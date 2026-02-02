@@ -1,0 +1,63 @@
+# --- macOS System ---
+.DS_Store
+.AppleDouble
+.LSOverride
+._*
+
+# --- Xcode & Swift ---
+build/
+*.xcodeproj/*
+!*.xcodeproj/project.pbxproj
+!*.xcodeproj/xcshareddata/
+!*.xcodeproj/xcschemes/
+*.xcworkspace/*
+!*.xcworkspace/contents.xcworkspacedata
+xcuserdata/
+DerivedData/
+*.hmap
+*.ipa
+*.dSYM.zip
+*.dSYM
+
+# --- Swift Package Manager ---
+.build/
+Packages/
+
+# --- Python & Virtual Envs ---
+__pycache__/
+*.py[cod]
+*$py.class
+venv/
+env/
+.env
+.venv/
+
+# --- Machine Learning Artifacts (Critical) ---
+# Ignore training checkpoints, but keep the final models
+checkpoints/
+runs/
+*.ckpt
+*.pth
+!final_model.pth
+
+# Large Data Files (Prevent GitHub rejection)
+data/
+datasets/
+*.mp4
+*.mov
+*.h5
+
+# --- C++ / Compiled ---
+*.o
+*.obj
+*.dylib
+*.so
+
+# --- CoreML ---
+# Ignore intermediate build files for CoreML
+*.mlmodelc
+
+# --- .md ---
+claude.md
+ROADMAP.md
+PROJECT_LOG.md

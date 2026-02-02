@@ -1,0 +1,757 @@
+// !$*UTF8*$!
+{
+	archiveVersion = 1;
+	classes = {
+	};
+	objectVersion = 77;
+	objects = {
+
+/* Begin PBXBuildFile section */
+		F90A3DAD2F30B1F90037BACD /* Morris.CinematicCoreMacOS.CinematicCoreExtension.systemextension in Embed System Extensions */ = {isa = PBXBuildFile; fileRef = F90A3DA32F30B1F90037BACD /* Morris.CinematicCoreMacOS.CinematicCoreExtension.systemextension */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
+/* End PBXBuildFile section */
+
+/* Begin PBXContainerItemProxy section */
+		F90A3D832F30B1B00037BACD /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = F90A3D6D2F30B1AF0037BACD /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = F90A3D742F30B1AF0037BACD;
+			remoteInfo = CinematicCoreMacOS;
+		};
+		F90A3D8D2F30B1B00037BACD /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = F90A3D6D2F30B1AF0037BACD /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = F90A3D742F30B1AF0037BACD;
+			remoteInfo = CinematicCoreMacOS;
+		};
+		F90A3DAB2F30B1F90037BACD /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = F90A3D6D2F30B1AF0037BACD /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = F90A3DA22F30B1F90037BACD;
+			remoteInfo = CinematicCoreExtension;
+		};
+/* End PBXContainerItemProxy section */
+
+/* Begin PBXCopyFilesBuildPhase section */
+		F90A3DB22F30B1F90037BACD /* Embed System Extensions */ = {
+			isa = PBXCopyFilesBuildPhase;
+			buildActionMask = 2147483647;
+			dstPath = "$(SYSTEM_EXTENSIONS_FOLDER_PATH)";
+			dstSubfolderSpec = 16;
+			files = (
+				F90A3DAD2F30B1F90037BACD /* Morris.CinematicCoreMacOS.CinematicCoreExtension.systemextension in Embed System Extensions */,
+			);
+			name = "Embed System Extensions";
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXCopyFilesBuildPhase section */
+
+/* Begin PBXFileReference section */
+		F90A3D752F30B1AF0037BACD /* CinematicCoreMacOS.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = CinematicCoreMacOS.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		F90A3D822F30B1B00037BACD /* CinematicCoreMacOSTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = CinematicCoreMacOSTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
+		F90A3D8C2F30B1B00037BACD /* CinematicCoreMacOSUITests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = CinematicCoreMacOSUITests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
+		F90A3DA32F30B1F90037BACD /* Morris.CinematicCoreMacOS.CinematicCoreExtension.systemextension */ = {isa = PBXFileReference; explicitFileType = "wrapper.system-extension"; includeInIndex = 0; path = Morris.CinematicCoreMacOS.CinematicCoreExtension.systemextension; sourceTree = BUILT_PRODUCTS_DIR; };
+/* End PBXFileReference section */
+
+/* Begin PBXFileSystemSynchronizedBuildFileExceptionSet section */
+		F90A3DAE2F30B1F90037BACD /* Exceptions for "CinematicCoreExtension" folder in "CinematicCoreExtension" target */ = {
+			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
+			membershipExceptions = (
+				Info.plist,
+			);
+			target = F90A3DA22F30B1F90037BACD /* CinematicCoreExtension */;
+		};
+/* End PBXFileSystemSynchronizedBuildFileExceptionSet section */
+
+/* Begin PBXFileSystemSynchronizedRootGroup section */
+		F90A3D772F30B1AF0037BACD /* CinematicCoreMacOS */ = {
+			isa = PBXFileSystemSynchronizedRootGroup;
+			path = CinematicCoreMacOS;
+			sourceTree = "<group>";
+		};
+		F90A3D852F30B1B00037BACD /* CinematicCoreMacOSTests */ = {
+			isa = PBXFileSystemSynchronizedRootGroup;
+			path = CinematicCoreMacOSTests;
+			sourceTree = "<group>";
+		};
+		F90A3D8F2F30B1B00037BACD /* CinematicCoreMacOSUITests */ = {
+			isa = PBXFileSystemSynchronizedRootGroup;
+			path = CinematicCoreMacOSUITests;
+			sourceTree = "<group>";
+		};
+		F90A3DA42F30B1F90037BACD /* CinematicCoreExtension */ = {
+			isa = PBXFileSystemSynchronizedRootGroup;
+			exceptions = (
+				F90A3DAE2F30B1F90037BACD /* Exceptions for "CinematicCoreExtension" folder in "CinematicCoreExtension" target */,
+			);
+			path = CinematicCoreExtension;
+			sourceTree = "<group>";
+		};
+/* End PBXFileSystemSynchronizedRootGroup section */
+
+/* Begin PBXFrameworksBuildPhase section */
+		F90A3D722F30B1AF0037BACD /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		F90A3D7F2F30B1B00037BACD /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		F90A3D892F30B1B00037BACD /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		F90A3DA02F30B1F90037BACD /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXFrameworksBuildPhase section */
+
+/* Begin PBXGroup section */
+		F90A3D6C2F30B1AF0037BACD = {
+			isa = PBXGroup;
+			children = (
+				F90A3D772F30B1AF0037BACD /* CinematicCoreMacOS */,
+				F90A3D852F30B1B00037BACD /* CinematicCoreMacOSTests */,
+				F90A3D8F2F30B1B00037BACD /* CinematicCoreMacOSUITests */,
+				F90A3DA42F30B1F90037BACD /* CinematicCoreExtension */,
+				F90A3D762F30B1AF0037BACD /* Products */,
+			);
+			sourceTree = "<group>";
+		};
+		F90A3D762F30B1AF0037BACD /* Products */ = {
+			isa = PBXGroup;
+			children = (
+				F90A3D752F30B1AF0037BACD /* CinematicCoreMacOS.app */,
+				F90A3D822F30B1B00037BACD /* CinematicCoreMacOSTests.xctest */,
+				F90A3D8C2F30B1B00037BACD /* CinematicCoreMacOSUITests.xctest */,
+				F90A3DA32F30B1F90037BACD /* Morris.CinematicCoreMacOS.CinematicCoreExtension.systemextension */,
+			);
+			name = Products;
+			sourceTree = "<group>";
+		};
+/* End PBXGroup section */
+
+/* Begin PBXNativeTarget section */
+		F90A3D742F30B1AF0037BACD /* CinematicCoreMacOS */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = F90A3D962F30B1B00037BACD /* Build configuration list for PBXNativeTarget "CinematicCoreMacOS" */;
+			buildPhases = (
+				F90A3D712F30B1AF0037BACD /* Sources */,
+				F90A3D722F30B1AF0037BACD /* Frameworks */,
+				F90A3D732F30B1AF0037BACD /* Resources */,
+				F90A3DB22F30B1F90037BACD /* Embed System Extensions */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+				F90A3DAC2F30B1F90037BACD /* PBXTargetDependency */,
+			);
+			fileSystemSynchronizedGroups = (
+				F90A3D772F30B1AF0037BACD /* CinematicCoreMacOS */,
+			);
+			name = CinematicCoreMacOS;
+			packageProductDependencies = (
+			);
+			productName = CinematicCoreMacOS;
+			productReference = F90A3D752F30B1AF0037BACD /* CinematicCoreMacOS.app */;
+			productType = "com.apple.product-type.application";
+		};
+		F90A3D812F30B1B00037BACD /* CinematicCoreMacOSTests */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = F90A3D992F30B1B00037BACD /* Build configuration list for PBXNativeTarget "CinematicCoreMacOSTests" */;
+			buildPhases = (
+				F90A3D7E2F30B1B00037BACD /* Sources */,
+				F90A3D7F2F30B1B00037BACD /* Frameworks */,
+				F90A3D802F30B1B00037BACD /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+				F90A3D842F30B1B00037BACD /* PBXTargetDependency */,
+			);
+			fileSystemSynchronizedGroups = (
+				F90A3D852F30B1B00037BACD /* CinematicCoreMacOSTests */,
+			);
+			name = CinematicCoreMacOSTests;
+			packageProductDependencies = (
+			);
+			productName = CinematicCoreMacOSTests;
+			productReference = F90A3D822F30B1B00037BACD /* CinematicCoreMacOSTests.xctest */;
+			productType = "com.apple.product-type.bundle.unit-test";
+		};
+		F90A3D8B2F30B1B00037BACD /* CinematicCoreMacOSUITests */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = F90A3D9C2F30B1B00037BACD /* Build configuration list for PBXNativeTarget "CinematicCoreMacOSUITests" */;
+			buildPhases = (
+				F90A3D882F30B1B00037BACD /* Sources */,
+				F90A3D892F30B1B00037BACD /* Frameworks */,
+				F90A3D8A2F30B1B00037BACD /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+				F90A3D8E2F30B1B00037BACD /* PBXTargetDependency */,
+			);
+			fileSystemSynchronizedGroups = (
+				F90A3D8F2F30B1B00037BACD /* CinematicCoreMacOSUITests */,
+			);
+			name = CinematicCoreMacOSUITests;
+			packageProductDependencies = (
+			);
+			productName = CinematicCoreMacOSUITests;
+			productReference = F90A3D8C2F30B1B00037BACD /* CinematicCoreMacOSUITests.xctest */;
+			productType = "com.apple.product-type.bundle.ui-testing";
+		};
+		F90A3DA22F30B1F90037BACD /* CinematicCoreExtension */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = F90A3DAF2F30B1F90037BACD /* Build configuration list for PBXNativeTarget "CinematicCoreExtension" */;
+			buildPhases = (
+				F90A3D9F2F30B1F90037BACD /* Sources */,
+				F90A3DA02F30B1F90037BACD /* Frameworks */,
+				F90A3DA12F30B1F90037BACD /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			fileSystemSynchronizedGroups = (
+				F90A3DA42F30B1F90037BACD /* CinematicCoreExtension */,
+			);
+			name = CinematicCoreExtension;
+			packageProductDependencies = (
+			);
+			productName = CinematicCoreExtension;
+			productReference = F90A3DA32F30B1F90037BACD /* Morris.CinematicCoreMacOS.CinematicCoreExtension.systemextension */;
+			productType = "com.apple.product-type.system-extension";
+		};
+/* End PBXNativeTarget section */
+
+/* Begin PBXProject section */
+		F90A3D6D2F30B1AF0037BACD /* Project object */ = {
+			isa = PBXProject;
+			attributes = {
+				BuildIndependentTargetsInParallel = 1;
+				LastSwiftUpdateCheck = 2620;
+				LastUpgradeCheck = 2620;
+				TargetAttributes = {
+					F90A3D742F30B1AF0037BACD = {
+						CreatedOnToolsVersion = 26.2;
+					};
+					F90A3D812F30B1B00037BACD = {
+						CreatedOnToolsVersion = 26.2;
+						TestTargetID = F90A3D742F30B1AF0037BACD;
+					};
+					F90A3D8B2F30B1B00037BACD = {
+						CreatedOnToolsVersion = 26.2;
+						TestTargetID = F90A3D742F30B1AF0037BACD;
+					};
+					F90A3DA22F30B1F90037BACD = {
+						CreatedOnToolsVersion = 26.2;
+					};
+				};
+			};
+			buildConfigurationList = F90A3D702F30B1AF0037BACD /* Build configuration list for PBXProject "CinematicCoreMacOS" */;
+			developmentRegion = en;
+			hasScannedForEncodings = 0;
+			knownRegions = (
+				en,
+				Base,
+			);
+			mainGroup = F90A3D6C2F30B1AF0037BACD;
+			minimizedProjectReferenceProxies = 1;
+			preferredProjectObjectVersion = 77;
+			productRefGroup = F90A3D762F30B1AF0037BACD /* Products */;
+			projectDirPath = "";
+			projectRoot = "";
+			targets = (
+				F90A3D742F30B1AF0037BACD /* CinematicCoreMacOS */,
+				F90A3D812F30B1B00037BACD /* CinematicCoreMacOSTests */,
+				F90A3D8B2F30B1B00037BACD /* CinematicCoreMacOSUITests */,
+				F90A3DA22F30B1F90037BACD /* CinematicCoreExtension */,
+			);
+		};
+/* End PBXProject section */
+
+/* Begin PBXResourcesBuildPhase section */
+		F90A3D732F30B1AF0037BACD /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		F90A3D802F30B1B00037BACD /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		F90A3D8A2F30B1B00037BACD /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		F90A3DA12F30B1F90037BACD /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXResourcesBuildPhase section */
+
+/* Begin PBXSourcesBuildPhase section */
+		F90A3D712F30B1AF0037BACD /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		F90A3D7E2F30B1B00037BACD /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		F90A3D882F30B1B00037BACD /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		F90A3D9F2F30B1F90037BACD /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXSourcesBuildPhase section */
+
+/* Begin PBXTargetDependency section */
+		F90A3D842F30B1B00037BACD /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = F90A3D742F30B1AF0037BACD /* CinematicCoreMacOS */;
+			targetProxy = F90A3D832F30B1B00037BACD /* PBXContainerItemProxy */;
+		};
+		F90A3D8E2F30B1B00037BACD /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = F90A3D742F30B1AF0037BACD /* CinematicCoreMacOS */;
+			targetProxy = F90A3D8D2F30B1B00037BACD /* PBXContainerItemProxy */;
+		};
+		F90A3DAC2F30B1F90037BACD /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = F90A3DA22F30B1F90037BACD /* CinematicCoreExtension */;
+			targetProxy = F90A3DAB2F30B1F90037BACD /* PBXContainerItemProxy */;
+		};
+/* End PBXTargetDependency section */
+
+/* Begin XCBuildConfiguration section */
+		F90A3D942F30B1B00037BACD /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				ASSETCATALOG_COMPILER_GENERATE_SWIFT_ASSET_SYMBOL_EXTENSIONS = YES;
+				CLANG_ANALYZER_NONNULL = YES;
+				CLANG_ANALYZER_NUMBER_OBJECT_CONVERSION = YES_AGGRESSIVE;
+				CLANG_CXX_LANGUAGE_STANDARD = "gnu++20";
+				CLANG_ENABLE_MODULES = YES;
+				CLANG_ENABLE_OBJC_ARC = YES;
+				CLANG_ENABLE_OBJC_WEAK = YES;
+				CLANG_WARN_BLOCK_CAPTURE_AUTORELEASING = YES;
+				CLANG_WARN_BOOL_CONVERSION = YES;
+				CLANG_WARN_COMMA = YES;
+				CLANG_WARN_CONSTANT_CONVERSION = YES;
+				CLANG_WARN_DEPRECATED_OBJC_IMPLEMENTATIONS = YES;
+				CLANG_WARN_DIRECT_OBJC_ISA_USAGE = YES_ERROR;
+				CLANG_WARN_DOCUMENTATION_COMMENTS = YES;
+				CLANG_WARN_EMPTY_BODY = YES;
+				CLANG_WARN_ENUM_CONVERSION = YES;
+				CLANG_WARN_INFINITE_RECURSION = YES;
+				CLANG_WARN_INT_CONVERSION = YES;
+				CLANG_WARN_NON_LITERAL_NULL_CONVERSION = YES;
+				CLANG_WARN_OBJC_IMPLICIT_RETAIN_SELF = YES;
+				CLANG_WARN_OBJC_LITERAL_CONVERSION = YES;
+				CLANG_WARN_OBJC_ROOT_CLASS = YES_ERROR;
+				CLANG_WARN_QUOTED_INCLUDE_IN_FRAMEWORK_HEADER = YES;
+				CLANG_WARN_RANGE_LOOP_ANALYSIS = YES;
+				CLANG_WARN_STRICT_PROTOTYPES = YES;
+				CLANG_WARN_SUSPICIOUS_MOVE = YES;
+				CLANG_WARN_UNGUARDED_AVAILABILITY = YES_AGGRESSIVE;
+				CLANG_WARN_UNREACHABLE_CODE = YES;
+				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
+				COPY_PHASE_STRIP = NO;
+				DEBUG_INFORMATION_FORMAT = dwarf;
+				ENABLE_STRICT_OBJC_MSGSEND = YES;
+				ENABLE_TESTABILITY = YES;
+				ENABLE_USER_SCRIPT_SANDBOXING = YES;
+				GCC_C_LANGUAGE_STANDARD = gnu17;
+				GCC_DYNAMIC_NO_PIC = NO;
+				GCC_NO_COMMON_BLOCKS = YES;
+				GCC_OPTIMIZATION_LEVEL = 0;
+				GCC_PREPROCESSOR_DEFINITIONS = (
+					"DEBUG=1",
+					"$(inherited)",
+				);
+				GCC_WARN_64_TO_32_BIT_CONVERSION = YES;
+				GCC_WARN_ABOUT_RETURN_TYPE = YES_ERROR;
+				GCC_WARN_UNDECLARED_SELECTOR = YES;
+				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
+				GCC_WARN_UNUSED_FUNCTION = YES;
+				GCC_WARN_UNUSED_VARIABLE = YES;
+				LOCALIZATION_PREFERS_STRING_CATALOGS = YES;
+				MACOSX_DEPLOYMENT_TARGET = 26.2;
+				MTL_ENABLE_DEBUG_INFO = INCLUDE_SOURCE;
+				MTL_FAST_MATH = YES;
+				ONLY_ACTIVE_ARCH = YES;
+				SDKROOT = macosx;
+				SWIFT_ACTIVE_COMPILATION_CONDITIONS = "DEBUG $(inherited)";
+				SWIFT_OPTIMIZATION_LEVEL = "-Onone";
+			};
+			name = Debug;
+		};
+		F90A3D952F30B1B00037BACD /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				ASSETCATALOG_COMPILER_GENERATE_SWIFT_ASSET_SYMBOL_EXTENSIONS = YES;
+				CLANG_ANALYZER_NONNULL = YES;
+				CLANG_ANALYZER_NUMBER_OBJECT_CONVERSION = YES_AGGRESSIVE;
+				CLANG_CXX_LANGUAGE_STANDARD = "gnu++20";
+				CLANG_ENABLE_MODULES = YES;
+				CLANG_ENABLE_OBJC_ARC = YES;
+				CLANG_ENABLE_OBJC_WEAK = YES;
+				CLANG_WARN_BLOCK_CAPTURE_AUTORELEASING = YES;
+				CLANG_WARN_BOOL_CONVERSION = YES;
+				CLANG_WARN_COMMA = YES;
+				CLANG_WARN_CONSTANT_CONVERSION = YES;
+				CLANG_WARN_DEPRECATED_OBJC_IMPLEMENTATIONS = YES;
+				CLANG_WARN_DIRECT_OBJC_ISA_USAGE = YES_ERROR;
+				CLANG_WARN_DOCUMENTATION_COMMENTS = YES;
+				CLANG_WARN_EMPTY_BODY = YES;
+				CLANG_WARN_ENUM_CONVERSION = YES;
+				CLANG_WARN_INFINITE_RECURSION = YES;
+				CLANG_WARN_INT_CONVERSION = YES;
+				CLANG_WARN_NON_LITERAL_NULL_CONVERSION = YES;
+				CLANG_WARN_OBJC_IMPLICIT_RETAIN_SELF = YES;
+				CLANG_WARN_OBJC_LITERAL_CONVERSION = YES;
+				CLANG_WARN_OBJC_ROOT_CLASS = YES_ERROR;
+				CLANG_WARN_QUOTED_INCLUDE_IN_FRAMEWORK_HEADER = YES;
+				CLANG_WARN_RANGE_LOOP_ANALYSIS = YES;
+				CLANG_WARN_STRICT_PROTOTYPES = YES;
+				CLANG_WARN_SUSPICIOUS_MOVE = YES;
+				CLANG_WARN_UNGUARDED_AVAILABILITY = YES_AGGRESSIVE;
+				CLANG_WARN_UNREACHABLE_CODE = YES;
+				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
+				COPY_PHASE_STRIP = NO;
+				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
+				ENABLE_NS_ASSERTIONS = NO;
+				ENABLE_STRICT_OBJC_MSGSEND = YES;
+				ENABLE_USER_SCRIPT_SANDBOXING = YES;
+				GCC_C_LANGUAGE_STANDARD = gnu17;
+				GCC_NO_COMMON_BLOCKS = YES;
+				GCC_WARN_64_TO_32_BIT_CONVERSION = YES;
+				GCC_WARN_ABOUT_RETURN_TYPE = YES_ERROR;
+				GCC_WARN_UNDECLARED_SELECTOR = YES;
+				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
+				GCC_WARN_UNUSED_FUNCTION = YES;
+				GCC_WARN_UNUSED_VARIABLE = YES;
+				LOCALIZATION_PREFERS_STRING_CATALOGS = YES;
+				MACOSX_DEPLOYMENT_TARGET = 26.2;
+				MTL_ENABLE_DEBUG_INFO = NO;
+				MTL_FAST_MATH = YES;
+				SDKROOT = macosx;
+				SWIFT_COMPILATION_MODE = wholemodule;
+			};
+			name = Release;
+		};
+		F90A3D972F30B1B00037BACD /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
+				CODE_SIGN_STYLE = Automatic;
+				COMBINE_HIDPI_IMAGES = YES;
+				CURRENT_PROJECT_VERSION = 1;
+				ENABLE_APP_SANDBOX = YES;
+				ENABLE_INCOMING_NETWORK_CONNECTIONS = NO;
+				ENABLE_OUTGOING_NETWORK_CONNECTIONS = NO;
+				ENABLE_PREVIEWS = YES;
+				ENABLE_RESOURCE_ACCESS_AUDIO_INPUT = YES;
+				ENABLE_RESOURCE_ACCESS_BLUETOOTH = NO;
+				ENABLE_RESOURCE_ACCESS_CALENDARS = NO;
+				ENABLE_RESOURCE_ACCESS_CAMERA = YES;
+				ENABLE_RESOURCE_ACCESS_CONTACTS = NO;
+				ENABLE_RESOURCE_ACCESS_LOCATION = NO;
+				ENABLE_RESOURCE_ACCESS_PRINTING = NO;
+				ENABLE_RESOURCE_ACCESS_USB = YES;
+				ENABLE_USER_SELECTED_FILES = readonly;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_KEY_NSCameraUsageDescription = "CinematicCore needs camera access to capture and process video frames for the virtual camera system.";
+				INFOPLIST_KEY_NSHumanReadableCopyright = "";
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/../Frameworks",
+				);
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = Morris.CinematicCoreMacOS;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				REGISTER_APP_GROUPS = YES;
+				STRING_CATALOG_GENERATE_SYMBOLS = YES;
+				SWIFT_APPROACHABLE_CONCURRENCY = YES;
+				SWIFT_DEFAULT_ACTOR_ISOLATION = MainActor;
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
+				SWIFT_VERSION = 5.0;
+			};
+			name = Debug;
+		};
+		F90A3D982F30B1B00037BACD /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
+				CODE_SIGN_STYLE = Automatic;
+				COMBINE_HIDPI_IMAGES = YES;
+				CURRENT_PROJECT_VERSION = 1;
+				ENABLE_APP_SANDBOX = YES;
+				ENABLE_INCOMING_NETWORK_CONNECTIONS = NO;
+				ENABLE_OUTGOING_NETWORK_CONNECTIONS = NO;
+				ENABLE_PREVIEWS = YES;
+				ENABLE_RESOURCE_ACCESS_AUDIO_INPUT = YES;
+				ENABLE_RESOURCE_ACCESS_BLUETOOTH = NO;
+				ENABLE_RESOURCE_ACCESS_CALENDARS = NO;
+				ENABLE_RESOURCE_ACCESS_CAMERA = YES;
+				ENABLE_RESOURCE_ACCESS_CONTACTS = NO;
+				ENABLE_RESOURCE_ACCESS_LOCATION = NO;
+				ENABLE_RESOURCE_ACCESS_PRINTING = NO;
+				ENABLE_RESOURCE_ACCESS_USB = YES;
+				ENABLE_USER_SELECTED_FILES = readonly;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_KEY_NSCameraUsageDescription = "CinematicCore needs camera access to capture and process video frames for the virtual camera system.";
+				INFOPLIST_KEY_NSHumanReadableCopyright = "";
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/../Frameworks",
+				);
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = Morris.CinematicCoreMacOS;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				REGISTER_APP_GROUPS = YES;
+				STRING_CATALOG_GENERATE_SYMBOLS = YES;
+				SWIFT_APPROACHABLE_CONCURRENCY = YES;
+				SWIFT_DEFAULT_ACTOR_ISOLATION = MainActor;
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
+				SWIFT_VERSION = 5.0;
+			};
+			name = Release;
+		};
+		F90A3D9A2F30B1B00037BACD /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				BUNDLE_LOADER = "$(TEST_HOST)";
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				GENERATE_INFOPLIST_FILE = YES;
+				MACOSX_DEPLOYMENT_TARGET = 26.2;
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = Morris.CinematicCoreMacOSTests;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				STRING_CATALOG_GENERATE_SYMBOLS = NO;
+				SWIFT_APPROACHABLE_CONCURRENCY = YES;
+				SWIFT_EMIT_LOC_STRINGS = NO;
+				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
+				SWIFT_VERSION = 5.0;
+				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/CinematicCoreMacOS.app/$(BUNDLE_EXECUTABLE_FOLDER_PATH)/CinematicCoreMacOS";
+			};
+			name = Debug;
+		};
+		F90A3D9B2F30B1B00037BACD /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				BUNDLE_LOADER = "$(TEST_HOST)";
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				GENERATE_INFOPLIST_FILE = YES;
+				MACOSX_DEPLOYMENT_TARGET = 26.2;
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = Morris.CinematicCoreMacOSTests;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				STRING_CATALOG_GENERATE_SYMBOLS = NO;
+				SWIFT_APPROACHABLE_CONCURRENCY = YES;
+				SWIFT_EMIT_LOC_STRINGS = NO;
+				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
+				SWIFT_VERSION = 5.0;
+				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/CinematicCoreMacOS.app/$(BUNDLE_EXECUTABLE_FOLDER_PATH)/CinematicCoreMacOS";
+			};
+			name = Release;
+		};
+		F90A3D9D2F30B1B00037BACD /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				GENERATE_INFOPLIST_FILE = YES;
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = Morris.CinematicCoreMacOSUITests;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				STRING_CATALOG_GENERATE_SYMBOLS = NO;
+				SWIFT_APPROACHABLE_CONCURRENCY = YES;
+				SWIFT_EMIT_LOC_STRINGS = NO;
+				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
+				SWIFT_VERSION = 5.0;
+				TEST_TARGET_NAME = CinematicCoreMacOS;
+			};
+			name = Debug;
+		};
+		F90A3D9E2F30B1B00037BACD /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				GENERATE_INFOPLIST_FILE = YES;
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = Morris.CinematicCoreMacOSUITests;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				STRING_CATALOG_GENERATE_SYMBOLS = NO;
+				SWIFT_APPROACHABLE_CONCURRENCY = YES;
+				SWIFT_EMIT_LOC_STRINGS = NO;
+				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
+				SWIFT_VERSION = 5.0;
+				TEST_TARGET_NAME = CinematicCoreMacOS;
+			};
+			name = Release;
+		};
+		F90A3DB02F30B1F90037BACD /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_ENTITLEMENTS = CinematicCoreExtension/CinematicCoreExtension.entitlements;
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				ENABLE_APP_SANDBOX = YES;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = CinematicCoreExtension/Info.plist;
+				INFOPLIST_KEY_CFBundleDisplayName = CinematicCoreExtension;
+				INFOPLIST_KEY_NSHumanReadableCopyright = "";
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/../Frameworks",
+					"@executable_path/../../../../Frameworks",
+				);
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = Morris.CinematicCoreMacOS.CinematicCoreExtension;
+				PRODUCT_NAME = "$(inherited)";
+				REGISTER_APP_GROUPS = YES;
+				SKIP_INSTALL = YES;
+				STRING_CATALOG_GENERATE_SYMBOLS = YES;
+				SWIFT_APPROACHABLE_CONCURRENCY = YES;
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
+				SWIFT_VERSION = 5.0;
+			};
+			name = Debug;
+		};
+		F90A3DB12F30B1F90037BACD /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_ENTITLEMENTS = CinematicCoreExtension/CinematicCoreExtension.entitlements;
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				ENABLE_APP_SANDBOX = YES;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = CinematicCoreExtension/Info.plist;
+				INFOPLIST_KEY_CFBundleDisplayName = CinematicCoreExtension;
+				INFOPLIST_KEY_NSHumanReadableCopyright = "";
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/../Frameworks",
+					"@executable_path/../../../../Frameworks",
+				);
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = Morris.CinematicCoreMacOS.CinematicCoreExtension;
+				PRODUCT_NAME = "$(inherited)";
+				REGISTER_APP_GROUPS = YES;
+				SKIP_INSTALL = YES;
+				STRING_CATALOG_GENERATE_SYMBOLS = YES;
+				SWIFT_APPROACHABLE_CONCURRENCY = YES;
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
+				SWIFT_VERSION = 5.0;
+			};
+			name = Release;
+		};
+/* End XCBuildConfiguration section */
+
+/* Begin XCConfigurationList section */
+		F90A3D702F30B1AF0037BACD /* Build configuration list for PBXProject "CinematicCoreMacOS" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				F90A3D942F30B1B00037BACD /* Debug */,
+				F90A3D952F30B1B00037BACD /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		F90A3D962F30B1B00037BACD /* Build configuration list for PBXNativeTarget "CinematicCoreMacOS" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				F90A3D972F30B1B00037BACD /* Debug */,
+				F90A3D982F30B1B00037BACD /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		F90A3D992F30B1B00037BACD /* Build configuration list for PBXNativeTarget "CinematicCoreMacOSTests" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				F90A3D9A2F30B1B00037BACD /* Debug */,
+				F90A3D9B2F30B1B00037BACD /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		F90A3D9C2F30B1B00037BACD /* Build configuration list for PBXNativeTarget "CinematicCoreMacOSUITests" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				F90A3D9D2F30B1B00037BACD /* Debug */,
+				F90A3D9E2F30B1B00037BACD /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		F90A3DAF2F30B1F90037BACD /* Build configuration list for PBXNativeTarget "CinematicCoreExtension" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				F90A3DB02F30B1F90037BACD /* Debug */,
+				F90A3DB12F30B1F90037BACD /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+/* End XCConfigurationList section */
+	};
+	rootObject = F90A3D6D2F30B1AF0037BACD /* Project object */;
+}
