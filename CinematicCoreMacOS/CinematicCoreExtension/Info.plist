@@ -2,12 +2,24 @@
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
+	<key>NSExtension</key>
+	<dict>
+		<key>NSExtensionAttributes</key>
+		<dict>
+			<key>CMIOExtensionMachServiceName</key>
+			<string>com.cinematiccore.extension</string>
+		</dict>
+		<key>NSExtensionPointIdentifier</key>
+		<string>com.apple.cmio-extension</string>
+		<key>NSExtensionPrincipalClass</key>
+		<string>$(PRODUCT_MODULE_NAME).CinematicCoreExtensionProviderSource</string>
+	</dict>
 	<key>CMIOExtension</key>
 	<dict>
 		<key>CMIOExtensionMachServiceName</key>
-		<string>$(TeamIdentifierPrefix)$(PRODUCT_BUNDLE_IDENTIFIER)</string>
+		<string>com.cinematiccore.extension</string>
 	</dict>
 	<key>NSSystemExtensionUsageDescription</key>
-	<string>SYSTEM_EXTENSION_USAGE_DESCRIPTION</string>
+	<string>CinematicCore uses a system extension to provide a virtual camera that can be accessed by other applications.</string>
 </dict>
 </plist>

@@ -9,9 +9,42 @@ import Foundation
 import CoreMediaIO
 import IOKit.audio
 import os.log
+import IOSurface
 
-let kWhiteStripeHeight: Int = 10
-let kFrameRate: Int = 60
+// MARK: - Configuration
+
+let kFrameRate: Int = 30  // Match CameraManager target frame rate
+
+// MARK: - Shared Frame Queue
+
+/// Thread-safe queue for incoming frames from XPC
+actor FrameQueue {
+    private var frames: [(surfaceID: UInt32, timestamp: Double, width: Int32, height: Int32)] = []
+    private let maxQueueSize = 5
+    
+    func enqueue(surfaceID: UInt32, timestamp: Double, width: Int32, height: Int32) {
+        frames.append((surfaceID, timestamp, width, height))
+        
+        // Limit queue size to prevent memory buildup
+        if frames.count > maxQueueSize {
+            frames.removeFirst()
+            os_log(.debug, "Frame queue full, dropping oldest frame")
+        }
+    }
+    
+    func dequeue() -> (surfaceID: UInt32, timestamp: Double, width: Int32, height: Int32)? {
+        guard !frames.isEmpty else { return nil }
+        return frames.removeFirst()
+    }
+    
+    func clear() {
+        frames.removeAll()
+    }
+    
+    var count: Int {
+        frames.count
+    }
+}
 
 // MARK: -
 
@@ -29,13 +62,11 @@ class CinematicCoreExtensionDeviceSource: NSObject, CMIOExtensionDeviceSource {
 	
 	private var _videoDescription: CMFormatDescription!
 	
-	private var _bufferPool: CVPixelBufferPool!
+	// Frame queue for incoming frames from host app
+	private let frameQueue = FrameQueue()
 	
-	private var _bufferAuxAttributes: NSDictionary!
-	
-	private var _whiteStripeStartRow: UInt32 = 0
-	
-	private var _whiteStripeIsAscending: Bool = false
+	// Track if we're receiving frames from host
+	private var isReceivingFrames = false
 	
 	init(localizedName: String) {
 		
@@ -43,22 +74,14 @@ class CinematicCoreExtensionDeviceSource: NSObject, CMIOExtensionDeviceSource {
 		let deviceID = UUID() // replace this with your device UUID
 		self.device = CMIOExtensionDevice(localizedName: localizedName, deviceID: deviceID, legacyDeviceID: nil, source: self)
 		
-		let dims = CMVideoDimensions(width: 1920, height: 1080)
+		// Configure for 4K @ 30fps to match CameraManager output
+		let dims = CMVideoDimensions(width: 3840, height: 2160)
 		CMVideoFormatDescriptionCreate(allocator: kCFAllocatorDefault, codecType: kCVPixelFormatType_32BGRA, width: dims.width, height: dims.height, extensions: nil, formatDescriptionOut: &_videoDescription)
 		
-		let pixelBufferAttributes: NSDictionary = [
-			kCVPixelBufferWidthKey: dims.width,
-			kCVPixelBufferHeightKey: dims.height,
-			kCVPixelBufferPixelFormatTypeKey: _videoDescription.mediaSubType,
-			kCVPixelBufferIOSurfacePropertiesKey: [:] as NSDictionary
-		]
-		CVPixelBufferPoolCreate(kCFAllocatorDefault, nil, pixelBufferAttributes, &_bufferPool)
-		
 		let videoStreamFormat = CMIOExtensionStreamFormat.init(formatDescription: _videoDescription, maxFrameDuration: CMTime(value: 1, timescale: Int32(kFrameRate)), minFrameDuration: CMTime(value: 1, timescale: Int32(kFrameRate)), validFrameDurations: nil)
-		_bufferAuxAttributes = [kCVPixelBufferPoolAllocationThresholdKey: 5]
 		
 		let videoID = UUID() // replace this with your video UUID
-		_streamSource = CinematicCoreExtensionStreamSource(localizedName: "SampleCapture.Video", streamID: videoID, streamFormat: videoStreamFormat, device: device)
+		_streamSource = CinematicCoreExtensionStreamSource(localizedName: "CinematicCore.Video", streamID: videoID, streamFormat: videoStreamFormat, device: device)
 		do {
 			try device.addStream(_streamSource.stream)
 		} catch let error {
@@ -78,7 +101,7 @@ class CinematicCoreExtensionDeviceSource: NSObject, CMIOExtensionDeviceSource {
 			deviceProperties.transportType = kIOAudioDeviceTransportTypeVirtual
 		}
 		if properties.contains(.deviceModel) {
-			deviceProperties.model = "SampleCapture Model"
+			deviceProperties.model = "CinematicCore Virtual Camera"
 		}
 		
 		return deviceProperties
@@ -89,66 +112,52 @@ class CinematicCoreExtensionDeviceSource: NSObject, CMIOExtensionDeviceSource {
 		// Handle settable properties here.
 	}
 	
-	func startStreaming() {
-		
-		guard let _ = _bufferPool else {
-			return
+	// MARK: - Frame Reception from XPC
+	
+	/// Receive video frame from host app via XPC
+	func enqueueFrame(surfaceID: UInt32, timestamp: Double, width: Int32, height: Int32) {
+		Task {
+			await frameQueue.enqueue(surfaceID: surfaceID, timestamp: timestamp, width: width, height: height)
+			isReceivingFrames = true
 		}
+	}
+	
+	/// Update capture status from host app
+	func updateCaptureStatus(isRunning: Bool) {
+		if !isRunning {
+			Task {
+				await frameQueue.clear()
+			}
+			isReceivingFrames = false
+			os_log(.info, "Host app stopped capturing")
+		} else {
+			os_log(.info, "Host app started capturing")
+		}
+	}
+	
+	func startStreaming() {
 		
 		_streamingCounter += 1
 		
 		_timer = DispatchSource.makeTimerSource(flags: .strict, queue: _timerQueue)
 		_timer!.schedule(deadline: .now(), repeating: 1.0 / Double(kFrameRate), leeway: .seconds(0))
 		
-		_timer!.setEventHandler {
+		_timer!.setEventHandler { [weak self] in
+			guard let self = self else { return }
 			
-			var err: OSStatus = 0
-			let now = CMClockGetTime(CMClockGetHostTimeClock())
-			
-			var pixelBuffer: CVPixelBuffer?
-			err = CVPixelBufferPoolCreatePixelBufferWithAuxAttributes(kCFAllocatorDefault, self._bufferPool, self._bufferAuxAttributes, &pixelBuffer)
-			if err != 0 {
-				os_log(.error, "out of pixel buffers \(err)")
-			}
-			
-			if let pixelBuffer = pixelBuffer {
-				
-				CVPixelBufferLockBaseAddress(pixelBuffer, [])
-				
-				var bufferPtr = CVPixelBufferGetBaseAddress(pixelBuffer)!
-				let width = CVPixelBufferGetWidth(pixelBuffer)
-				let height = CVPixelBufferGetHeight(pixelBuffer)
-				let rowBytes = CVPixelBufferGetBytesPerRow(pixelBuffer)
-				memset(bufferPtr, 0, rowBytes * height)
-				
-				let whiteStripeStartRow = self._whiteStripeStartRow
-				if self._whiteStripeIsAscending {
-					self._whiteStripeStartRow = whiteStripeStartRow - 1
-					self._whiteStripeIsAscending = self._whiteStripeStartRow > 0
+			// Try to get frame from queue
+			Task {
+				if let frame = await self.frameQueue.dequeue() {
+					// We have a real frame from the host app - forward it
+					self.sendFrameFromIOSurface(surfaceID: frame.surfaceID, timestamp: frame.timestamp, width: frame.width, height: frame.height)
+				} else if self.isReceivingFrames {
+					// Queue is empty but we're receiving frames - just skip this timer tick
+					// This prevents synthetic frames from appearing while transitioning
+					os_log(.debug, "Frame queue empty, skipping")
+				} else {
+					// Not receiving frames - send a blank frame to keep stream alive
+					self.sendBlankFrame()
 				}
-				else {
-					self._whiteStripeStartRow = whiteStripeStartRow + 1
-					self._whiteStripeIsAscending = self._whiteStripeStartRow >= (height - kWhiteStripeHeight)
-				}
-				bufferPtr += rowBytes * Int(whiteStripeStartRow)
-				for _ in 0..<kWhiteStripeHeight {
-					for _ in 0..<width {
-						var white: UInt32 = 0xFFFFFFFF
-						memcpy(bufferPtr, &white, MemoryLayout.size(ofValue: white))
-						bufferPtr += MemoryLayout.size(ofValue: white)
-					}
-				}
-				
-				CVPixelBufferUnlockBaseAddress(pixelBuffer, [])
-				
-				var sbuf: CMSampleBuffer!
-				var timingInfo = CMSampleTimingInfo()
-				timingInfo.presentationTimeStamp = CMClockGetTime(CMClockGetHostTimeClock())
-				err = CMSampleBufferCreateForImageBuffer(allocator: kCFAllocatorDefault, imageBuffer: pixelBuffer, dataReady: true, makeDataReadyCallback: nil, refcon: nil, formatDescription: self._videoDescription, sampleTiming: &timingInfo, sampleBufferOut: &sbuf)
-				if err == 0 {
-					self._streamSource.stream.send(sbuf, discontinuity: [], hostTimeInNanoseconds: UInt64(timingInfo.presentationTimeStamp.seconds * Double(NSEC_PER_SEC)))
-				}
-				os_log(.info, "video time \(timingInfo.presentationTimeStamp.seconds) now \(now.seconds) err \(err)")
 			}
 		}
 		
@@ -156,6 +165,7 @@ class CinematicCoreExtensionDeviceSource: NSObject, CMIOExtensionDeviceSource {
 		}
 		
 		_timer!.resume()
+		os_log(.info, "Virtual camera streaming started")
 	}
 	
 	func stopStreaming() {
@@ -169,6 +179,124 @@ class CinematicCoreExtensionDeviceSource: NSObject, CMIOExtensionDeviceSource {
 				timer.cancel()
 				_timer = nil
 			}
+			Task {
+				await frameQueue.clear()
+			}
+			os_log(.info, "Virtual camera streaming stopped")
+		}
+	}
+	
+	// MARK: - Frame Sending
+	
+	private func sendFrameFromIOSurface(surfaceID: UInt32, timestamp: Double, width: Int32, height: Int32) {
+		// Lookup IOSurface by ID
+		guard let ioSurface = IOSurfaceLookup(surfaceID) else {
+			os_log(.error, "Failed to lookup IOSurface with ID: \(surfaceID)")
+			return
+		}
+		
+		// Create CVPixelBuffer from IOSurface (zero-copy)
+		var unmanagedPixelBuffer: Unmanaged<CVPixelBuffer>?
+		let status = CVPixelBufferCreateWithIOSurface(
+			kCFAllocatorDefault,
+			ioSurface,
+			nil,  // attributes
+			&unmanagedPixelBuffer
+		)
+		
+		guard status == kCVReturnSuccess, let unmanagedPixelBuffer = unmanagedPixelBuffer else {
+			os_log(.error, "Failed to create CVPixelBuffer from IOSurface: \(status)")
+			return
+		}
+		
+		let pixelBuffer = unmanagedPixelBuffer.takeRetainedValue()
+		
+		// Create sample buffer
+		var sampleBuffer: CMSampleBuffer?
+		var timingInfo = CMSampleTimingInfo()
+		timingInfo.presentationTimeStamp = CMTime(seconds: timestamp, preferredTimescale: 1000000000)
+		timingInfo.decodeTimeStamp = .invalid
+		timingInfo.duration = .invalid
+		
+		let err = CMSampleBufferCreateForImageBuffer(
+			allocator: kCFAllocatorDefault,
+			imageBuffer: pixelBuffer,
+			dataReady: true,
+			makeDataReadyCallback: nil,
+			refcon: nil,
+			formatDescription: _videoDescription,
+			sampleTiming: &timingInfo,
+			sampleBufferOut: &sampleBuffer
+		)
+		
+		if err == 0, let sampleBuffer = sampleBuffer {
+			_streamSource.stream.send(
+				sampleBuffer,
+				discontinuity: [],
+				hostTimeInNanoseconds: UInt64(timestamp * Double(NSEC_PER_SEC))
+			)
+		} else {
+			os_log(.error, "Failed to create sample buffer: \(err)")
+		}
+	}
+	
+	private func sendBlankFrame() {
+		// Send a blank frame to keep the stream alive when no frames are available
+		// This prevents apps from thinking the camera has frozen
+		
+		// Create a simple black frame
+		var pixelBuffer: CVPixelBuffer?
+		let attrs: [String: Any] = [
+			kCVPixelBufferWidthKey as String: 3840,
+			kCVPixelBufferHeightKey as String: 2160,
+			kCVPixelBufferPixelFormatTypeKey as String: kCVPixelFormatType_32BGRA,
+			kCVPixelBufferIOSurfacePropertiesKey as String: [:] as [String: Any]
+		]
+		
+		let status = CVPixelBufferCreate(
+			kCFAllocatorDefault,
+			3840,
+			2160,
+			kCVPixelFormatType_32BGRA,
+			attrs as CFDictionary,
+			&pixelBuffer
+		)
+		
+		guard status == kCVReturnSuccess, let pixelBuffer = pixelBuffer else {
+			return
+		}
+		
+		// Clear to black
+		CVPixelBufferLockBaseAddress(pixelBuffer, [])
+		if let baseAddress = CVPixelBufferGetBaseAddress(pixelBuffer) {
+			let height = CVPixelBufferGetHeight(pixelBuffer)
+			let bytesPerRow = CVPixelBufferGetBytesPerRow(pixelBuffer)
+			memset(baseAddress, 0, bytesPerRow * height)
+		}
+		CVPixelBufferUnlockBaseAddress(pixelBuffer, [])
+		
+		// Create and send sample buffer
+		var sampleBuffer: CMSampleBuffer?
+		var timingInfo = CMSampleTimingInfo()
+		timingInfo.presentationTimeStamp = CMClockGetTime(CMClockGetHostTimeClock())
+		
+		let err = CMSampleBufferCreateForImageBuffer(
+			allocator: kCFAllocatorDefault,
+			imageBuffer: pixelBuffer,
+			dataReady: true,
+			makeDataReadyCallback: nil,
+			refcon: nil,
+			formatDescription: _videoDescription,
+			sampleTiming: &timingInfo,
+			sampleBufferOut: &sampleBuffer
+		)
+		
+		if err == 0, let sampleBuffer = sampleBuffer {
+			_streamSource.stream.send(
+				sampleBuffer,
+				discontinuity: [],
+				hostTimeInNanoseconds: UInt64(timingInfo.presentationTimeStamp.seconds * Double(NSEC_PER_SEC))
+			)
 		}
 	}
 }
@@ -262,6 +390,9 @@ class CinematicCoreExtensionProviderSource: NSObject, CMIOExtensionProviderSourc
 	
 	private var deviceSource: CinematicCoreExtensionDeviceSource!
 	
+	// XPC Listener for incoming connections from host app
+	private var xpcListener: NSXPCListener?
+	
 	// CMIOExtensionProviderSource protocol methods (all are required)
 	
 	init(clientQueue: DispatchQueue?) {
@@ -269,13 +400,25 @@ class CinematicCoreExtensionProviderSource: NSObject, CMIOExtensionProviderSourc
 		super.init()
 		
 		provider = CMIOExtensionProvider(source: self, clientQueue: clientQueue)
-		deviceSource = CinematicCoreExtensionDeviceSource(localizedName: "SampleCapture (Swift)")
+		deviceSource = CinematicCoreExtensionDeviceSource(localizedName: "CinematicCore Virtual Camera")
 		
 		do {
 			try provider.addDevice(deviceSource.device)
 		} catch let error {
 			fatalError("Failed to add device: \(error.localizedDescription)")
 		}
+		
+		// Set up XPC listener
+		setupXPCListener()
+	}
+	
+	// MARK: - XPC Setup
+	
+	private func setupXPCListener() {
+		xpcListener = NSXPCListener(machServiceName: CinematicCoreXPC.machServiceName)
+		xpcListener?.delegate = self
+		xpcListener?.resume()
+		os_log(.info, "XPC listener started on \(CinematicCoreXPC.machServiceName)")
 	}
 	
 	func connect(to client: CMIOExtensionClient) throws {
@@ -298,7 +441,7 @@ class CinematicCoreExtensionProviderSource: NSObject, CMIOExtensionProviderSourc
 		
 		let providerProperties = CMIOExtensionProviderProperties(dictionary: [:])
 		if properties.contains(.providerManufacturer) {
-			providerProperties.manufacturer = "SampleCapture Manufacturer"
+			providerProperties.manufacturer = "CinematicCore"
 		}
 		return providerProperties
 	}
@@ -308,3 +451,55 @@ class CinematicCoreExtensionProviderSource: NSObject, CMIOExtensionProviderSourc
 		// Handle settable properties here.
 	}
 }
+// MARK: - NSXPCListenerDelegate
+
+extension CinematicCoreExtensionProviderSource: NSXPCListenerDelegate {
+	
+	func listener(_ listener: NSXPCListener, shouldAcceptNewConnection newConnection: NSXPCConnection) -> Bool {
+		os_log(.info, "Received XPC connection request")
+		
+		// Configure connection
+		newConnection.exportedInterface = NSXPCInterface(with: CinematicCoreXPCProtocol.self)
+		newConnection.exportedObject = XPCServiceImplementation(deviceSource: deviceSource)
+		
+		newConnection.invalidationHandler = {
+			os_log(.info, "XPC connection invalidated")
+		}
+		
+		newConnection.interruptionHandler = {
+			os_log(.error, "XPC connection interrupted")
+		}
+		
+		newConnection.resume()
+		os_log(.info, "✓ XPC connection accepted")
+		
+		return true
+	}
+}
+
+// MARK: - XPC Service Implementation
+
+/// Implements the XPC protocol for receiving frames from the host app
+private class XPCServiceImplementation: NSObject, CinematicCoreXPCProtocol {
+	
+	private weak var deviceSource: CinematicCoreExtensionDeviceSource?
+	
+	init(deviceSource: CinematicCoreExtensionDeviceSource) {
+		self.deviceSource = deviceSource
+		super.init()
+	}
+	
+	func sendVideoFrame(surfaceID: UInt32, timestamp: Double, width: Int32, height: Int32) {
+		deviceSource?.enqueueFrame(surfaceID: surfaceID, timestamp: timestamp, width: width, height: height)
+	}
+	
+	func updateCaptureStatus(isRunning: Bool) {
+		deviceSource?.updateCaptureStatus(isRunning: isRunning)
+	}
+	
+	func ping(reply: @escaping () -> Void) {
+		os_log(.debug, "XPC ping received")
+		reply()
+	}
+}
+

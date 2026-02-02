@@ -57,7 +57,8 @@ datasets/
 # Ignore intermediate build files for CoreML
 *.mlmodelc
 
-# --- .md ---
+# --- Documentation & .md ---
 claude.md
 ROADMAP.md
 PROJECT_LOG.md
+CinematicCoreMacOS/Documentation/

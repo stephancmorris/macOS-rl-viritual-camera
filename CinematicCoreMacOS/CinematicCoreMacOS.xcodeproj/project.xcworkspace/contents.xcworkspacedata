@@ -4,4 +4,7 @@
    <FileRef
       location = "self:">
    </FileRef>
+   <FileRef
+      location = "group:TASK_1_2_TROUBLESHOOTING.md">
+   </FileRef>
 </Workspace>

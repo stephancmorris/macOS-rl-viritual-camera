@@ -89,6 +89,16 @@
 			path = CinematicCoreExtension;
 			sourceTree = "<group>";
 		};
+		F90A3DB32F30C1000037BACD /* Shared */ = {
+			isa = PBXFileSystemSynchronizedRootGroup;
+			path = Shared;
+			sourceTree = "<group>";
+		};
+		F90A3DB42F30C1000037BACD /* Documentation */ = {
+			isa = PBXFileSystemSynchronizedRootGroup;
+			path = Documentation;
+			sourceTree = "<group>";
+		};
 /* End PBXFileSystemSynchronizedRootGroup section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -130,6 +140,8 @@
 				F90A3D852F30B1B00037BACD /* CinematicCoreMacOSTests */,
 				F90A3D8F2F30B1B00037BACD /* CinematicCoreMacOSUITests */,
 				F90A3DA42F30B1F90037BACD /* CinematicCoreExtension */,
+				F90A3DB32F30C1000037BACD /* Shared */,
+				F90A3DB42F30C1000037BACD /* Documentation */,
 				F90A3D762F30B1AF0037BACD /* Products */,
 			);
 			sourceTree = "<group>";
@@ -164,6 +176,7 @@
 			);
 			fileSystemSynchronizedGroups = (
 				F90A3D772F30B1AF0037BACD /* CinematicCoreMacOS */,
+				F90A3DB32F30C1000037BACD /* Shared */,
 			);
 			name = CinematicCoreMacOS;
 			packageProductDependencies = (
@@ -232,6 +245,7 @@
 			);
 			fileSystemSynchronizedGroups = (
 				F90A3DA42F30B1F90037BACD /* CinematicCoreExtension */,
+				F90A3DB32F30C1000037BACD /* Shared */,
 			);
 			name = CinematicCoreExtension;
 			packageProductDependencies = (

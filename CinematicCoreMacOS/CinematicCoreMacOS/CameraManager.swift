@@ -9,6 +9,7 @@ import AVFoundation
 import CoreVideo
 import CoreImage
 import Combine
+import IOSurface
 
 /// Manages the AVCaptureSession pipeline for 4K video capture
 /// Ticket: APP-01 - AVCaptureSession Pipeline
@@ -56,6 +57,7 @@ final class CameraManager: NSObject, ObservableObject {
         label: "com.cinematiccore.videoOutput",
         qos: .userInteractive
     )
+    private let xpcManager = XPCConnectionManager()
     
     // MARK: - Configuration Constants
     
@@ -111,7 +113,7 @@ final class CameraManager: NSObject, ObservableObject {
         // TEMP Testing: Filter out Cameras for debugging
         let allDevices = discoverySession.devices
         let devices = allDevices.filter { device in
-            !device.localizedName.lowercased().contains("stephan")
+            !device.localizedName.lowercased().contains("Test")
         }
 //        
 //        print("   Found \(devices.count) camera(s) (excluding MacBook Pro for testing)")
@@ -430,8 +432,21 @@ extension CameraManager: AVCaptureVideoDataOutputSampleBufferDelegate {
         }
         
         // Verify IOSurface backing (zero-copy requirement)
-        assert(CVPixelBufferGetIOSurface(pixelBuffer) != nil,
-               "PixelBuffer must be IOSurface-backed for zero-copy operations")
+        guard let ioSurface = CVPixelBufferGetIOSurface(pixelBuffer)?.takeUnretainedValue() else {
+            assertionFailure("PixelBuffer must be IOSurface-backed for zero-copy operations")
+            return
+        }
+        
+        // Get IOSurface ID for XPC sharing
+        let surfaceID = IOSurfaceGetID(ioSurface)
+        
+        // Get frame dimensions
+        let width = CVPixelBufferGetWidth(pixelBuffer)
+        let height = CVPixelBufferGetHeight(pixelBuffer)
+        
+        // Get presentation timestamp
+        let timestamp = CMSampleBufferGetPresentationTimeStamp(sampleBuffer)
+        let timestampSeconds = timestamp.seconds
         
         // Convert to CIImage for display
         let ciImage = CIImage(cvPixelBuffer: pixelBuffer)
@@ -439,10 +454,17 @@ extension CameraManager: AVCaptureVideoDataOutputSampleBufferDelegate {
         // Update on main thread
         Task { @MainActor in
             self.currentFrame = ciImage
+            
+            // Send frame to system extension via XPC
+            if let proxy = self.xpcManager.remoteProxy() {
+                proxy.sendVideoFrame(
+                    surfaceID: surfaceID,
+                    timestamp: timestampSeconds,
+                    width: Int32(width),
+                    height: Int32(height)
+                )
+            }
         }
-        
-        // TODO (Epic 1, Task 1.3): Share IOSurfaceID with System Extension
-        // let surfaceID = CVPixelBufferGetIOSurface(pixelBuffer).map(IOSurfaceGetID)
     }
     
     nonisolated func captureOutput(
