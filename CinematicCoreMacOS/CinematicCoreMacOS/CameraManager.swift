@@ -172,48 +172,70 @@ final class CameraManager: NSObject, ObservableObject {
     
     /// Request camera permissions and start the capture session
     func startCapture() async throws {
+        print("\n▶️ Starting capture...")
+        
         // Check authorization
         let authorized = await checkAuthorization()
         guard authorized else {
+            print("   ❌ Authorization denied")
             error = .authorizationDenied
             throw CameraError.authorizationDenied
         }
+        print("   ✓ Camera authorized")
         
-        // Refresh camera list
-        discoverCameras()
+        // Refresh camera list if no camera selected
+        if selectedCamera == nil {
+            print("   Discovering cameras...")
+            discoverCameras()
+        }
         
         // Configure session
+        print("   Configuring session...")
         try await configureSession()
+        print("   ✓ Session configured")
         
         // Start running
         await MainActor.run {
             captureSession.startRunning()
             isRunning = captureSession.isRunning
             if isRunning {
-                print("✓ Capture started")
+                print("   ✓ Capture started successfully")
+            } else {
+                print("   ⚠️ Session not running after startRunning() call")
             }
         }
     }
     
     /// Stop the capture session
     func stopCapture() {
+        print("   ⏹️ Stopping capture...")
         captureSession.stopRunning()
         isRunning = false
+        print("   ✓ Capture stopped")
     }
     
     /// Restart capture with a different camera
     func restartWithCamera(_ cameraDevice: CameraDevice) async throws {
+        print("\n🔄 Switching to camera: \(cameraDevice.name)")
+        
         // Stop current session
-        if isRunning {
+        let wasRunning = isRunning
+        if wasRunning {
+            print("   Stopping current session...")
             stopCapture()
+            // Give the session time to fully stop
             try await Task.sleep(for: .milliseconds(500))
         }
         
         // Update selected camera
         selectedCamera = cameraDevice
+        print("   ✓ Selected camera updated")
         
-        // Start new session
-        try await startCapture()
+        // Start new session if it was running before
+        if wasRunning {
+            print("   Starting new session...")
+            try await startCapture()
+        }
     }
     
     // MARK: - Private Methods
@@ -234,6 +256,10 @@ final class CameraManager: NSObject, ObservableObject {
     private func configureSession() async throws {
         captureSession.beginConfiguration()
         defer { captureSession.commitConfiguration() }
+        
+        // Remove existing inputs and outputs
+        captureSession.inputs.forEach { captureSession.removeInput($0) }
+        captureSession.outputs.forEach { captureSession.removeOutput($0) }
         
         // Set session preset
         if captureSession.canSetSessionPreset(.high) {
@@ -307,6 +333,8 @@ final class CameraManager: NSObject, ObservableObject {
     }
     
     private func configureCameraDevice(_ device: AVCaptureDevice) throws {
+        print("   🎥 Configuring device: \(device.localizedName)")
+        
         try device.lockForConfiguration()
         defer { device.unlockForConfiguration() }
         
@@ -319,7 +347,8 @@ final class CameraManager: NSObject, ObservableObject {
         device.activeFormat = format
         
         // DEBUG: Print supported frame rates
-        print("   📊 Format: \(CMVideoFormatDescriptionGetDimensions(format.formatDescription).width)x\(CMVideoFormatDescriptionGetDimensions(format.formatDescription).height)")
+        let dims = CMVideoFormatDescriptionGetDimensions(format.formatDescription)
+        print("   📊 Format: \(dims.width)x\(dims.height)")
         print("   📊 Supported frame rates:")
         for range in format.videoSupportedFrameRateRanges {
             print("      - \(range.minFrameRate) to \(range.maxFrameRate) fps")
