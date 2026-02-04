@@ -33,6 +33,9 @@ final class CameraManager: NSObject, ObservableObject {
     /// Currently selected camera
     @Published var selectedCamera: CameraDevice?
     
+    /// Person detector (Task 2.1)
+    let personDetector = PersonDetector()
+    
     // MARK: - Camera Device Model
     
     struct CameraDevice: Identifiable, Hashable {
@@ -454,6 +457,9 @@ extension CameraManager: AVCaptureVideoDataOutputSampleBufferDelegate {
         // Update on main thread
         Task { @MainActor in
             self.currentFrame = ciImage
+            
+            // Task 2.1: Run person detection
+            await self.personDetector.processFrame(pixelBuffer)
             
             // Send frame to system extension via XPC
             if let proxy = self.xpcManager.remoteProxy() {

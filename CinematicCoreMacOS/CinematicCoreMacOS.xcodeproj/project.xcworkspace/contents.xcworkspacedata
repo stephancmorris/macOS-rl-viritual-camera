@@ -5,6 +5,15 @@
       location = "self:">
    </FileRef>
    <FileRef
-      location = "group:TASK_1_2_TROUBLESHOOTING.md">
+      location = "group:ROADMAP.md">
+   </FileRef>
+   <FileRef
+      location = "group:NewRoadmap.md">
+   </FileRef>
+   <FileRef
+      location = "group:PersonDetector.swift">
+   </FileRef>
+   <FileRef
+      location = "group:DetectionOverlayView.swift">
    </FileRef>
 </Workspace>
