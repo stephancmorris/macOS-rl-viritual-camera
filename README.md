@@ -38,7 +38,7 @@ An autonomous virtual camera operator for live broadcast environments. This macO
 - [ ] Metal Rendering Engine
 
 **Phase 2: Perception**
-- [ ] YOLOv8 Model Integration
+- [ ] Apple's Vision framework Integration
 - [ ] Subject Tracking Logic
 
 **Phase 3: Automation**
