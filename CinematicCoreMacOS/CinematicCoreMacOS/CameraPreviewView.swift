@@ -9,17 +9,30 @@ import SwiftUI
 import CoreImage
 import AppKit
 
-/// SwiftUI view that displays the live camera feed
+/// SwiftUI view that displays the live camera feed with detection overlay
 struct CameraPreviewView: View {
     let image: CIImage?
+    let detectedPersons: [PersonDetector.DetectedPerson]
+    let showDetections: Bool
     
     var body: some View {
         GeometryReader { geometry in
             if let image = image {
-                Image(decorative: image, scale: 1.0, orientation: .up)
-                    .resizable()
-                    .aspectRatio(contentMode: .fit)
-                    .frame(width: geometry.size.width, height: geometry.size.height)
+                ZStack {
+                    // Camera feed
+                    Image(decorative: image, scale: 1.0, orientation: .up)
+                        .resizable()
+                        .aspectRatio(contentMode: .fit)
+                        .frame(width: geometry.size.width, height: geometry.size.height)
+                    
+                    // Detection overlay
+                    if showDetections {
+                        DetectionOverlayView(
+                            detectedPersons: detectedPersons,
+                            imageSize: image.extent.size
+                        )
+                    }
+                }
             } else {
                 // Placeholder when no camera feed
                 ZStack {
@@ -56,6 +69,10 @@ extension Image {
 }
 
 #Preview {
-    CameraPreviewView(image: nil)
-        .frame(width: 800, height: 600)
+    CameraPreviewView(
+        image: nil,
+        detectedPersons: [],
+        showDetections: true
+    )
+    .frame(width: 800, height: 600)
 }

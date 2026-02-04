@@ -11,12 +11,18 @@ struct ContentView: View {
     @StateObject private var cameraManager = CameraManager()
     @State private var showError = false
     @State private var showCameraList = false
+    @State private var showDetections = true // Task 2.1: Toggle for detection overlay
+    @State private var showDetectionSettings = false // Task 2.1: Detection settings panel
     
     var body: some View {
         VStack(spacing: 0) {
             // Camera Preview (Main Area)
-            CameraPreviewView(image: cameraManager.currentFrame)
-                .background(Color.black)
+            CameraPreviewView(
+                image: cameraManager.currentFrame,
+                detectedPersons: cameraManager.personDetector.detectedPersons,
+                showDetections: showDetections
+            )
+            .background(Color.black)
             
             // Control Bar
             HStack(spacing: 16) {
@@ -28,6 +34,34 @@ struct ContentView: View {
                     Text(cameraManager.isRunning ? "Live" : "Stopped")
                         .font(.caption)
                         .foregroundStyle(.secondary)
+                }
+                
+                Spacer()
+                
+                // Detection Stats (Task 2.1)
+                if cameraManager.isRunning {
+                    VStack(alignment: .center, spacing: 2) {
+                        Text("Persons: \(cameraManager.personDetector.detectedPersons.count)")
+                            .font(.caption)
+                            .foregroundStyle(.primary)
+                        Text(String(format: "%.1fms", cameraManager.personDetector.stats.lastDetectionTime * 1000))
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
+                    }
+                }
+                
+                // Detection Toggle
+                Toggle(isOn: $showDetections) {
+                    Label("Detections", systemImage: "person.crop.rectangle")
+                }
+                .toggleStyle(.button)
+                
+                // Detection Settings
+                Button(action: { showDetectionSettings.toggle() }) {
+                    Label("Settings", systemImage: "slider.horizontal.3")
+                }
+                .popover(isPresented: $showDetectionSettings) {
+                    DetectionSettingsView(personDetector: cameraManager.personDetector)
                 }
                 
                 Spacer()
