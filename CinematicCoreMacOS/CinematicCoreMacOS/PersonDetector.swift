@@ -29,7 +29,7 @@ final class PersonDetector: ObservableObject {
     
     // MARK: - Models
     
-    struct DetectedPerson: Identifiable {
+    struct DetectedPerson: Identifiable, Sendable {
         let id: UUID
         let boundingBox: CGRect // Normalized coordinates (0-1)
         let confidence: Float
@@ -46,7 +46,7 @@ final class PersonDetector: ObservableObject {
         }
     }
     
-    struct DetectionStats {
+    struct DetectionStats: Sendable {
         var totalFramesProcessed: Int = 0
         var averageDetectionTime: TimeInterval = 0
         var lastDetectionTime: TimeInterval = 0
@@ -92,9 +92,12 @@ final class PersonDetector: ObservableObject {
     }
     
     // MARK: - Initialization
-    
+
     init() {
-        setupDetectionRequest()
+        // Setup detection request inline to avoid nonisolated call from init
+        let request = VNDetectHumanRectanglesRequest()
+        request.upperBodyOnly = true
+        detectionRequest = request
     }
     
     // MARK: - Public Methods

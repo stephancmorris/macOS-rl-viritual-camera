@@ -12,12 +12,14 @@ import os.log
 /// Handles connection lifecycle, retries, and error recovery
 @MainActor
 final class XPCConnectionManager {
-    
+
     // MARK: - Properties
-    
+
     private var connection: NSXPCConnection?
     private var connectionRetries = 0
     private let logger = Logger(subsystem: "com.cinematiccore.app", category: "XPC")
+    private var noConnectionWarningCount = 0
+    private let maxNoConnectionWarnings = 10
     
     var isConnected: Bool {
         connection != nil
@@ -72,10 +74,20 @@ final class XPCConnectionManager {
     /// - Returns: Remote object proxy or nil if not connected
     func remoteProxy() -> CinematicCoreXPCProtocol? {
         guard let connection = connection else {
-            logger.warning("Cannot get remote proxy - no connection")
+            // Only log the first N warnings to avoid spam
+            if noConnectionWarningCount < maxNoConnectionWarnings {
+                noConnectionWarningCount += 1
+                logger.warning("Cannot get remote proxy - no connection (\(self.noConnectionWarningCount)/\(self.maxNoConnectionWarnings) warnings)")
+            } else if noConnectionWarningCount == maxNoConnectionWarnings {
+                noConnectionWarningCount += 1
+                logger.warning("Cannot get remote proxy - suppressing further warnings")
+            }
             return nil
         }
-        
+
+        // Reset warning count when we have a connection
+        noConnectionWarningCount = 0
+
         return connection.remoteObjectProxyWithErrorHandler { [weak self] error in
             self?.logger.error("XPC proxy error: \(error.localizedDescription)")
         } as? CinematicCoreXPCProtocol
