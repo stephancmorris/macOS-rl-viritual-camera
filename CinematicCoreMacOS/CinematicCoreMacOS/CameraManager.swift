@@ -36,6 +36,15 @@ final class CameraManager: NSObject, ObservableObject {
     /// Person detector (Task 2.1)
     let personDetector = PersonDetector()
     
+    /// Crop engine (Task 2.2 - GFX-01)
+    let cropEngine: CropEngine?
+    
+    /// Cropped output frame (for ATEM output)
+    @Published private(set) var croppedFrame: CIImage?
+    
+    /// Enable/disable cropping
+    @Published var cropEnabled: Bool = false
+    
     // MARK: - Camera Device Model
     
     struct CameraDevice: Identifiable, Hashable {
@@ -96,7 +105,17 @@ final class CameraManager: NSObject, ObservableObject {
     // MARK: - Initialization
     
     override init() {
+        // Initialize crop engine (Task 2.2 - GFX-01)
+        self.cropEngine = CropEngine()
+        
         super.init()
+        
+        if cropEngine == nil {
+            print("⚠️ CropEngine failed to initialize - Metal may not be available")
+        } else {
+            print("✅ CropEngine initialized successfully")
+        }
+        
         // Discover cameras on initialization
         discoverCameras()
     }
@@ -454,13 +473,40 @@ extension CameraManager: AVCaptureVideoDataOutputSampleBufferDelegate {
         // Convert to CIImage for display
         let ciImage = CIImage(cvPixelBuffer: pixelBuffer)
         
-        // Update on main thread
+        // Process frame asynchronously (avoid blocking capture queue)
         Task { @MainActor in
-            self.currentFrame = ciImage
-            
             // Task 2.1: Run person detection
-            await self.personDetector.processFrame(pixelBuffer)
-            
+            let detectedPersons = await self.personDetector.processFrame(pixelBuffer)
+
+            // Task 2.2: Apply crop if enabled (GFX-01)
+            var croppedImage: CIImage?
+            if self.cropEnabled, let cropEngine = self.cropEngine {
+                print("🔍 DEBUG: Crop enabled, starting crop processing...")
+
+                // If persons detected, auto-frame the first person
+                if let primaryPerson = detectedPersons.first {
+                    print("🔍 DEBUG: Framing person at \(primaryPerson.boundingBox)")
+                    cropEngine.framePerson(primaryPerson, padding: 0.15)
+                } else {
+                    print("🔍 DEBUG: No persons detected, using current crop")
+                }
+
+                // Process crop (heavy GPU work)
+                print("🔍 DEBUG: About to call processCrop...")
+                do {
+                    let croppedBuffer = try await cropEngine.processCrop(pixelBuffer)
+                    print("🔍 DEBUG: processCrop returned successfully")
+                    croppedImage = CIImage(cvPixelBuffer: croppedBuffer)
+                } catch {
+                    print("❌ Crop processing failed: \(error)")
+                }
+                print("🔍 DEBUG: Crop processing complete")
+            }
+
+            // Update UI (already on main actor)
+            self.currentFrame = ciImage
+            self.croppedFrame = croppedImage
+
             // Send frame to system extension via XPC
             if let proxy = self.xpcManager.remoteProxy() {
                 proxy.sendVideoFrame(

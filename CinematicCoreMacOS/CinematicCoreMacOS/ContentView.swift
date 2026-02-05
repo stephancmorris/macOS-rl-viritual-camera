@@ -13,6 +13,8 @@ struct ContentView: View {
     @State private var showCameraList = false
     @State private var showDetections = true // Task 2.1: Toggle for detection overlay
     @State private var showDetectionSettings = false // Task 2.1: Detection settings panel
+    @State private var showCropSettings = false // Task 2.2: Crop settings panel
+    @State private var showCropIndicator = true // Task 2.2: Show crop rectangle on preview
     
     var body: some View {
         VStack(spacing: 0) {
@@ -20,7 +22,8 @@ struct ContentView: View {
             CameraPreviewView(
                 image: cameraManager.currentFrame,
                 detectedPersons: cameraManager.personDetector.detectedPersons,
-                showDetections: showDetections
+                showDetections: showDetections,
+                cropIndicator: (showCropIndicator && cameraManager.cropEnabled) ? cameraManager.cropEngine?.currentCrop : nil
             )
             .background(Color.black)
             
@@ -58,10 +61,51 @@ struct ContentView: View {
                 
                 // Detection Settings
                 Button(action: { showDetectionSettings.toggle() }) {
-                    Label("Settings", systemImage: "slider.horizontal.3")
+                    Label("Detection", systemImage: "slider.horizontal.3")
                 }
                 .popover(isPresented: $showDetectionSettings) {
                     DetectionSettingsView(personDetector: cameraManager.personDetector)
+                }
+                
+                Spacer()
+                
+                // Task 2.2: Crop Controls
+                if let cropEngine = cameraManager.cropEngine {
+                    // Crop Stats
+                    if cameraManager.isRunning && cameraManager.cropEnabled {
+                        VStack(alignment: .center, spacing: 2) {
+                            Text("Crop: \(Int(cropEngine.config.outputSize.width))×\(Int(cropEngine.config.outputSize.height))")
+                                .font(.caption)
+                                .foregroundStyle(.primary)
+                            Text(String(format: "%.1fms", cropEngine.stats.lastRenderTime * 1000))
+                                .font(.caption2)
+                                .foregroundStyle(.secondary)
+                        }
+                    }
+                    
+                    // Crop Toggle
+                    Toggle(isOn: $cameraManager.cropEnabled) {
+                        Label("Crop", systemImage: "crop.rotate")
+                    }
+                    .toggleStyle(.button)
+                    
+                    // Crop Indicator Toggle
+                    Toggle(isOn: $showCropIndicator) {
+                        Label("Indicator", systemImage: "viewfinder")
+                    }
+                    .toggleStyle(.button)
+                    .disabled(!cameraManager.cropEnabled)
+                    
+                    // Crop Settings
+                    Button(action: { showCropSettings.toggle() }) {
+                        Label("Crop Settings", systemImage: "gearshape")
+                    }
+                    .popover(isPresented: $showCropSettings) {
+                        CropSettingsView(
+                            cropEngine: cropEngine,
+                            cameraManager: cameraManager
+                        )
+                    }
                 }
                 
                 Spacer()

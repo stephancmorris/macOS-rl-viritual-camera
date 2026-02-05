@@ -4,16 +4,4 @@
    <FileRef
       location = "self:">
    </FileRef>
-   <FileRef
-      location = "group:ROADMAP.md">
-   </FileRef>
-   <FileRef
-      location = "group:NewRoadmap.md">
-   </FileRef>
-   <FileRef
-      location = "group:PersonDetector.swift">
-   </FileRef>
-   <FileRef
-      location = "group:DetectionOverlayView.swift">
-   </FileRef>
 </Workspace>
