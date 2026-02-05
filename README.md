@@ -1,4 +1,4 @@
-# Cinematic Core (Broadcast Edition)
+# Cinematic Core (Broadcast Helper)
 
 An autonomous virtual camera operator for live broadcast environments. This macOS application ingests a static 4K wide shot, uses computer vision to detect subjects, and outputs a digitally panned and zoomed 1080p signal to ATEM switchers via dedicated hardware.
 
