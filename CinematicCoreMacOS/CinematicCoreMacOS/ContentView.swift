@@ -15,6 +15,7 @@ struct ContentView: View {
     @State private var showDetectionSettings = false // Task 2.1: Detection settings panel
     @State private var showCropSettings = false // Task 2.2: Crop settings panel
     @State private var showCropIndicator = true // Task 2.2: Show crop rectangle on preview
+    @State private var showComposerSettings = false // Task 2.3: Shot composer settings
     
     var body: some View {
         VStack(spacing: 0) {
@@ -107,9 +108,19 @@ struct ContentView: View {
                         )
                     }
                 }
-                
+
+                // Task 2.3: Shot Composer Settings
+                Button(action: { showComposerSettings.toggle() }) {
+                    Label("Composer", systemImage: "film")
+                }
+                .popover(isPresented: $showComposerSettings) {
+                    ShotComposerSettingsView(
+                        shotComposer: cameraManager.shotComposer
+                    )
+                }
+
                 Spacer()
-                
+
                 // Camera Info/Selector
                 VStack(alignment: .center, spacing: 2) {
                     if let selected = cameraManager.selectedCamera {

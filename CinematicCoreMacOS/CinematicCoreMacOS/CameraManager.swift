@@ -38,6 +38,9 @@ final class CameraManager: NSObject, ObservableObject {
     
     /// Crop engine (Task 2.2 - GFX-01)
     let cropEngine: CropEngine?
+
+    /// Shot composer (Task 2.3 - LOGIC-01)
+    let shotComposer = ShotComposer()
     
     /// Cropped output frame (for ATEM output)
     @Published private(set) var croppedFrame: CIImage?
@@ -483,12 +486,16 @@ extension CameraManager: AVCaptureVideoDataOutputSampleBufferDelegate {
             if self.cropEnabled, let cropEngine = self.cropEngine {
                 print("🔍 DEBUG: Crop enabled, starting crop processing...")
 
-                // If persons detected, auto-frame the first person
+                // Task 2.3 (LOGIC-01): Use ShotComposer for intelligent framing
+                cropEngine.config.transitionSmoothing = self.shotComposer.config.smoothingFactor
                 if let primaryPerson = detectedPersons.first {
-                    print("🔍 DEBUG: Framing person at \(primaryPerson.boundingBox)")
-                    cropEngine.framePerson(primaryPerson, padding: 0.15)
+                    print("🔍 DEBUG: Composing shot for person at \(primaryPerson.boundingBox)")
+                    if let idealCrop = self.shotComposer.compose(person: primaryPerson) {
+                        cropEngine.targetCrop = idealCrop
+                    }
+                    // nil = within deadzone, CropEngine continues interpolating to last target
                 } else {
-                    print("🔍 DEBUG: No persons detected, using current crop")
+                    print("🔍 DEBUG: No persons detected, holding last position")
                 }
 
                 // Process crop (heavy GPU work)

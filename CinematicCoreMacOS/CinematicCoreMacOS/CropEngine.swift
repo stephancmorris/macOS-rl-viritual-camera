@@ -25,7 +25,8 @@ final class CropEngine: ObservableObject {
         var outputSize: CGSize = CGSize(width: 1920, height: 1080)
 
         /// Smoothing factor for crop transitions (0 = instant, 1 = very smooth)
-        var transitionSmoothing: Float = 0.15
+        /// 10% per frame as specified by LOGIC-01
+        var transitionSmoothing: Float = 0.10
 
         /// Use high-quality sampling (slightly slower but better quality)
         var useHighQuality: Bool = true

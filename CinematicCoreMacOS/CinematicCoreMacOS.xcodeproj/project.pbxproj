@@ -8,10 +8,6 @@
 
 /* Begin PBXBuildFile section */
 		F90A3DAD2F30B1F90037BACD /* Morris.CinematicCoreMacOS.CinematicCoreExtension.systemextension in Embed System Extensions */ = {isa = PBXBuildFile; fileRef = F90A3DA32F30B1F90037BACD /* Morris.CinematicCoreMacOS.CinematicCoreExtension.systemextension */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
-		F9309C5D2F347D6700240B9F /* TASK_2_2_COMPLETION.md in Resources */ = {isa = PBXBuildFile; fileRef = F9309C5C2F347D6700240B9F /* TASK_2_2_COMPLETION.md */; };
-		F9309C5E2F347D6700240B9F /* TASK_2_2_COMPLETION.md in Resources */ = {isa = PBXBuildFile; fileRef = F9309C5C2F347D6700240B9F /* TASK_2_2_COMPLETION.md */; };
-		F9309C602F347D8B00240B9F /* PROGRESS_SUMMARY.md in Resources */ = {isa = PBXBuildFile; fileRef = F9309C5F2F347D8B00240B9F /* PROGRESS_SUMMARY.md */; };
-		F9309C612F347D8B00240B9F /* PROGRESS_SUMMARY.md in Resources */ = {isa = PBXBuildFile; fileRef = F9309C5F2F347D8B00240B9F /* PROGRESS_SUMMARY.md */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -57,8 +53,6 @@
 		F90A3D822F30B1B00037BACD /* CinematicCoreMacOSTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = CinematicCoreMacOSTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		F90A3D8C2F30B1B00037BACD /* CinematicCoreMacOSUITests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = CinematicCoreMacOSUITests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		F90A3DA32F30B1F90037BACD /* Morris.CinematicCoreMacOS.CinematicCoreExtension.systemextension */ = {isa = PBXFileReference; explicitFileType = "wrapper.system-extension"; includeInIndex = 0; path = Morris.CinematicCoreMacOS.CinematicCoreExtension.systemextension; sourceTree = BUILT_PRODUCTS_DIR; };
-		F9309C5C2F347D6700240B9F /* TASK_2_2_COMPLETION.md */ = {isa = PBXFileReference; lastKnownFileType = net.daringfireball.markdown; path = TASK_2_2_COMPLETION.md; sourceTree = "<group>"; };
-		F9309C5F2F347D8B00240B9F /* PROGRESS_SUMMARY.md */ = {isa = PBXFileReference; lastKnownFileType = net.daringfireball.markdown; path = PROGRESS_SUMMARY.md; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedBuildFileExceptionSet section */
@@ -153,8 +147,6 @@
 				F90A3DA42F30B1F90037BACD /* CinematicCoreExtension */,
 				F90A3DB32F30C1000037BACD /* Shared */,
 				F90A3D762F30B1AF0037BACD /* Products */,
-				F9309C5C2F347D6700240B9F /* TASK_2_2_COMPLETION.md */,
-				F9309C5F2F347D8B00240B9F /* PROGRESS_SUMMARY.md */,
 			);
 			sourceTree = "<group>";
 		};
@@ -319,8 +311,6 @@
 			isa = PBXResourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
-				F9309C612F347D8B00240B9F /* PROGRESS_SUMMARY.md in Resources */,
-				F9309C5D2F347D6700240B9F /* TASK_2_2_COMPLETION.md in Resources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -342,8 +332,6 @@
 			isa = PBXResourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
-				F9309C602F347D8B00240B9F /* PROGRESS_SUMMARY.md in Resources */,
-				F9309C5E2F347D6700240B9F /* TASK_2_2_COMPLETION.md in Resources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

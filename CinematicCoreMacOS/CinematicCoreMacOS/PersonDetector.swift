@@ -28,13 +28,24 @@ final class PersonDetector: ObservableObject {
     @Published var isEnabled: Bool = true
     
     // MARK: - Models
-    
+
+    /// Body pose keypoints for rule-of-thirds composition (Task 2.3 - LOGIC-01)
+    struct PoseKeypoints: Sendable {
+        /// Head position in normalized Vision coordinates (0-1, bottom-left origin)
+        let head: CGPoint
+        /// Waist/hip position in normalized Vision coordinates
+        let waist: CGPoint
+        /// Confidence of the pose observation (0-1)
+        let confidence: Float
+    }
+
     struct DetectedPerson: Identifiable, Sendable {
         let id: UUID
         let boundingBox: CGRect // Normalized coordinates (0-1)
         let confidence: Float
         let timestamp: TimeInterval
-        
+        let poseKeypoints: PoseKeypoints? // nil when pose detection fails
+
         /// Convert normalized rect to pixel coordinates
         func pixelBoundingBox(imageSize: CGSize) -> CGRect {
             CGRect(
@@ -75,6 +86,7 @@ final class PersonDetector: ObservableObject {
     // MARK: - Private Properties
     
     private nonisolated(unsafe) var detectionRequest: VNDetectHumanRectanglesRequest?
+    private nonisolated(unsafe) let poseRequest = VNDetectHumanBodyPoseRequest()
     private let processingQueue = DispatchQueue(
         label: "com.cinematiccore.personDetection",
         qos: .userInitiated
@@ -108,20 +120,24 @@ final class PersonDetector: ObservableObject {
     @discardableResult
     func processFrame(_ pixelBuffer: CVPixelBuffer) async -> [DetectedPerson] {
         guard isEnabled else { return [] }
-        
+
         let startTime = CACurrentMediaTime()
-        
-        // Perform detection on background queue
-        let observations = await performDetection(pixelBuffer: pixelBuffer)
-        
+
+        // Perform detection on background queue (rect + pose together)
+        let (rectObservations, poseObservations) = await performDetection(pixelBuffer: pixelBuffer)
+
         let detectionTime = CACurrentMediaTime() - startTime
-        
-        // Update on main actor
+
+        // Match and update on main actor
         await MainActor.run {
-            updateTracking(observations: observations, timestamp: startTime)
+            updateTracking(
+                rectObservations: rectObservations,
+                poseObservations: poseObservations,
+                timestamp: startTime
+            )
             updateStats(detectionTime: detectionTime)
         }
-        
+
         return detectedPersons
     }
     
@@ -150,9 +166,9 @@ final class PersonDetector: ObservableObject {
         detectionRequest = request
     }
     
-    private nonisolated func performDetection(pixelBuffer: CVPixelBuffer) async -> [VNHumanObservation] {
-        guard let request = detectionRequest else { return [] }
-        
+    private nonisolated func performDetection(pixelBuffer: CVPixelBuffer) async -> ([VNHumanObservation], [VNHumanBodyPoseObservation]) {
+        guard let rectRequest = detectionRequest else { return ([], []) }
+
         return await withCheckedContinuation { continuation in
             processingQueue.async {
                 let handler = VNImageRequestHandler(
@@ -160,45 +176,103 @@ final class PersonDetector: ObservableObject {
                     orientation: .up,
                     options: [:]
                 )
-                
+
                 do {
-                    try handler.perform([request])
-                    
-                    let observations = request.results ?? []
-                    
-                    // Filter by confidence
-                    let filtered = observations.filter { observation in
-                        observation.confidence >= self.config.confidenceThreshold
-                    }
-                    
-                    // Limit to max persons
-                    let limited = Array(filtered.prefix(self.config.maxPersons))
-                    
-                    continuation.resume(returning: limited)
+                    // Run both requests together for efficiency
+                    try handler.perform([rectRequest, self.poseRequest])
+
+                    let rectResults = (rectRequest.results ?? [])
+                        .filter { $0.confidence >= self.config.confidenceThreshold }
+                    let limited = Array(rectResults.prefix(self.config.maxPersons))
+
+                    let poseResults = self.poseRequest.results ?? []
+
+                    continuation.resume(returning: (limited, poseResults))
                 } catch {
                     print("❌ Person detection error: \(error)")
-                    continuation.resume(returning: [])
+                    continuation.resume(returning: ([], []))
                 }
             }
         }
     }
+
+    /// Extract head and waist keypoints from a pose observation
+    private func extractKeypoints(from pose: VNHumanBodyPoseObservation) -> PoseKeypoints? {
+        guard let allPoints = try? pose.recognizedPoints(.all) else { return nil }
+
+        // Head: prefer average of ears, fallback to nose
+        let head: CGPoint? = {
+            let leftEar = allPoints[.leftEar]
+            let rightEar = allPoints[.rightEar]
+            let nose = allPoints[.nose]
+
+            if let le = leftEar, let re = rightEar, le.confidence > 0.3, re.confidence > 0.3 {
+                return CGPoint(
+                    x: (le.location.x + re.location.x) / 2,
+                    y: (le.location.y + re.location.y) / 2
+                )
+            } else if let n = nose, n.confidence > 0.3 {
+                return n.location
+            }
+            return nil
+        }()
+
+        // Waist: prefer root (center hip), fallback to hip average
+        let waist: CGPoint? = {
+            let root = allPoints[.root]
+            let leftHip = allPoints[.leftHip]
+            let rightHip = allPoints[.rightHip]
+
+            if let r = root, r.confidence > 0.3 {
+                return r.location
+            } else if let lh = leftHip, let rh = rightHip, lh.confidence > 0.3, rh.confidence > 0.3 {
+                return CGPoint(
+                    x: (lh.location.x + rh.location.x) / 2,
+                    y: (lh.location.y + rh.location.y) / 2
+                )
+            }
+            return nil
+        }()
+
+        guard let h = head, let w = waist else { return nil }
+
+        return PoseKeypoints(head: h, waist: w, confidence: pose.confidence)
+    }
     
-    private func updateTracking(observations: [VNHumanObservation], timestamp: TimeInterval) {
+    private func updateTracking(
+        rectObservations: [VNHumanObservation],
+        poseObservations: [VNHumanBodyPoseObservation],
+        timestamp: TimeInterval
+    ) {
         // Remove stale tracks
         trackedPersons = trackedPersons.filter { _, person in
             timestamp - person.lastSeen < trackingTimeout
         }
-        
+
         var updatedPersons: [DetectedPerson] = []
-        
-        for observation in observations {
+
+        for observation in rectObservations {
             let boundingBox = observation.boundingBox
             let confidence = observation.confidence
-            
+
+            // Match this rect to the best-overlapping pose observation
+            let keypoints: PoseKeypoints? = {
+                let bestPose = poseObservations.max { a, b in
+                    let bboxA = poseBoundingBox(a)
+                    let bboxB = poseBoundingBox(b)
+                    return calculateIoU(boundingBox, bboxA) < calculateIoU(boundingBox, bboxB)
+                }
+                guard let pose = bestPose,
+                      calculateIoU(boundingBox, poseBoundingBox(pose)) > 0.2 else {
+                    return nil
+                }
+                return extractKeypoints(from: pose)
+            }()
+
             // Try to match with existing track
             let matchedID = findMatchingTrack(boundingBox: boundingBox, timestamp: timestamp)
             let personID = matchedID ?? UUID()
-            
+
             // Update or create track
             trackedPersons[personID] = TrackedPerson(
                 id: personID,
@@ -206,17 +280,18 @@ final class PersonDetector: ObservableObject {
                 lastBoundingBox: boundingBox,
                 confidence: confidence
             )
-            
-            // Create detected person
+
+            // Create detected person with optional pose keypoints
             let detectedPerson = DetectedPerson(
                 id: personID,
                 boundingBox: boundingBox,
                 confidence: confidence,
-                timestamp: timestamp
+                timestamp: timestamp,
+                poseKeypoints: keypoints
             )
             updatedPersons.append(detectedPerson)
         }
-        
+
         detectedPersons = updatedPersons
     }
     
@@ -242,6 +317,30 @@ final class PersonDetector: ObservableObject {
         return bestMatch?.id
     }
     
+    /// Compute an approximate bounding box from a pose observation's recognized points
+    private func poseBoundingBox(_ pose: VNHumanBodyPoseObservation) -> CGRect {
+        guard let allPoints = try? pose.recognizedPoints(.all) else {
+            return .zero
+        }
+
+        var minX: CGFloat = 1.0
+        var minY: CGFloat = 1.0
+        var maxX: CGFloat = 0.0
+        var maxY: CGFloat = 0.0
+        var count = 0
+
+        for (_, point) in allPoints where point.confidence > 0.1 {
+            minX = min(minX, point.location.x)
+            minY = min(minY, point.location.y)
+            maxX = max(maxX, point.location.x)
+            maxY = max(maxY, point.location.y)
+            count += 1
+        }
+
+        guard count > 0 else { return .zero }
+        return CGRect(x: minX, y: minY, width: maxX - minX, height: maxY - minY)
+    }
+
     private func calculateIoU(_ rect1: CGRect, _ rect2: CGRect) -> CGFloat {
         let intersection = rect1.intersection(rect2)
         
