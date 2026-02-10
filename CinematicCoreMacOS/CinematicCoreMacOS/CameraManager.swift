@@ -41,7 +41,10 @@ final class CameraManager: NSObject, ObservableObject {
 
     /// Shot composer (Task 2.3 - LOGIC-01)
     let shotComposer = ShotComposer()
-    
+
+    /// Training data recorder (Task 3.1 - RL-01)
+    let trainingDataRecorder = TrainingDataRecorder()
+
     /// Cropped output frame (for ATEM output)
     @Published private(set) var croppedFrame: CIImage?
     
@@ -508,6 +511,17 @@ extension CameraManager: AVCaptureVideoDataOutputSampleBufferDelegate {
                     print("❌ Crop processing failed: \(error)")
                 }
                 print("🔍 DEBUG: Crop processing complete")
+            }
+
+            // Task 3.1 (RL-01): Record training data
+            if self.trainingDataRecorder.isRecording {
+                self.trainingDataRecorder.recordFrame(
+                    timestamp: timestampSeconds,
+                    persons: detectedPersons,
+                    currentCrop: self.cropEngine?.currentCrop ?? .fullFrame,
+                    idealCrop: self.shotComposer.lastComputedCrop,
+                    isInterpolating: self.cropEngine?.isInterpolating ?? false
+                )
             }
 
             // Update UI (already on main actor)

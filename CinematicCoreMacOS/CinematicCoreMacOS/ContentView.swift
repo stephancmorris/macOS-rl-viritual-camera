@@ -16,6 +16,7 @@ struct ContentView: View {
     @State private var showCropSettings = false // Task 2.2: Crop settings panel
     @State private var showCropIndicator = true // Task 2.2: Show crop rectangle on preview
     @State private var showComposerSettings = false // Task 2.3: Shot composer settings
+    @State private var showRecorderSettings = false // Task 3.1: Training data recorder
     
     var body: some View {
         VStack(spacing: 0) {
@@ -116,6 +117,24 @@ struct ContentView: View {
                 .popover(isPresented: $showComposerSettings) {
                     ShotComposerSettingsView(
                         shotComposer: cameraManager.shotComposer
+                    )
+                }
+
+                // Task 3.1: Training Data Recorder
+                Button(action: { showRecorderSettings.toggle() }) {
+                    Label(
+                        cameraManager.trainingDataRecorder.isRecording ? "REC" : "Recorder",
+                        systemImage: cameraManager.trainingDataRecorder.isRecording
+                            ? "record.circle.fill" : "record.circle"
+                    )
+                    .foregroundStyle(
+                        cameraManager.trainingDataRecorder.isRecording ? .red : .primary
+                    )
+                }
+                .popover(isPresented: $showRecorderSettings) {
+                    RecorderSettingsView(
+                        recorder: cameraManager.trainingDataRecorder,
+                        cameraManager: cameraManager
                     )
                 }
 
