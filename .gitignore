@@ -57,6 +57,13 @@ datasets/
 # Ignore intermediate build files for CoreML
 *.mlmodelc
 
+# --- MediaPipe Models ---
+*.task
+
+# --- Training Pipeline Output ---
+training/output/
+training/_downloads/
+
 # --- Documentation & .md ---
 claude.md
 ROADMAP.md
