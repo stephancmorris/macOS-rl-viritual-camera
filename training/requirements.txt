@@ -2,3 +2,5 @@ opencv-python>=4.8.0
 mediapipe>=0.10.9
 numpy>=1.24.0
 tqdm>=4.65.0
+gymnasium>=0.29.0
+stable-baselines3>=2.2.0
