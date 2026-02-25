@@ -42,6 +42,18 @@ final class CameraManager: NSObject, ObservableObject {
     /// Shot composer (Task 2.3 - LOGIC-01)
     let shotComposer = ShotComposer()
 
+    /// RL-trained CoreML agent (Task APP-02)
+    let cinematicAgent = CinematicAgent()
+
+    /// When true, the cinematic agent drives the crop instead of ShotComposer.
+    @Published var useMLAgent: Bool = false {
+        didSet {
+            if useMLAgent, let crop = cropEngine?.currentCrop {
+                cinematicAgent.initialize(from: crop)
+            }
+        }
+    }
+
     /// Training data recorder (Task 3.1 - RL-01)
     let trainingDataRecorder = TrainingDataRecorder()
 
@@ -489,16 +501,27 @@ extension CameraManager: AVCaptureVideoDataOutputSampleBufferDelegate {
             if self.cropEnabled, let cropEngine = self.cropEngine {
                 print("🔍 DEBUG: Crop enabled, starting crop processing...")
 
-                // Task 2.3 (LOGIC-01): Use ShotComposer for intelligent framing
-                cropEngine.config.transitionSmoothing = self.shotComposer.config.smoothingFactor
-                if let primaryPerson = detectedPersons.first {
-                    print("🔍 DEBUG: Composing shot for person at \(primaryPerson.boundingBox)")
-                    if let idealCrop = self.shotComposer.compose(person: primaryPerson) {
-                        cropEngine.targetCrop = idealCrop
-                    }
-                    // nil = within deadzone, CropEngine continues interpolating to last target
+                // Task APP-02 / LOGIC-01: ML agent or rule-based shot composer
+                if self.useMLAgent {
+                    // RL agent: velocity-based crop control (no deadzone, low smoothing)
+                    cropEngine.config.transitionSmoothing = 0.05
+                    let newCrop = self.cinematicAgent.predict(
+                        person: detectedPersons.first,
+                        currentCrop: cropEngine.currentCrop
+                    )
+                    cropEngine.targetCrop = newCrop
                 } else {
-                    print("🔍 DEBUG: No persons detected, holding last position")
+                    // Rule-based shot composer (LOGIC-01)
+                    cropEngine.config.transitionSmoothing = self.shotComposer.config.smoothingFactor
+                    if let primaryPerson = detectedPersons.first {
+                        print("🔍 DEBUG: Composing shot for person at \(primaryPerson.boundingBox)")
+                        if let idealCrop = self.shotComposer.compose(person: primaryPerson) {
+                            cropEngine.targetCrop = idealCrop
+                        }
+                        // nil = within deadzone, CropEngine continues interpolating to last target
+                    } else {
+                        print("🔍 DEBUG: No persons detected, holding last position")
+                    }
                 }
 
                 // Process crop (heavy GPU work)
@@ -519,7 +542,9 @@ extension CameraManager: AVCaptureVideoDataOutputSampleBufferDelegate {
                     timestamp: timestampSeconds,
                     persons: detectedPersons,
                     currentCrop: self.cropEngine?.currentCrop ?? .fullFrame,
-                    idealCrop: self.shotComposer.lastComputedCrop,
+                    idealCrop: self.useMLAgent
+                        ? self.cinematicAgent.lastPredictedCrop
+                        : self.shotComposer.lastComputedCrop,
                     isInterpolating: self.cropEngine?.isInterpolating ?? false
                 )
             }

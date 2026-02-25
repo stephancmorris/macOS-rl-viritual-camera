@@ -17,6 +17,7 @@ struct ContentView: View {
     @State private var showCropIndicator = true // Task 2.2: Show crop rectangle on preview
     @State private var showComposerSettings = false // Task 2.3: Shot composer settings
     @State private var showRecorderSettings = false // Task 3.1: Training data recorder
+    @State private var showAgentSettings = false    // Task APP-02: RL agent settings
     
     var body: some View {
         VStack(spacing: 0) {
@@ -118,6 +119,20 @@ struct ContentView: View {
                     ShotComposerSettingsView(
                         shotComposer: cameraManager.shotComposer
                     )
+                }
+
+                // Task APP-02: RL Agent toggle
+                Button(action: { showAgentSettings.toggle() }) {
+                    Label(
+                        "Agent",
+                        systemImage: cameraManager.useMLAgent
+                            ? "brain.filled.head.profile"
+                            : "brain.head.profile"
+                    )
+                }
+                .foregroundStyle(cameraManager.useMLAgent ? .blue : .primary)
+                .popover(isPresented: $showAgentSettings) {
+                    CinematicAgentSettingsView(cameraManager: cameraManager)
                 }
 
                 // Task 3.1: Training Data Recorder
