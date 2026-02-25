@@ -110,8 +110,7 @@ final class TrainingDataRecorder: ObservableObject {
     struct ComposerConfigData: Codable, Sendable {
         let deadzoneThreshold: Double
         let smoothingFactor: Double
-        let horizontalPadding: Double
-        let useRuleOfThirds: Bool
+        let padding: Double
     }
 
     struct DetectorConfigData: Codable, Sendable {
@@ -201,8 +200,7 @@ final class TrainingDataRecorder: ObservableObject {
             composerConfig: ComposerConfigData(
                 deadzoneThreshold: composerConfig.deadzoneThreshold,
                 smoothingFactor: Double(composerConfig.smoothingFactor),
-                horizontalPadding: composerConfig.horizontalPadding,
-                useRuleOfThirds: composerConfig.useRuleOfThirds
+                padding: composerConfig.padding
             ),
             detectorConfig: DetectorConfigData(
                 confidenceThreshold: Double(detectorConfig.confidenceThreshold),

@@ -52,14 +52,24 @@ kernel void cropAndScale(
     
     // Convert output pixel position to normalized coordinates (0-1)
     float2 outputNorm = float2(gid) / float2(params.outputSize);
-    
-    // Map to crop region in source texture
-    // Vision framework uses bottom-left origin, Metal uses top-left
-    // We need to convert coordinates appropriately
-    float2 sourceNorm = params.cropOrigin + (outputNorm * params.cropSize);
-    
-    // Flip Y coordinate (Vision uses bottom-left, Metal uses top-left)
-    sourceNorm.y = 1.0 - sourceNorm.y;
+
+    // Map to crop region in source texture.
+    // cropOrigin is Vision bottom-left origin (Y increases upward).
+    // Metal textures use top-left origin (Y increases downward).
+    //
+    // Output top (outputNorm.y=0) must read the TOP of the Vision crop region.
+    // Vision top of crop = cropOrigin.y + cropSize.y
+    // Metal Y of that point = 1 - (cropOrigin.y + cropSize.y)
+    //
+    // Output bottom (outputNorm.y=1) must read the BOTTOM of the Vision crop region.
+    // Vision bottom of crop = cropOrigin.y
+    // Metal Y of that point = 1 - cropOrigin.y
+    //
+    // General formula:
+    //   sourceNorm.y = (1 - cropOrigin.y - cropSize.y) + outputNorm.y * cropSize.y
+    float2 sourceNorm;
+    sourceNorm.x = params.cropOrigin.x + outputNorm.x * params.cropSize.x;
+    sourceNorm.y = (1.0 - params.cropOrigin.y - params.cropSize.y) + outputNorm.y * params.cropSize.y;
     
     // Sample with bilinear filtering for smooth scaling
     constexpr sampler textureSampler(
@@ -88,10 +98,11 @@ kernel void cropAndScaleSmooth(
     
     // Normalized output position
     float2 outputNorm = float2(gid) / float2(params.outputSize);
-    
-    // Map to source with coordinate flip
-    float2 sourceNorm = params.cropOrigin + (outputNorm * params.cropSize);
-    sourceNorm.y = 1.0 - sourceNorm.y;
+
+    // Map to crop region (Vision bottom-left → Metal top-left, corrected Y)
+    float2 sourceNorm;
+    sourceNorm.x = params.cropOrigin.x + outputNorm.x * params.cropSize.x;
+    sourceNorm.y = (1.0 - params.cropOrigin.y - params.cropSize.y) + outputNorm.y * params.cropSize.y;
 
     // High-quality sampling
     constexpr sampler highQualitySampler(
@@ -118,8 +129,11 @@ kernel void cropWithVignette(
     }
     
     float2 outputNorm = float2(gid) / float2(params.outputSize);
-    float2 sourceNorm = params.cropOrigin + (outputNorm * params.cropSize);
-    sourceNorm.y = 1.0 - sourceNorm.y;
+
+    // Map to crop region (Vision bottom-left → Metal top-left, corrected Y)
+    float2 sourceNorm;
+    sourceNorm.x = params.cropOrigin.x + outputNorm.x * params.cropSize.x;
+    sourceNorm.y = (1.0 - params.cropOrigin.y - params.cropSize.y) + outputNorm.y * params.cropSize.y;
 
     constexpr sampler textureSampler(
         mag_filter::linear,
@@ -127,9 +141,9 @@ kernel void cropWithVignette(
         address::clamp_to_edge,
         coord::normalized
     );
-    
+
     float4 color = sourceTexture.sample(textureSampler, sourceNorm);
-    
+
     // Optional: Add subtle vignette for cinematic look
     float2 centerDist = (outputNorm - 0.5) * 2.0; // -1 to 1
     float vignette = 1.0 - (length(centerDist) * 0.3); // Subtle darkening at edges

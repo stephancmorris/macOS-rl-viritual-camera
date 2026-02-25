@@ -66,9 +66,12 @@ final class CinematicAgent: ObservableObject {
         }
 
         do {
+            // .mlpackage must be compiled before loading; compileModel produces a
+            // temporary .mlmodelc that is valid for this process lifetime.
+            let compiledURL = try MLModel.compileModel(at: url)
             let config = MLModelConfiguration()
             config.computeUnits = .cpuAndNeuralEngine
-            model = try MLModel(contentsOf: url, configuration: config)
+            model = try MLModel(contentsOf: compiledURL, configuration: config)
             isModelLoaded = true
             modelStatus = "Model loaded (Neural Engine)"
         } catch {

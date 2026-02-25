@@ -22,13 +22,26 @@ struct ContentView: View {
     var body: some View {
         VStack(spacing: 0) {
             // Camera Preview (Main Area)
-            CameraPreviewView(
-                image: cameraManager.currentFrame,
-                detectedPersons: cameraManager.personDetector.detectedPersons,
-                showDetections: showDetections,
-                cropIndicator: (showCropIndicator && cameraManager.cropEnabled) ? cameraManager.cropEngine?.currentCrop : nil
-            )
-            .background(Color.black)
+            // When Detections is ON: dual-panel (wide input left, detection box crop right)
+            // When Detections is OFF: single wide panel
+            if showDetections {
+                CropPreviewView(
+                    originalFrame: cameraManager.currentFrame,
+                    croppedFrame: cameraManager.detectionCroppedFrame,
+                    detectedPersons: cameraManager.personDetector.detectedPersons,
+                    showDetections: showDetections,
+                    cropRect: showCropIndicator ? cameraManager.cropEngine?.currentCrop : nil
+                )
+                .background(Color.black)
+            } else {
+                CameraPreviewView(
+                    image: cameraManager.currentFrame,
+                    detectedPersons: cameraManager.personDetector.detectedPersons,
+                    showDetections: showDetections,
+                    cropIndicator: nil
+                )
+                .background(Color.black)
+            }
             
             // Control Bar
             HStack(spacing: 16) {
@@ -199,7 +212,7 @@ struct ContentView: View {
             .padding()
             .background(.regularMaterial)
         }
-        .frame(minWidth: 800, minHeight: 600)
+        .frame(minWidth: 1100, minHeight: 600)
         .alert("Camera Error", isPresented: $showError, presenting: cameraManager.error) { _ in
             Button("OK") { showError = false }
         } message: { error in

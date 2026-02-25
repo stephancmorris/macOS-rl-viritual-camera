@@ -13,44 +13,45 @@ struct CropPreviewView: View {
     let originalFrame: CIImage?
     let croppedFrame: CIImage?
     let detectedPersons: [PersonDetector.DetectedPerson]
-    let cropRect: CropEngine.CropRect
-    
+    let showDetections: Bool
+    let cropRect: CropEngine.CropRect?
+
     var body: some View {
         GeometryReader { geometry in
             HStack(spacing: 8) {
                 // Original Feed with Crop Indicator
                 VStack(spacing: 4) {
-                    Text("Source (4K)")
+                    Text("Input · Wide")
                         .font(.caption)
                         .foregroundStyle(.secondary)
-                    
+
                     CameraPreviewView(
                         image: originalFrame,
                         detectedPersons: detectedPersons,
-                        showDetections: true,
+                        showDetections: showDetections,
                         cropIndicator: cropRect
                     )
                 }
-                
-                // Cropped Output
+
+                // Detection Crop Output
                 VStack(spacing: 4) {
-                    Text("Output (1080p)")
+                    Text("Detection · Live")
                         .font(.caption)
                         .foregroundStyle(.secondary)
-                    
+
                     ZStack {
                         Color.black
-                        
+
                         if let cropped = croppedFrame {
                             Image(decorative: cropped, scale: 1.0)
                                 .resizable()
                                 .aspectRatio(contentMode: .fit)
                         } else {
                             VStack(spacing: 8) {
-                                Image(systemName: "crop.rotate")
+                                Image(systemName: "person.slash")
                                     .font(.largeTitle)
                                     .foregroundStyle(.secondary)
-                                Text("Crop Disabled")
+                                Text("No Person Detected")
                                     .font(.caption)
                                     .foregroundStyle(.secondary)
                             }

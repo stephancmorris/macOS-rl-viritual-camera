@@ -59,6 +59,9 @@ final class CameraManager: NSObject, ObservableObject {
 
     /// Cropped output frame (for ATEM output)
     @Published private(set) var croppedFrame: CIImage?
+
+    /// Raw camera frame cropped to the detection bounding box (no padding, no aspect enforcement)
+    @Published private(set) var detectionCroppedFrame: CIImage?
     
     /// Enable/disable cropping
     @Published var cropEnabled: Bool = false
@@ -495,6 +498,21 @@ extension CameraManager: AVCaptureVideoDataOutputSampleBufferDelegate {
         Task { @MainActor in
             // Task 2.1: Run person detection
             let detectedPersons = await self.personDetector.processFrame(pixelBuffer)
+
+            // Crop raw frame to detection bbox for right panel display (Vision + CIImage share bottom-left origin)
+            if let person = detectedPersons.first {
+                let bbox = person.boundingBox
+                let extent = ciImage.extent
+                let cropRect = CGRect(
+                    x: bbox.origin.x * extent.width,
+                    y: bbox.origin.y * extent.height,
+                    width: bbox.width * extent.width,
+                    height: bbox.height * extent.height
+                )
+                self.detectionCroppedFrame = ciImage.cropped(to: cropRect)
+            } else {
+                self.detectionCroppedFrame = nil
+            }
 
             // Task 2.2: Apply crop if enabled (GFX-01)
             var croppedImage: CIImage?

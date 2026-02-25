@@ -8,6 +8,7 @@
 
 /* Begin PBXBuildFile section */
 		F90A3DAD2F30B1F90037BACD /* Morris.CinematicCoreMacOS.CinematicCoreExtension.systemextension in Embed System Extensions */ = {isa = PBXBuildFile; fileRef = F90A3DA32F30B1F90037BACD /* Morris.CinematicCoreMacOS.CinematicCoreExtension.systemextension */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
+		F90A3DB52F30C2000037BACD /* CinematicFraming.mlpackage in Resources */ = {isa = PBXBuildFile; fileRef = F90A3DB42F30C2000037BACD /* CinematicFraming.mlpackage */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -49,6 +50,7 @@
 /* End PBXCopyFilesBuildPhase section */
 
 /* Begin PBXFileReference section */
+		F90A3DB42F30C2000037BACD /* CinematicFraming.mlpackage */ = {isa = PBXFileReference; lastKnownFileType = folder; path = CinematicFraming.mlpackage; sourceTree = "<group>"; };
 		F90A3D752F30B1AF0037BACD /* CinematicCoreMacOS.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = CinematicCoreMacOS.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		F90A3D822F30B1B00037BACD /* CinematicCoreMacOSTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = CinematicCoreMacOSTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		F90A3D8C2F30B1B00037BACD /* CinematicCoreMacOSUITests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = CinematicCoreMacOSUITests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
@@ -146,8 +148,17 @@
 				F90A3D8F2F30B1B00037BACD /* CinematicCoreMacOSUITests */,
 				F90A3DA42F30B1F90037BACD /* CinematicCoreExtension */,
 				F90A3DB32F30C1000037BACD /* Shared */,
+				F90A3DB62F30C2000037BACD /* Models */,
 				F90A3D762F30B1AF0037BACD /* Products */,
 			);
+			sourceTree = "<group>";
+		};
+		F90A3DB62F30C2000037BACD /* Models */ = {
+			isa = PBXGroup;
+			children = (
+				F90A3DB42F30C2000037BACD /* CinematicFraming.mlpackage */,
+			);
+			path = Models;
 			sourceTree = "<group>";
 		};
 		F90A3D762F30B1AF0037BACD /* Products */ = {
@@ -311,6 +322,7 @@
 			isa = PBXResourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				F90A3DB52F30C2000037BACD /* CinematicFraming.mlpackage in Resources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

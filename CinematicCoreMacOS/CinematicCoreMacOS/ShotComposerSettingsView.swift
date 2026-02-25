@@ -16,10 +16,6 @@ struct ShotComposerSettingsView: View {
         Form {
             Section("Shot Composer") {
                 Toggle("Enable Composer", isOn: $shotComposer.config.isEnabled)
-
-                Toggle("Rule of Thirds", isOn: $shotComposer.config.useRuleOfThirds)
-                    .help("Frame head at upper third, waist at lower third")
-                    .disabled(!shotComposer.config.isEnabled)
             }
 
             Section("Tuning") {
@@ -60,14 +56,14 @@ struct ShotComposerSettingsView: View {
                 HStack {
                     Text("Padding")
                     Spacer()
-                    Text(String(format: "%.0f%%", shotComposer.config.horizontalPadding * 100))
+                    Text(String(format: "%.0f%%", shotComposer.config.padding * 100))
                         .foregroundStyle(.secondary)
                         .monospacedDigit()
                 }
 
                 Slider(
-                    value: $shotComposer.config.horizontalPadding,
-                    in: 0.05...0.30,
+                    value: $shotComposer.config.padding,
+                    in: 0.05...0.50,
                     step: 0.01
                 )
                 .disabled(!shotComposer.config.isEnabled)

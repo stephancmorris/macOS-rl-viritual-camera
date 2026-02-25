@@ -10,7 +10,8 @@ import Foundation
 import Combine
 import CoreGraphics
 
-/// Rule-based shot composer for "waist-up" framing using rule of thirds.
+/// Shot composer that frames the output around the person detection bounding box.
+/// The crop follows the detection box directly — same behavior as FaceTime Center Stage.
 /// Designed to be replaced by RL agent in Epic 3 (Task 3.3, Ticket APP-02).
 @MainActor
 final class ShotComposer: ObservableObject {
@@ -25,14 +26,12 @@ final class ShotComposer: ObservableObject {
         /// Smoothing factor per frame (synced to CropEngine.transitionSmoothing)
         var smoothingFactor: Float = 0.10 // 10% per frame
 
-        /// Horizontal padding around the subject (fraction of crop width)
-        var horizontalPadding: CGFloat = 0.15
+        /// Padding added around the detection box on each side (fraction of box size).
+        /// 0.20 = 20% breathing room above/below/left/right.
+        var padding: CGFloat = 0.20
 
         /// Output aspect ratio (width / height)
         var outputAspectRatio: CGFloat = 16.0 / 9.0
-
-        /// Enable rule-of-thirds composition
-        var useRuleOfThirds: Bool = true
 
         /// Master toggle
         var isEnabled: Bool = true
@@ -42,28 +41,21 @@ final class ShotComposer: ObservableObject {
 
     // MARK: - State
 
-    /// Last accepted speaker center position (for deadzone comparison)
+    /// Last accepted detection center (for deadzone comparison)
     private var lastAcceptedCenter: CGPoint?
 
     /// Whether a valid target has been computed at least once
     @Published private(set) var hasActiveTarget: Bool = false
 
-    /// Debug: the most recently computed ideal crop
+    /// The most recently computed crop (used by training recorder)
     @Published private(set) var lastComputedCrop: CropEngine.CropRect?
 
     // MARK: - Public Methods
 
-    /// Compose a shot given a detected person.
-    /// Returns a CropRect if the target should be updated, or nil if within deadzone.
+    /// Compose a shot centered on the detected person's bounding box.
+    /// Returns a CropRect when the target should be updated, nil when within deadzone.
     func compose(person: PersonDetector.DetectedPerson) -> CropEngine.CropRect? {
         guard config.isEnabled else { return nil }
-
-        // If we have pose keypoints, use rule-of-thirds composition
-        if let keypoints = person.poseKeypoints, config.useRuleOfThirds {
-            return composeFromKeypoints(keypoints, boundingBox: person.boundingBox)
-        }
-
-        // Fallback: use bounding box framing
         return composeFromBoundingBox(person.boundingBox)
     }
 
@@ -74,76 +66,28 @@ final class ShotComposer: ObservableObject {
         lastComputedCrop = nil
     }
 
-    // MARK: - Private: Rule of Thirds Composition
+    // MARK: - Private
 
-    private func composeFromKeypoints(
-        _ keypoints: PersonDetector.PoseKeypoints,
-        boundingBox: CGRect
-    ) -> CropEngine.CropRect? {
-        // All coordinates in Vision normalized space (0-1, bottom-left origin)
-        // In Vision coords: Y increases upward, so head.y > waist.y
-        let headY = keypoints.head.y
-        let waistY = keypoints.waist.y
-
-        let subjectHeight = headY - waistY
-        guard subjectHeight > 0.01 else {
-            // Degenerate case: head and waist too close or inverted
-            return composeFromBoundingBox(boundingBox)
-        }
-
-        // Rule of thirds:
-        //   Head at 2/3 from crop bottom (upper third line)
-        //   Waist at 1/3 from crop bottom (lower third line)
-        //   cropHeight * (2/3 - 1/3) = subjectHeight → cropHeight = 3 * subjectHeight
-        let cropHeight = subjectHeight * 3.0
-        let cropWidth = cropHeight * config.outputAspectRatio
-
-        // Origin Y: waist at 1/3 from bottom → waistY = originY + cropHeight/3
-        let originY = waistY - cropHeight / 3.0
-
-        // Center horizontally on subject
-        let subjectCenterX = (keypoints.head.x + keypoints.waist.x) / 2.0
-        let originX = subjectCenterX - cropWidth / 2.0
-
-        var crop = CropEngine.CropRect(
-            origin: CGPoint(x: originX, y: originY),
-            size: CGSize(width: cropWidth, height: cropHeight)
-        )
-        crop = clampCropToFrame(crop)
-        lastComputedCrop = crop
-
-        // Deadzone check
-        let currentCenter = CGPoint(x: subjectCenterX, y: (headY + waistY) / 2.0)
-        if let lastCenter = lastAcceptedCenter {
-            let dx = abs(currentCenter.x - lastCenter.x)
-            let dy = abs(currentCenter.y - lastCenter.y)
-            if dx < config.deadzoneThreshold && dy < config.deadzoneThreshold {
-                return nil // Within deadzone
-            }
-        }
-
-        lastAcceptedCenter = currentCenter
-        hasActiveTarget = true
-        return crop
-    }
-
-    // MARK: - Private: Bounding Box Fallback
-
+    /// Build a 16:9 crop that frames the detection bounding box with padding.
     private func composeFromBoundingBox(_ boundingBox: CGRect) -> CropEngine.CropRect? {
-        // Approximate waist-up framing from bounding box.
-        // Top of box ≈ head, bottom ≈ waist.
-        let headY = boundingBox.origin.y + boundingBox.height
-        let waistY = boundingBox.origin.y
+        guard boundingBox.height > 0.01 else { return nil }
 
-        let subjectHeight = headY - waistY
-        guard subjectHeight > 0.01 else { return nil }
+        // Expand the detection box by padding on every side
+        var cropHeight = boundingBox.height * (1.0 + 2.0 * config.padding)
+        var cropWidth  = boundingBox.width  * (1.0 + 2.0 * config.padding)
 
-        // Same rule-of-thirds math
-        let cropHeight = subjectHeight * 3.0
-        let cropWidth = cropHeight * config.outputAspectRatio
-        let originY = waistY - cropHeight / 3.0
-        let subjectCenterX = boundingBox.midX
-        let originX = subjectCenterX - cropWidth / 2.0
+        // Enforce 16:9 by expanding the narrower dimension — never shrink
+        if cropWidth / cropHeight < config.outputAspectRatio {
+            cropWidth = cropHeight * config.outputAspectRatio
+        } else {
+            cropHeight = cropWidth / config.outputAspectRatio
+        }
+
+        // Center the crop on the detection box midpoint
+        let centerX = boundingBox.midX
+        let centerY = boundingBox.midY
+        let originX = centerX - cropWidth  / 2.0
+        let originY = centerY - cropHeight / 2.0
 
         var crop = CropEngine.CropRect(
             origin: CGPoint(x: originX, y: originY),
@@ -152,8 +96,8 @@ final class ShotComposer: ObservableObject {
         crop = clampCropToFrame(crop)
         lastComputedCrop = crop
 
-        // Deadzone check
-        let currentCenter = CGPoint(x: subjectCenterX, y: (headY + waistY) / 2.0)
+        // Deadzone: only update when person has moved enough to avoid micro-jitter
+        let currentCenter = CGPoint(x: centerX, y: centerY)
         if let lastCenter = lastAcceptedCenter {
             let dx = abs(currentCenter.x - lastCenter.x)
             let dy = abs(currentCenter.y - lastCenter.y)
@@ -167,17 +111,14 @@ final class ShotComposer: ObservableObject {
         return crop
     }
 
-    // MARK: - Private: Helpers
-
     private func clampCropToFrame(_ crop: CropEngine.CropRect) -> CropEngine.CropRect {
-        // Ensure crop fits within 0-1 normalized frame
         var h = min(crop.size.height, 1.0)
         var w: CGFloat
 
-        // Enforce minimum zoom (don't zoom in more than 4x)
+        // Enforce minimum crop size (4× max zoom)
         h = max(h, 0.25)
 
-        // Maintain aspect ratio
+        // Maintain 16:9
         let desiredWidth = h * config.outputAspectRatio
         if desiredWidth <= 1.0 {
             w = desiredWidth
@@ -186,7 +127,7 @@ final class ShotComposer: ObservableObject {
             h = w / config.outputAspectRatio
         }
 
-        // Clamp origin so crop stays within frame
+        // Keep crop within [0, 1] canvas
         let x = max(0, min(1.0 - w, crop.origin.x))
         let y = max(0, min(1.0 - h, crop.origin.y))
 
