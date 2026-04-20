@@ -13,6 +13,13 @@ import os.log
 @MainActor
 final class XPCConnectionManager {
 
+    enum ConnectionState: Equatable {
+        case disconnected
+        case connecting
+        case connected
+        case error(String)
+    }
+
     // MARK: - Properties
 
     private var connection: NSXPCConnection?
@@ -20,6 +27,10 @@ final class XPCConnectionManager {
     private let logger = Logger(subsystem: "com.cinematiccore.app", category: "XPC")
     private var noConnectionWarningCount = 0
     private let maxNoConnectionWarnings = 10
+
+    private(set) var connectionState: ConnectionState = .disconnected
+    private(set) var lastErrorDescription: String?
+    var onStateChange: (() -> Void)?
     
     var isConnected: Bool {
         connection != nil
@@ -35,6 +46,9 @@ final class XPCConnectionManager {
         }
         
         logger.info("🔌 Establishing XPC connection to extension...")
+        connectionState = .connecting
+        lastErrorDescription = nil
+        onStateChange?()
         
         let newConnection = NSXPCConnection(serviceName: CinematicCoreXPC.machServiceName)
         newConnection.remoteObjectInterface = NSXPCInterface(with: CinematicCoreXPCProtocol.self)
@@ -66,6 +80,8 @@ final class XPCConnectionManager {
         connection?.invalidate()
         connection = nil
         connectionRetries = 0
+        connectionState = .disconnected
+        onStateChange?()
     }
     
     // MARK: - Remote Proxy Access
@@ -89,7 +105,12 @@ final class XPCConnectionManager {
         noConnectionWarningCount = 0
 
         return connection.remoteObjectProxyWithErrorHandler { [weak self] error in
-            self?.logger.error("XPC proxy error: \(error.localizedDescription)")
+            Task { @MainActor in
+                self?.logger.error("XPC proxy error: \(error.localizedDescription)")
+                self?.lastErrorDescription = error.localizedDescription
+                self?.connectionState = .error(error.localizedDescription)
+                self?.onStateChange?()
+            }
         } as? CinematicCoreXPCProtocol
     }
     
@@ -98,6 +119,9 @@ final class XPCConnectionManager {
     private func verifyConnection() {
         guard let proxy = remoteProxy() else {
             logger.error("Failed to get remote proxy")
+            lastErrorDescription = "Failed to create the XPC remote proxy."
+            connectionState = .error("Failed to create the XPC remote proxy.")
+            onStateChange?()
             attemptReconnect()
             return
         }
@@ -107,6 +131,9 @@ final class XPCConnectionManager {
                 guard let self = self else { return }
                 self.logger.info("✓ XPC connection verified")
                 self.connectionRetries = 0
+                self.lastErrorDescription = nil
+                self.connectionState = .connected
+                self.onStateChange?()
             }
         }
     }
@@ -116,17 +143,25 @@ final class XPCConnectionManager {
     private func handleInterruption() {
         logger.warning("⚠️ XPC connection interrupted")
         connection = nil
+        lastErrorDescription = "The CMIO extension connection was interrupted."
+        connectionState = .error("The CMIO extension connection was interrupted.")
+        onStateChange?()
         attemptReconnect()
     }
     
     private func handleInvalidation() {
         logger.info("XPC connection invalidated")
         connection = nil
+        connectionState = .disconnected
+        onStateChange?()
     }
     
     private func attemptReconnect() {
         guard connectionRetries < CinematicCoreXPC.maxConnectionRetries else {
             logger.error("❌ Max XPC reconnection attempts reached")
+            lastErrorDescription = "Reached the maximum XPC reconnection attempts."
+            connectionState = .error("Reached the maximum XPC reconnection attempts.")
+            onStateChange?()
             return
         }
         

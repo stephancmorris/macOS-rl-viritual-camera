@@ -33,9 +33,9 @@ struct CropPreviewView: View {
                     )
                 }
 
-                // Detection Crop Output
+                // Program output preview
                 VStack(spacing: 4) {
-                    Text("Detection · Live")
+                    Text("Program · Output")
                         .font(.caption)
                         .foregroundStyle(.secondary)
 
@@ -48,10 +48,10 @@ struct CropPreviewView: View {
                                 .aspectRatio(contentMode: .fit)
                         } else {
                             VStack(spacing: 8) {
-                                Image(systemName: "person.slash")
+                                Image(systemName: "rectangle.on.rectangle.slash")
                                     .font(.largeTitle)
                                     .foregroundStyle(.secondary)
-                                Text("No Person Detected")
+                                Text("Program Output Unavailable")
                                     .font(.caption)
                                     .foregroundStyle(.secondary)
                             }

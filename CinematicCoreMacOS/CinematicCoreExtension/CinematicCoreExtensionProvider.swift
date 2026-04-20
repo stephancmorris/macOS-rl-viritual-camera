@@ -61,6 +61,7 @@ class CinematicCoreExtensionDeviceSource: NSObject, CMIOExtensionDeviceSource {
 	private let _timerQueue = DispatchQueue(label: "timerQueue", qos: .userInteractive, attributes: [], autoreleaseFrequency: .workItem, target: .global(qos: .userInteractive))
 	
 	private var _videoDescription: CMFormatDescription!
+	private var currentFrameDimensions = CMVideoDimensions(width: 1920, height: 1080)
 	
 	// Frame queue for incoming frames from host app
 	private let frameQueue = FrameQueue()
@@ -74,8 +75,8 @@ class CinematicCoreExtensionDeviceSource: NSObject, CMIOExtensionDeviceSource {
 		let deviceID = UUID() // replace this with your device UUID
 		self.device = CMIOExtensionDevice(localizedName: localizedName, deviceID: deviceID, legacyDeviceID: nil, source: self)
 		
-		// Configure for 4K @ 30fps to match CameraManager output
-		let dims = CMVideoDimensions(width: 3840, height: 2160)
+		// Advertise HD by default because the church MVP program output target is HD.
+		let dims = currentFrameDimensions
 		CMVideoFormatDescriptionCreate(allocator: kCFAllocatorDefault, codecType: kCVPixelFormatType_32BGRA, width: dims.width, height: dims.height, extensions: nil, formatDescriptionOut: &_videoDescription)
 		
 		let videoStreamFormat = CMIOExtensionStreamFormat.init(formatDescription: _videoDescription, maxFrameDuration: CMTime(value: 1, timescale: Int32(kFrameRate)), minFrameDuration: CMTime(value: 1, timescale: Int32(kFrameRate)), validFrameDurations: nil)
@@ -211,6 +212,8 @@ class CinematicCoreExtensionDeviceSource: NSObject, CMIOExtensionDeviceSource {
 		
 		let pixelBuffer = unmanagedPixelBuffer.takeRetainedValue()
 		
+		let frameDescription = formatDescription(width: width, height: height)
+
 		// Create sample buffer
 		var sampleBuffer: CMSampleBuffer?
 		var timingInfo = CMSampleTimingInfo()
@@ -224,7 +227,7 @@ class CinematicCoreExtensionDeviceSource: NSObject, CMIOExtensionDeviceSource {
 			dataReady: true,
 			makeDataReadyCallback: nil,
 			refcon: nil,
-			formatDescription: _videoDescription,
+			formatDescription: frameDescription,
 			sampleTiming: &timingInfo,
 			sampleBufferOut: &sampleBuffer
 		)
@@ -246,17 +249,18 @@ class CinematicCoreExtensionDeviceSource: NSObject, CMIOExtensionDeviceSource {
 		
 		// Create a simple black frame
 		var pixelBuffer: CVPixelBuffer?
+		let dims = currentFrameDimensions
 		let attrs: [String: Any] = [
-			kCVPixelBufferWidthKey as String: 3840,
-			kCVPixelBufferHeightKey as String: 2160,
+			kCVPixelBufferWidthKey as String: Int(dims.width),
+			kCVPixelBufferHeightKey as String: Int(dims.height),
 			kCVPixelBufferPixelFormatTypeKey as String: kCVPixelFormatType_32BGRA,
 			kCVPixelBufferIOSurfacePropertiesKey as String: [:] as [String: Any]
 		]
 		
 		let status = CVPixelBufferCreate(
 			kCFAllocatorDefault,
-			3840,
-			2160,
+			Int(dims.width),
+			Int(dims.height),
 			kCVPixelFormatType_32BGRA,
 			attrs as CFDictionary,
 			&pixelBuffer
@@ -286,7 +290,7 @@ class CinematicCoreExtensionDeviceSource: NSObject, CMIOExtensionDeviceSource {
 			dataReady: true,
 			makeDataReadyCallback: nil,
 			refcon: nil,
-			formatDescription: _videoDescription,
+			formatDescription: formatDescription(width: dims.width, height: dims.height),
 			sampleTiming: &timingInfo,
 			sampleBufferOut: &sampleBuffer
 		)
@@ -298,6 +302,28 @@ class CinematicCoreExtensionDeviceSource: NSObject, CMIOExtensionDeviceSource {
 				hostTimeInNanoseconds: UInt64(timingInfo.presentationTimeStamp.seconds * Double(NSEC_PER_SEC))
 			)
 		}
+	}
+
+	private func formatDescription(width: Int32, height: Int32) -> CMFormatDescription {
+		if currentFrameDimensions.width == width, currentFrameDimensions.height == height {
+			return _videoDescription
+		}
+
+		currentFrameDimensions = CMVideoDimensions(width: width, height: height)
+		var formatDescription: CMFormatDescription?
+		CMVideoFormatDescriptionCreate(
+			allocator: kCFAllocatorDefault,
+			codecType: kCVPixelFormatType_32BGRA,
+			width: width,
+			height: height,
+			extensions: nil,
+			formatDescriptionOut: &formatDescription
+		)
+
+		if let formatDescription {
+			_videoDescription = formatDescription
+		}
+		return _videoDescription
 	}
 }
 
@@ -502,4 +528,3 @@ private class XPCServiceImplementation: NSObject, CinematicCoreXPCProtocol {
 		reply()
 	}
 }
-

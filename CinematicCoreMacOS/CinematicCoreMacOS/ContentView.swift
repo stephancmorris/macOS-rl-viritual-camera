@@ -18,6 +18,7 @@ struct ContentView: View {
     @State private var showComposerSettings = false // Task 2.3: Shot composer settings
     @State private var showRecorderSettings = false // Task 3.1: Training data recorder
     @State private var showAgentSettings = false    // Task APP-02: RL agent settings
+    @State private var showOutputSettings = false   // Task 2.4: Program output routing
     
     var body: some View {
         VStack(spacing: 0) {
@@ -27,7 +28,7 @@ struct ContentView: View {
             if showDetections {
                 CropPreviewView(
                     originalFrame: cameraManager.currentFrame,
-                    croppedFrame: cameraManager.detectionCroppedFrame,
+                    croppedFrame: cameraManager.croppedFrame,
                     detectedPersons: cameraManager.personDetector.detectedPersons,
                     showDetections: showDetections,
                     cropRect: showCropIndicator ? cameraManager.cropEngine?.currentCrop : nil
@@ -68,6 +69,15 @@ struct ContentView: View {
                             .foregroundStyle(.secondary)
                     }
                 }
+
+                VStack(alignment: .center, spacing: 2) {
+                    Text(cameraManager.programOutput.activeRouteTitle)
+                        .font(.caption)
+                        .foregroundStyle(.primary)
+                    Text("\(cameraManager.programOutput.framesSent) frames")
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                }
                 
                 // Detection Toggle
                 Toggle(isOn: $showDetections) {
@@ -96,6 +106,11 @@ struct ContentView: View {
                             Text(String(format: "%.1fms", cropEngine.stats.lastRenderTime * 1000))
                                 .font(.caption2)
                                 .foregroundStyle(.secondary)
+                            if cameraManager.trackingPaused {
+                                Text("Wide Hold")
+                                    .font(.caption2)
+                                    .foregroundStyle(.orange)
+                            }
                         }
                     }
                     
@@ -122,6 +137,16 @@ struct ContentView: View {
                             cameraManager: cameraManager
                         )
                     }
+
+                    Button(action: { cameraManager.returnToWide() }) {
+                        Label("Return to Wide", systemImage: "arrow.up.left.and.arrow.down.right")
+                    }
+                    .disabled(!cameraManager.isRunning || !cameraManager.cropEnabled || cameraManager.trackingPaused)
+
+                    Button(action: { cameraManager.resumeTracking() }) {
+                        Label("Resume Tracking", systemImage: "scope")
+                    }
+                    .disabled(!cameraManager.isRunning || !cameraManager.cropEnabled || !cameraManager.trackingPaused)
                 }
 
                 // Task 2.3: Shot Composer Settings
@@ -163,6 +188,19 @@ struct ContentView: View {
                     RecorderSettingsView(
                         recorder: cameraManager.trainingDataRecorder,
                         cameraManager: cameraManager
+                    )
+                }
+
+                Button(action: { showOutputSettings.toggle() }) {
+                    Label(
+                        "Output",
+                        systemImage: cameraManager.programOutput.activeRoute?.systemImage
+                            ?? "dot.radiowaves.left.and.right"
+                    )
+                }
+                .popover(isPresented: $showOutputSettings) {
+                    ProgramOutputSettingsView(
+                        programOutput: cameraManager.programOutput
                     )
                 }
 

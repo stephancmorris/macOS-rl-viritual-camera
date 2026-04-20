@@ -57,6 +57,14 @@ final class CameraManager: NSObject, ObservableObject {
     /// Training data recorder (Task 3.1 - RL-01)
     let trainingDataRecorder = TrainingDataRecorder()
 
+    /// Routes the processed program feed to the currently active output sink.
+    let programOutput = ProgramOutputManager(
+        sinks: [
+            VirtualCameraOutputSink(),
+            BlackmagicOutputSink()
+        ]
+    )
+
     /// Cropped output frame (for ATEM output)
     @Published private(set) var croppedFrame: CIImage?
 
@@ -64,7 +72,18 @@ final class CameraManager: NSObject, ObservableObject {
     @Published private(set) var detectionCroppedFrame: CIImage?
     
     /// Enable/disable cropping
-    @Published var cropEnabled: Bool = false
+    @Published var cropEnabled: Bool = false {
+        didSet {
+            if !cropEnabled {
+                trackingPaused = false
+                shotComposer.reset()
+                cinematicAgent.reset()
+            }
+        }
+    }
+
+    /// Operator override that forces a safe wide shot until tracking is resumed.
+    @Published private(set) var trackingPaused: Bool = false
     
     // MARK: - Camera Device Model
     
@@ -90,8 +109,6 @@ final class CameraManager: NSObject, ObservableObject {
         label: "com.cinematiccore.videoOutput",
         qos: .userInteractive
     )
-    private let xpcManager = XPCConnectionManager()
-    
     // MARK: - Configuration Constants
     
     private enum Config {
@@ -218,12 +235,14 @@ final class CameraManager: NSObject, ObservableObject {
     /// Request camera permissions and start the capture session
     func startCapture() async throws {
         print("\n▶️ Starting capture...")
+        programOutput.start()
         
         // Check authorization
         let authorized = await checkAuthorization()
         guard authorized else {
             print("   ❌ Authorization denied")
             error = .authorizationDenied
+            programOutput.stop()
             throw CameraError.authorizationDenied
         }
         print("   ✓ Camera authorized")
@@ -236,7 +255,12 @@ final class CameraManager: NSObject, ObservableObject {
         
         // Configure session
         print("   Configuring session...")
-        try await configureSession()
+        do {
+            try await configureSession()
+        } catch {
+            programOutput.stop()
+            throw error
+        }
         print("   ✓ Session configured")
         
         // Start running
@@ -245,8 +269,10 @@ final class CameraManager: NSObject, ObservableObject {
             isRunning = captureSession.isRunning
             if isRunning {
                 print("   ✓ Capture started successfully")
+                programOutput.updateCaptureStatus(isRunning: true)
             } else {
                 print("   ⚠️ Session not running after startRunning() call")
+                programOutput.stop()
             }
         }
     }
@@ -254,9 +280,36 @@ final class CameraManager: NSObject, ObservableObject {
     /// Stop the capture session
     func stopCapture() {
         print("   ⏹️ Stopping capture...")
+        programOutput.updateCaptureStatus(isRunning: false)
         captureSession.stopRunning()
+        programOutput.stop()
         isRunning = false
+        trackingPaused = false
+        shotComposer.reset()
+        cinematicAgent.reset()
         print("   ✓ Capture stopped")
+    }
+
+    /// Hold a wide safety shot while keeping the output path active.
+    func returnToWide() {
+        guard let cropEngine else { return }
+
+        trackingPaused = true
+        shotComposer.reset()
+        cinematicAgent.reset()
+        cropEngine.resetToFullFrame()
+        cropEngine.jumpToTarget()
+    }
+
+    /// Hand control back to the tracker after a manual wide hold.
+    func resumeTracking() {
+        trackingPaused = false
+        shotComposer.reset()
+        cinematicAgent.reset()
+
+        if useMLAgent, let crop = cropEngine?.currentCrop {
+            cinematicAgent.initialize(from: crop)
+        }
     }
     
     /// Restart capture with a different camera
@@ -460,6 +513,105 @@ final class CameraManager: NSObject, ObservableObject {
     }
 }
 
+@MainActor
+private final class VirtualCameraOutputSink: ProgramOutputSink {
+    let route: ProgramOutputManager.Route = .virtualCamera
+
+    private let xpcManager = XPCConnectionManager()
+    var onStateChange: (() -> Void)? {
+        didSet {
+            xpcManager.onStateChange = onStateChange
+        }
+    }
+
+    var isAvailable: Bool {
+        true
+    }
+
+    var summary: String {
+        switch xpcManager.connectionState {
+        case .connected:
+            return "CMIO extension is connected and ready."
+        case .connecting:
+            return "Connecting to the CMIO extension."
+        case .disconnected:
+            return "Virtual camera route is idle."
+        case .error:
+            return "Virtual camera route hit a connection problem."
+        }
+    }
+
+    var detail: String {
+        switch xpcManager.connectionState {
+        case .connected:
+            return "Frames are being sent to the system extension over XPC."
+        case .connecting:
+            return "Waiting for the extension service to answer the connection check."
+        case .disconnected:
+            return "Start capture to connect the host app to the virtual camera extension."
+        case .error(let message):
+            return message
+        }
+    }
+
+    var lastErrorDescription: String? {
+        xpcManager.lastErrorDescription
+    }
+
+    func connect() {
+        xpcManager.connect()
+    }
+
+    func disconnect() {
+        xpcManager.disconnect()
+    }
+
+    func updateCaptureStatus(isRunning: Bool) {
+        xpcManager.remoteProxy()?.updateCaptureStatus(isRunning: isRunning)
+    }
+
+    func sendFrame(pixelBuffer: CVPixelBuffer, timestamp: Double) {
+        guard let ioSurface = CVPixelBufferGetIOSurface(pixelBuffer)?.takeUnretainedValue(),
+              let proxy = xpcManager.remoteProxy() else {
+            return
+        }
+
+        proxy.sendVideoFrame(
+            surfaceID: IOSurfaceGetID(ioSurface),
+            timestamp: timestamp,
+            width: Int32(CVPixelBufferGetWidth(pixelBuffer)),
+            height: Int32(CVPixelBufferGetHeight(pixelBuffer))
+        )
+    }
+}
+
+@MainActor
+private final class BlackmagicOutputSink: ProgramOutputSink {
+    let route: ProgramOutputManager.Route = .blackmagicSDI
+    var onStateChange: (() -> Void)?
+
+    var isAvailable: Bool {
+        false
+    }
+
+    var summary: String {
+        "Blackmagic playback sink is not integrated yet."
+    }
+
+    var detail: String {
+        "Add the Desktop Video SDK playback path here to send the processed feed to UltraStudio or DeckLink hardware."
+    }
+
+    var lastErrorDescription: String? {
+        nil
+    }
+
+    func connect() {}
+    func disconnect() {}
+    func updateCaptureStatus(isRunning: Bool) {}
+    func sendFrame(pixelBuffer: CVPixelBuffer, timestamp: Double) {}
+}
+
 // MARK: - AVCaptureVideoDataOutputSampleBufferDelegate
 
 extension CameraManager: AVCaptureVideoDataOutputSampleBufferDelegate {
@@ -475,17 +627,10 @@ extension CameraManager: AVCaptureVideoDataOutputSampleBufferDelegate {
         }
         
         // Verify IOSurface backing (zero-copy requirement)
-        guard let ioSurface = CVPixelBufferGetIOSurface(pixelBuffer)?.takeUnretainedValue() else {
+        guard CVPixelBufferGetIOSurface(pixelBuffer) != nil else {
             assertionFailure("PixelBuffer must be IOSurface-backed for zero-copy operations")
             return
         }
-        
-        // Get IOSurface ID for XPC sharing
-        let surfaceID = IOSurfaceGetID(ioSurface)
-        
-        // Get frame dimensions
-        let width = CVPixelBufferGetWidth(pixelBuffer)
-        let height = CVPixelBufferGetHeight(pixelBuffer)
         
         // Get presentation timestamp
         let timestamp = CMSampleBufferGetPresentationTimeStamp(sampleBuffer)
@@ -498,9 +643,12 @@ extension CameraManager: AVCaptureVideoDataOutputSampleBufferDelegate {
         Task { @MainActor in
             // Task 2.1: Run person detection
             let detectedPersons = await self.personDetector.processFrame(pixelBuffer)
+            let primaryPerson = self.trackingPaused
+                ? nil
+                : self.shotComposer.primaryPerson(from: detectedPersons)
 
             // Crop raw frame to detection bbox for right panel display (Vision + CIImage share bottom-left origin)
-            if let person = detectedPersons.first {
+            if let person = primaryPerson {
                 let bbox = person.boundingBox
                 let extent = ciImage.extent
                 let cropRect = CGRect(
@@ -515,23 +663,26 @@ extension CameraManager: AVCaptureVideoDataOutputSampleBufferDelegate {
             }
 
             // Task 2.2: Apply crop if enabled (GFX-01)
-            var croppedImage: CIImage?
+            var programImage = ciImage
+            var outputPixelBuffer = pixelBuffer
             if self.cropEnabled, let cropEngine = self.cropEngine {
                 print("🔍 DEBUG: Crop enabled, starting crop processing...")
 
-                // Task APP-02 / LOGIC-01: ML agent or rule-based shot composer
-                if self.useMLAgent {
+                if self.trackingPaused {
+                    print("🔍 DEBUG: Tracking paused, holding wide safety shot")
+                } else if self.useMLAgent {
+                    // Task APP-02 / LOGIC-01: ML agent or rule-based shot composer
                     // RL agent: velocity-based crop control (no deadzone, low smoothing)
                     cropEngine.config.transitionSmoothing = 0.05
                     let newCrop = self.cinematicAgent.predict(
-                        person: detectedPersons.first,
+                        person: primaryPerson,
                         currentCrop: cropEngine.currentCrop
                     )
                     cropEngine.targetCrop = newCrop
                 } else {
                     // Rule-based shot composer (LOGIC-01)
                     cropEngine.config.transitionSmoothing = self.shotComposer.config.smoothingFactor
-                    if let primaryPerson = detectedPersons.first {
+                    if let primaryPerson {
                         print("🔍 DEBUG: Composing shot for person at \(primaryPerson.boundingBox)")
                         if let idealCrop = self.shotComposer.compose(person: primaryPerson) {
                             cropEngine.targetCrop = idealCrop
@@ -547,7 +698,8 @@ extension CameraManager: AVCaptureVideoDataOutputSampleBufferDelegate {
                 do {
                     let croppedBuffer = try await cropEngine.processCrop(pixelBuffer)
                     print("🔍 DEBUG: processCrop returned successfully")
-                    croppedImage = CIImage(cvPixelBuffer: croppedBuffer)
+                    programImage = CIImage(cvPixelBuffer: croppedBuffer)
+                    outputPixelBuffer = croppedBuffer
                 } catch {
                     print("❌ Crop processing failed: \(error)")
                 }
@@ -569,17 +721,10 @@ extension CameraManager: AVCaptureVideoDataOutputSampleBufferDelegate {
 
             // Update UI (already on main actor)
             self.currentFrame = ciImage
-            self.croppedFrame = croppedImage
+            self.croppedFrame = programImage
 
-            // Send frame to system extension via XPC
-            if let proxy = self.xpcManager.remoteProxy() {
-                proxy.sendVideoFrame(
-                    surfaceID: surfaceID,
-                    timestamp: timestampSeconds,
-                    width: Int32(width),
-                    height: Int32(height)
-                )
-            }
+            // Route the actual program frame to the active output sink.
+            self.programOutput.sendFrame(outputPixelBuffer, timestamp: timestampSeconds)
         }
     }
     

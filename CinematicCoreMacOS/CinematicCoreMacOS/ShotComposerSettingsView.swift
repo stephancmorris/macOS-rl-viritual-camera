@@ -16,6 +16,9 @@ struct ShotComposerSettingsView: View {
         Form {
             Section("Shot Composer") {
                 Toggle("Enable Composer", isOn: $shotComposer.config.isEnabled)
+                Text("Aims for a stable waist-up shot when pose keypoints are available.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
             }
 
             Section("Tuning") {
@@ -54,7 +57,7 @@ struct ShotComposerSettingsView: View {
                 .disabled(!shotComposer.config.isEnabled)
 
                 HStack {
-                    Text("Padding")
+                    Text("Breathing Room")
                     Spacer()
                     Text(String(format: "%.0f%%", shotComposer.config.padding * 100))
                         .foregroundStyle(.secondary)
@@ -67,11 +70,83 @@ struct ShotComposerSettingsView: View {
                     step: 0.01
                 )
                 .disabled(!shotComposer.config.isEnabled)
+
+                HStack {
+                    Text("Hold After Loss")
+                    Spacer()
+                    Text(String(format: "%.2fs", shotComposer.config.targetHoldDuration))
+                        .foregroundStyle(.secondary)
+                        .monospacedDigit()
+                }
+
+                Slider(
+                    value: $shotComposer.config.targetHoldDuration,
+                    in: 0.25...2.0,
+                    step: 0.05
+                )
+                .disabled(!shotComposer.config.isEnabled)
+
+                HStack {
+                    Text("Stage Side Margin")
+                    Spacer()
+                    Text(String(format: "%.0f%%", shotComposer.config.stageHorizontalMargin * 100))
+                        .foregroundStyle(.secondary)
+                        .monospacedDigit()
+                }
+
+                Slider(
+                    value: $shotComposer.config.stageHorizontalMargin,
+                    in: 0.00...0.20,
+                    step: 0.01
+                )
+                .disabled(!shotComposer.config.isEnabled)
+
+                HStack {
+                    Text("Stage Top/Bottom Margin")
+                    Spacer()
+                    Text(String(format: "%.0f%%", shotComposer.config.stageVerticalMargin * 100))
+                        .foregroundStyle(.secondary)
+                        .monospacedDigit()
+                }
+
+                Slider(
+                    value: $shotComposer.config.stageVerticalMargin,
+                    in: 0.00...0.15,
+                    step: 0.01
+                )
+                .disabled(!shotComposer.config.isEnabled)
+
+                HStack {
+                    Text("Subject Edge Safety")
+                    Spacer()
+                    Text(String(format: "%.0f%%", shotComposer.config.edgeSafetyMargin * 100))
+                        .foregroundStyle(.secondary)
+                        .monospacedDigit()
+                }
+
+                Slider(
+                    value: $shotComposer.config.edgeSafetyMargin,
+                    in: 0.05...0.25,
+                    step: 0.01
+                )
+                .disabled(!shotComposer.config.isEnabled)
             }
 
             Section("Status") {
                 LabeledContent("Active Target",
                                value: shotComposer.hasActiveTarget ? "Yes" : "No")
+
+                LabeledContent("Target Lock",
+                               value: shotComposer.activeTargetID == nil ? "None" : "Tracking")
+
+                LabeledContent(
+                    "Stage Window",
+                    value: String(
+                        format: "L/R %.0f%%  T/B %.0f%%",
+                        shotComposer.config.stageHorizontalMargin * 100,
+                        shotComposer.config.stageVerticalMargin * 100
+                    )
+                )
 
                 if let crop = shotComposer.lastComputedCrop {
                     LabeledContent("Crop Origin",

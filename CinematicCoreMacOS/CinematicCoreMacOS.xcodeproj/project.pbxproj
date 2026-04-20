@@ -50,11 +50,11 @@
 /* End PBXCopyFilesBuildPhase section */
 
 /* Begin PBXFileReference section */
-		F90A3DB42F30C2000037BACD /* CinematicFraming.mlpackage */ = {isa = PBXFileReference; lastKnownFileType = folder; path = CinematicFraming.mlpackage; sourceTree = "<group>"; };
 		F90A3D752F30B1AF0037BACD /* CinematicCoreMacOS.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = CinematicCoreMacOS.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		F90A3D822F30B1B00037BACD /* CinematicCoreMacOSTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = CinematicCoreMacOSTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		F90A3D8C2F30B1B00037BACD /* CinematicCoreMacOSUITests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = CinematicCoreMacOSUITests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		F90A3DA32F30B1F90037BACD /* Morris.CinematicCoreMacOS.CinematicCoreExtension.systemextension */ = {isa = PBXFileReference; explicitFileType = "wrapper.system-extension"; includeInIndex = 0; path = Morris.CinematicCoreMacOS.CinematicCoreExtension.systemextension; sourceTree = BUILT_PRODUCTS_DIR; };
+		F90A3DB42F30C2000037BACD /* CinematicFraming.mlpackage */ = {isa = PBXFileReference; lastKnownFileType = folder; path = CinematicFraming.mlpackage; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedBuildFileExceptionSet section */
@@ -69,6 +69,7 @@
 			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
 			membershipExceptions = (
 				CropRenderer.metal,
+				ProgramOutputManager.swift,
 			);
 			target = F90A3DA22F30B1F90037BACD /* CinematicCoreExtension */;
 		};
@@ -153,14 +154,6 @@
 			);
 			sourceTree = "<group>";
 		};
-		F90A3DB62F30C2000037BACD /* Models */ = {
-			isa = PBXGroup;
-			children = (
-				F90A3DB42F30C2000037BACD /* CinematicFraming.mlpackage */,
-			);
-			path = Models;
-			sourceTree = "<group>";
-		};
 		F90A3D762F30B1AF0037BACD /* Products */ = {
 			isa = PBXGroup;
 			children = (
@@ -170,6 +163,14 @@
 				F90A3DA32F30B1F90037BACD /* Morris.CinematicCoreMacOS.CinematicCoreExtension.systemextension */,
 			);
 			name = Products;
+			sourceTree = "<group>";
+		};
+		F90A3DB62F30C2000037BACD /* Models */ = {
+			isa = PBXGroup;
+			children = (
+				F90A3DB42F30C2000037BACD /* CinematicFraming.mlpackage */,
+			);
+			path = Models;
 			sourceTree = "<group>";
 		};
 /* End PBXGroup section */
