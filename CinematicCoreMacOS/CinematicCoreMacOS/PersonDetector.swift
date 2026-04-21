@@ -77,16 +77,10 @@ final class PersonDetector: ObservableObject {
         var useHighAccuracy: Bool = false
     }
     
-    nonisolated(unsafe) var config = Config() {
-        didSet {
-            setupDetectionRequest()
-        }
-    }
+    var config = Config()
     
     // MARK: - Private Properties
     
-    private nonisolated(unsafe) var detectionRequest: VNDetectHumanRectanglesRequest?
-    private nonisolated(unsafe) let poseRequest = VNDetectHumanBodyPoseRequest()
     private let processingQueue = DispatchQueue(
         label: "com.cinematiccore.personDetection",
         qos: .userInitiated
@@ -105,12 +99,7 @@ final class PersonDetector: ObservableObject {
     
     // MARK: - Initialization
 
-    init() {
-        // Setup detection request inline to avoid nonisolated call from init
-        let request = VNDetectHumanRectanglesRequest()
-        request.upperBodyOnly = true
-        detectionRequest = request
-    }
+    init() {}
     
     // MARK: - Public Methods
     
@@ -122,9 +111,13 @@ final class PersonDetector: ObservableObject {
         guard isEnabled else { return [] }
 
         let startTime = CACurrentMediaTime()
+        let configSnapshot = config
 
         // Perform detection on background queue (rect + pose together)
-        let (rectObservations, poseObservations) = await performDetection(pixelBuffer: pixelBuffer)
+        let (rectObservations, poseObservations) = await performDetection(
+            pixelBuffer: pixelBuffer,
+            config: configSnapshot
+        )
 
         let detectionTime = CACurrentMediaTime() - startTime
 
@@ -152,40 +145,40 @@ final class PersonDetector: ObservableObject {
     
     // MARK: - Private Methods
     
-    private nonisolated func setupDetectionRequest() {
-        let request = VNDetectHumanRectanglesRequest()
-        
-        // Configure request based on settings
-        if config.useHighAccuracy {
-            request.revision = VNDetectHumanRectanglesRequestRevision2 // More accurate
-        }
-        
-        // Upper body only for better speaker tracking
-        request.upperBodyOnly = true
-        
-        detectionRequest = request
+    private struct SendablePixelBuffer: @unchecked Sendable {
+        let value: CVPixelBuffer
     }
-    
-    private nonisolated func performDetection(pixelBuffer: CVPixelBuffer) async -> ([VNHumanObservation], [VNHumanBodyPoseObservation]) {
-        guard let rectRequest = detectionRequest else { return ([], []) }
+
+    private nonisolated func performDetection(
+        pixelBuffer: CVPixelBuffer,
+        config: Config
+    ) async -> ([VNHumanObservation], [VNHumanBodyPoseObservation]) {
+        let sendablePixelBuffer = SendablePixelBuffer(value: pixelBuffer)
 
         return await withCheckedContinuation { continuation in
             processingQueue.async {
+                let rectRequest = VNDetectHumanRectanglesRequest()
+                if config.useHighAccuracy {
+                    rectRequest.revision = VNDetectHumanRectanglesRequestRevision2
+                }
+                rectRequest.upperBodyOnly = true
+
+                let poseRequest = VNDetectHumanBodyPoseRequest()
                 let handler = VNImageRequestHandler(
-                    cvPixelBuffer: pixelBuffer,
+                    cvPixelBuffer: sendablePixelBuffer.value,
                     orientation: .up,
                     options: [:]
                 )
 
                 do {
-                    // Run both requests together for efficiency
-                    try handler.perform([rectRequest, self.poseRequest])
+                    // Run both requests together for efficiency.
+                    try handler.perform([rectRequest, poseRequest])
 
                     let rectResults = (rectRequest.results ?? [])
-                        .filter { $0.confidence >= self.config.confidenceThreshold }
-                    let limited = Array(rectResults.prefix(self.config.maxPersons))
+                        .filter { $0.confidence >= config.confidenceThreshold }
+                    let limited = Array(rectResults.prefix(config.maxPersons))
 
-                    let poseResults = self.poseRequest.results ?? []
+                    let poseResults = poseRequest.results ?? []
 
                     continuation.resume(returning: (limited, poseResults))
                 } catch {

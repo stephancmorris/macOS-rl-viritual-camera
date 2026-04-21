@@ -170,7 +170,7 @@ final class XPCConnectionManager {
         
         Task {
             try? await Task.sleep(for: .seconds(CinematicCoreXPC.connectionInterruptionRetryDelay))
-            await connect()
+            connect()
         }
     }
 }

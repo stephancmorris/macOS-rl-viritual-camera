@@ -37,6 +37,7 @@ Implemented foundation:
 - Heuristic crop composition with stage-friendly waist-up framing
 - Primary-speaker persistence and sticky target selection
 - Configurable stage bounds and subject edge-safety margins
+- Manual subject lock from the operator preview
 - CoreML agent integration scaffolding
 - Training-data recording
 - Python training and export pipeline
@@ -183,6 +184,10 @@ Acceptance criteria:
 
 ### Task 4.1: Manual subject override
 
+Status:
+
+- Implemented in the operator preview with tap-to-lock and clear-lock controls
+
 - Add operator ability to select or lock the target person
 - Maintain lock until cleared or target is fully lost
 
@@ -191,6 +196,10 @@ Acceptance criteria:
 - operator can recover quickly when auto-selection is wrong
 
 ### Task 4.2: Shot presets
+
+Status:
+
+- Implemented with `Wide Safety`, `Medium`, and `Waist Up` presets plus a secondary `Portrait Profile` frame mode
 
 - Add simple presets:
   - `Wide Safety`

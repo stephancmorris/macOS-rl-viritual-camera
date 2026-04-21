@@ -21,6 +21,32 @@ struct ShotComposerSettingsView: View {
                     .foregroundStyle(.secondary)
             }
 
+            Section("Framing Style") {
+                Picker("Frame Profile", selection: $shotComposer.config.frameProfile) {
+                    ForEach(ShotComposer.Config.FrameProfile.allCases) { profile in
+                        Text(profile.title).tag(profile)
+                    }
+                }
+
+                Picker("Shot Preset", selection: $shotComposer.config.shotPreset) {
+                    ForEach(ShotComposer.Config.ShotPreset.allCases) { preset in
+                        Text(preset.title).tag(preset)
+                    }
+                }
+
+                Text("Use `Livestream Rectangle` for normal YouTube or switcher feeds. `Portrait Profile` is a secondary vertical option.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+
+                Text(shotComposer.config.shotPreset.detail)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+
+                LiquidFramingSwitch(selection: $shotComposer.config.shotFraming)
+                    .disabled(!shotComposer.config.isEnabled)
+                    .padding(.top, 4)
+            }
+
             Section("Tuning") {
                 HStack {
                     Text("Deadzone")
@@ -140,6 +166,21 @@ struct ShotComposerSettingsView: View {
                                value: shotComposer.activeTargetID == nil ? "None" : "Tracking")
 
                 LabeledContent(
+                    "Manual Override",
+                    value: shotComposer.isManualLockActive ? "Locked" : "Auto"
+                )
+
+                LabeledContent(
+                    "Frame Profile",
+                    value: shotComposer.config.frameProfile.shortTitle
+                )
+
+                LabeledContent(
+                    "Shot Preset",
+                    value: shotComposer.config.shotPreset.title
+                )
+
+                LabeledContent(
                     "Stage Window",
                     value: String(
                         format: "L/R %.0f%%  T/B %.0f%%",
@@ -160,6 +201,83 @@ struct ShotComposerSettingsView: View {
         }
         .formStyle(.grouped)
         .frame(width: 350, height: 500)
+    }
+}
+
+// MARK: - Liquid Glass Framing Switch
+
+struct LiquidFramingSwitch: View {
+    @Binding var selection: ShotComposer.Config.ShotFraming
+    @Environment(\.isEnabled) private var isEnabled
+    @Namespace private var indicatorNamespace
+
+    var body: some View {
+        HStack(spacing: 2) {
+            ForEach(ShotComposer.Config.ShotFraming.allCases) { option in
+                segment(for: option)
+            }
+        }
+        .padding(3)
+        .background {
+            Capsule(style: .continuous)
+                .fill(.ultraThinMaterial)
+                .overlay(
+                    Capsule(style: .continuous)
+                        .strokeBorder(.white.opacity(0.12), lineWidth: 1)
+                )
+        }
+        .opacity(isEnabled ? 1.0 : 0.5)
+    }
+
+    @ViewBuilder
+    private func segment(for option: ShotComposer.Config.ShotFraming) -> some View {
+        let isSelected = selection == option
+        Button {
+            guard isEnabled else { return }
+            withAnimation(.spring(response: 0.32, dampingFraction: 0.82)) {
+                selection = option
+            }
+        } label: {
+            HStack(spacing: 6) {
+                Image(systemName: icon(for: option))
+                    .font(.system(size: 11, weight: .semibold))
+                Text(option.title)
+                    .font(.system(size: 12, weight: .semibold, design: .rounded))
+            }
+            .foregroundStyle(isSelected ? Color.black.opacity(0.88) : Color.white.opacity(0.82))
+            .padding(.horizontal, 12)
+            .padding(.vertical, 6)
+            .background {
+                if isSelected {
+                    Capsule(style: .continuous)
+                        .fill(
+                            LinearGradient(
+                                colors: [
+                                    Color.mint.opacity(0.95),
+                                    Color.green.opacity(0.85)
+                                ],
+                                startPoint: .topLeading,
+                                endPoint: .bottomTrailing
+                            )
+                        )
+                        .overlay(
+                            Capsule(style: .continuous)
+                                .strokeBorder(.white.opacity(0.35), lineWidth: 1)
+                        )
+                        .shadow(color: .mint.opacity(0.35), radius: 8, y: 2)
+                        .matchedGeometryEffect(id: "framingIndicator", in: indicatorNamespace)
+                }
+            }
+            .contentShape(Capsule(style: .continuous))
+        }
+        .buttonStyle(.plain)
+    }
+
+    private func icon(for option: ShotComposer.Config.ShotFraming) -> String {
+        switch option {
+        case .chestUp: return "person.crop.rectangle"
+        case .waistUp: return "person.fill"
+        }
     }
 }
 

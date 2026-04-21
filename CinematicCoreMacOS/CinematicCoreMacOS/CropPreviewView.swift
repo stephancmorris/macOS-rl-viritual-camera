@@ -15,30 +15,36 @@ struct CropPreviewView: View {
     let detectedPersons: [PersonDetector.DetectedPerson]
     let showDetections: Bool
     let cropRect: CropEngine.CropRect?
+    let activeTargetID: UUID?
+    let manualLockedTargetID: UUID?
+    let trackedSubjectRect: CGRect?
+    var onSelectPerson: ((UUID) -> Void)? = nil
 
     var body: some View {
-        GeometryReader { geometry in
-            HStack(spacing: 8) {
-                // Original Feed with Crop Indicator
-                VStack(spacing: 4) {
-                    Text("Input · Wide")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-
+        GeometryReader { _ in
+            HStack(spacing: 16) {
+                LiquidPreviewCard(
+                    title: "Input · Wide",
+                    subtitle: "Stage overview with operator overlays · tap a subject to lock",
+                    accent: .mint
+                ) {
                     CameraPreviewView(
                         image: originalFrame,
                         detectedPersons: detectedPersons,
                         showDetections: showDetections,
+                        activeTargetID: activeTargetID,
+                        manualLockedTargetID: manualLockedTargetID,
+                        trackedSubjectRect: trackedSubjectRect,
+                        onSelectPerson: onSelectPerson,
                         cropIndicator: cropRect
                     )
                 }
 
-                // Program output preview
-                VStack(spacing: 4) {
-                    Text("Program · Output")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-
+                LiquidPreviewCard(
+                    title: "Program · Output",
+                    subtitle: "Processed switcher feed",
+                    accent: .cyan
+                ) {
                     ZStack {
                         Color.black
 
@@ -47,23 +53,21 @@ struct CropPreviewView: View {
                                 .resizable()
                                 .aspectRatio(contentMode: .fit)
                         } else {
-                            VStack(spacing: 8) {
-                                Image(systemName: "rectangle.on.rectangle.slash")
-                                    .font(.largeTitle)
-                                    .foregroundStyle(.secondary)
+                            VStack(spacing: 10) {
+                                Image(systemName: "sparkles.tv")
+                                    .font(.system(size: 32))
+                                    .foregroundStyle(.white.opacity(0.52))
                                 Text("Program Output Unavailable")
-                                    .font(.caption)
-                                    .foregroundStyle(.secondary)
+                                    .font(.system(size: 14, weight: .semibold, design: .rounded))
+                                    .foregroundStyle(.white.opacity(0.78))
+                                Text("Enable the crop pipeline to generate the broadcast frame.")
+                                    .font(.system(size: 12, weight: .medium, design: .rounded))
+                                    .foregroundStyle(.white.opacity(0.48))
                             }
                         }
                     }
-                    .overlay(
-                        RoundedRectangle(cornerRadius: 4)
-                            .strokeBorder(Color.green, lineWidth: 2)
-                    )
                 }
             }
-            .padding(8)
         }
     }
 }
@@ -72,6 +76,23 @@ struct CropPreviewView: View {
 struct CropSettingsView: View {
     @ObservedObject var cropEngine: CropEngine
     @ObservedObject var cameraManager: CameraManager
+
+    private var resolutionOptions: [(String, CGSize)] {
+        switch cameraManager.shotComposer.config.frameProfile {
+        case .livestream:
+            return [
+                ("1920 × 1080 (Full HD)", CGSize(width: 1920, height: 1080)),
+                ("1280 × 720 (HD)", CGSize(width: 1280, height: 720)),
+                ("3840 × 2160 (4K)", CGSize(width: 3840, height: 2160))
+            ]
+        case .portrait:
+            return [
+                ("1080 × 1920 (Vertical HD)", CGSize(width: 1080, height: 1920)),
+                ("720 × 1280 (Vertical SD)", CGSize(width: 720, height: 1280)),
+                ("2160 × 3840 (Vertical 4K)", CGSize(width: 2160, height: 3840))
+            ]
+        }
+    }
     
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
@@ -104,11 +125,15 @@ struct CropSettingsView: View {
                 VStack(alignment: .leading, spacing: 8) {
                     Text("Output Resolution")
                         .font(.subheadline)
+
+                    Text(cameraManager.shotComposer.config.frameProfile.detail)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
                     
                     Picker("Resolution", selection: $cropEngine.config.outputSize) {
-                        Text("1920 × 1080 (Full HD)").tag(CGSize(width: 1920, height: 1080))
-                        Text("1280 × 720 (HD)").tag(CGSize(width: 1280, height: 720))
-                        Text("3840 × 2160 (4K)").tag(CGSize(width: 3840, height: 2160))
+                        ForEach(resolutionOptions, id: \.0) { option in
+                            Text(option.0).tag(option.1)
+                        }
                     }
                     .pickerStyle(.menu)
                 }

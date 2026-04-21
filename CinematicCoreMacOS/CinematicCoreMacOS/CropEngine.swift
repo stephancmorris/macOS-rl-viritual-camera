@@ -66,11 +66,11 @@ final class CropEngine: ObservableObject {
     // MARK: - Metal Resources (nonisolated for GPU work)
 
     // These are thread-safe and can be used from any context
-    private nonisolated(unsafe) let device: MTLDevice
-    private nonisolated(unsafe) let commandQueue: MTLCommandQueue
-    private nonisolated(unsafe) let pipelineState: MTLComputePipelineState
+    private let device: MTLDevice
+    private let commandQueue: MTLCommandQueue
+    private let pipelineState: MTLComputePipelineState
     private nonisolated(unsafe) let textureCache: CVMetalTextureCache
-    private nonisolated(unsafe) let ciContext: CIContext
+    private let ciContext: CIContext
     
     // MARK: - Crop Rectangle Model
     

@@ -48,7 +48,11 @@ final class CameraManager: NSObject, ObservableObject {
     /// When true, the cinematic agent drives the crop instead of ShotComposer.
     @Published var useMLAgent: Bool = false {
         didSet {
-            if useMLAgent, let crop = cropEngine?.currentCrop {
+            if useMLAgent {
+                cinematicAgent.ensureModelLoaded()
+            }
+
+            if useMLAgent, cinematicAgent.isModelLoaded, let crop = cropEngine?.currentCrop {
                 cinematicAgent.initialize(from: crop)
             }
         }
@@ -76,7 +80,7 @@ final class CameraManager: NSObject, ObservableObject {
         didSet {
             if !cropEnabled {
                 trackingPaused = false
-                shotComposer.reset()
+                shotComposer.reset(clearManualLock: true)
                 cinematicAgent.reset()
             }
         }
@@ -109,6 +113,7 @@ final class CameraManager: NSObject, ObservableObject {
         label: "com.cinematiccore.videoOutput",
         qos: .userInteractive
     )
+    private var cancellables = Set<AnyCancellable>()
     // MARK: - Configuration Constants
     
     private enum Config {
@@ -153,6 +158,9 @@ final class CameraManager: NSObject, ObservableObject {
         } else {
             print("✅ CropEngine initialized successfully")
         }
+
+        configureFramingBindings()
+        applyFrameProfile(shotComposer.config.frameProfile)
         
         // Discover cameras on initialization
         discoverCameras()
@@ -285,7 +293,7 @@ final class CameraManager: NSObject, ObservableObject {
         programOutput.stop()
         isRunning = false
         trackingPaused = false
-        shotComposer.reset()
+        shotComposer.reset(clearManualLock: true)
         cinematicAgent.reset()
         print("   ✓ Capture stopped")
     }
@@ -310,6 +318,14 @@ final class CameraManager: NSObject, ObservableObject {
         if useMLAgent, let crop = cropEngine?.currentCrop {
             cinematicAgent.initialize(from: crop)
         }
+    }
+
+    func lockTarget(personID: UUID) {
+        shotComposer.lockTarget(personID)
+    }
+
+    func clearManualTargetLock() {
+        shotComposer.clearManualLock()
     }
     
     /// Restart capture with a different camera
@@ -348,6 +364,25 @@ final class CameraManager: NSObject, ObservableObject {
             return false
         @unknown default:
             return false
+        }
+    }
+
+    private func configureFramingBindings() {
+        shotComposer.$config
+            .map(\.frameProfile)
+            .removeDuplicates()
+            .sink { [weak self] profile in
+                self?.applyFrameProfile(profile)
+            }
+            .store(in: &cancellables)
+    }
+
+    private func applyFrameProfile(_ profile: ShotComposer.Config.FrameProfile) {
+        guard let cropEngine else { return }
+
+        let desiredSize = profile.defaultOutputSize
+        if cropEngine.config.outputSize != desiredSize {
+            cropEngine.config.outputSize = desiredSize
         }
     }
     
@@ -510,6 +545,16 @@ final class CameraManager: NSObject, ObservableObject {
         
         // If no 30fps format, just use highest resolution
         return format30fps ?? sortedFormats.first
+    }
+}
+
+extension CameraManager {
+    var manualLockedTargetID: UUID? {
+        shotComposer.manualLockedTargetID
+    }
+
+    var isManualTargetLockActive: Bool {
+        shotComposer.isManualLockActive
     }
 }
 

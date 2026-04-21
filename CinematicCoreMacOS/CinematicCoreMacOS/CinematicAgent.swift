@@ -7,7 +7,7 @@
 //
 
 import Combine
-import CoreML
+@preconcurrency import CoreML
 import CoreGraphics
 import Foundation
 
@@ -25,7 +25,7 @@ final class CinematicAgent: ObservableObject {
     // MARK: - Published State
 
     @Published private(set) var isModelLoaded: Bool = false
-    @Published private(set) var modelStatus: String = "No model loaded"
+    @Published private(set) var modelStatus: String = "Model idle"
     @Published private(set) var lastPredictedCrop: CropEngine.CropRect?
 
     // MARK: - Constants (must match cinematic_env.py exactly)
@@ -47,16 +47,29 @@ final class CinematicAgent: ObservableObject {
     private var cropX:    Float = 0.0
     private var cropY:    Float = 0.0
     private var cropZoom: Float = 1.0
+    private var modelLoadWorkItem: DispatchWorkItem?
 
     // MARK: - Lifecycle
 
-    init() {
-        loadModel()
+    init() {}
+
+    deinit {
+        modelLoadWorkItem?.cancel()
     }
 
     // MARK: - Model Loading
 
+    func ensureModelLoaded() {
+        guard model == nil, modelLoadWorkItem == nil else { return }
+        loadModel()
+    }
+
     private func loadModel() {
+        modelLoadWorkItem?.cancel()
+        modelLoadWorkItem = nil
+        isModelLoaded = false
+        modelStatus = "Loading model..."
+
         guard let url = Bundle.main.url(
             forResource: "CinematicFraming",
             withExtension: "mlpackage"
@@ -65,18 +78,39 @@ final class CinematicAgent: ObservableObject {
             return
         }
 
-        do {
-            // .mlpackage must be compiled before loading; compileModel produces a
-            // temporary .mlmodelc that is valid for this process lifetime.
-            let compiledURL = try MLModel.compileModel(at: url)
-            let config = MLModelConfiguration()
-            config.computeUnits = .cpuAndNeuralEngine
-            model = try MLModel(contentsOf: compiledURL, configuration: config)
-            isModelLoaded = true
-            modelStatus = "Model loaded (Neural Engine)"
-        } catch {
-            modelStatus = "Failed to load: \(error.localizedDescription)"
+        var workItem: DispatchWorkItem?
+        workItem = DispatchWorkItem { [weak self] in
+            do {
+                // .mlpackage must be compiled before loading; compileModel produces a
+                // temporary .mlmodelc that is valid for this process lifetime.
+                let compiledURL = try MLModel.compileModel(at: url)
+                let config = MLModelConfiguration()
+                config.computeUnits = .cpuAndNeuralEngine
+                let loadedModel = try MLModel(contentsOf: compiledURL, configuration: config)
+
+                guard workItem?.isCancelled == false else { return }
+
+                Task { @MainActor [weak self] in
+                    guard let self else { return }
+                    self.model = loadedModel
+                    self.isModelLoaded = true
+                    self.modelStatus = "Model loaded (Neural Engine)"
+                    self.modelLoadWorkItem = nil
+                }
+            } catch {
+                guard workItem?.isCancelled == false else { return }
+
+                Task { @MainActor [weak self] in
+                    guard let self else { return }
+                    self.modelStatus = "Failed to load: \(error.localizedDescription)"
+                    self.modelLoadWorkItem = nil
+                }
+            }
         }
+
+        guard let workItem else { return }
+        modelLoadWorkItem = workItem
+        DispatchQueue.global(qos: .utility).async(execute: workItem)
     }
 
     // MARK: - Public Interface

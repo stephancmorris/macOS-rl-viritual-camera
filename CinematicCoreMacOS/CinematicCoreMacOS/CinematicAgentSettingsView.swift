@@ -73,6 +73,9 @@ struct CinematicAgentSettingsView: View {
         }
         .formStyle(.grouped)
         .frame(width: 350, height: 380)
+        .onAppear {
+            cameraManager.cinematicAgent.ensureModelLoaded()
+        }
     }
 }
 

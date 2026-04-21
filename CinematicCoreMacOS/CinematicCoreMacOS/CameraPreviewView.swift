@@ -14,6 +14,10 @@ struct CameraPreviewView: View {
     let image: CIImage?
     let detectedPersons: [PersonDetector.DetectedPerson]
     let showDetections: Bool
+    let activeTargetID: UUID?
+    let manualLockedTargetID: UUID?
+    var trackedSubjectRect: CGRect? = nil
+    var onSelectPerson: ((UUID) -> Void)? = nil
     var cropIndicator: CropEngine.CropRect? = nil  // Task 2.2: Show crop region
     
     var body: some View {
@@ -30,7 +34,11 @@ struct CameraPreviewView: View {
                     if showDetections {
                         DetectionOverlayView(
                             detectedPersons: detectedPersons,
-                            imageSize: image.extent.size
+                            imageSize: image.extent.size,
+                            activeTargetID: activeTargetID,
+                            manualLockedTargetID: manualLockedTargetID,
+                            trackedSubjectRect: trackedSubjectRect,
+                            onSelectPerson: onSelectPerson
                         )
                     }
                     
@@ -40,23 +48,33 @@ struct CameraPreviewView: View {
                             cropRect: cropRect,
                             imageSize: image.extent.size
                         )
+                        .allowsHitTesting(false)
                     }
                 }
             } else {
                 // Placeholder when no camera feed
                 ZStack {
-                    Color.black
+                    LinearGradient(
+                        colors: [
+                            Color.black,
+                            Color(red: 0.06, green: 0.08, blue: 0.12)
+                        ],
+                        startPoint: .topLeading,
+                        endPoint: .bottomTrailing
+                    )
                     VStack(spacing: 16) {
-                        Image(systemName: "video.slash")
-                            .font(.system(size: 48))
-                            .foregroundStyle(.secondary)
+                        Image(systemName: "sparkles.tv")
+                            .font(.system(size: 42))
+                            .foregroundStyle(.white.opacity(0.5))
                         Text("No Camera Feed")
-                            .font(.headline)
-                            .foregroundStyle(.secondary)
-                        Text("Check the Xcode console for camera diagnostics")
-                            .font(.caption)
-                            .foregroundStyle(.tertiary)
+                            .font(.system(size: 18, weight: .semibold, design: .rounded))
+                            .foregroundStyle(.white.opacity(0.78))
+                        Text("Connect a source and start capture to light up the live glass console.")
+                            .font(.system(size: 12, weight: .medium, design: .rounded))
+                            .foregroundStyle(.white.opacity(0.45))
+                            .multilineTextAlignment(.center)
                     }
+                    .padding(24)
                 }
             }
         }
@@ -81,7 +99,10 @@ extension Image {
     CameraPreviewView(
         image: nil,
         detectedPersons: [],
-        showDetections: true
+        showDetections: true,
+        activeTargetID: nil,
+        manualLockedTargetID: nil,
+        trackedSubjectRect: nil
     )
     .frame(width: 800, height: 600)
 }
@@ -123,8 +144,18 @@ struct CropIndicatorView: View {
             
             // Draw crop indicator
             Rectangle()
-                .strokeBorder(Color.green, lineWidth: 3)
-                .background(Color.green.opacity(0.1))
+                .strokeBorder(
+                    LinearGradient(
+                        colors: [Color.red.opacity(0.95), Color.orange.opacity(0.9)],
+                        startPoint: .topLeading,
+                        endPoint: .bottomTrailing
+                    ),
+                    lineWidth: 2.5
+                )
+                .background(
+                    RoundedRectangle(cornerRadius: 18, style: .continuous)
+                        .fill(Color.red.opacity(0.08))
+                )
                 .frame(width: cropWidth, height: cropHeight)
                 .position(
                     x: cropX + cropWidth / 2,
@@ -134,23 +165,33 @@ struct CropIndicatorView: View {
                     // Corner handles
                     ForEach(0..<4, id: \.self) { index in
                         Circle()
-                            .fill(Color.green)
-                            .frame(width: 12, height: 12)
+                            .fill(
+                                LinearGradient(
+                                    colors: [Color.white, Color.red],
+                                    startPoint: .top,
+                                    endPoint: .bottom
+                                )
+                            )
+                            .frame(width: 11, height: 11)
+                            .shadow(color: .red.opacity(0.45), radius: 6)
                             .position(cornerPosition(index: index, x: cropX, y: cropY, width: cropWidth, height: cropHeight))
                     }
                 )
                 .overlay(
                     // Label
-                    Text("Output Frame")
-                        .font(.caption)
-                        .padding(.horizontal, 8)
-                        .padding(.vertical, 4)
-                        .background(.ultraThinMaterial)
-                        .foregroundStyle(.green)
-                        .cornerRadius(4)
+                    Text("Program Crop")
+                        .font(.system(size: 11, weight: .bold, design: .rounded))
+                        .padding(.horizontal, 12)
+                        .padding(.vertical, 7)
+                        .background(.ultraThinMaterial, in: Capsule(style: .continuous))
+                        .overlay(
+                            Capsule(style: .continuous)
+                                .strokeBorder(.white.opacity(0.16), lineWidth: 1)
+                        )
+                        .foregroundStyle(.white.opacity(0.92))
                         .position(
                             x: cropX + cropWidth / 2,
-                            y: cropY - 16
+                            y: max(18, cropY - 18)
                         )
                 )
         }
@@ -166,4 +207,3 @@ struct CropIndicatorView: View {
         }
     }
 }
-
