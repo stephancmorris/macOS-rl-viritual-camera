@@ -114,6 +114,11 @@ final class CameraManager: NSObject, ObservableObject {
         qos: .userInteractive
     )
     private var cancellables = Set<AnyCancellable>()
+
+    /// Last source pixel aspect (width/height) forwarded to the shot composer.
+    /// Used to skip the per-frame update when aspect is unchanged.
+    private var lastAppliedSourceAspect: CGFloat = 0
+
     // MARK: - Configuration Constants
     
     private enum Config {
@@ -482,6 +487,13 @@ final class CameraManager: NSObject, ObservableObject {
         // DEBUG: Print supported frame rates
         let dims = CMVideoFormatDescriptionGetDimensions(format.formatDescription)
         print("   📊 Format: \(dims.width)x\(dims.height)")
+
+        if dims.height > 0 {
+            let sourceAspect = CGFloat(dims.width) / CGFloat(dims.height)
+            shotComposer.updateSourcePixelAspect(sourceAspect)
+            lastAppliedSourceAspect = sourceAspect
+        }
+
         print("   📊 Supported frame rates:")
         for range in format.videoSupportedFrameRateRanges {
             print("      - \(range.minFrameRate) to \(range.maxFrameRate) fps")
@@ -684,8 +696,19 @@ extension CameraManager: AVCaptureVideoDataOutputSampleBufferDelegate {
         // Convert to CIImage for display
         let ciImage = CIImage(cvPixelBuffer: pixelBuffer)
         
+        let bufferWidth = CGFloat(CVPixelBufferGetWidth(pixelBuffer))
+        let bufferHeight = CGFloat(CVPixelBufferGetHeight(pixelBuffer))
+
         // Process frame asynchronously (avoid blocking capture queue)
         Task { @MainActor in
+            if bufferHeight > 0 {
+                let bufferAspect = bufferWidth / bufferHeight
+                if abs(bufferAspect - self.lastAppliedSourceAspect) > 0.001 {
+                    self.lastAppliedSourceAspect = bufferAspect
+                    self.shotComposer.updateSourcePixelAspect(bufferAspect)
+                }
+            }
+
             // Task 2.1: Run person detection
             let detectedPersons = await self.personDetector.processFrame(pixelBuffer)
             let primaryPerson = self.trackingPaused

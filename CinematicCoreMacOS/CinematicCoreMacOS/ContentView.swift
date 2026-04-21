@@ -105,13 +105,13 @@ struct ContentView: View {
 
             HStack(alignment: .center, spacing: 18) {
                 VStack(alignment: .leading, spacing: 10) {
-                    Text("CinematicCore")
+                    Text("Alfie")
                         .font(.system(size: tier == .minimal ? 24 : 30, weight: .semibold, design: .rounded))
                         .foregroundStyle(.white.opacity(0.96))
                         .lineLimit(1)
                         .minimumScaleFactor(0.7)
 
-                    Text("Liquid glass camera console for live autonomous framing")
+                    Text("Your autonomous live camera operator")
                         .font(.system(size: tier == .minimal ? 12 : 14, weight: .medium, design: .rounded))
                         .foregroundStyle(.white.opacity(0.68))
                         .lineLimit(2)
@@ -319,37 +319,41 @@ struct ContentView: View {
                         )
                     }
 
-                    Button(action: { showAgentSettings.toggle() }) {
-                        Label(
-                            "Agent",
-                            systemImage: cameraManager.useMLAgent
-                                ? "brain.filled.head.profile"
-                                : "brain.head.profile"
-                        )
-                    }
-                    .buttonStyle(GlassCapsuleButtonStyle(tint: cameraManager.useMLAgent ? .blue : .white.opacity(0.6)))
-                    .popover(isPresented: $showAgentSettings) {
-                        CinematicAgentSettingsView(cameraManager: cameraManager)
+                    if DeveloperFlags.exposeMLAgentControls {
+                        Button(action: { showAgentSettings.toggle() }) {
+                            Label(
+                                "Agent",
+                                systemImage: cameraManager.useMLAgent
+                                    ? "brain.filled.head.profile"
+                                    : "brain.head.profile"
+                            )
+                        }
+                        .buttonStyle(GlassCapsuleButtonStyle(tint: cameraManager.useMLAgent ? .blue : .white.opacity(0.6)))
+                        .popover(isPresented: $showAgentSettings) {
+                            CinematicAgentSettingsView(cameraManager: cameraManager)
+                        }
                     }
 
-                    Button(action: { showRecorderSettings.toggle() }) {
-                        Label(
-                            cameraManager.trainingDataRecorder.isRecording ? "Recorder Live" : "Recorder",
-                            systemImage: cameraManager.trainingDataRecorder.isRecording
-                                ? "record.circle.fill" : "record.circle"
+                    if DeveloperFlags.exposeTrainingRecorderControls {
+                        Button(action: { showRecorderSettings.toggle() }) {
+                            Label(
+                                cameraManager.trainingDataRecorder.isRecording ? "Recorder Live" : "Recorder",
+                                systemImage: cameraManager.trainingDataRecorder.isRecording
+                                    ? "record.circle.fill" : "record.circle"
+                            )
+                        }
+                        .buttonStyle(
+                            GlassCapsuleButtonStyle(
+                                tint: cameraManager.trainingDataRecorder.isRecording ? .red : .white.opacity(0.6),
+                                isPrimary: cameraManager.trainingDataRecorder.isRecording
+                            )
                         )
-                    }
-                    .buttonStyle(
-                        GlassCapsuleButtonStyle(
-                            tint: cameraManager.trainingDataRecorder.isRecording ? .red : .white.opacity(0.6),
-                            isPrimary: cameraManager.trainingDataRecorder.isRecording
-                        )
-                    )
-                    .popover(isPresented: $showRecorderSettings) {
-                        RecorderSettingsView(
-                            recorder: cameraManager.trainingDataRecorder,
-                            cameraManager: cameraManager
-                        )
+                        .popover(isPresented: $showRecorderSettings) {
+                            RecorderSettingsView(
+                                recorder: cameraManager.trainingDataRecorder,
+                                cameraManager: cameraManager
+                            )
+                        }
                     }
 
                     Button(action: { showOutputSettings.toggle() }) {
@@ -623,20 +627,24 @@ struct ContentView: View {
                     }
                     .buttonStyle(GlassCapsuleButtonStyle(tint: .purple))
 
-                    Button(action: { showDockOverflow = false; showAgentSettings = true }) {
-                        Label("Agent", systemImage: cameraManager.useMLAgent ? "brain.filled.head.profile" : "brain.head.profile")
+                    if DeveloperFlags.exposeMLAgentControls {
+                        Button(action: { showDockOverflow = false; showAgentSettings = true }) {
+                            Label("Agent", systemImage: cameraManager.useMLAgent ? "brain.filled.head.profile" : "brain.head.profile")
+                        }
+                        .buttonStyle(GlassCapsuleButtonStyle(tint: cameraManager.useMLAgent ? .blue : .white.opacity(0.6)))
                     }
-                    .buttonStyle(GlassCapsuleButtonStyle(tint: cameraManager.useMLAgent ? .blue : .white.opacity(0.6)))
 
-                    Button(action: { showDockOverflow = false; showRecorderSettings = true }) {
-                        Label("Recorder", systemImage: cameraManager.trainingDataRecorder.isRecording ? "record.circle.fill" : "record.circle")
-                    }
-                    .buttonStyle(
-                        GlassCapsuleButtonStyle(
-                            tint: cameraManager.trainingDataRecorder.isRecording ? .red : .white.opacity(0.6),
-                            isPrimary: cameraManager.trainingDataRecorder.isRecording
+                    if DeveloperFlags.exposeTrainingRecorderControls {
+                        Button(action: { showDockOverflow = false; showRecorderSettings = true }) {
+                            Label("Recorder", systemImage: cameraManager.trainingDataRecorder.isRecording ? "record.circle.fill" : "record.circle")
+                        }
+                        .buttonStyle(
+                            GlassCapsuleButtonStyle(
+                                tint: cameraManager.trainingDataRecorder.isRecording ? .red : .white.opacity(0.6),
+                                isPrimary: cameraManager.trainingDataRecorder.isRecording
+                            )
                         )
-                    )
+                    }
 
                     Button(action: { showDockOverflow = false; showOutputSettings = true }) {
                         Label("Output", systemImage: cameraManager.programOutput.activeRoute?.systemImage ?? "dot.radiowaves.left.and.right")

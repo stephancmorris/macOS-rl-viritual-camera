@@ -82,7 +82,7 @@ class CinematicCoreExtensionDeviceSource: NSObject, CMIOExtensionDeviceSource {
 		let videoStreamFormat = CMIOExtensionStreamFormat.init(formatDescription: _videoDescription, maxFrameDuration: CMTime(value: 1, timescale: Int32(kFrameRate)), minFrameDuration: CMTime(value: 1, timescale: Int32(kFrameRate)), validFrameDurations: nil)
 		
 		let videoID = UUID() // replace this with your video UUID
-		_streamSource = CinematicCoreExtensionStreamSource(localizedName: "CinematicCore.Video", streamID: videoID, streamFormat: videoStreamFormat, device: device)
+		_streamSource = CinematicCoreExtensionStreamSource(localizedName: "Alfie.Video", streamID: videoID, streamFormat: videoStreamFormat, device: device)
 		do {
 			try device.addStream(_streamSource.stream)
 		} catch let error {
@@ -102,7 +102,7 @@ class CinematicCoreExtensionDeviceSource: NSObject, CMIOExtensionDeviceSource {
 			deviceProperties.transportType = kIOAudioDeviceTransportTypeVirtual
 		}
 		if properties.contains(.deviceModel) {
-			deviceProperties.model = "CinematicCore Virtual Camera"
+			deviceProperties.model = "Alfie"
 		}
 		
 		return deviceProperties
@@ -426,7 +426,7 @@ class CinematicCoreExtensionProviderSource: NSObject, CMIOExtensionProviderSourc
 		super.init()
 		
 		provider = CMIOExtensionProvider(source: self, clientQueue: clientQueue)
-		deviceSource = CinematicCoreExtensionDeviceSource(localizedName: "CinematicCore Virtual Camera")
+		deviceSource = CinematicCoreExtensionDeviceSource(localizedName: "Alfie")
 		
 		do {
 			try provider.addDevice(deviceSource.device)
@@ -467,7 +467,7 @@ class CinematicCoreExtensionProviderSource: NSObject, CMIOExtensionProviderSourc
 		
 		let providerProperties = CMIOExtensionProviderProperties(dictionary: [:])
 		if properties.contains(.providerManufacturer) {
-			providerProperties.manufacturer = "CinematicCore"
+			providerProperties.manufacturer = "Alfie"
 		}
 		return providerProperties
 	}

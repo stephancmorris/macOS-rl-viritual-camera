@@ -36,6 +36,6 @@
 		<string>com.cinematiccore.extension</string>
 	</dict>
 	<key>NSSystemExtensionUsageDescription</key>
-	<string>CinematicCore uses a system extension to provide a virtual camera that can be accessed by other applications.</string>
+	<string>Alfie uses a system extension to provide a virtual camera that can be accessed by other applications.</string>
 </dict>
 </plist>

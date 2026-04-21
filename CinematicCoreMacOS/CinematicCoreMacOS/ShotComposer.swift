@@ -198,6 +198,11 @@ final class ShotComposer: ObservableObject {
 
     // MARK: - State
 
+    /// Pixel aspect (width / height) of the source frame currently being
+    /// composed against. Used to convert the output aspect from pixel space
+    /// into normalized (0–1) space. Defaults to 16:9.
+    private var sourcePixelAspect: CGFloat = 16.0 / 9.0
+
     /// Last accepted detection center (for deadzone comparison)
     private var lastAcceptedCenter: CGPoint?
 
@@ -297,6 +302,14 @@ final class ShotComposer: ObservableObject {
         )
     }
 
+    /// Update the source frame's pixel aspect. Called when the capture
+    /// format changes or when new pixel buffers arrive with a different
+    /// aspect than the active format's declared dimensions.
+    func updateSourcePixelAspect(_ aspect: CGFloat) {
+        guard aspect.isFinite, aspect > 0 else { return }
+        sourcePixelAspect = aspect
+    }
+
     /// Reset state (e.g., when switching subjects or losing track)
     func reset(clearManualLock: Bool = false) {
         lastAcceptedCenter = nil
@@ -330,13 +343,20 @@ final class ShotComposer: ObservableObject {
 
     // MARK: - Private
 
+    /// Aspect of the crop rect in Vision's normalized coordinate space such
+    /// that when the rect is sampled from the source pixels it yields the
+    /// configured output pixel aspect.
+    private var normalizedAspect: CGFloat {
+        config.outputAspectRatio / sourcePixelAspect
+    }
+
     private func composeFromTrackedBounds(
         _ trackedBounds: CGRect,
         subjectBounds: CGRect,
         trackingCenter: CGPoint
     ) -> CropEngine.CropRect? {
         let tuning = framingTuning
-        let aspect = config.outputAspectRatio
+        let aspect = normalizedAspect
 
         // Anchor from the top of the full subject detection (the yellow box)
         // with a small headroom gap so the skull isn't clipped. Vision's
@@ -426,7 +446,7 @@ final class ShotComposer: ObservableObject {
         // into a valid 16:9 rectangle inside the source frame.
         let centerX = crop.origin.x + (crop.size.width / 2.0)
         let centerY = crop.origin.y + (crop.size.height / 2.0)
-        let aspect = config.outputAspectRatio
+        let aspect = normalizedAspect
 
         let minHeight = framingTuning.minimumCropHeight
         let minWidth = minHeight * aspect
