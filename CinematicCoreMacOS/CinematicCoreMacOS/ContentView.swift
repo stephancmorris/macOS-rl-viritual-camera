@@ -17,6 +17,7 @@ struct ContentView: View {
     }
 
     @StateObject private var cameraManager = CameraManager()
+    @ObservedObject var systemExtensionManager: SystemExtensionActivationManager
     @State private var showError = false
     @State private var showCameraList = false
     @State private var showDetections = true // Task 2.1: Toggle for detection overlay
@@ -29,6 +30,11 @@ struct ContentView: View {
     @State private var showOutputSettings = false   // Task 2.4: Program output routing
     @State private var showHeaderOverflow = false
     @State private var showDockOverflow = false
+    @State private var showSystemExtensionStatus = false
+
+    init(systemExtensionManager: SystemExtensionActivationManager) {
+        self.systemExtensionManager = systemExtensionManager
+    }
     
     var body: some View {
         GeometryReader { geometry in
@@ -50,9 +56,6 @@ struct ContentView: View {
             Button("OK") { showError = false }
         } message: { error in
             Text(error.localizedDescription)
-        }
-        .task {
-            await startCamera()
         }
     }
 
@@ -129,6 +132,18 @@ struct ContentView: View {
                                 systemImage: cameraManager.programOutput.activeRoute?.systemImage ?? "cable.connector.slash",
                                 tint: .cyan
                             )
+                        }
+
+                        Button(action: { showSystemExtensionStatus.toggle() }) {
+                            statusBadge(
+                                title: systemExtensionManager.badgeTitle,
+                                systemImage: systemExtensionManager.badgeSystemImage,
+                                tint: systemExtensionManager.badgeTint
+                            )
+                        }
+                        .buttonStyle(.plain)
+                        .popover(isPresented: $showSystemExtensionStatus) {
+                            systemExtensionStatusPopover
                         }
 
                         if tier == .expanded, let selectedCamera = cameraManager.selectedCamera {
@@ -388,6 +403,13 @@ struct ContentView: View {
     }
 
     private func startCamera() async {
+        if !systemExtensionManager.isInstallReady {
+            let extensionReady = await systemExtensionManager.ensureInstalledForSessionStart()
+            if !extensionReady {
+                showSystemExtensionStatus = true
+            }
+        }
+
         do {
             try await cameraManager.startCapture()
         } catch {
@@ -682,6 +704,45 @@ struct ContentView: View {
                             .strokeBorder(.white.opacity(0.16), lineWidth: 1)
                     )
             }
+    }
+
+    private var systemExtensionStatusPopover: some View {
+        VStack(alignment: .leading, spacing: 16) {
+            overflowSection(title: "Virtual Camera") {
+                overflowInfoRow(
+                    title: systemExtensionManager.badgeTitle,
+                    detail: systemExtensionManager.detailText
+                )
+
+                Text(systemExtensionManager.summaryText)
+                    .font(.system(size: 12, weight: .medium, design: .rounded))
+                    .foregroundStyle(.white.opacity(0.72))
+                    .fixedSize(horizontal: false, vertical: true)
+
+                if let actionTitle = systemExtensionManager.primaryActionTitle {
+                    Button(action: {
+                        Task {
+                            await systemExtensionManager.triggerPrimaryAction()
+                        }
+                    }) {
+                        Label(
+                            actionTitle,
+                            systemImage: systemExtensionManager.primaryActionSystemImage
+                        )
+                    }
+                    .buttonStyle(
+                        GlassCapsuleButtonStyle(
+                            tint: systemExtensionManager.badgeTint,
+                            isPrimary: true
+                        )
+                    )
+                }
+
+            }
+        }
+        .padding(18)
+        .frame(width: 340)
+        .glassPanel(cornerRadius: 26, opacity: 0.28)
     }
 
     private func metricTile(title: String, value: String, detail: String, tint: Color) -> some View {
@@ -1106,6 +1167,6 @@ extension View {
 }
 
 #Preview {
-    ContentView()
+    ContentView(systemExtensionManager: SystemExtensionActivationManager())
         .frame(width: 1200, height: 800)
 }

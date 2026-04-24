@@ -9,9 +9,11 @@ import SwiftUI
 
 @main
 struct CinematicCoreMacOSApp: App {
+    @StateObject private var systemExtensionManager = SystemExtensionActivationManager()
+
     var body: some Scene {
         WindowGroup {
-            ContentView()
+            ContentView(systemExtensionManager: systemExtensionManager)
         }
     }
 }

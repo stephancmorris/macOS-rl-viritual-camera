@@ -35,6 +35,6 @@ enum CinematicCoreXPC {
     static let machServiceName = "com.cinematiccore.extension"
     
     /// XPC connection configuration
-    static let connectionInterruptionRetryDelay: TimeInterval = 1.0
-    static let maxConnectionRetries = 5
+    static let initialConnectionRetryDelay: TimeInterval = 1.0
+    static let maxConnectionRetryDelay: TimeInterval = 30.0
 }

@@ -18,12 +18,21 @@ protocol ProgramOutputSink: AnyObject {
     var summary: String { get }
     var detail: String { get }
     var lastErrorDescription: String? { get }
+    var canReconnect: Bool { get }
+    var reconnectStatus: String? { get }
     var onStateChange: (() -> Void)? { get set }
 
     func connect()
     func disconnect()
+    func reconnect()
     func updateCaptureStatus(isRunning: Bool)
     func sendFrame(pixelBuffer: CVPixelBuffer, timestamp: Double)
+}
+
+extension ProgramOutputSink {
+    var canReconnect: Bool { false }
+    var reconnectStatus: String? { nil }
+    func reconnect() {}
 }
 
 @MainActor
@@ -189,6 +198,19 @@ final class ProgramOutputManager: ObservableObject {
         return "\(preferredRoute.title) is not available yet, so output is falling back to \(activeRoute.title)."
     }
 
+    var preferredSinkCanReconnect: Bool {
+        sink(for: preferredRoute)?.canReconnect ?? false
+    }
+
+    var preferredSinkReconnectStatus: String? {
+        sink(for: preferredRoute)?.reconnectStatus
+    }
+
+    func reconnectPreferredRoute() {
+        sink(for: preferredRoute)?.reconnect()
+        refreshStatuses()
+    }
+
     private var activeSink: (any ProgramOutputSink)? {
         guard let activeRoute else { return nil }
         return sink(for: activeRoute)
@@ -298,6 +320,26 @@ struct ProgramOutputSettingsView: View {
                     .padding(.vertical, 4)
                 }
             }
+
+            if programOutput.preferredSinkCanReconnect {
+                Section("Recovery") {
+                    Button {
+                        programOutput.reconnectPreferredRoute()
+                    } label: {
+                        Label("Reconnect Output", systemImage: "arrow.clockwise.circle")
+                    }
+
+                    if let reconnectStatus = programOutput.preferredSinkReconnectStatus {
+                        Text(reconnectStatus)
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    } else {
+                        Text("Force the preferred output route to tear down the current XPC connection and reconnect immediately.")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                }
+            }
         }
         .formStyle(.grouped)
         .frame(width: 420, height: 420)
@@ -315,9 +357,12 @@ private final class PreviewOutputSink: ProgramOutputSink {
     var summary: String { "Preview route is available." }
     var detail: String { "Used only for the SwiftUI preview." }
     var lastErrorDescription: String? { nil }
+    var canReconnect: Bool { false }
+    var reconnectStatus: String? { nil }
     var onStateChange: (() -> Void)?
     func connect() {}
     func disconnect() {}
+    func reconnect() {}
     func updateCaptureStatus(isRunning: Bool) {}
     func sendFrame(pixelBuffer: CVPixelBuffer, timestamp: Double) {}
 }

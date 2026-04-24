@@ -119,6 +119,11 @@ final class CameraManager: NSObject, ObservableObject {
     /// Used to skip the per-frame update when aspect is unchanged.
     private var lastAppliedSourceAspect: CGFloat = 0
 
+    private nonisolated func frameLog(_ message: @autoclosure () -> String) {
+        guard DeveloperFlags.verboseFrameLogging else { return }
+        print(message())
+    }
+
     // MARK: - Configuration Constants
     
     private enum Config {
@@ -615,12 +620,24 @@ private final class VirtualCameraOutputSink: ProgramOutputSink {
         xpcManager.lastErrorDescription
     }
 
+    var canReconnect: Bool {
+        xpcManager.canReconnect
+    }
+
+    var reconnectStatus: String? {
+        xpcManager.reconnectStatusDescription
+    }
+
     func connect() {
         xpcManager.connect()
     }
 
     func disconnect() {
         xpcManager.disconnect()
+    }
+
+    func reconnect() {
+        xpcManager.forceReconnect()
     }
 
     func updateCaptureStatus(isRunning: Bool) {
@@ -665,6 +682,7 @@ private final class BlackmagicOutputSink: ProgramOutputSink {
 
     func connect() {}
     func disconnect() {}
+    func reconnect() {}
     func updateCaptureStatus(isRunning: Bool) {}
     func sendFrame(pixelBuffer: CVPixelBuffer, timestamp: Double) {}
 }
@@ -734,10 +752,10 @@ extension CameraManager: AVCaptureVideoDataOutputSampleBufferDelegate {
             var programImage = ciImage
             var outputPixelBuffer = pixelBuffer
             if self.cropEnabled, let cropEngine = self.cropEngine {
-                print("🔍 DEBUG: Crop enabled, starting crop processing...")
+                self.frameLog("🔍 DEBUG: Crop enabled, starting crop processing...")
 
                 if self.trackingPaused {
-                    print("🔍 DEBUG: Tracking paused, holding wide safety shot")
+                    self.frameLog("🔍 DEBUG: Tracking paused, holding wide safety shot")
                 } else if self.useMLAgent {
                     // Task APP-02 / LOGIC-01: ML agent or rule-based shot composer
                     // RL agent: velocity-based crop control (no deadzone, low smoothing)
@@ -751,27 +769,27 @@ extension CameraManager: AVCaptureVideoDataOutputSampleBufferDelegate {
                     // Rule-based shot composer (LOGIC-01)
                     cropEngine.config.transitionSmoothing = self.shotComposer.config.smoothingFactor
                     if let primaryPerson {
-                        print("🔍 DEBUG: Composing shot for person at \(primaryPerson.boundingBox)")
+                        self.frameLog("🔍 DEBUG: Composing shot for person at \(primaryPerson.boundingBox)")
                         if let idealCrop = self.shotComposer.compose(person: primaryPerson) {
                             cropEngine.targetCrop = idealCrop
                         }
                         // nil = within deadzone, CropEngine continues interpolating to last target
                     } else {
-                        print("🔍 DEBUG: No persons detected, holding last position")
+                        self.frameLog("🔍 DEBUG: No persons detected, holding last position")
                     }
                 }
 
                 // Process crop (heavy GPU work)
-                print("🔍 DEBUG: About to call processCrop...")
+                self.frameLog("🔍 DEBUG: About to call processCrop...")
                 do {
                     let croppedBuffer = try await cropEngine.processCrop(pixelBuffer)
-                    print("🔍 DEBUG: processCrop returned successfully")
+                    self.frameLog("🔍 DEBUG: processCrop returned successfully")
                     programImage = CIImage(cvPixelBuffer: croppedBuffer)
                     outputPixelBuffer = croppedBuffer
                 } catch {
                     print("❌ Crop processing failed: \(error)")
                 }
-                print("🔍 DEBUG: Crop processing complete")
+                self.frameLog("🔍 DEBUG: Crop processing complete")
             }
 
             // Task 3.1 (RL-01): Record training data
@@ -802,6 +820,6 @@ extension CameraManager: AVCaptureVideoDataOutputSampleBufferDelegate {
         from connection: AVCaptureConnection
     ) {
         // Performance monitoring: frame drops indicate system overload
-        print("⚠️ Dropped frame")
+        frameLog("⚠️ Dropped frame")
     }
 }

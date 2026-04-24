@@ -19,4 +19,13 @@ enum DeveloperFlags {
     /// compiled in regardless; this only controls whether operators can
     /// start/stop recordings from the toolbar.
     static let exposeTrainingRecorderControls = false
+
+    /// Enables verbose per-frame logging in the capture loop. Keep this off
+    /// for operator-facing builds because it can emit hundreds of log lines
+    /// per second while tracking is active.
+    static let verboseFrameLogging = false
+
+    /// Enables verbose GPU render tracing inside CropEngine. Useful when
+    /// diagnosing Metal or crop-geometry issues, but too noisy for normal use.
+    static let verboseRenderLogging = false
 }

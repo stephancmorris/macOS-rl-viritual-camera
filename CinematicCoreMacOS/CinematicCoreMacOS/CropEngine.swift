@@ -71,6 +71,11 @@ final class CropEngine: ObservableObject {
     private let pipelineState: MTLComputePipelineState
     private nonisolated(unsafe) let textureCache: CVMetalTextureCache
     private let ciContext: CIContext
+
+    private nonisolated func renderLog(_ message: @autoclosure () -> String) {
+        guard DeveloperFlags.verboseRenderLogging else { return }
+        print(message())
+    }
     
     // MARK: - Crop Rectangle Model
     
@@ -222,41 +227,41 @@ final class CropEngine: ObservableObject {
     /// - Parameter pixelBuffer: Input video frame
     /// - Returns: Cropped and scaled pixel buffer
     nonisolated func processCrop(_ pixelBuffer: CVPixelBuffer) async throws -> CVPixelBuffer {
-        print("🔧 CropEngine.processCrop: START")
+        renderLog("🔧 CropEngine.processCrop: START")
         let startTime = CACurrentMediaTime()
 
         // Get ALL data from main actor before doing any work
-        print("🔧 CropEngine.processCrop: Getting data from main actor...")
+        renderLog("🔧 CropEngine.processCrop: Getting data from main actor...")
         let (crop, outputSize, smoothingFactor) = await MainActor.run { () -> (CropRect, CGSize, Float) in
-            print("🔧 CropEngine.processCrop: Inside MainActor.run, calling updateInterpolation")
+            self.renderLog("🔧 CropEngine.processCrop: Inside MainActor.run, calling updateInterpolation")
             updateInterpolation()
-            print("🔧 CropEngine.processCrop: updateInterpolation done, returning config")
+            self.renderLog("🔧 CropEngine.processCrop: updateInterpolation done, returning config")
             return (currentCrop, config.outputSize, config.transitionSmoothing)
         }
-        print("🔧 CropEngine.processCrop: Got data - crop: \(crop), outputSize: \(outputSize)")
+        renderLog("🔧 CropEngine.processCrop: Got data - crop: \(crop), outputSize: \(outputSize)")
 
         // Create Metal textures from pixel buffers
-        print("🔧 CropEngine.processCrop: Creating source texture...")
+        renderLog("🔧 CropEngine.processCrop: Creating source texture...")
         guard let sourceTexture = makeTexture(from: pixelBuffer) else {
-            print("🔧 CropEngine.processCrop: FAILED to create source texture")
+            renderLog("🔧 CropEngine.processCrop: FAILED to create source texture")
             throw CropError.textureCreationFailed
         }
-        print("🔧 CropEngine.processCrop: Source texture created: \(sourceTexture.width)x\(sourceTexture.height)")
+        renderLog("🔧 CropEngine.processCrop: Source texture created: \(sourceTexture.width)x\(sourceTexture.height)")
 
         // Create output pixel buffer
-        print("🔧 CropEngine.processCrop: Creating output buffer...")
+        renderLog("🔧 CropEngine.processCrop: Creating output buffer...")
         let outputBuffer = try createOutputBuffer(size: outputSize)
-        print("🔧 CropEngine.processCrop: Output buffer created")
+        renderLog("🔧 CropEngine.processCrop: Output buffer created")
 
-        print("🔧 CropEngine.processCrop: Creating output texture...")
+        renderLog("🔧 CropEngine.processCrop: Creating output texture...")
         guard let outputTexture = makeTexture(from: outputBuffer) else {
-            print("🔧 CropEngine.processCrop: FAILED to create output texture")
+            renderLog("🔧 CropEngine.processCrop: FAILED to create output texture")
             throw CropError.textureCreationFailed
         }
-        print("🔧 CropEngine.processCrop: Output texture created: \(outputTexture.width)x\(outputTexture.height)")
+        renderLog("🔧 CropEngine.processCrop: Output texture created: \(outputTexture.width)x\(outputTexture.height)")
 
         // Perform Metal rendering (GPU work, all off main thread)
-        print("🔧 CropEngine.processCrop: Starting Metal render...")
+        renderLog("🔧 CropEngine.processCrop: Starting Metal render...")
         try render(
             source: sourceTexture,
             destination: outputTexture,
@@ -264,7 +269,7 @@ final class CropEngine: ObservableObject {
             outputSize: outputSize,
             smoothingFactor: smoothingFactor
         )
-        print("🔧 CropEngine.processCrop: Metal render complete")
+        renderLog("🔧 CropEngine.processCrop: Metal render complete")
 
         // Update stats on main actor
         let renderTime = CACurrentMediaTime() - startTime
@@ -272,7 +277,7 @@ final class CropEngine: ObservableObject {
             updateStats(renderTime: renderTime)
         }
 
-        print("🔧 CropEngine.processCrop: END (took \(renderTime * 1000)ms)")
+        renderLog("🔧 CropEngine.processCrop: END (took \(renderTime * 1000)ms)")
         return outputBuffer
     }
     
@@ -356,24 +361,24 @@ final class CropEngine: ObservableObject {
         outputSize: CGSize,
         smoothingFactor: Float
     ) throws {
-        print("🔧 render: START")
-        print("🔧 render: source texture: \(source.width)x\(source.height)")
-        print("🔧 render: destination texture: \(destination.width)x\(destination.height)")
-        print("🔧 render: outputSize: \(outputSize)")
+        renderLog("🔧 render: START")
+        renderLog("🔧 render: source texture: \(source.width)x\(source.height)")
+        renderLog("🔧 render: destination texture: \(destination.width)x\(destination.height)")
+        renderLog("🔧 render: outputSize: \(outputSize)")
 
-        print("🔧 render: Creating command buffer...")
+        renderLog("🔧 render: Creating command buffer...")
         guard let commandBuffer = commandQueue.makeCommandBuffer() else {
-            print("🔧 render: FAILED to create command buffer")
+            renderLog("🔧 render: FAILED to create command buffer")
             throw CropError.renderingFailed
         }
-        print("🔧 render: Command buffer created")
+        renderLog("🔧 render: Command buffer created")
 
-        print("🔧 render: Creating compute encoder...")
+        renderLog("🔧 render: Creating compute encoder...")
         guard let encoder = commandBuffer.makeComputeCommandEncoder() else {
-            print("🔧 render: FAILED to create compute encoder")
+            renderLog("🔧 render: FAILED to create compute encoder")
             throw CropError.renderingFailed
         }
-        print("🔧 render: Compute encoder created")
+        renderLog("🔧 render: Compute encoder created")
 
         encoder.setComputePipelineState(pipelineState)
         encoder.setTexture(source, index: 0)
@@ -389,7 +394,7 @@ final class CropEngine: ObservableObject {
             ),
             smoothingFactor: smoothingFactor
         )
-        print("🔧 render: CropParams - origin: \(params.cropOrigin), size: \(params.cropSize), output: \(params.outputSize)")
+        renderLog("🔧 render: CropParams - origin: \(params.cropOrigin), size: \(params.cropSize), output: \(params.outputSize)")
 
         encoder.setBytes(&params, length: MemoryLayout<CropParams>.size, index: 0)
 
@@ -397,7 +402,7 @@ final class CropEngine: ObservableObject {
         let w = pipelineState.threadExecutionWidth
         let h = pipelineState.maxTotalThreadsPerThreadgroup / w
         let threadgroupSize = MTLSize(width: w, height: h, depth: 1)
-        print("🔧 render: threadgroupSize: \(threadgroupSize)")
+        renderLog("🔧 render: threadgroupSize: \(threadgroupSize)")
 
         // Calculate grid size
         let gridSize = MTLSize(
@@ -405,26 +410,26 @@ final class CropEngine: ObservableObject {
             height: Int(outputSize.height),
             depth: 1
         )
-        print("🔧 render: gridSize: \(gridSize)")
+        renderLog("🔧 render: gridSize: \(gridSize)")
 
         // Check if device supports non-uniform threadgroups
-        print("🔧 render: Dispatching threads...")
+        renderLog("🔧 render: Dispatching threads...")
         encoder.dispatchThreads(gridSize, threadsPerThreadgroup: threadgroupSize)
         encoder.endEncoding()
-        print("🔧 render: Encoder ended, committing...")
+        renderLog("🔧 render: Encoder ended, committing...")
 
         commandBuffer.commit()
-        print("🔧 render: Committed, waiting for completion...")
+        renderLog("🔧 render: Committed, waiting for completion...")
 
         // Wait and check for errors - THIS IS LIKELY WHERE IT HANGS
         commandBuffer.waitUntilCompleted()
-        print("🔧 render: Completed!")
+        renderLog("🔧 render: Completed!")
 
         if let error = commandBuffer.error {
             print("❌ Metal command buffer error: \(error)")
             throw CropError.renderingFailed
         }
-        print("🔧 render: END (success)")
+        renderLog("🔧 render: END (success)")
     }
     
     private nonisolated func makeTexture(from pixelBuffer: CVPixelBuffer) -> MTLTexture? {
