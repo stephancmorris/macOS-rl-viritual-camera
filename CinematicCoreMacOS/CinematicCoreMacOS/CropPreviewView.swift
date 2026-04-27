@@ -129,13 +129,18 @@ struct CropSettingsView: View {
                     Text(cameraManager.shotComposer.config.frameProfile.detail)
                         .font(.caption)
                         .foregroundStyle(.secondary)
-                    
-                    Picker("Resolution", selection: $cropEngine.config.outputSize) {
-                        ForEach(resolutionOptions, id: \.0) { option in
-                            Text(option.0).tag(option.1)
+
+                    if cameraManager.shotComposer.config.frameProfile == .livestream {
+                        LabeledContent("MVP Output", value: "1920 × 1080 (Locked)")
+                            .font(.caption)
+                    } else {
+                        Picker("Resolution", selection: $cropEngine.config.outputSize) {
+                            ForEach(resolutionOptions, id: \.0) { option in
+                                Text(option.0).tag(option.1)
+                            }
                         }
+                        .pickerStyle(.menu)
                     }
-                    .pickerStyle(.menu)
                 }
                 
                 // Transition Smoothing

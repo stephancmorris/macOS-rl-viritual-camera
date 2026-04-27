@@ -12,11 +12,14 @@ import CoreVideo
 import CoreImage
 import QuartzCore
 import Combine
+import OSLog
 
 /// High-performance Metal-based crop and scale engine
 /// Maintains full quality while extracting regions from 4K video
 @MainActor
 final class CropEngine: ObservableObject {
+    private nonisolated static let logger = Logger(subsystem: "com.alfie", category: "CropEngine")
+    private nonisolated static let signposter = OSSignposter(logger: logger)
 
     // MARK: - Configuration
 
@@ -74,7 +77,8 @@ final class CropEngine: ObservableObject {
 
     private nonisolated func renderLog(_ message: @autoclosure () -> String) {
         guard DeveloperFlags.verboseRenderLogging else { return }
-        print(message())
+        let resolvedMessage = message()
+        Self.logger.debug("\(resolvedMessage, privacy: .public)")
     }
     
     // MARK: - Crop Rectangle Model
@@ -163,14 +167,14 @@ final class CropEngine: ObservableObject {
     init?() {
         // Get Metal device
         guard let device = MTLCreateSystemDefaultDevice() else {
-            print("❌ Metal is not supported on this device")
+            Self.logger.error("Metal is not supported on this device")
             return nil
         }
         self.device = device
         
         // Create command queue
         guard let queue = device.makeCommandQueue() else {
-            print("❌ Failed to create Metal command queue")
+            Self.logger.error("Failed to create Metal command queue")
             return nil
         }
         self.commandQueue = queue
@@ -178,17 +182,17 @@ final class CropEngine: ObservableObject {
         // Load Metal library and create pipeline
         guard let library = device.makeDefaultLibrary(),
               let cropFunction = library.makeFunction(name: "cropAndScale") else {
-            print("❌ Failed to load Metal shader library")
+            Self.logger.error("Failed to load Metal shader library")
             return nil
         }
-        
+
         do {
             self.pipelineState = try device.makeComputePipelineState(function: cropFunction)
-            print("✅ Created compute pipeline state")
-            print("   - Thread execution width: \(pipelineState.threadExecutionWidth)")
-            print("   - Max threads per threadgroup: \(pipelineState.maxTotalThreadsPerThreadgroup)")
+            Self.logger.notice("Created compute pipeline state")
+            Self.logger.debug("Thread execution width: \(self.pipelineState.threadExecutionWidth)")
+            Self.logger.debug("Max threads per threadgroup: \(self.pipelineState.maxTotalThreadsPerThreadgroup)")
         } catch {
-            print("❌ Failed to create compute pipeline: \(error)")
+            Self.logger.error("Failed to create compute pipeline: \(error.localizedDescription, privacy: .public)")
             return nil
         }
         
@@ -201,9 +205,9 @@ final class CropEngine: ObservableObject {
             nil,
             &cache
         )
-        
+
         guard result == kCVReturnSuccess, let textureCache = cache else {
-            print("❌ Failed to create texture cache")
+            Self.logger.error("Failed to create texture cache")
             return nil
         }
         self.textureCache = textureCache
@@ -218,7 +222,7 @@ final class CropEngine: ObservableObject {
             ]
         )
         
-        print("✅ CropEngine initialized with Metal device: \(device.name)")
+        Self.logger.notice("CropEngine initialized with Metal device: \(device.name, privacy: .public)")
     }
     
     // MARK: - Public Methods
@@ -228,6 +232,10 @@ final class CropEngine: ObservableObject {
     /// - Returns: Cropped and scaled pixel buffer
     nonisolated func processCrop(_ pixelBuffer: CVPixelBuffer) async throws -> CVPixelBuffer {
         renderLog("🔧 CropEngine.processCrop: START")
+        let cropInterval = Self.signposter.beginInterval("cropRender")
+        defer {
+            Self.signposter.endInterval("cropRender", cropInterval)
+        }
         let startTime = CACurrentMediaTime()
 
         // Get ALL data from main actor before doing any work
@@ -426,7 +434,7 @@ final class CropEngine: ObservableObject {
         renderLog("🔧 render: Completed!")
 
         if let error = commandBuffer.error {
-            print("❌ Metal command buffer error: \(error)")
+            Self.logger.error("Metal command buffer error: \(error.localizedDescription, privacy: .public)")
             throw CropError.renderingFailed
         }
         renderLog("🔧 render: END (success)")

@@ -9,6 +9,7 @@ import Combine
 import CoreGraphics
 import CoreVideo
 import Foundation
+import OSLog
 import SwiftUI
 
 @MainActor
@@ -18,6 +19,7 @@ protocol ProgramOutputSink: AnyObject {
     var summary: String { get }
     var detail: String { get }
     var lastErrorDescription: String? { get }
+    var lastFrameSendDuration: TimeInterval? { get }
     var canReconnect: Bool { get }
     var reconnectStatus: String? { get }
     var onStateChange: (() -> Void)? { get set }
@@ -26,10 +28,12 @@ protocol ProgramOutputSink: AnyObject {
     func disconnect()
     func reconnect()
     func updateCaptureStatus(isRunning: Bool)
-    func sendFrame(pixelBuffer: CVPixelBuffer, timestamp: Double)
+    @discardableResult
+    func sendFrame(pixelBuffer: CVPixelBuffer, timestamp: Double) -> Bool
 }
 
 extension ProgramOutputSink {
+    var lastFrameSendDuration: TimeInterval? { nil }
     var canReconnect: Bool { false }
     var reconnectStatus: String? { nil }
     func reconnect() {}
@@ -37,6 +41,44 @@ extension ProgramOutputSink {
 
 @MainActor
 final class ProgramOutputManager: ObservableObject {
+    private let logger = Logger(subsystem: "com.alfie", category: "ProgramOutput")
+
+    enum LatencyStage: String, CaseIterable, Identifiable {
+        case detection
+        case compose
+        case cropRender
+        case xpcSend
+        case total
+
+        var id: String { rawValue }
+
+        var title: String {
+            switch self {
+            case .detection:
+                return "Detection"
+            case .compose:
+                return "Compose"
+            case .cropRender:
+                return "Crop Render"
+            case .xpcSend:
+                return "XPC Send"
+            case .total:
+                return "Total"
+            }
+        }
+    }
+
+    struct StageLatency: Identifiable {
+        let stage: LatencyStage
+        let averageDuration: TimeInterval
+
+        var id: LatencyStage { stage }
+    }
+
+    private struct TimedDuration {
+        let timestamp: TimeInterval
+        let duration: TimeInterval
+    }
 
     enum Route: String, CaseIterable, Identifiable {
         case virtualCamera
@@ -114,11 +156,18 @@ final class ProgramOutputManager: ObservableObject {
     @Published private(set) var activeRoute: Route?
     @Published private(set) var sinkStatuses: [SinkStatus] = []
     @Published private(set) var framesSent: Int = 0
+    @Published private(set) var droppedFrames: Int = 0
+    @Published private(set) var dropRatePerMinute: Double = 0
     @Published private(set) var lastFrameSize: CGSize?
     @Published private(set) var lastFrameTimestamp: Double?
+    @Published private(set) var lastDropTimestamp: Double?
+    @Published private(set) var lastDropReason: String?
+    @Published private(set) var stageLatencies: [StageLatency] = []
 
     private let sinks: [any ProgramOutputSink]
     private var isCaptureRunning = false
+    private var dropTimestamps: [Double] = []
+    private var latencySamples: [LatencyStage: [TimedDuration]] = [:]
 
     init(sinks: [any ProgramOutputSink] = []) {
         self.sinks = sinks
@@ -132,8 +181,15 @@ final class ProgramOutputManager: ObservableObject {
 
     func start() {
         framesSent = 0
+        droppedFrames = 0
+        dropRatePerMinute = 0
         lastFrameSize = nil
         lastFrameTimestamp = nil
+        lastDropTimestamp = nil
+        lastDropReason = nil
+        dropTimestamps = []
+        latencySamples = [:]
+        stageLatencies = []
         sinks.forEach { $0.connect() }
         refreshRoutingDecision()
     }
@@ -173,9 +229,43 @@ final class ProgramOutputManager: ObservableObject {
         )
         lastFrameTimestamp = timestamp
 
-        activeSink.sendFrame(pixelBuffer: pixelBuffer, timestamp: timestamp)
+        let didSend = activeSink.sendFrame(pixelBuffer: pixelBuffer, timestamp: timestamp)
+        if !didSend {
+            recordDroppedFrame(
+                timestamp: timestamp,
+                reason: "Active output route did not accept the frame."
+            )
+            refreshStatuses()
+            return
+        }
+        if let sendDuration = activeSink.lastFrameSendDuration {
+            recordLatency(stage: .xpcSend, duration: sendDuration)
+        }
         framesSent += 1
         refreshStatuses()
+    }
+
+    func recordDroppedFrame(timestamp: Double, reason: String) {
+        droppedFrames += 1
+        lastDropTimestamp = timestamp
+        lastDropReason = reason
+        dropTimestamps.append(timestamp)
+        trimDropTimestamps(relativeTo: timestamp)
+        dropRatePerMinute = Double(dropTimestamps.count)
+        logger.warning("Dropped frame: \(reason, privacy: .public)")
+    }
+
+    func recordLatency(
+        stage: LatencyStage,
+        duration: TimeInterval,
+        timestamp: TimeInterval = CACurrentMediaTime()
+    ) {
+        var samples = latencySamples[stage, default: []]
+        samples.append(TimedDuration(timestamp: timestamp, duration: duration))
+        let windowStart = timestamp - 5
+        samples.removeAll { $0.timestamp < windowStart }
+        latencySamples[stage] = samples
+        refreshLatencySnapshot()
     }
 
     var activeRouteTitle: String {
@@ -257,6 +347,19 @@ final class ProgramOutputManager: ObservableObject {
             )
         }
     }
+
+    private func trimDropTimestamps(relativeTo timestamp: Double) {
+        let windowStart = timestamp - 60
+        dropTimestamps.removeAll { $0 < windowStart }
+    }
+
+    private func refreshLatencySnapshot() {
+        stageLatencies = LatencyStage.allCases.compactMap { stage in
+            guard let samples = latencySamples[stage], !samples.isEmpty else { return nil }
+            let total = samples.reduce(0) { $0 + $1.duration }
+            return StageLatency(stage: stage, averageDuration: total / Double(samples.count))
+        }
+    }
 }
 
 struct ProgramOutputSettingsView: View {
@@ -281,6 +384,11 @@ struct ProgramOutputSettingsView: View {
 
             Section("Program Feed") {
                 LabeledContent("Frames Sent", value: "\(programOutput.framesSent)")
+                LabeledContent("Dropped Frames", value: "\(programOutput.droppedFrames)")
+                LabeledContent(
+                    "Drop Rate",
+                    value: String(format: "%.0f/min", programOutput.dropRatePerMinute)
+                )
 
                 if let size = programOutput.lastFrameSize {
                     LabeledContent(
@@ -297,10 +405,35 @@ struct ProgramOutputSettingsView: View {
                         value: String(format: "%.3fs", timestamp)
                     )
                 }
+
+                if let lastDropTimestamp = programOutput.lastDropTimestamp {
+                    LabeledContent(
+                        "Last Drop",
+                        value: String(format: "%.3fs", lastDropTimestamp)
+                    )
+                }
+
+                if let lastDropReason = programOutput.lastDropReason {
+                    Text(lastDropReason)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+            }
+
+            if !programOutput.stageLatencies.isEmpty {
+                Section("Latency (Last 5 Seconds)") {
+                    ForEach(programOutput.stageLatencies, id: \.id) { latency in
+                        LabeledContent(
+                            latency.stage.title,
+                            value: String(format: "%.1f ms", latency.averageDuration * 1000)
+                        )
+                    }
+                }
             }
 
             Section("Sink Health") {
-                ForEach(programOutput.sinkStatuses) { status in
+                ForEach(programOutput.sinkStatuses, id: \.id) { status in
                     VStack(alignment: .leading, spacing: 4) {
                         HStack {
                             Label(status.route.title, systemImage: status.route.systemImage)
@@ -364,5 +497,5 @@ private final class PreviewOutputSink: ProgramOutputSink {
     func disconnect() {}
     func reconnect() {}
     func updateCaptureStatus(isRunning: Bool) {}
-    func sendFrame(pixelBuffer: CVPixelBuffer, timestamp: Double) {}
+    func sendFrame(pixelBuffer: CVPixelBuffer, timestamp: Double) -> Bool { true }
 }

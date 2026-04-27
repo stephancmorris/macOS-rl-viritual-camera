@@ -10,11 +10,14 @@ import CoreVideo
 import CoreImage
 import Combine
 import IOSurface
+import OSLog
 
 /// Manages the AVCaptureSession pipeline for 4K video capture
 /// Ticket: APP-01 - AVCaptureSession Pipeline
 @MainActor
 final class CameraManager: NSObject, ObservableObject {
+    private nonisolated static let logger = Logger(subsystem: "com.alfie", category: "Camera")
+    private nonisolated static let signposter = OSSignposter(logger: logger)
     
     // MARK: - Published Properties
     
@@ -32,6 +35,21 @@ final class CameraManager: NSObject, ObservableObject {
     
     /// Currently selected camera
     @Published var selectedCamera: CameraDevice?
+
+    /// Preferred frame source for the next session start.
+    @Published var preferredInputSource: InputSource = .liveCamera
+
+    /// Source currently driving the pipeline.
+    @Published private(set) var activeInputSource: InputSource = .liveCamera
+
+    /// Local validation clip selected for Gate 5 playback.
+    @Published private(set) var validationClipURL: URL?
+
+    /// When true, the validation clip repeats until the session is stopped.
+    @Published var loopValidationClip: Bool = true
+
+    /// Operator-facing summary of the current playback harness state.
+    @Published private(set) var validationClipStatus: String = "Select a validation clip to route file playback through Alfie's camera pipeline."
     
     /// Person detector (Task 2.1)
     let personDetector = PersonDetector()
@@ -104,6 +122,31 @@ final class CameraManager: NSObject, ObservableObject {
             "\(name) - \(maxResolution)"
         }
     }
+
+    enum InputSource: String, CaseIterable, Identifiable {
+        case liveCamera
+        case validationClip
+
+        var id: String { rawValue }
+
+        var title: String {
+            switch self {
+            case .liveCamera:
+                return "Live Camera"
+            case .validationClip:
+                return "Validation Clip"
+            }
+        }
+
+        var systemImage: String {
+            switch self {
+            case .liveCamera:
+                return "camera"
+            case .validationClip:
+                return "film.stack"
+            }
+        }
+    }
     
     // MARK: - Private Properties
     
@@ -114,6 +157,15 @@ final class CameraManager: NSObject, ObservableObject {
         qos: .userInteractive
     )
     private var cancellables = Set<AnyCancellable>()
+    private var clipPlaybackTask: Task<Void, Never>?
+
+    private final class SendablePixelBufferBox: @unchecked Sendable {
+        let pixelBuffer: CVPixelBuffer
+
+        init(_ pixelBuffer: CVPixelBuffer) {
+            self.pixelBuffer = pixelBuffer
+        }
+    }
 
     /// Last source pixel aspect (width/height) forwarded to the shot composer.
     /// Used to skip the per-frame update when aspect is unchanged.
@@ -121,7 +173,8 @@ final class CameraManager: NSObject, ObservableObject {
 
     private nonisolated func frameLog(_ message: @autoclosure () -> String) {
         guard DeveloperFlags.verboseFrameLogging else { return }
-        print(message())
+        let resolvedMessage = message()
+        Self.logger.debug("\(resolvedMessage, privacy: .public)")
     }
 
     // MARK: - Configuration Constants
@@ -140,6 +193,9 @@ final class CameraManager: NSObject, ObservableObject {
         case sessionConfigurationFailed
         case unsupportedFormat
         case authorizationDenied
+        case noValidationClipSelected
+        case invalidValidationClip
+        case validationClipPlaybackFailed(String)
         
         var errorDescription: String? {
             switch self {
@@ -151,6 +207,12 @@ final class CameraManager: NSObject, ObservableObject {
                 return "Camera does not support 4K capture"
             case .authorizationDenied:
                 return "Camera access denied"
+            case .noValidationClipSelected:
+                return "Choose a validation clip before starting clip playback"
+            case .invalidValidationClip:
+                return "The selected validation clip does not contain a readable video track"
+            case .validationClipPlaybackFailed(let message):
+                return "Validation clip playback failed: \(message)"
             }
         }
     }
@@ -164,9 +226,9 @@ final class CameraManager: NSObject, ObservableObject {
         super.init()
         
         if cropEngine == nil {
-            print("⚠️ CropEngine failed to initialize - Metal may not be available")
+            Self.logger.warning("CropEngine failed to initialize - Metal may not be available")
         } else {
-            print("✅ CropEngine initialized successfully")
+            Self.logger.notice("CropEngine initialized successfully")
         }
 
         configureFramingBindings()
@@ -180,7 +242,7 @@ final class CameraManager: NSObject, ObservableObject {
     
     /// Discover and list all available cameras
     func discoverCameras() {
-        print("\n🔍 Discovering cameras...")
+        Self.logger.notice("Discovering cameras")
         
         let discoverySession = AVCaptureDevice.DiscoverySession(
             deviceTypes: [.builtInWideAngleCamera, .external],
@@ -225,7 +287,7 @@ final class CameraManager: NSObject, ObservableObject {
             }
             let maxResString = maxRes.map { "\($0.width)x\($0.height)" } ?? "Unknown"
             
-            print("   - \(device.localizedName): \(maxResString)\(supports4K ? " (4K)" : "")")
+            Self.logger.debug("Camera discovered: \(device.localizedName, privacy: .public) \(maxResString, privacy: .public)\(supports4K ? " (4K)" : "")")
             
             let cameraDevice = CameraDevice(
                 id: device.uniqueID,
@@ -245,51 +307,63 @@ final class CameraManager: NSObject, ObservableObject {
         if selectedCamera == nil {
             selectedCamera = cameraDevices.first { $0.supports4K } ?? cameraDevices.first
             if let selected = selectedCamera {
-                print("   ✓ Selected: \(selected.name)")
+                Self.logger.notice("Selected camera: \(selected.name, privacy: .public)")
             }
         }
     }
     
     /// Request camera permissions and start the capture session
     func startCapture() async throws {
-        print("\n▶️ Starting capture...")
+        let sourceTitle = preferredInputSource.title
+        Self.logger.notice("Starting capture from \(sourceTitle, privacy: .public)")
         programOutput.start()
+
+        if preferredInputSource == .validationClip {
+            do {
+                try await startValidationClipPlayback()
+            } catch {
+                programOutput.stop()
+                throw error
+            }
+            return
+        }
         
         // Check authorization
         let authorized = await checkAuthorization()
         guard authorized else {
-            print("   ❌ Authorization denied")
+            Self.logger.error("Camera authorization denied")
             error = .authorizationDenied
             programOutput.stop()
             throw CameraError.authorizationDenied
         }
-        print("   ✓ Camera authorized")
+        Self.logger.notice("Camera authorized")
         
         // Refresh camera list if no camera selected
         if selectedCamera == nil {
-            print("   Discovering cameras...")
+            Self.logger.debug("No selected camera; rediscovering cameras")
             discoverCameras()
         }
         
         // Configure session
-        print("   Configuring session...")
+        Self.logger.notice("Configuring capture session")
         do {
             try await configureSession()
         } catch {
             programOutput.stop()
             throw error
         }
-        print("   ✓ Session configured")
+        Self.logger.notice("Capture session configured")
         
         // Start running
         await MainActor.run {
             captureSession.startRunning()
             isRunning = captureSession.isRunning
+            activeInputSource = .liveCamera
             if isRunning {
-                print("   ✓ Capture started successfully")
+                Self.logger.notice("Capture started successfully")
                 programOutput.updateCaptureStatus(isRunning: true)
             } else {
-                print("   ⚠️ Session not running after startRunning() call")
+                Self.logger.warning("Session not running after startRunning()")
                 programOutput.stop()
             }
         }
@@ -297,15 +371,23 @@ final class CameraManager: NSObject, ObservableObject {
     
     /// Stop the capture session
     func stopCapture() {
-        print("   ⏹️ Stopping capture...")
+        Self.logger.notice("Stopping capture")
+        clipPlaybackTask?.cancel()
+        clipPlaybackTask = nil
         programOutput.updateCaptureStatus(isRunning: false)
-        captureSession.stopRunning()
+        if captureSession.isRunning {
+            captureSession.stopRunning()
+        }
         programOutput.stop()
         isRunning = false
+        activeInputSource = preferredInputSource
         trackingPaused = false
         shotComposer.reset(clearManualLock: true)
         cinematicAgent.reset()
-        print("   ✓ Capture stopped")
+        if validationClipURL != nil, preferredInputSource == .validationClip {
+            validationClipStatus = "Validation clip stopped."
+        }
+        Self.logger.notice("Capture stopped")
     }
 
     /// Hold a wide safety shot while keeping the output path active.
@@ -340,12 +422,12 @@ final class CameraManager: NSObject, ObservableObject {
     
     /// Restart capture with a different camera
     func restartWithCamera(_ cameraDevice: CameraDevice) async throws {
-        print("\n🔄 Switching to camera: \(cameraDevice.name)")
+        Self.logger.notice("Switching to camera: \(cameraDevice.name, privacy: .public)")
         
         // Stop current session
-        let wasRunning = isRunning
+        let wasRunning = isRunning && activeInputSource == .liveCamera
         if wasRunning {
-            print("   Stopping current session...")
+            Self.logger.debug("Stopping current session before camera switch")
             stopCapture()
             // Give the session time to fully stop
             try await Task.sleep(for: .milliseconds(500))
@@ -353,13 +435,30 @@ final class CameraManager: NSObject, ObservableObject {
         
         // Update selected camera
         selectedCamera = cameraDevice
-        print("   ✓ Selected camera updated")
+        Self.logger.notice("Selected camera updated")
         
         // Start new session if it was running before
         if wasRunning {
-            print("   Starting new session...")
+            Self.logger.debug("Restarting capture after camera switch")
             try await startCapture()
         }
+    }
+
+    func setValidationClipURL(_ url: URL?) {
+        validationClipURL = url
+        if let url {
+            validationClipStatus = "Ready to play \(url.lastPathComponent). Start Session to route it through the live pipeline."
+        } else {
+            validationClipStatus = "Select a validation clip to route file playback through Alfie's camera pipeline."
+        }
+    }
+
+    var selectedValidationClipName: String {
+        validationClipURL?.lastPathComponent ?? "No Clip Selected"
+    }
+
+    var shouldPreflightVirtualCameraInstallation: Bool {
+        preferredInputSource == .liveCamera
     }
     
     // MARK: - Private Methods
@@ -390,9 +489,293 @@ final class CameraManager: NSObject, ObservableObject {
     private func applyFrameProfile(_ profile: ShotComposer.Config.FrameProfile) {
         guard let cropEngine else { return }
 
-        let desiredSize = profile.defaultOutputSize
+        let desiredSize: CGSize
+        switch profile {
+        case .livestream:
+            desiredSize = CGSize(width: 1920, height: 1080)
+        case .portrait:
+            desiredSize = profile.defaultOutputSize
+        }
         if cropEngine.config.outputSize != desiredSize {
             cropEngine.config.outputSize = desiredSize
+        }
+    }
+
+    private func startValidationClipPlayback() async throws {
+        guard let validationClipURL else {
+            error = .noValidationClipSelected
+            throw CameraError.noValidationClipSelected
+        }
+
+        if captureSession.isRunning {
+            captureSession.stopRunning()
+        }
+
+        error = nil
+        isRunning = true
+        activeInputSource = .validationClip
+        trackingPaused = false
+        shotComposer.reset(clearManualLock: true)
+        cinematicAgent.reset()
+        currentFrame = nil
+        croppedFrame = nil
+        detectionCroppedFrame = nil
+        validationClipStatus = "Preparing \(validationClipURL.lastPathComponent)…"
+        programOutput.updateCaptureStatus(isRunning: true)
+
+        clipPlaybackTask?.cancel()
+        clipPlaybackTask = Task.detached(priority: .userInitiated) { [weak self] in
+            guard let self else { return }
+
+            do {
+                repeat {
+                    try await Self.playValidationClip(from: validationClipURL) { pixelBufferBox, timestampSeconds in
+                        await self.processValidationFrame(
+                            pixelBufferBox,
+                            timestampSeconds: timestampSeconds
+                        )
+                    }
+
+                    let shouldLoop = await self.loopValidationClip
+                    if !shouldLoop || Task.isCancelled {
+                        break
+                    }
+
+                    await self.updateValidationClipStatus(
+                        "Looping \(validationClipURL.lastPathComponent)…"
+                    )
+                } while !Task.isCancelled
+
+                await self.finishValidationClipPlayback(cancelled: Task.isCancelled)
+            } catch is CancellationError {
+                await self.finishValidationClipPlayback(cancelled: true)
+            } catch {
+                await self.handleValidationClipFailure(error)
+            }
+        }
+    }
+
+    private func processFrame(pixelBuffer: CVPixelBuffer, timestampSeconds: Double) async {
+        let ciImage = CIImage(cvPixelBuffer: pixelBuffer)
+        let bufferWidth = CGFloat(CVPixelBufferGetWidth(pixelBuffer))
+        let bufferHeight = CGFloat(CVPixelBufferGetHeight(pixelBuffer))
+
+        let captureInterval = Self.signposter.beginInterval("captureFrame")
+        let captureStart = CACurrentMediaTime()
+
+        if bufferHeight > 0 {
+            let bufferAspect = bufferWidth / bufferHeight
+            if abs(bufferAspect - lastAppliedSourceAspect) > 0.001 {
+                lastAppliedSourceAspect = bufferAspect
+                shotComposer.updateSourcePixelAspect(bufferAspect)
+            }
+        }
+
+        let detectionInterval = Self.signposter.beginInterval("detection")
+        let detectionStart = CACurrentMediaTime()
+        let detectedPersons = await personDetector.processFrame(pixelBuffer)
+        let detectionDuration = CACurrentMediaTime() - detectionStart
+        Self.signposter.endInterval("detection", detectionInterval)
+        programOutput.recordLatency(stage: .detection, duration: detectionDuration)
+
+        let composeInterval = Self.signposter.beginInterval("compose")
+        let composeStart = CACurrentMediaTime()
+        let primaryPerson = trackingPaused
+            ? nil
+            : shotComposer.primaryPerson(from: detectedPersons)
+
+        if let person = primaryPerson {
+            let bbox = person.boundingBox
+            let extent = ciImage.extent
+            let cropRect = CGRect(
+                x: bbox.origin.x * extent.width,
+                y: bbox.origin.y * extent.height,
+                width: bbox.width * extent.width,
+                height: bbox.height * extent.height
+            )
+            detectionCroppedFrame = ciImage.cropped(to: cropRect)
+        } else {
+            detectionCroppedFrame = nil
+        }
+
+        var programImage = ciImage
+        var outputPixelBuffer = pixelBuffer
+        if cropEnabled, let cropEngine {
+            frameLog("🔍 DEBUG: Crop enabled, starting crop processing...")
+
+            if trackingPaused {
+                frameLog("🔍 DEBUG: Tracking paused, holding wide safety shot")
+            } else if useMLAgent {
+                cropEngine.config.transitionSmoothing = 0.05
+                let newCrop = cinematicAgent.predict(
+                    person: primaryPerson,
+                    currentCrop: cropEngine.currentCrop
+                )
+                cropEngine.targetCrop = newCrop
+            } else {
+                cropEngine.config.transitionSmoothing = shotComposer.config.smoothingFactor
+                if let primaryPerson {
+                    frameLog("🔍 DEBUG: Composing shot for person at \(primaryPerson.boundingBox)")
+                    if let idealCrop = shotComposer.compose(person: primaryPerson) {
+                        cropEngine.targetCrop = idealCrop
+                    }
+                } else {
+                    frameLog("🔍 DEBUG: No persons detected, holding last position")
+                }
+            }
+            let composeDuration = CACurrentMediaTime() - composeStart
+            Self.signposter.endInterval("compose", composeInterval)
+            programOutput.recordLatency(stage: .compose, duration: composeDuration)
+
+            frameLog("🔍 DEBUG: About to call processCrop...")
+            do {
+                let cropStart = CACurrentMediaTime()
+                let croppedBuffer = try await cropEngine.processCrop(pixelBuffer)
+                let cropDuration = CACurrentMediaTime() - cropStart
+                programOutput.recordLatency(stage: .cropRender, duration: cropDuration)
+                frameLog("🔍 DEBUG: processCrop returned successfully")
+                programImage = CIImage(cvPixelBuffer: croppedBuffer)
+                outputPixelBuffer = croppedBuffer
+            } catch {
+                Self.logger.error("Crop processing failed: \(error.localizedDescription, privacy: .public)")
+                programOutput.recordDroppedFrame(
+                    timestamp: timestampSeconds,
+                    reason: "Crop processing failed: \(error.localizedDescription)"
+                )
+            }
+            frameLog("🔍 DEBUG: Crop processing complete")
+        } else {
+            let composeDuration = CACurrentMediaTime() - composeStart
+            Self.signposter.endInterval("compose", composeInterval)
+            programOutput.recordLatency(stage: .compose, duration: composeDuration)
+        }
+
+        if trainingDataRecorder.isRecording {
+            trainingDataRecorder.recordFrame(
+                timestamp: timestampSeconds,
+                persons: detectedPersons,
+                currentCrop: cropEngine?.currentCrop ?? .fullFrame,
+                idealCrop: useMLAgent
+                    ? cinematicAgent.lastPredictedCrop
+                    : shotComposer.lastComputedCrop,
+                isInterpolating: cropEngine?.isInterpolating ?? false
+            )
+        }
+
+        currentFrame = ciImage
+        croppedFrame = programImage
+        programOutput.sendFrame(outputPixelBuffer, timestamp: timestampSeconds)
+
+        let totalDuration = CACurrentMediaTime() - captureStart
+        programOutput.recordLatency(stage: .total, duration: totalDuration)
+        Self.signposter.endInterval("captureFrame", captureInterval)
+    }
+
+    private func processValidationFrame(
+        _ pixelBufferBox: SendablePixelBufferBox,
+        timestampSeconds: Double
+    ) async {
+        await processFrame(
+            pixelBuffer: pixelBufferBox.pixelBuffer,
+            timestampSeconds: timestampSeconds
+        )
+    }
+
+    private func updateValidationClipStatus(_ status: String) {
+        validationClipStatus = status
+    }
+
+    private func handleValidationClipFailure(_ error: Error) {
+        Self.logger.error("Validation clip playback failed: \(error.localizedDescription, privacy: .public)")
+        self.error = .validationClipPlaybackFailed(error.localizedDescription)
+        validationClipStatus = "Playback failed: \(error.localizedDescription)"
+        finishValidationClipPlayback(cancelled: false)
+    }
+
+    private func finishValidationClipPlayback(cancelled: Bool) {
+        guard activeInputSource == .validationClip || isRunning else { return }
+
+        clipPlaybackTask = nil
+        programOutput.updateCaptureStatus(isRunning: false)
+        programOutput.stop()
+        isRunning = false
+        activeInputSource = preferredInputSource
+        trackingPaused = false
+        shotComposer.reset(clearManualLock: true)
+        cinematicAgent.reset()
+
+        if let validationClipURL {
+            validationClipStatus = cancelled
+                ? "Stopped \(validationClipURL.lastPathComponent)."
+                : "Finished \(validationClipURL.lastPathComponent)."
+        } else {
+            validationClipStatus = cancelled
+                ? "Validation clip stopped."
+                : "Validation clip finished."
+        }
+    }
+
+    private nonisolated static func playValidationClip(
+        from url: URL,
+        onFrame: @escaping @Sendable (SendablePixelBufferBox, Double) async -> Void
+    ) async throws {
+        let asset = AVURLAsset(url: url)
+        let videoTracks = try await asset.loadTracks(withMediaType: .video)
+        guard let videoTrack = videoTracks.first else {
+            throw CameraError.invalidValidationClip
+        }
+
+        let reader = try AVAssetReader(asset: asset)
+        let output = AVAssetReaderTrackOutput(
+            track: videoTrack,
+            outputSettings: [
+                kCVPixelBufferPixelFormatTypeKey as String: Int(kCVPixelFormatType_32BGRA),
+                kCVPixelBufferIOSurfacePropertiesKey as String: [:] as CFDictionary,
+                kCVPixelBufferMetalCompatibilityKey as String: true
+            ]
+        )
+        output.alwaysCopiesSampleData = false
+
+        guard reader.canAdd(output) else {
+            throw CameraError.validationClipPlaybackFailed("AVAssetReader could not attach the video output")
+        }
+        reader.add(output)
+
+        guard reader.startReading() else {
+            throw CameraError.validationClipPlaybackFailed(
+                reader.error?.localizedDescription ?? "AVAssetReader failed to start"
+            )
+        }
+
+        var previousTimestamp: Double?
+        while !Task.isCancelled, let sampleBuffer = output.copyNextSampleBuffer() {
+            guard let pixelBuffer = CMSampleBufferGetImageBuffer(sampleBuffer) else {
+                continue
+            }
+
+            let timestampSeconds = CMSampleBufferGetPresentationTimeStamp(sampleBuffer).seconds
+            if let previousTimestamp {
+                let delta = max(0, timestampSeconds - previousTimestamp)
+                if delta > 0 {
+                    try await Task.sleep(
+                        nanoseconds: UInt64((delta * 1_000_000_000).rounded())
+                    )
+                }
+            }
+            previousTimestamp = timestampSeconds
+
+            let pixelBufferBox = SendablePixelBufferBox(pixelBuffer)
+            await onFrame(pixelBufferBox, timestampSeconds)
+        }
+
+        if Task.isCancelled {
+            throw CancellationError()
+        }
+
+        if reader.status == .failed {
+            throw CameraError.validationClipPlaybackFailed(
+                reader.error?.localizedDescription ?? "AVAssetReader failed while reading"
+            )
         }
     }
     
@@ -476,7 +859,7 @@ final class CameraManager: NSObject, ObservableObject {
     }
     
     private func configureCameraDevice(_ device: AVCaptureDevice) throws {
-        print("   🎥 Configuring device: \(device.localizedName)")
+        Self.logger.notice("Configuring device: \(device.localizedName, privacy: .public)")
         
         try device.lockForConfiguration()
         defer { device.unlockForConfiguration() }
@@ -491,7 +874,7 @@ final class CameraManager: NSObject, ObservableObject {
         
         // DEBUG: Print supported frame rates
         let dims = CMVideoFormatDescriptionGetDimensions(format.formatDescription)
-        print("   📊 Format: \(dims.width)x\(dims.height)")
+        Self.logger.notice("Active format: \(dims.width)x\(dims.height)")
 
         if dims.height > 0 {
             let sourceAspect = CGFloat(dims.width) / CGFloat(dims.height)
@@ -499,9 +882,9 @@ final class CameraManager: NSObject, ObservableObject {
             lastAppliedSourceAspect = sourceAspect
         }
 
-        print("   📊 Supported frame rates:")
+        Self.logger.debug("Supported frame rates follow")
         for range in format.videoSupportedFrameRateRanges {
-            print("      - \(range.minFrameRate) to \(range.maxFrameRate) fps")
+            Self.logger.debug("\(range.minFrameRate, privacy: .public) to \(range.maxFrameRate, privacy: .public) fps")
         }
         
         // Set frame rate using EXACT duration from supported range
@@ -509,11 +892,11 @@ final class CameraManager: NSObject, ObservableObject {
         if let range30fps = format.videoSupportedFrameRateRanges.first(where: { range in
             range.minFrameRate <= Config.targetFrameRate && range.maxFrameRate >= Config.targetFrameRate
         }) {
-            print("   ✓ Using 30fps range: min=\(range30fps.minFrameDuration.value)/\(range30fps.minFrameDuration.timescale)")
+            Self.logger.notice("Using 30fps-supported range")
             device.activeVideoMinFrameDuration = range30fps.minFrameDuration
             device.activeVideoMaxFrameDuration = range30fps.maxFrameDuration
         } else {
-            print("   ⚠️ No 30fps range found, using first available")
+            Self.logger.warning("No 30fps range found; using first available range")
             if let firstRange = format.videoSupportedFrameRateRanges.first {
                 device.activeVideoMinFrameDuration = firstRange.minFrameDuration
                 device.activeVideoMaxFrameDuration = firstRange.maxFrameDuration
@@ -578,8 +961,11 @@ extension CameraManager {
 @MainActor
 private final class VirtualCameraOutputSink: ProgramOutputSink {
     let route: ProgramOutputManager.Route = .virtualCamera
+    private static let logger = Logger(subsystem: "com.alfie", category: "VirtualCameraOutput")
+    private static let signposter = OSSignposter(logger: logger)
 
     private let xpcManager = XPCConnectionManager()
+    private(set) var lastFrameSendDuration: TimeInterval?
     var onStateChange: (() -> Void)? {
         didSet {
             xpcManager.onStateChange = onStateChange
@@ -644,10 +1030,14 @@ private final class VirtualCameraOutputSink: ProgramOutputSink {
         xpcManager.remoteProxy()?.updateCaptureStatus(isRunning: isRunning)
     }
 
-    func sendFrame(pixelBuffer: CVPixelBuffer, timestamp: Double) {
+    func sendFrame(pixelBuffer: CVPixelBuffer, timestamp: Double) -> Bool {
+        let sendInterval = Self.signposter.beginInterval("xpcSend")
+        let sendStart = CACurrentMediaTime()
         guard let ioSurface = CVPixelBufferGetIOSurface(pixelBuffer)?.takeUnretainedValue(),
               let proxy = xpcManager.remoteProxy() else {
-            return
+            lastFrameSendDuration = nil
+            Self.signposter.endInterval("xpcSend", sendInterval)
+            return false
         }
 
         proxy.sendVideoFrame(
@@ -656,6 +1046,9 @@ private final class VirtualCameraOutputSink: ProgramOutputSink {
             width: Int32(CVPixelBufferGetWidth(pixelBuffer)),
             height: Int32(CVPixelBufferGetHeight(pixelBuffer))
         )
+        lastFrameSendDuration = CACurrentMediaTime() - sendStart
+        Self.signposter.endInterval("xpcSend", sendInterval)
+        return true
     }
 }
 
@@ -684,7 +1077,7 @@ private final class BlackmagicOutputSink: ProgramOutputSink {
     func disconnect() {}
     func reconnect() {}
     func updateCaptureStatus(isRunning: Bool) {}
-    func sendFrame(pixelBuffer: CVPixelBuffer, timestamp: Double) {}
+    func sendFrame(pixelBuffer: CVPixelBuffer, timestamp: Double) -> Bool { false }
 }
 
 // MARK: - AVCaptureVideoDataOutputSampleBufferDelegate
@@ -707,110 +1100,14 @@ extension CameraManager: AVCaptureVideoDataOutputSampleBufferDelegate {
             return
         }
         
-        // Get presentation timestamp
-        let timestamp = CMSampleBufferGetPresentationTimeStamp(sampleBuffer)
-        let timestampSeconds = timestamp.seconds
-        
-        // Convert to CIImage for display
-        let ciImage = CIImage(cvPixelBuffer: pixelBuffer)
-        
-        let bufferWidth = CGFloat(CVPixelBufferGetWidth(pixelBuffer))
-        let bufferHeight = CGFloat(CVPixelBufferGetHeight(pixelBuffer))
+        let timestampSeconds = CMSampleBufferGetPresentationTimeStamp(sampleBuffer).seconds
 
         // Process frame asynchronously (avoid blocking capture queue)
         Task { @MainActor in
-            if bufferHeight > 0 {
-                let bufferAspect = bufferWidth / bufferHeight
-                if abs(bufferAspect - self.lastAppliedSourceAspect) > 0.001 {
-                    self.lastAppliedSourceAspect = bufferAspect
-                    self.shotComposer.updateSourcePixelAspect(bufferAspect)
-                }
-            }
-
-            // Task 2.1: Run person detection
-            let detectedPersons = await self.personDetector.processFrame(pixelBuffer)
-            let primaryPerson = self.trackingPaused
-                ? nil
-                : self.shotComposer.primaryPerson(from: detectedPersons)
-
-            // Crop raw frame to detection bbox for right panel display (Vision + CIImage share bottom-left origin)
-            if let person = primaryPerson {
-                let bbox = person.boundingBox
-                let extent = ciImage.extent
-                let cropRect = CGRect(
-                    x: bbox.origin.x * extent.width,
-                    y: bbox.origin.y * extent.height,
-                    width: bbox.width * extent.width,
-                    height: bbox.height * extent.height
-                )
-                self.detectionCroppedFrame = ciImage.cropped(to: cropRect)
-            } else {
-                self.detectionCroppedFrame = nil
-            }
-
-            // Task 2.2: Apply crop if enabled (GFX-01)
-            var programImage = ciImage
-            var outputPixelBuffer = pixelBuffer
-            if self.cropEnabled, let cropEngine = self.cropEngine {
-                self.frameLog("🔍 DEBUG: Crop enabled, starting crop processing...")
-
-                if self.trackingPaused {
-                    self.frameLog("🔍 DEBUG: Tracking paused, holding wide safety shot")
-                } else if self.useMLAgent {
-                    // Task APP-02 / LOGIC-01: ML agent or rule-based shot composer
-                    // RL agent: velocity-based crop control (no deadzone, low smoothing)
-                    cropEngine.config.transitionSmoothing = 0.05
-                    let newCrop = self.cinematicAgent.predict(
-                        person: primaryPerson,
-                        currentCrop: cropEngine.currentCrop
-                    )
-                    cropEngine.targetCrop = newCrop
-                } else {
-                    // Rule-based shot composer (LOGIC-01)
-                    cropEngine.config.transitionSmoothing = self.shotComposer.config.smoothingFactor
-                    if let primaryPerson {
-                        self.frameLog("🔍 DEBUG: Composing shot for person at \(primaryPerson.boundingBox)")
-                        if let idealCrop = self.shotComposer.compose(person: primaryPerson) {
-                            cropEngine.targetCrop = idealCrop
-                        }
-                        // nil = within deadzone, CropEngine continues interpolating to last target
-                    } else {
-                        self.frameLog("🔍 DEBUG: No persons detected, holding last position")
-                    }
-                }
-
-                // Process crop (heavy GPU work)
-                self.frameLog("🔍 DEBUG: About to call processCrop...")
-                do {
-                    let croppedBuffer = try await cropEngine.processCrop(pixelBuffer)
-                    self.frameLog("🔍 DEBUG: processCrop returned successfully")
-                    programImage = CIImage(cvPixelBuffer: croppedBuffer)
-                    outputPixelBuffer = croppedBuffer
-                } catch {
-                    print("❌ Crop processing failed: \(error)")
-                }
-                self.frameLog("🔍 DEBUG: Crop processing complete")
-            }
-
-            // Task 3.1 (RL-01): Record training data
-            if self.trainingDataRecorder.isRecording {
-                self.trainingDataRecorder.recordFrame(
-                    timestamp: timestampSeconds,
-                    persons: detectedPersons,
-                    currentCrop: self.cropEngine?.currentCrop ?? .fullFrame,
-                    idealCrop: self.useMLAgent
-                        ? self.cinematicAgent.lastPredictedCrop
-                        : self.shotComposer.lastComputedCrop,
-                    isInterpolating: self.cropEngine?.isInterpolating ?? false
-                )
-            }
-
-            // Update UI (already on main actor)
-            self.currentFrame = ciImage
-            self.croppedFrame = programImage
-
-            // Route the actual program frame to the active output sink.
-            self.programOutput.sendFrame(outputPixelBuffer, timestamp: timestampSeconds)
+            await self.processFrame(
+                pixelBuffer: pixelBuffer,
+                timestampSeconds: timestampSeconds
+            )
         }
     }
     
@@ -821,5 +1118,12 @@ extension CameraManager: AVCaptureVideoDataOutputSampleBufferDelegate {
     ) {
         // Performance monitoring: frame drops indicate system overload
         frameLog("⚠️ Dropped frame")
+        let timestampSeconds = CMSampleBufferGetPresentationTimeStamp(sampleBuffer).seconds
+        Task { @MainActor in
+            self.programOutput.recordDroppedFrame(
+                timestamp: timestampSeconds,
+                reason: "AVCapture dropped a frame before processing."
+            )
+        }
     }
 }

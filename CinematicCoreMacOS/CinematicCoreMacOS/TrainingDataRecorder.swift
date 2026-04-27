@@ -10,11 +10,13 @@ import Foundation
 import Combine
 import CoreGraphics
 import AppKit
+import OSLog
 
 /// Records per-frame training data to JSON Lines files for RL agent training.
 /// Data format is designed for direct consumption by Gymnasium environment (Task 3.2).
 @MainActor
 final class TrainingDataRecorder: ObservableObject {
+    private nonisolated static let logger = Logger(subsystem: "com.alfie", category: "TrainingData")
 
     // MARK: - Configuration
 
@@ -167,7 +169,7 @@ final class TrainingDataRecorder: ObservableObject {
         do {
             try FileManager.default.createDirectory(at: sessionDir, withIntermediateDirectories: true)
         } catch {
-            print("Failed to create session directory: \(error)")
+            Self.logger.error("Failed to create session directory: \(error.localizedDescription, privacy: .public)")
             return
         }
 
@@ -175,7 +177,7 @@ final class TrainingDataRecorder: ObservableObject {
         let framesFile = sessionDir.appendingPathComponent("frames.jsonl")
         FileManager.default.createFile(atPath: framesFile.path, contents: nil)
         guard let handle = FileHandle(forWritingAtPath: framesFile.path) else {
-            print("Failed to open frames.jsonl for writing")
+            Self.logger.error("Failed to open frames.jsonl for writing")
             return
         }
 
@@ -210,7 +212,7 @@ final class TrainingDataRecorder: ObservableObject {
         )
 
         isRecording = true
-        print("Started recording session: \(id)")
+        Self.logger.notice("Started recording session: \(id, privacy: .public)")
     }
 
     /// Stop the current recording session
@@ -253,7 +255,7 @@ final class TrainingDataRecorder: ObservableObject {
         pendingMetadata = nil
         isRecording = false
 
-        print("Stopped recording. Frames: \(stats.framesRecorded)")
+        Self.logger.notice("Stopped recording. Frames: \(self.stats.framesRecorded)")
     }
 
     /// Record a single frame observation

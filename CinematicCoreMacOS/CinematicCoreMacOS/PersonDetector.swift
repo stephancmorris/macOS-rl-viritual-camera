@@ -10,11 +10,14 @@ import CoreImage
 import CoreVideo
 import Combine
 import QuartzCore
+import OSLog
 
 /// Detects and tracks people in video frames using Apple Vision framework
 /// Ticket: VIS-01 - Person Detection
 @MainActor
 final class PersonDetector: ObservableObject {
+    private nonisolated static let logger = Logger(subsystem: "com.alfie", category: "Vision")
+    private nonisolated static let signposter = OSSignposter(logger: logger)
     
     // MARK: - Published Properties
     
@@ -110,6 +113,7 @@ final class PersonDetector: ObservableObject {
     func processFrame(_ pixelBuffer: CVPixelBuffer) async -> [DetectedPerson] {
         guard isEnabled else { return [] }
 
+        let detectionInterval = Self.signposter.beginInterval("visionDetection")
         let startTime = CACurrentMediaTime()
         let configSnapshot = config
 
@@ -120,6 +124,7 @@ final class PersonDetector: ObservableObject {
         )
 
         let detectionTime = CACurrentMediaTime() - startTime
+        Self.signposter.endInterval("visionDetection", detectionInterval)
 
         // Match and update on main actor
         await MainActor.run {
@@ -182,7 +187,7 @@ final class PersonDetector: ObservableObject {
 
                     continuation.resume(returning: (limited, poseResults))
                 } catch {
-                    print("❌ Person detection error: \(error)")
+                    Self.logger.error("Person detection error: \(error.localizedDescription, privacy: .public)")
                     continuation.resume(returning: ([], []))
                 }
             }

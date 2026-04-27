@@ -28,7 +28,7 @@ final class XPCConnectionManager {
     private var reconnectAttemptCount = 0
     private var nextReconnectDelay: TimeInterval?
     private var suppressNextInvalidationReconnect = false
-    private let logger = Logger(subsystem: "com.cinematiccore.app", category: "XPC")
+    private let logger = Logger(subsystem: "com.alfie", category: "XPC")
     private var noConnectionWarningCount = 0
     private let maxNoConnectionWarnings = 10
 

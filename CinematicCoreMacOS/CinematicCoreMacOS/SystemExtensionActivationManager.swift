@@ -9,6 +9,7 @@ import AppKit
 import Combine
 import Foundation
 import OSLog
+import Security
 import SwiftUI
 import SystemExtensions
 
@@ -71,9 +72,11 @@ final class SystemExtensionActivationManager: NSObject, ObservableObject {
     }
 
     private enum PreflightFailure {
+        case developerBuild(URL)
         case appNotInApplications(URL)
         case missingEmbeddedExtension(URL)
         case bundleIdentifierMismatch(expected: String, actual: String, bundleURL: URL)
+        case missingHostEntitlement(URL)
     }
 
     init(defaults: UserDefaults = .standard) {
@@ -379,6 +382,10 @@ final class SystemExtensionActivationManager: NSObject, ObservableObject {
 
     private func preflightFailure() -> PreflightFailure? {
         let bundleURL = Bundle.main.bundleURL.standardizedFileURL
+        if Self.isDeveloperBuildLocation(bundleURL) {
+            return .developerBuild(bundleURL)
+        }
+
         guard Self.isBundleInstalledInApplicationsDirectory(bundleURL) else {
             return .appNotInApplications(bundleURL)
         }
@@ -395,6 +402,10 @@ final class SystemExtensionActivationManager: NSObject, ObservableObject {
                 actual: actualIdentifier,
                 bundleURL: extensionBundleURL
             )
+        }
+
+        guard Self.hostAppCanInstallSystemExtensions(bundleURL) else {
+            return .missingHostEntitlement(bundleURL)
         }
 
         return nil
@@ -422,6 +433,13 @@ final class SystemExtensionActivationManager: NSObject, ObservableObject {
         return nil
     }
 
+    private static func isDeveloperBuildLocation(_ bundleURL: URL) -> Bool {
+        let path = bundleURL.path
+        return path.contains("/DerivedData/")
+            || path.contains("/Build/Products/")
+            || path.contains("/Xcode/Archives/")
+    }
+
     private static func isBundleInstalledInApplicationsDirectory(_ bundleURL: URL) -> Bool {
         let applicationDirectories =
             FileManager.default.urls(for: .applicationDirectory, in: .localDomainMask)
@@ -436,8 +454,45 @@ final class SystemExtensionActivationManager: NSObject, ObservableObject {
         }
     }
 
+    private static func hostAppCanInstallSystemExtensions(_ bundleURL: URL) -> Bool {
+        guard let signingInfo = signingInformation(for: bundleURL),
+              let entitlements = signingInfo[kSecCodeInfoEntitlementsDict as String] as? [String: Any] else {
+            return false
+        }
+
+        return (entitlements["com.apple.developer.system-extension.install"] as? Bool) == true
+    }
+
+    private static func signingInformation(for bundleURL: URL) -> [String: Any]? {
+        var staticCode: SecStaticCode?
+        let createStatus = SecStaticCodeCreateWithPath(bundleURL as CFURL, [], &staticCode)
+        guard createStatus == errSecSuccess, let staticCode else {
+            return nil
+        }
+
+        var signingInfo: CFDictionary?
+        let infoStatus = SecCodeCopySigningInformation(
+            staticCode,
+            SecCSFlags(rawValue: kSecCSSigningInformation),
+            &signingInfo
+        )
+        guard infoStatus == errSecSuccess,
+              let info = signingInfo as? [String: Any] else {
+            return nil
+        }
+
+        return info
+    }
+
     private static func failureDetails(for preflightFailure: PreflightFailure) -> FailureDetails {
         switch preflightFailure {
+        case .developerBuild(let bundleURL):
+            return FailureDetails(
+                title: "Developer Build",
+                summary: "Virtual camera install is disabled for Xcode-run builds.",
+                detail: "Current app location: \(bundleURL.path). Copy Alfie into /Applications or ~/Applications, relaunch it outside Xcode, then retry the virtual camera install.",
+                recoveryAction: .retryInstall
+            )
         case .appNotInApplications(let bundleURL):
             return FailureDetails(
                 title: "Move Alfie to Applications",
@@ -457,6 +512,13 @@ final class SystemExtensionActivationManager: NSObject, ObservableObject {
                 title: "Identifier Mismatch",
                 summary: "The embedded virtual camera extension identifier does not match Alfie’s activation target.",
                 detail: "Expected \(expected), found \(actual) in \(bundleURL.path). Align the extension bundle identifier with the host app’s activation request.",
+                recoveryAction: .retryInstall
+            )
+        case .missingHostEntitlement(let bundleURL):
+            return FailureDetails(
+                title: "Missing Host Entitlement",
+                summary: "The running Alfie app is not signed with system-extension install permission.",
+                detail: "Current app location: \(bundleURL.path). Ensure the host app is signed with `com.apple.developer.system-extension.install`, then rebuild and relaunch Alfie from Applications.",
                 recoveryAction: .retryInstall
             )
         }

@@ -10,22 +10,27 @@
 import Foundation
 
 enum DeveloperFlags {
+    /// Exposes the Gate 5 validation playback controls so recorded church
+    /// clips can be routed through the same detection/crop pipeline as the
+    /// live camera feed.
+    nonisolated static let exposeClipPlaybackControls = true
+
     /// Exposes the ML agent toggle, agent settings popover, and enables
     /// `useMLAgent` as a runtime-selectable controller. Church MVP ships
     /// with this off so `ShotComposer` is the only controller operators see.
-    static let exposeMLAgentControls = false
+    nonisolated static let exposeMLAgentControls = false
 
     /// Exposes the training-data recorder UI. Recorder infrastructure stays
     /// compiled in regardless; this only controls whether operators can
     /// start/stop recordings from the toolbar.
-    static let exposeTrainingRecorderControls = false
+    nonisolated static let exposeTrainingRecorderControls = false
 
     /// Enables verbose per-frame logging in the capture loop. Keep this off
     /// for operator-facing builds because it can emit hundreds of log lines
     /// per second while tracking is active.
-    static let verboseFrameLogging = false
+    nonisolated static let verboseFrameLogging = false
 
     /// Enables verbose GPU render tracing inside CropEngine. Useful when
     /// diagnosing Metal or crop-geometry issues, but too noisy for normal use.
-    static let verboseRenderLogging = false
+    nonisolated static let verboseRenderLogging = false
 }

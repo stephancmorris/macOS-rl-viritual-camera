@@ -5,9 +5,11 @@
 //  Created by Stephan Morris on 2/2/2026.
 //
 
+import OSLog
 import SwiftUI
 
 struct ContentView: View {
+    private static let logger = Logger(subsystem: "com.alfie", category: "ContentView")
     private enum AdaptiveTier {
         case expanded
         case large
@@ -28,6 +30,7 @@ struct ContentView: View {
     @State private var showRecorderSettings = false // Task 3.1: Training data recorder
     @State private var showAgentSettings = false    // Task APP-02: RL agent settings
     @State private var showOutputSettings = false   // Task 2.4: Program output routing
+    @State private var showPlaybackSettings = false // Task 5.1: Clip playback harness
     @State private var showHeaderOverflow = false
     @State private var showDockOverflow = false
     @State private var showSystemExtensionStatus = false
@@ -371,6 +374,25 @@ struct ContentView: View {
                         }
                     }
 
+                    if DeveloperFlags.exposeClipPlaybackControls {
+                        Button(action: { showPlaybackSettings.toggle() }) {
+                            Label(
+                                cameraManager.preferredInputSource == .validationClip ? "Playback Clip" : "Playback",
+                                systemImage: cameraManager.preferredInputSource.systemImage
+                            )
+                        }
+                        .buttonStyle(
+                            GlassCapsuleButtonStyle(
+                                tint: cameraManager.preferredInputSource == .validationClip
+                                    ? .orange
+                                    : .white.opacity(0.6)
+                            )
+                        )
+                        .popover(isPresented: $showPlaybackSettings) {
+                            ValidationClipPlaybackView(cameraManager: cameraManager)
+                        }
+                    }
+
                     Button(action: { showOutputSettings.toggle() }) {
                         Label(
                             "Output",
@@ -403,7 +425,7 @@ struct ContentView: View {
     }
 
     private func startCamera() async {
-        if !systemExtensionManager.isInstallReady {
+        if cameraManager.shouldPreflightVirtualCameraInstallation, !systemExtensionManager.isInstallReady {
             let extensionReady = await systemExtensionManager.ensureInstalledForSessionStart()
             if !extensionReady {
                 showSystemExtensionStatus = true
@@ -668,6 +690,22 @@ struct ContentView: View {
                         )
                     }
 
+                    if DeveloperFlags.exposeClipPlaybackControls {
+                        Button(action: { showDockOverflow = false; showPlaybackSettings = true }) {
+                            Label(
+                                "Playback",
+                                systemImage: cameraManager.preferredInputSource.systemImage
+                            )
+                        }
+                        .buttonStyle(
+                            GlassCapsuleButtonStyle(
+                                tint: cameraManager.preferredInputSource == .validationClip
+                                    ? .orange
+                                    : .white.opacity(0.6)
+                            )
+                        )
+                    }
+
                     Button(action: { showDockOverflow = false; showOutputSettings = true }) {
                         Label("Output", systemImage: cameraManager.programOutput.activeRoute?.systemImage ?? "dot.radiowaves.left.and.right")
                     }
@@ -857,6 +895,8 @@ struct ContentView: View {
 // MARK: - Camera List View
 
 struct CameraListView: View {
+    private static let logger = Logger(subsystem: "com.alfie", category: "CameraListView")
+
     @ObservedObject var cameraManager: CameraManager
     @Environment(\.dismiss) private var dismiss
     
@@ -901,7 +941,10 @@ struct CameraListView: View {
             } else {
                 ScrollView {
                     VStack(alignment: .leading, spacing: 8) {
-                        ForEach(cameraManager.availableCameras) { camera in
+                        ForEach(
+                            Array(cameraManager.availableCameras),
+                            id: \CameraManager.CameraDevice.id
+                        ) { camera in
                             CameraRowView(
                                 camera: camera,
                                 isSelected: cameraManager.selectedCamera?.id == camera.id,
@@ -911,7 +954,7 @@ struct CameraListView: View {
                                             try await cameraManager.restartWithCamera(camera)
                                             dismiss()
                                         } catch {
-                                            print("❌ Failed to switch camera: \(error)")
+                                            Self.logger.error("Failed to switch camera: \(error.localizedDescription, privacy: .public)")
                                         }
                                     }
                                 }
