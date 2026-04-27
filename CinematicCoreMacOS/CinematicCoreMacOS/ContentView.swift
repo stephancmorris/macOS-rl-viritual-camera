@@ -5,423 +5,133 @@
 //  Created by Stephan Morris on 2/2/2026.
 //
 
+import Combine
 import OSLog
 import SwiftUI
 
 struct ContentView: View {
     private static let logger = Logger(subsystem: "com.alfie", category: "ContentView")
-    private enum AdaptiveTier {
-        case expanded
-        case large
-        case medium
-        case compact
-        case minimal
-    }
 
     @StateObject private var cameraManager = CameraManager()
     @ObservedObject var systemExtensionManager: SystemExtensionActivationManager
+
     @State private var showError = false
-    @State private var showCameraList = false
-    @State private var showDetections = true // Task 2.1: Toggle for detection overlay
-    @State private var showDetectionSettings = false // Task 2.1: Detection settings panel
-    @State private var showCropSettings = false // Task 2.2: Crop settings panel
-    @State private var showCropIndicator = true // Task 2.2: Show crop rectangle on preview
-    @State private var showComposerSettings = false // Task 2.3: Shot composer settings
-    @State private var showRecorderSettings = false // Task 3.1: Training data recorder
-    @State private var showAgentSettings = false    // Task APP-02: RL agent settings
-    @State private var showOutputSettings = false   // Task 2.4: Program output routing
-    @State private var showPlaybackSettings = false // Task 5.1: Clip playback harness
-    @State private var showHeaderOverflow = false
-    @State private var showDockOverflow = false
+    @State private var inspectorOpen = false
     @State private var showSystemExtensionStatus = false
+    @State private var elapsedSeconds: Int = 0
+    @State private var sessionStartedAt: Date?
+    @State private var lastSessionEndedAt: Date?
+
+    private let elapsedTimer = Timer.publish(every: 1, on: .main, in: .common).autoconnect()
 
     init(systemExtensionManager: SystemExtensionActivationManager) {
         self.systemExtensionManager = systemExtensionManager
     }
-    
+
     var body: some View {
-        GeometryReader { geometry in
-            let width = geometry.size.width
+        ZStack {
+            // Layer 0: backdrop
+            LiquidGlassBackdrop()
 
-            ZStack {
-                LiquidGlassBackdrop()
+            // Layer 1: dual feed (or stopped screen) fills the window
+            if cameraManager.isRunning {
+                CropPreviewView(
+                    originalFrame: cameraManager.currentFrame,
+                    croppedFrame: cameraManager.croppedFrame,
+                    detectedPersons: cameraManager.personDetector.detectedPersons,
+                    showDetections: true,
+                    cropRect: cameraManager.cropEnabled ? cameraManager.cropEngine?.currentCrop : nil,
+                    activeTargetID: cameraManager.shotComposer.activeTargetID,
+                    manualLockedTargetID: cameraManager.manualLockedTargetID,
+                    trackedSubjectRect: cameraManager.shotComposer.lastTrackedBounds,
+                    isRecovering: cameraManager.trackingPaused,
+                    framingTitle: cameraManager.shotComposer.config.shotPreset.title,
+                    onSelectPerson: cameraManager.lockTarget
+                )
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+            } else {
+                StoppedScreen(
+                    lastSessionEndedAt: lastSessionEndedAt,
+                    onStart: { Task { await startCamera() } }
+                )
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+            }
 
-                VStack(spacing: 18) {
-                    headerPanel(for: width)
-                    previewPanel
-                    controlDock(for: width)
-                }
-                .padding(20)
+            // Layer 2: floating overlays — only while running
+            if cameraManager.isRunning {
+                IdentityStackOverlay(
+                    cameraManager: cameraManager,
+                    elapsedSeconds: elapsedSeconds
+                )
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+                .padding(.leading, 24)
+                .padding(.top, 24)
+                .allowsHitTesting(false)
+
+                TelemetryOverlay(cameraManager: cameraManager)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topTrailing)
+                    .padding(.top, 28)
+                    .padding(.trailing, 72)
+                    .allowsHitTesting(false)
+
+                ProgramOnAirBadgeAnchor()
+                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+                    .allowsHitTesting(false)
+
+                OperatorPill(
+                    cameraManager: cameraManager,
+                    onStop: { toggleCamera() },
+                    onStart: { Task { await startCamera() } }
+                )
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottom)
+                .padding(.bottom, 26)
+            }
+
+            // Layer 3: inspector handle — always visible
+            InspectorHandle(isOpen: $inspectorOpen)
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topTrailing)
+                .padding(.top, 16)
+                .padding(.trailing, 16)
+
+            // Layer 4: inspector drawer — slides over the right edge
+            if inspectorOpen {
+                InspectorDrawer(
+                    cameraManager: cameraManager,
+                    systemExtensionManager: systemExtensionManager,
+                    isOpen: $inspectorOpen
+                )
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .trailing)
+                .transition(.move(edge: .trailing))
             }
         }
-        .frame(minWidth: 1100, minHeight: 600)
+        .animation(.easeInOut(duration: 0.36), value: inspectorOpen)
+        .frame(minWidth: 1280, minHeight: 800)
+        .background(Color.black)
+        .ignoresSafeArea()
+        .onAppear {
+            if cameraManager.availableCameras.isEmpty {
+                cameraManager.discoverCameras()
+            }
+        }
+        .onChange(of: cameraManager.isRunning) { _, isRunning in
+            if isRunning {
+                sessionStartedAt = Date()
+                elapsedSeconds = 0
+            } else {
+                lastSessionEndedAt = Date()
+                sessionStartedAt = nil
+                elapsedSeconds = 0
+            }
+        }
+        .onReceive(elapsedTimer) { _ in
+            guard let start = sessionStartedAt else { return }
+            elapsedSeconds = Int(Date().timeIntervalSince(start))
+        }
         .alert("Camera Error", isPresented: $showError, presenting: cameraManager.error) { _ in
             Button("OK") { showError = false }
         } message: { error in
             Text(error.localizedDescription)
         }
-    }
-
-    private func headerPanel(for width: CGFloat) -> some View {
-        let tier = adaptiveTier(for: width)
-
-        return ZStack {
-            HStack(spacing: 12) {
-                headerCommandPanel(title: "Source · Session") {
-                    if tier == .expanded || tier == .large || tier == .medium {
-                        infoPill(
-                            title: cameraManager.selectedCamera?.name ?? "No Camera",
-                            detail: cameraManager.selectedCamera?.maxResolution ?? "Unavailable",
-                            tint: .white.opacity(0.7)
-                        )
-                    }
-
-                    Button(action: { showCameraList.toggle() }) {
-                        Label("Cameras", systemImage: "camera.circle")
-                    }
-                    .buttonStyle(GlassCapsuleButtonStyle(tint: .white.opacity(0.6)))
-                    .popover(isPresented: $showCameraList) {
-                        CameraListView(cameraManager: cameraManager)
-                    }
-
-                    if tier == .expanded || tier == .large || tier == .medium {
-                        Button(action: { cameraManager.discoverCameras() }) {
-                            Label("Refresh", systemImage: "arrow.clockwise")
-                        }
-                        .buttonStyle(GlassCapsuleButtonStyle(tint: .white.opacity(0.6)))
-                    }
-
-                    Button(action: toggleCamera) {
-                        Label(
-                            cameraManager.isRunning ? "Stop Session" : "Start Session",
-                            systemImage: cameraManager.isRunning ? "stop.circle.fill" : "play.circle.fill"
-                        )
-                    }
-                    .buttonStyle(
-                        GlassCapsuleButtonStyle(
-                            tint: cameraManager.isRunning ? .red : .green,
-                            isPrimary: true
-                        )
-                    )
-                    .disabled(cameraManager.error != nil || cameraManager.availableCameras.isEmpty)
-                }
-                .frame(maxWidth: tier == .minimal ? 240 : 620)
-            }
-            .frame(maxWidth: .infinity, alignment: .center)
-
-            HStack(alignment: .center, spacing: 18) {
-                VStack(alignment: .leading, spacing: 10) {
-                    Text("Alfie")
-                        .font(.system(size: tier == .minimal ? 24 : 30, weight: .semibold, design: .rounded))
-                        .foregroundStyle(.white.opacity(0.96))
-                        .lineLimit(1)
-                        .minimumScaleFactor(0.7)
-
-                    Text("Your autonomous live camera operator")
-                        .font(.system(size: tier == .minimal ? 12 : 14, weight: .medium, design: .rounded))
-                        .foregroundStyle(.white.opacity(0.68))
-                        .lineLimit(2)
-
-                    HStack(spacing: 10) {
-                        statusBadge(
-                            title: cameraManager.isRunning ? "Live Session" : "Offline",
-                            systemImage: cameraManager.isRunning ? "dot.radiowaves.left.and.right" : "pause.circle",
-                            tint: cameraManager.isRunning ? .green : .orange
-                        )
-
-                        if tier != .minimal {
-                            statusBadge(
-                                title: cameraManager.programOutput.activeRouteTitle,
-                                systemImage: cameraManager.programOutput.activeRoute?.systemImage ?? "cable.connector.slash",
-                                tint: .cyan
-                            )
-                        }
-
-                        Button(action: { showSystemExtensionStatus.toggle() }) {
-                            statusBadge(
-                                title: systemExtensionManager.badgeTitle,
-                                systemImage: systemExtensionManager.badgeSystemImage,
-                                tint: systemExtensionManager.badgeTint
-                            )
-                        }
-                        .buttonStyle(.plain)
-                        .popover(isPresented: $showSystemExtensionStatus) {
-                            systemExtensionStatusPopover
-                        }
-
-                        if tier == .expanded, let selectedCamera = cameraManager.selectedCamera {
-                            statusBadge(
-                                title: selectedCamera.name,
-                                systemImage: "camera.aperture",
-                                tint: .white.opacity(0.75)
-                            )
-                        }
-                    }
-                }
-                .frame(maxWidth: .infinity, alignment: .leading)
-
-                HStack(spacing: 12) {
-                    metricTile(
-                        title: "Persons",
-                        value: "\(cameraManager.personDetector.detectedPersons.count)",
-                        detail: cameraManager.isRunning ? "Vision live" : "Idle",
-                        tint: .mint
-                    )
-
-                    if tier != .minimal {
-                        metricTile(
-                            title: "Detection",
-                            value: String(format: "%.1fms", cameraManager.personDetector.stats.lastDetectionTime * 1000),
-                            detail: "Frame analysis",
-                            tint: .blue
-                        )
-                    }
-
-                    if tier == .expanded || tier == .large {
-                        metricTile(
-                            title: "Program",
-                            value: "\(cameraManager.programOutput.framesSent)",
-                            detail: "Frames routed",
-                            tint: .cyan
-                        )
-                    }
-
-                    if headerHasOverflow(for: tier) {
-                        Button(action: { showHeaderOverflow.toggle() }) {
-                            overflowButton(title: "More", tint: .white.opacity(0.64))
-                        }
-                        .buttonStyle(.plain)
-                        .popover(isPresented: $showHeaderOverflow) {
-                            headerOverflowPanel(for: tier)
-                        }
-                    }
-                }
-                .frame(maxWidth: .infinity, alignment: .trailing)
-            }
-        }
-        .padding(22)
-        .glassPanel(cornerRadius: 30)
-    }
-
-    private var previewPanel: some View {
-        Group {
-            if showDetections {
-                CropPreviewView(
-                    originalFrame: cameraManager.currentFrame,
-                    croppedFrame: cameraManager.croppedFrame,
-                    detectedPersons: cameraManager.personDetector.detectedPersons,
-                    showDetections: showDetections,
-                    cropRect: showCropIndicator ? cameraManager.cropEngine?.currentCrop : nil,
-                    activeTargetID: cameraManager.shotComposer.activeTargetID,
-                    manualLockedTargetID: cameraManager.manualLockedTargetID,
-                    trackedSubjectRect: cameraManager.shotComposer.lastTrackedBounds,
-                    onSelectPerson: cameraManager.lockTarget
-                )
-            } else {
-                LiquidPreviewCard(
-                    title: "Input · Wide",
-                    subtitle: "Raw stage feed",
-                    accent: .mint
-                ) {
-                    CameraPreviewView(
-                        image: cameraManager.currentFrame,
-                        detectedPersons: cameraManager.personDetector.detectedPersons,
-                        showDetections: showDetections,
-                        activeTargetID: cameraManager.shotComposer.activeTargetID,
-                        manualLockedTargetID: cameraManager.manualLockedTargetID,
-                        trackedSubjectRect: cameraManager.shotComposer.lastTrackedBounds,
-                        onSelectPerson: cameraManager.lockTarget,
-                        cropIndicator: nil
-                    )
-                }
-            }
-        }
-        .padding(14)
-        .glassPanel(cornerRadius: 34)
-    }
-
-    private func controlDock(for width: CGFloat) -> some View {
-        let tier = adaptiveTier(for: width)
-
-        return HStack(alignment: .top, spacing: 14) {
-            if tier == .expanded || tier == .large || tier == .medium {
-                controlCluster(title: "Inspect") {
-                    Toggle(isOn: $showDetections) {
-                        Label("Detections", systemImage: "person.crop.rectangle")
-                    }
-                    .toggleStyle(.button)
-                    .buttonStyle(GlassCapsuleButtonStyle(tint: showDetections ? .blue : .white.opacity(0.6)))
-
-                    if tier != .compact {
-                        Button(action: { showDetectionSettings.toggle() }) {
-                            Label("Detection", systemImage: "slider.horizontal.3")
-                        }
-                        .buttonStyle(GlassCapsuleButtonStyle(tint: .white.opacity(0.6)))
-                        .popover(isPresented: $showDetectionSettings) {
-                            DetectionSettingsView(personDetector: cameraManager.personDetector)
-                        }
-                    }
-                }
-            }
-
-            if let cropEngine = cameraManager.cropEngine {
-                controlCluster(title: "Framing") {
-                    Toggle(isOn: $cameraManager.cropEnabled) {
-                        Label("Crop", systemImage: "crop.rotate")
-                    }
-                    .toggleStyle(.button)
-                    .buttonStyle(GlassCapsuleButtonStyle(tint: cameraManager.cropEnabled ? .mint : .white.opacity(0.6)))
-
-                    if tier != .minimal {
-                        Toggle(isOn: $showCropIndicator) {
-                            Label("Indicator", systemImage: "viewfinder")
-                        }
-                        .toggleStyle(.button)
-                        .buttonStyle(GlassCapsuleButtonStyle(tint: showCropIndicator ? .cyan : .white.opacity(0.6)))
-                        .disabled(!cameraManager.cropEnabled)
-                    }
-
-                    if tier == .expanded || tier == .large {
-                        Button(action: { showCropSettings.toggle() }) {
-                            Label("Crop Settings", systemImage: "gearshape")
-                        }
-                        .buttonStyle(GlassCapsuleButtonStyle(tint: .white.opacity(0.6)))
-                        .popover(isPresented: $showCropSettings) {
-                            CropSettingsView(
-                                cropEngine: cropEngine,
-                                cameraManager: cameraManager
-                            )
-                        }
-                    }
-
-                    if (tier == .expanded || tier == .large) && cameraManager.isRunning && cameraManager.cropEnabled {
-                        infoPill(
-                            title: "\(cameraManager.shotComposer.config.shotPreset.title) · \(cameraManager.shotComposer.config.frameProfile.shortTitle)",
-                            detail: "\(Int(cropEngine.config.outputSize.width))×\(Int(cropEngine.config.outputSize.height))",
-                            tint: cameraManager.trackingPaused ? .orange : .mint
-                        )
-                    }
-                }
-
-                controlCluster(title: "Recovery") {
-                    Button(action: { cameraManager.returnToWide() }) {
-                        Label("Return to Wide", systemImage: "arrow.up.left.and.arrow.down.right")
-                    }
-                    .buttonStyle(GlassCapsuleButtonStyle(tint: .orange, isPrimary: true))
-                    .disabled(!cameraManager.isRunning || !cameraManager.cropEnabled || cameraManager.trackingPaused)
-
-                    Button(action: { cameraManager.resumeTracking() }) {
-                        Label("Resume Tracking", systemImage: "scope")
-                    }
-                    .buttonStyle(GlassCapsuleButtonStyle(tint: .green, isPrimary: true))
-                    .disabled(!cameraManager.isRunning || !cameraManager.cropEnabled || !cameraManager.trackingPaused)
-
-                    if cameraManager.isManualTargetLockActive {
-                        Button(action: { cameraManager.clearManualTargetLock() }) {
-                            Label("Clear Lock", systemImage: "pin.slash")
-                        }
-                        .buttonStyle(GlassCapsuleButtonStyle(tint: .yellow))
-                    }
-                }
-            }
-
-            if tier == .expanded || tier == .large {
-                controlCluster(title: "Modules") {
-                    Button(action: { showComposerSettings.toggle() }) {
-                        Label("Composer", systemImage: "film")
-                    }
-                    .buttonStyle(GlassCapsuleButtonStyle(tint: .purple))
-                    .popover(isPresented: $showComposerSettings) {
-                        ShotComposerSettingsView(
-                            shotComposer: cameraManager.shotComposer
-                        )
-                    }
-
-                    if DeveloperFlags.exposeMLAgentControls {
-                        Button(action: { showAgentSettings.toggle() }) {
-                            Label(
-                                "Agent",
-                                systemImage: cameraManager.useMLAgent
-                                    ? "brain.filled.head.profile"
-                                    : "brain.head.profile"
-                            )
-                        }
-                        .buttonStyle(GlassCapsuleButtonStyle(tint: cameraManager.useMLAgent ? .blue : .white.opacity(0.6)))
-                        .popover(isPresented: $showAgentSettings) {
-                            CinematicAgentSettingsView(cameraManager: cameraManager)
-                        }
-                    }
-
-                    if DeveloperFlags.exposeTrainingRecorderControls {
-                        Button(action: { showRecorderSettings.toggle() }) {
-                            Label(
-                                cameraManager.trainingDataRecorder.isRecording ? "Recorder Live" : "Recorder",
-                                systemImage: cameraManager.trainingDataRecorder.isRecording
-                                    ? "record.circle.fill" : "record.circle"
-                            )
-                        }
-                        .buttonStyle(
-                            GlassCapsuleButtonStyle(
-                                tint: cameraManager.trainingDataRecorder.isRecording ? .red : .white.opacity(0.6),
-                                isPrimary: cameraManager.trainingDataRecorder.isRecording
-                            )
-                        )
-                        .popover(isPresented: $showRecorderSettings) {
-                            RecorderSettingsView(
-                                recorder: cameraManager.trainingDataRecorder,
-                                cameraManager: cameraManager
-                            )
-                        }
-                    }
-
-                    if DeveloperFlags.exposeClipPlaybackControls {
-                        Button(action: { showPlaybackSettings.toggle() }) {
-                            Label(
-                                cameraManager.preferredInputSource == .validationClip ? "Playback Clip" : "Playback",
-                                systemImage: cameraManager.preferredInputSource.systemImage
-                            )
-                        }
-                        .buttonStyle(
-                            GlassCapsuleButtonStyle(
-                                tint: cameraManager.preferredInputSource == .validationClip
-                                    ? .orange
-                                    : .white.opacity(0.6)
-                            )
-                        )
-                        .popover(isPresented: $showPlaybackSettings) {
-                            ValidationClipPlaybackView(cameraManager: cameraManager)
-                        }
-                    }
-
-                    Button(action: { showOutputSettings.toggle() }) {
-                        Label(
-                            "Output",
-                            systemImage: cameraManager.programOutput.activeRoute?.systemImage
-                                ?? "dot.radiowaves.left.and.right"
-                        )
-                    }
-                    .buttonStyle(GlassCapsuleButtonStyle(tint: .cyan))
-                    .popover(isPresented: $showOutputSettings) {
-                        ProgramOutputSettingsView(
-                            programOutput: cameraManager.programOutput
-                        )
-                    }
-                }
-            }
-
-            if dockHasOverflow(for: tier) {
-                Button(action: { showDockOverflow.toggle() }) {
-                    overflowButton(title: "More", tint: .white.opacity(0.64))
-                }
-                .buttonStyle(.plain)
-                .popover(isPresented: $showDockOverflow) {
-                    dockOverflowPanel(for: tier)
-                }
-            }
-        }
-        .frame(maxWidth: .infinity, alignment: .center)
-        .padding(10)
-        .glassPanel(cornerRadius: 30)
     }
 
     private func startCamera() async {
@@ -443,454 +153,11 @@ struct ContentView: View {
         if cameraManager.isRunning {
             cameraManager.stopCapture()
         } else {
-            Task {
-                await startCamera()
-            }
+            Task { await startCamera() }
         }
-    }
-
-    private func adaptiveTier(for width: CGFloat) -> AdaptiveTier {
-        switch width {
-        case 1850...:
-            return .expanded
-        case 1620..<1850:
-            return .large
-        case 1450..<1620:
-            return .medium
-        case 1280..<1450:
-            return .compact
-        default:
-            return .minimal
-        }
-    }
-
-    private func headerHasOverflow(for tier: AdaptiveTier) -> Bool {
-        tier != .expanded
-    }
-
-    private func dockHasOverflow(for tier: AdaptiveTier) -> Bool {
-        tier != .expanded && tier != .large
-    }
-
-    @ViewBuilder
-    private func controlCluster<Content: View>(
-        title: String,
-        @ViewBuilder content: () -> Content
-    ) -> some View {
-        VStack(alignment: .leading, spacing: 10) {
-            Text(title.uppercased())
-                .font(.system(size: 11, weight: .bold, design: .rounded))
-                .foregroundStyle(.white.opacity(0.48))
-                .tracking(1.2)
-
-            HStack(spacing: 10) {
-                content()
-            }
-        }
-        .padding(.horizontal, 14)
-        .padding(.vertical, 12)
-        .glassPanel(cornerRadius: 24, opacity: 0.22)
-    }
-
-    @ViewBuilder
-    private func headerCommandPanel<Content: View>(
-        title: String,
-        @ViewBuilder content: () -> Content
-    ) -> some View {
-        VStack(alignment: .leading, spacing: 12) {
-            Text(title.uppercased())
-                .font(.system(size: 11, weight: .bold, design: .rounded))
-                .foregroundStyle(.white.opacity(0.48))
-                .tracking(1.2)
-
-            HStack(spacing: 10) {
-                content()
-            }
-        }
-        .padding(.horizontal, 16)
-        .padding(.vertical, 14)
-        .glassPanel(cornerRadius: 24, opacity: 0.24)
-    }
-
-    private func headerOverflowPanel(for tier: AdaptiveTier) -> some View {
-        VStack(alignment: .leading, spacing: 16) {
-            overflowSection(title: "Status") {
-                if tier == .minimal {
-                    overflowInfoRow(
-                        title: cameraManager.programOutput.activeRouteTitle,
-                        detail: "Current output route"
-                    )
-                }
-                if tier != .expanded, let selectedCamera = cameraManager.selectedCamera {
-                    overflowInfoRow(
-                        title: selectedCamera.name,
-                        detail: selectedCamera.maxResolution
-                    )
-                }
-            }
-
-            overflowSection(title: "Source") {
-                if tier == .compact || tier == .minimal {
-                    overflowInfoRow(
-                        title: cameraManager.selectedCamera?.name ?? "No Camera",
-                        detail: cameraManager.selectedCamera?.maxResolution ?? "Unavailable"
-                    )
-                }
-                if tier == .compact || tier == .minimal {
-                    Button(action: { cameraManager.discoverCameras(); showHeaderOverflow = false }) {
-                        Label("Refresh Sources", systemImage: "arrow.clockwise")
-                    }
-                    .buttonStyle(GlassCapsuleButtonStyle(tint: .white.opacity(0.6)))
-                }
-            }
-
-            overflowSection(title: "Session") {
-                if tier == .compact || tier == .minimal {
-                    Button(action: {
-                        showHeaderOverflow = false
-                        toggleCamera()
-                    }) {
-                        Label(
-                            cameraManager.isRunning ? "Stop Session" : "Start Session",
-                            systemImage: cameraManager.isRunning ? "stop.circle.fill" : "play.circle.fill"
-                        )
-                    }
-                    .buttonStyle(
-                        GlassCapsuleButtonStyle(
-                            tint: cameraManager.isRunning ? .red : .green,
-                            isPrimary: true
-                        )
-                    )
-                    .disabled(cameraManager.error != nil || cameraManager.availableCameras.isEmpty)
-                }
-            }
-
-            if cameraManager.isManualTargetLockActive {
-                overflowSection(title: "Target Lock") {
-                    overflowInfoRow(
-                        title: "Manual lock active",
-                        detail: "Tap another subject or clear the lock below"
-                    )
-
-                    Button(action: {
-                        cameraManager.clearManualTargetLock()
-                        showHeaderOverflow = false
-                    }) {
-                        Label("Clear Lock", systemImage: "pin.slash")
-                    }
-                    .buttonStyle(GlassCapsuleButtonStyle(tint: .yellow))
-                }
-            }
-
-            overflowSection(title: "Metrics") {
-                if tier == .minimal {
-                    overflowInfoRow(
-                        title: String(format: "%.1fms", cameraManager.personDetector.stats.lastDetectionTime * 1000),
-                        detail: "Detection latency"
-                    )
-                }
-                if tier != .expanded && tier != .large {
-                    overflowInfoRow(
-                        title: "\(cameraManager.programOutput.framesSent)",
-                        detail: "Frames routed"
-                    )
-                }
-            }
-        }
-        .padding(18)
-        .frame(width: 320)
-        .glassPanel(cornerRadius: 26, opacity: 0.28)
-    }
-
-    private func dockOverflowPanel(for tier: AdaptiveTier) -> some View {
-        VStack(alignment: .leading, spacing: 16) {
-            if tier == .compact || tier == .minimal {
-                overflowSection(title: "Inspect") {
-                    if tier == .minimal {
-                        Toggle(isOn: $showDetections) {
-                            Label("Detections", systemImage: "person.crop.rectangle")
-                        }
-                        .toggleStyle(.switch)
-                    }
-
-                    Button(action: { showDockOverflow = false; showDetectionSettings = true }) {
-                        Label("Detection Settings", systemImage: "slider.horizontal.3")
-                    }
-                    .buttonStyle(GlassCapsuleButtonStyle(tint: .white.opacity(0.6)))
-                }
-            }
-
-            overflowSection(title: "Framing") {
-                if tier == .minimal {
-                    Toggle(isOn: $showCropIndicator) {
-                        Label("Indicator Overlay", systemImage: "viewfinder")
-                    }
-                    .toggleStyle(.switch)
-                    .disabled(!cameraManager.cropEnabled)
-                }
-
-                if tier == .medium || tier == .compact || tier == .minimal {
-                    Button(action: { showDockOverflow = false; showCropSettings = true }) {
-                        Label("Crop Settings", systemImage: "gearshape")
-                    }
-                    .buttonStyle(GlassCapsuleButtonStyle(tint: .white.opacity(0.6)))
-                }
-
-                if tier == .medium || tier == .compact || tier == .minimal,
-                   let cropEngine = cameraManager.cropEngine,
-                   cameraManager.isRunning,
-                   cameraManager.cropEnabled {
-                    overflowInfoRow(
-                        title: "\(Int(cropEngine.config.outputSize.width))×\(Int(cropEngine.config.outputSize.height))",
-                        detail: String(format: "%.1fms render", cropEngine.stats.lastRenderTime * 1000)
-                    )
-                }
-            }
-
-            if cameraManager.isManualTargetLockActive {
-                overflowSection(title: "Target Lock") {
-                    overflowInfoRow(
-                        title: "Manual lock active",
-                        detail: "Tap a subject in the wide view to reassign"
-                    )
-
-                    Button(action: {
-                        showDockOverflow = false
-                        cameraManager.clearManualTargetLock()
-                    }) {
-                        Label("Clear Lock", systemImage: "pin.slash")
-                    }
-                    .buttonStyle(GlassCapsuleButtonStyle(tint: .yellow))
-                }
-            }
-
-            if tier != .expanded && tier != .large {
-                overflowSection(title: "Modules") {
-                    Button(action: { showDockOverflow = false; showComposerSettings = true }) {
-                        Label("Composer", systemImage: "film")
-                    }
-                    .buttonStyle(GlassCapsuleButtonStyle(tint: .purple))
-
-                    if DeveloperFlags.exposeMLAgentControls {
-                        Button(action: { showDockOverflow = false; showAgentSettings = true }) {
-                            Label("Agent", systemImage: cameraManager.useMLAgent ? "brain.filled.head.profile" : "brain.head.profile")
-                        }
-                        .buttonStyle(GlassCapsuleButtonStyle(tint: cameraManager.useMLAgent ? .blue : .white.opacity(0.6)))
-                    }
-
-                    if DeveloperFlags.exposeTrainingRecorderControls {
-                        Button(action: { showDockOverflow = false; showRecorderSettings = true }) {
-                            Label("Recorder", systemImage: cameraManager.trainingDataRecorder.isRecording ? "record.circle.fill" : "record.circle")
-                        }
-                        .buttonStyle(
-                            GlassCapsuleButtonStyle(
-                                tint: cameraManager.trainingDataRecorder.isRecording ? .red : .white.opacity(0.6),
-                                isPrimary: cameraManager.trainingDataRecorder.isRecording
-                            )
-                        )
-                    }
-
-                    if DeveloperFlags.exposeClipPlaybackControls {
-                        Button(action: { showDockOverflow = false; showPlaybackSettings = true }) {
-                            Label(
-                                "Playback",
-                                systemImage: cameraManager.preferredInputSource.systemImage
-                            )
-                        }
-                        .buttonStyle(
-                            GlassCapsuleButtonStyle(
-                                tint: cameraManager.preferredInputSource == .validationClip
-                                    ? .orange
-                                    : .white.opacity(0.6)
-                            )
-                        )
-                    }
-
-                    Button(action: { showDockOverflow = false; showOutputSettings = true }) {
-                        Label("Output", systemImage: cameraManager.programOutput.activeRoute?.systemImage ?? "dot.radiowaves.left.and.right")
-                    }
-                    .buttonStyle(GlassCapsuleButtonStyle(tint: .cyan))
-                }
-            }
-        }
-        .padding(18)
-        .frame(width: 340)
-        .glassPanel(cornerRadius: 26, opacity: 0.28)
-    }
-
-    private func statusBadge(title: String, systemImage: String, tint: Color) -> some View {
-        Label(title, systemImage: systemImage)
-            .font(.system(size: 12, weight: .semibold, design: .rounded))
-            .foregroundStyle(.white.opacity(0.86))
-            .padding(.horizontal, 12)
-            .padding(.vertical, 8)
-            .background {
-                Capsule(style: .continuous)
-                    .fill(.ultraThinMaterial)
-                    .overlay(
-                        Capsule(style: .continuous)
-                            .fill(
-                                LinearGradient(
-                                    colors: [tint.opacity(0.38), .white.opacity(0.1)],
-                                    startPoint: .topLeading,
-                                    endPoint: .bottomTrailing
-                                )
-                            )
-                    )
-                    .overlay(
-                        Capsule(style: .continuous)
-                            .strokeBorder(.white.opacity(0.16), lineWidth: 1)
-                    )
-            }
-    }
-
-    private var systemExtensionStatusPopover: some View {
-        VStack(alignment: .leading, spacing: 16) {
-            overflowSection(title: "Virtual Camera") {
-                overflowInfoRow(
-                    title: systemExtensionManager.badgeTitle,
-                    detail: systemExtensionManager.detailText
-                )
-
-                Text(systemExtensionManager.summaryText)
-                    .font(.system(size: 12, weight: .medium, design: .rounded))
-                    .foregroundStyle(.white.opacity(0.72))
-                    .fixedSize(horizontal: false, vertical: true)
-
-                if let actionTitle = systemExtensionManager.primaryActionTitle {
-                    Button(action: {
-                        Task {
-                            await systemExtensionManager.triggerPrimaryAction()
-                        }
-                    }) {
-                        Label(
-                            actionTitle,
-                            systemImage: systemExtensionManager.primaryActionSystemImage
-                        )
-                    }
-                    .buttonStyle(
-                        GlassCapsuleButtonStyle(
-                            tint: systemExtensionManager.badgeTint,
-                            isPrimary: true
-                        )
-                    )
-                }
-
-            }
-        }
-        .padding(18)
-        .frame(width: 340)
-        .glassPanel(cornerRadius: 26, opacity: 0.28)
-    }
-
-    private func metricTile(title: String, value: String, detail: String, tint: Color) -> some View {
-        VStack(alignment: .leading, spacing: 8) {
-            Text(title.uppercased())
-                .font(.system(size: 11, weight: .bold, design: .rounded))
-                .foregroundStyle(.white.opacity(0.45))
-                .tracking(1.2)
-
-            Text(value)
-                .font(.system(size: 22, weight: .semibold, design: .rounded))
-                .foregroundStyle(.white.opacity(0.95))
-
-            Text(detail)
-                .font(.system(size: 12, weight: .medium, design: .rounded))
-                .foregroundStyle(.white.opacity(0.62))
-        }
-        .frame(minWidth: 118, alignment: .leading)
-        .padding(16)
-        .glassPanel(cornerRadius: 24, tint: tint.opacity(0.24))
-    }
-
-    private func infoPill(title: String, detail: String, tint: Color) -> some View {
-        VStack(alignment: .leading, spacing: 3) {
-            Text(title)
-                .font(.system(size: 12, weight: .semibold, design: .rounded))
-                .foregroundStyle(.white.opacity(0.9))
-                .lineLimit(1)
-            Text(detail)
-                .font(.system(size: 11, weight: .medium, design: .rounded))
-                .foregroundStyle(.white.opacity(0.58))
-                .lineLimit(1)
-        }
-        .padding(.horizontal, 12)
-        .padding(.vertical, 10)
-        .background {
-            RoundedRectangle(cornerRadius: 18, style: .continuous)
-                .fill(.thinMaterial)
-                .overlay(
-                    RoundedRectangle(cornerRadius: 18, style: .continuous)
-                        .fill(
-                            LinearGradient(
-                                colors: [tint.opacity(0.24), .white.opacity(0.06)],
-                                startPoint: .topLeading,
-                                endPoint: .bottomTrailing
-                            )
-                        )
-                )
-                .overlay(
-                    RoundedRectangle(cornerRadius: 18, style: .continuous)
-                        .strokeBorder(.white.opacity(0.12), lineWidth: 1)
-                )
-        }
-    }
-
-    private func overflowButton(title: String, tint: Color) -> some View {
-        Label(title, systemImage: "ellipsis.circle")
-            .font(.system(size: 13, weight: .semibold, design: .rounded))
-            .foregroundStyle(.white.opacity(0.9))
-            .padding(.horizontal, 14)
-            .padding(.vertical, 11)
-            .background {
-                Capsule(style: .continuous)
-                    .fill(.ultraThinMaterial)
-                    .overlay(
-                        Capsule(style: .continuous)
-                            .fill(
-                                LinearGradient(
-                                    colors: [tint.opacity(0.32), .white.opacity(0.08)],
-                                    startPoint: .topLeading,
-                                    endPoint: .bottomTrailing
-                                )
-                            )
-                    )
-                    .overlay(
-                        Capsule(style: .continuous)
-                            .strokeBorder(.white.opacity(0.14), lineWidth: 1)
-                    )
-            }
-    }
-
-    @ViewBuilder
-    private func overflowSection<Content: View>(
-        title: String,
-        @ViewBuilder content: () -> Content
-    ) -> some View {
-        VStack(alignment: .leading, spacing: 10) {
-            Text(title.uppercased())
-                .font(.system(size: 11, weight: .bold, design: .rounded))
-                .foregroundStyle(.white.opacity(0.48))
-                .tracking(1.2)
-
-            VStack(alignment: .leading, spacing: 8) {
-                content()
-            }
-        }
-    }
-
-    private func overflowInfoRow(title: String, detail: String) -> some View {
-        VStack(alignment: .leading, spacing: 2) {
-            Text(title)
-                .font(.system(size: 13, weight: .semibold, design: .rounded))
-                .foregroundStyle(.white.opacity(0.9))
-            Text(detail)
-                .font(.system(size: 11, weight: .medium, design: .rounded))
-                .foregroundStyle(.white.opacity(0.54))
-        }
-        .padding(.vertical, 2)
     }
 }
+
 
 // MARK: - Camera List View
 

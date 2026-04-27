@@ -8,7 +8,7 @@
 
 import SwiftUI
 
-/// Side-by-side preview showing original camera feed and cropped output
+/// Edge-to-edge dual-feed pane: wide stage on the left, broadcast crop on the right.
 struct CropPreviewView: View {
     let originalFrame: CIImage?
     let croppedFrame: CIImage?
@@ -18,56 +18,42 @@ struct CropPreviewView: View {
     let activeTargetID: UUID?
     let manualLockedTargetID: UUID?
     let trackedSubjectRect: CGRect?
+    let isRecovering: Bool
+    let framingTitle: String
     var onSelectPerson: ((UUID) -> Void)? = nil
 
     var body: some View {
-        GeometryReader { _ in
-            HStack(spacing: 16) {
-                LiquidPreviewCard(
-                    title: "Input · Wide",
-                    subtitle: "Stage overview with operator overlays · tap a subject to lock",
-                    accent: .mint
-                ) {
-                    CameraPreviewView(
-                        image: originalFrame,
-                        detectedPersons: detectedPersons,
-                        showDetections: showDetections,
-                        activeTargetID: activeTargetID,
-                        manualLockedTargetID: manualLockedTargetID,
-                        trackedSubjectRect: trackedSubjectRect,
-                        onSelectPerson: onSelectPerson,
-                        cropIndicator: cropRect
-                    )
-                }
+        HStack(spacing: 0) {
+            CameraPreviewView(
+                image: originalFrame,
+                detectedPersons: detectedPersons,
+                showDetections: showDetections,
+                activeTargetID: activeTargetID,
+                manualLockedTargetID: manualLockedTargetID,
+                trackedSubjectRect: trackedSubjectRect,
+                onSelectPerson: onSelectPerson,
+                cropIndicator: cropRect,
+                isRecovering: isRecovering,
+                framingTitle: framingTitle,
+                aspectFill: false
+            )
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
 
-                LiquidPreviewCard(
-                    title: "Program · Output",
-                    subtitle: "Processed switcher feed",
-                    accent: .cyan
-                ) {
-                    ZStack {
-                        Color.black
+            Rectangle()
+                .fill(Color.white.opacity(0.12))
+                .frame(width: 1)
+                .frame(maxHeight: .infinity)
 
-                        if let cropped = croppedFrame {
-                            Image(decorative: cropped, scale: 1.0)
-                                .resizable()
-                                .aspectRatio(contentMode: .fit)
-                        } else {
-                            VStack(spacing: 10) {
-                                Image(systemName: "sparkles.tv")
-                                    .font(.system(size: 32))
-                                    .foregroundStyle(.white.opacity(0.52))
-                                Text("Program Output Unavailable")
-                                    .font(.system(size: 14, weight: .semibold, design: .rounded))
-                                    .foregroundStyle(.white.opacity(0.78))
-                                Text("Enable the crop pipeline to generate the broadcast frame.")
-                                    .font(.system(size: 12, weight: .medium, design: .rounded))
-                                    .foregroundStyle(.white.opacity(0.48))
-                            }
-                        }
-                    }
+            ZStack {
+                Color.black
+
+                if let cropped = croppedFrame {
+                    Image(decorative: cropped, scale: 1.0)
+                        .resizable()
+                        .aspectRatio(contentMode: .fit)
                 }
             }
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
     }
 }

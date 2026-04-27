@@ -67,7 +67,7 @@ Alfie is a macOS 14+ application with a companion CoreMediaIO system extension. 
 
 - **Sticky speaker selection** with configurable target-hold duration so the camera does not jump between people when a second person briefly appears on stage.
 - **Manual subject lock** — operator taps a detected person in the preview to force that person as the active target.
-- **Chest-up / Waist-up framing** anchored to the full subject detection, so vertical extent scales with subject height rather than the tighter tracked-torso region.
+- **Wide / Medium / Waist-Up framing** anchored to the full subject detection, so vertical extent scales with subject height rather than the tighter tracked-torso region.
 - **Deadzone** on subject movement to suppress jitter from small detection noise.
 - **Aspect correction** — the crop rectangle is computed in Vision's normalized (0–1) coordinate space and corrected for source pixel aspect, so a normalized "16:9" rect maps to a real 16:9 region regardless of source resolution.
 - **Frame-only clamping** — the crop can follow a speaker to the physical edge of frame; stage-margin settings are used for subject selection, not for fencing the crop.
@@ -92,6 +92,49 @@ The composer is heuristic, by design. See "Deep learning policy" below.
 - **Blackmagic SDI (deferred).** Scaffolding exists for a Desktop Video SDK sink. Not integrated for MVP. See "Deferred" below.
 
 The operator preview shows the *actual rendered program frame* — what downstream systems receive — so the right pane is truthful, not a separate debug view.
+
+## Operator console
+
+**Status:** Shipping.
+
+The interface is a single dark window built around three ideas: the video is the surface, the operator pill is the cockpit, and the inspector is the workshop. Everything else is hidden until needed.
+
+### Layout
+
+- **Full-bleed dual feed.** The window splits 50/50 with no chrome around the video. The left pane is the wide stage input; the right pane is the program output that downstream systems are receiving. A 1pt hairline separates them.
+- **Floating identity overlay.** Top-left of the wide pane: the Alfie wordmark, a green pulsing live indicator, the active source name, and an elapsed session timer.
+- **Floating telemetry overlay.** Top-right of the program pane: detection time, person count, and a routed indicator. Numbers only, no decoration.
+- **Program · On Air badge.** Top-left of the program pane, with a pulsing red dot. Confirms at a glance that what's on screen is what's on stream.
+- **Inspector handle.** A single liquid-glass square in the top-right corner that opens the inspector drawer.
+
+### Operator pill
+
+A floating glass pill anchored to the bottom-center of the window. Six controls separated by hairline dividers:
+
+1. **Lock state** — shows whether tracking is idle, locked on a subject, or recovering. Tapping while locked clears the lock; tapping while recovering resumes tracking.
+2. **Framing** — segmented control with Wide, Medium, Waist Up. The selected preset drives composition immediately.
+3. **Crop** — toggles the digital PTZ pipeline on or off without ending the session.
+4. **Return to Wide** — one-tap reset to the safety shot.
+5. **Resume Tracking** — re-engages tracking after a recovery state. Disabled when not applicable.
+6. **Stop session** — the only destructive control, styled red and isolated at the right end so it cannot be hit by accident.
+
+The pill is the entire live-control surface. There are no menus, no toolbars, no keyboard-only paths.
+
+### Inspector drawer
+
+Slides in from the right edge over the dual feed without reflowing it. Five sections, in order:
+
+- **Source** — camera picker, resolution, color profile, refresh and camera-list buttons.
+- **Composition** — read-only target hold, deadzone, and lerp-ease values, with detail buttons for Detection, Crop, and Composer settings.
+- **Output** — routing pills for Virtual Camera (active), Blackmagic SDI (deferred), and NDI (deferred), with an Output settings button.
+- **Modules** — capability rows with status dots: Composer, Playback, Output, Cinematic Agent (developer flag), Recorder (developer flag).
+- **Diagnostics** — build version, extension load state, GPU, and a Reveal Logs button.
+
+The drawer surfaces every setting that does not belong in the live-control flow. Developer-flagged controls only appear when their flag is on.
+
+### Stopped state
+
+When a session is stopped, the dual feed is replaced by a centered standby card — `SESSION STOPPED`, `Alfie is standing by.`, the time the last session ended, and a single Start session button. The operator pill, telemetry, and identity overlays hide; the inspector handle stays available.
 
 ## Operator principles
 

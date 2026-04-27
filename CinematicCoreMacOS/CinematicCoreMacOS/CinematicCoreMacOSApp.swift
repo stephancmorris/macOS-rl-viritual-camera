@@ -12,8 +12,9 @@ struct CinematicCoreMacOSApp: App {
     @StateObject private var systemExtensionManager = SystemExtensionActivationManager()
 
     var body: some Scene {
-        WindowGroup {
+        WindowGroup("Alfie") {
             ContentView(systemExtensionManager: systemExtensionManager)
         }
+        .windowStyle(.hiddenTitleBar)
     }
 }
