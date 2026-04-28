@@ -12,7 +12,7 @@ import SwiftUI
 struct ContentView: View {
     private static let logger = Logger(subsystem: "com.alfie", category: "ContentView")
 
-    @StateObject private var cameraManager = CameraManager()
+    @ObservedObject var cameraManager: CameraManager
     @ObservedObject var systemExtensionManager: SystemExtensionActivationManager
 
     @State private var showError = false
@@ -24,7 +24,8 @@ struct ContentView: View {
 
     private let elapsedTimer = Timer.publish(every: 1, on: .main, in: .common).autoconnect()
 
-    init(systemExtensionManager: SystemExtensionActivationManager) {
+    init(cameraManager: CameraManager, systemExtensionManager: SystemExtensionActivationManager) {
+        self.cameraManager = cameraManager
         self.systemExtensionManager = systemExtensionManager
     }
 
@@ -477,6 +478,9 @@ extension View {
 }
 
 #Preview {
-    ContentView(systemExtensionManager: SystemExtensionActivationManager())
+    ContentView(
+        cameraManager: CameraManager(),
+        systemExtensionManager: SystemExtensionActivationManager()
+    )
         .frame(width: 1200, height: 800)
 }

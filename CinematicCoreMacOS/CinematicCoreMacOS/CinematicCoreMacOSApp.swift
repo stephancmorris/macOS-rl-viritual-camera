@@ -10,11 +10,19 @@ import SwiftUI
 @main
 struct CinematicCoreMacOSApp: App {
     @StateObject private var systemExtensionManager = SystemExtensionActivationManager()
+    @StateObject private var cameraManager = CameraManager()
 
     var body: some Scene {
         WindowGroup("Alfie") {
-            ContentView(systemExtensionManager: systemExtensionManager)
+            ContentView(
+                cameraManager: cameraManager,
+                systemExtensionManager: systemExtensionManager
+            )
         }
         .windowStyle(.hiddenTitleBar)
+
+        Settings {
+            SettingsWindow(cameraManager: cameraManager)
+        }
     }
 }

@@ -141,10 +141,6 @@ final class ShotComposer: ObservableObject {
         /// Smoothing factor per frame (synced to CropEngine.transitionSmoothing)
         var smoothingFactor: Float = 0.10 // 10% per frame
 
-        /// Padding added around the tracked subject box before expanding to the
-        /// final output aspect ratio. 0.20 = 20% additional breathing room.
-        var padding: CGFloat = 0.20
-
         /// How long to keep the current target "warm" after detections drop.
         var targetHoldDuration: TimeInterval = 0.75
 
@@ -153,9 +149,6 @@ final class ShotComposer: ObservableObject {
 
         /// Vertical stage margin used to avoid drifting into ceiling or front-row space.
         var stageVerticalMargin: CGFloat = 0.03
-
-        /// Minimum margin to preserve between the speaker bounds and crop edges.
-        var edgeSafetyMargin: CGFloat = 0.12
 
         /// Output frame profile. Default is stream-friendly landscape.
         var frameProfile: FrameProfile = .livestream
@@ -205,6 +198,25 @@ final class ShotComposer: ObservableObject {
 
     /// Last accepted detection center (for deadzone comparison)
     private var lastAcceptedCenter: CGPoint?
+
+    /// Snapshot of the framing inputs the last accepted center was computed under.
+    /// When any of these change, the next compose frame bypasses the deadzone gate
+    /// once so a new preset/anchor takes effect even when the speaker is still.
+    private var lastAppliedFramingFingerprint: FramingFingerprint?
+
+    private struct FramingFingerprint: Equatable {
+        let frameProfile: Config.FrameProfile
+        let shotPreset: Config.ShotPreset
+        let shotFraming: Config.ShotFraming
+    }
+
+    private var currentFramingFingerprint: FramingFingerprint {
+        FramingFingerprint(
+            frameProfile: config.frameProfile,
+            shotPreset: config.shotPreset,
+            shotFraming: config.shotFraming
+        )
+    }
 
     /// Whether a valid target has been computed at least once
     @Published private(set) var hasActiveTarget: Bool = false
@@ -313,6 +325,7 @@ final class ShotComposer: ObservableObject {
     /// Reset state (e.g., when switching subjects or losing track)
     func reset(clearManualLock: Bool = false) {
         lastAcceptedCenter = nil
+        lastAppliedFramingFingerprint = nil
         hasActiveTarget = false
         lastComputedCrop = nil
         lastTrackedBounds = nil
@@ -488,9 +501,14 @@ final class ShotComposer: ObservableObject {
         let clampedCrop = clampCropToFrame(crop)
         lastComputedCrop = clampedCrop
 
-        // Deadzone: only update when the tracked subject anchor has moved enough
-        // to matter. This keeps the camera from chasing small detection noise.
-        if let lastCenter = lastAcceptedCenter {
+        let fingerprint = currentFramingFingerprint
+        let framingChanged = lastAppliedFramingFingerprint != fingerprint
+
+        // Deadzone: skip updates when the tracked subject anchor hasn't moved
+        // enough to matter, so we don't chase detection noise. Bypass the gate
+        // once whenever framing inputs change so a new preset/anchor takes
+        // effect even with a stationary speaker.
+        if !framingChanged, let lastCenter = lastAcceptedCenter {
             let dx = abs(trackingCenter.x - lastCenter.x)
             let dy = abs(trackingCenter.y - lastCenter.y)
             if dx < config.deadzoneThreshold && dy < config.deadzoneThreshold {
@@ -499,6 +517,7 @@ final class ShotComposer: ObservableObject {
         }
 
         lastAcceptedCenter = trackingCenter
+        lastAppliedFramingFingerprint = fingerprint
         hasActiveTarget = true
         return clampedCrop
     }

@@ -16,10 +16,6 @@ struct InspectorDrawer: View {
     @Binding var isOpen: Bool
 
     @State private var showCameraList = false
-    @State private var showDetectionSettings = false
-    @State private var showCropSettings = false
-    @State private var showComposerSettings = false
-    @State private var showOutputSettings = false
     @State private var showAgentSettings = false
     @State private var showRecorderSettings = false
     @State private var showPlaybackSettings = false
@@ -239,10 +235,16 @@ struct InspectorDrawer: View {
                 .padding(.bottom, 6)
 
             row("Target hold") {
-                valueText("2.4 s", monospaced: true)
+                valueText(
+                    String(format: "%.2f s", cameraManager.shotComposer.config.targetHoldDuration),
+                    monospaced: true
+                )
             }
             row("Deadzone") {
-                valueText("4.0%", monospaced: true)
+                valueText(
+                    String(format: "%.1f%%", cameraManager.shotComposer.config.deadzoneThreshold * 100),
+                    monospaced: true
+                )
             }
             row("Lerp ease") {
                 if let cropEngine = cameraManager.cropEngine {
@@ -252,31 +254,22 @@ struct InspectorDrawer: View {
                 }
             }
 
-            HStack(spacing: 8) {
-                smallButton("Detection", systemImage: "slider.horizontal.3", equalWidth: true) {
-                    showDetectionSettings.toggle()
-                }
-                .popover(isPresented: $showDetectionSettings) {
-                    DetectionSettingsView(personDetector: cameraManager.personDetector)
-                }
-
-                if let cropEngine = cameraManager.cropEngine {
-                    smallButton("Crop", systemImage: "crop", equalWidth: true) {
-                        showCropSettings.toggle()
-                    }
-                    .popover(isPresented: $showCropSettings) {
-                        CropSettingsView(cropEngine: cropEngine, cameraManager: cameraManager)
-                    }
-                }
-
-                smallButton("Composer", systemImage: "film", equalWidth: true) {
-                    showComposerSettings.toggle()
-                }
-                .popover(isPresented: $showComposerSettings) {
-                    ShotComposerSettingsView(shotComposer: cameraManager.shotComposer)
+            HStack {
+                smallButton("Settings…", systemImage: "gearshape", equalWidth: true) {
+                    openSettingsWindow()
                 }
             }
             .padding(.top, 10)
+        }
+    }
+
+    private func openSettingsWindow() {
+        // Standard macOS hook for the Settings scene. Works with SwiftUI's
+        // `Settings { ... }` scene declared in CinematicCoreMacOSApp.
+        if #available(macOS 14, *) {
+            NSApp.sendAction(Selector(("showSettingsWindow:")), to: nil, from: nil)
+        } else {
+            NSApp.sendAction(Selector(("showPreferencesWindow:")), to: nil, from: nil)
         }
     }
 
@@ -303,10 +296,7 @@ struct InspectorDrawer: View {
 
             HStack(spacing: 8) {
                 smallButton("Output settings…", systemImage: "dot.radiowaves.left.and.right") {
-                    showOutputSettings.toggle()
-                }
-                .popover(isPresented: $showOutputSettings) {
-                    ProgramOutputSettingsView(programOutput: cameraManager.programOutput)
+                    openSettingsWindow()
                 }
                 Spacer()
             }
@@ -326,7 +316,7 @@ struct InspectorDrawer: View {
                 description: "Active. Heuristic controller v1.4.",
                 isActive: true
             ) {
-                showComposerSettings.toggle()
+                openSettingsWindow()
             }
 
             if DeveloperFlags.exposeClipPlaybackControls {
@@ -349,7 +339,7 @@ struct InspectorDrawer: View {
                 description: outputSummary,
                 isActive: cameraManager.programOutput.activeRoute != nil
             ) {
-                showOutputSettings.toggle()
+                openSettingsWindow()
             }
 
             if DeveloperFlags.exposeMLAgentControls {

@@ -112,7 +112,9 @@ final class TrainingDataRecorder: ObservableObject {
     struct ComposerConfigData: Codable, Sendable {
         let deadzoneThreshold: Double
         let smoothingFactor: Double
-        let padding: Double
+        let targetHoldDuration: Double
+        let stageHorizontalMargin: Double
+        let stageVerticalMargin: Double
     }
 
     struct DetectorConfigData: Codable, Sendable {
@@ -202,7 +204,9 @@ final class TrainingDataRecorder: ObservableObject {
             composerConfig: ComposerConfigData(
                 deadzoneThreshold: composerConfig.deadzoneThreshold,
                 smoothingFactor: Double(composerConfig.smoothingFactor),
-                padding: composerConfig.padding
+                targetHoldDuration: composerConfig.targetHoldDuration,
+                stageHorizontalMargin: composerConfig.stageHorizontalMargin,
+                stageVerticalMargin: composerConfig.stageVerticalMargin
             ),
             detectorConfig: DetectorConfigData(
                 confidenceThreshold: Double(detectorConfig.confidenceThreshold),
