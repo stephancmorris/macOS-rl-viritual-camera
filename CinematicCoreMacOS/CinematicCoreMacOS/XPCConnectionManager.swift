@@ -76,7 +76,10 @@ final class XPCConnectionManager {
         lastErrorDescription = nil
         onStateChange?()
         
-        let newConnection = NSXPCConnection(serviceName: CinematicCoreXPC.machServiceName)
+        let newConnection = NSXPCConnection(
+            machServiceName: CinematicCoreXPC.machServiceName,
+            options: []
+        )
         newConnection.remoteObjectInterface = NSXPCInterface(with: CinematicCoreXPCProtocol.self)
         
         // Handle connection interruption (extension crashed or was killed)

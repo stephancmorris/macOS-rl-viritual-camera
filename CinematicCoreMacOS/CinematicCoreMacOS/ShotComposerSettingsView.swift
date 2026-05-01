@@ -42,11 +42,8 @@ struct ShotComposerSettingsView: View {
                 }
             }
 
-            Picker("Shot Preset", selection: $shotComposer.config.shotPreset) {
-                ForEach(ShotComposer.Config.ShotPreset.allCases) { preset in
-                    Text(preset.title).tag(preset)
-                }
-            }
+            LiquidPresetSwitch(selection: $shotComposer.config.shotPreset)
+                .disabled(!shotComposer.config.isEnabled)
 
             Text("Use `Livestream Rectangle` for normal YouTube or switcher feeds. `Portrait Profile` is a secondary vertical option.")
                 .font(.caption)
@@ -57,11 +54,8 @@ struct ShotComposerSettingsView: View {
                 .foregroundStyle(.secondary)
         }
 
-        Section("Head anchor") {
-            LiquidFramingSwitch(selection: $shotComposer.config.shotFraming)
-                .disabled(!shotComposer.config.isEnabled)
-
-            Text("Anchors the crop's vertical position to the speaker's chest or waist. Distinct from the pill's shot preset, which controls overall tightness.")
+        Section("Live Crop Controls") {
+            Text("The live operator pill now handles `Waist` and `Chest` directly. Composer settings focus on overall shot size: `Wide`, `Medium`, or `Waist Up`.")
                 .font(.caption)
                 .foregroundStyle(.secondary)
         }
@@ -194,6 +188,69 @@ struct ShotComposerSettingsView: View {
                                              crop.size.width, crop.size.height))
             }
         }
+    }
+}
+
+// MARK: - Liquid Glass Preset Switch
+
+struct LiquidPresetSwitch: View {
+    @Binding var selection: ShotComposer.Config.ShotPreset
+    @Environment(\.isEnabled) private var isEnabled
+
+    var body: some View {
+        HStack(spacing: 2) {
+            ForEach(ShotComposer.Config.ShotPreset.allCases) { option in
+                segment(for: option)
+            }
+        }
+        .padding(3)
+        .background {
+            Capsule(style: .continuous)
+                .fill(.ultraThinMaterial)
+                .overlay(
+                    Capsule(style: .continuous)
+                        .strokeBorder(.white.opacity(0.12), lineWidth: 1)
+                )
+        }
+        .opacity(isEnabled ? 1.0 : 0.5)
+    }
+
+    @ViewBuilder
+    private func segment(for option: ShotComposer.Config.ShotPreset) -> some View {
+        let isSelected = selection == option
+        Button {
+            guard isEnabled else { return }
+            withAnimation(.spring(response: 0.32, dampingFraction: 0.82)) {
+                selection = option
+            }
+        } label: {
+            Text(option.title)
+                .font(.system(size: 12, weight: .semibold, design: .rounded))
+                .foregroundStyle(isSelected ? Color.black.opacity(0.88) : Color.white.opacity(0.82))
+                .padding(.horizontal, 12)
+                .padding(.vertical, 6)
+                .background {
+                    if isSelected {
+                        Capsule(style: .continuous)
+                            .fill(
+                                LinearGradient(
+                                    colors: [
+                                        Color.mint.opacity(0.95),
+                                        Color.green.opacity(0.85)
+                                    ],
+                                    startPoint: .topLeading,
+                                    endPoint: .bottomTrailing
+                                )
+                            )
+                            .overlay(
+                                Capsule(style: .continuous)
+                                    .strokeBorder(.white.opacity(0.35), lineWidth: 1)
+                            )
+                            .shadow(color: .mint.opacity(0.35), radius: 8, y: 2)
+                    }
+                }
+        }
+        .buttonStyle(.plain)
     }
 }
 

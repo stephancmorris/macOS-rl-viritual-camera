@@ -12,6 +12,43 @@ import Combine
 import IOSurface
 import OSLog
 
+private final class SendablePixelBufferBox: @unchecked Sendable {
+    let pixelBuffer: CVPixelBuffer
+
+    init(_ pixelBuffer: CVPixelBuffer) {
+        self.pixelBuffer = pixelBuffer
+    }
+}
+
+enum CameraError: LocalizedError {
+    case noCameraAvailable
+    case sessionConfigurationFailed
+    case unsupportedFormat
+    case authorizationDenied
+    case noValidationClipSelected
+    case invalidValidationClip
+    case validationClipPlaybackFailed(String)
+
+    var errorDescription: String? {
+        switch self {
+        case .noCameraAvailable:
+            return "No camera device found"
+        case .sessionConfigurationFailed:
+            return "Failed to configure capture session"
+        case .unsupportedFormat:
+            return "Camera does not support 4K capture"
+        case .authorizationDenied:
+            return "Camera access denied"
+        case .noValidationClipSelected:
+            return "Choose a validation clip before starting clip playback"
+        case .invalidValidationClip:
+            return "The selected validation clip does not contain a readable video track"
+        case .validationClipPlaybackFailed(let message):
+            return "Validation clip playback failed: \(message)"
+        }
+    }
+}
+
 /// Manages the AVCaptureSession pipeline for 4K video capture
 /// Ticket: APP-01 - AVCaptureSession Pipeline
 @MainActor
@@ -159,14 +196,6 @@ final class CameraManager: NSObject, ObservableObject {
     private var cancellables = Set<AnyCancellable>()
     private var clipPlaybackTask: Task<Void, Never>?
 
-    private final class SendablePixelBufferBox: @unchecked Sendable {
-        let pixelBuffer: CVPixelBuffer
-
-        init(_ pixelBuffer: CVPixelBuffer) {
-            self.pixelBuffer = pixelBuffer
-        }
-    }
-
     /// Last source pixel aspect (width/height) forwarded to the shot composer.
     /// Used to skip the per-frame update when aspect is unchanged.
     private var lastAppliedSourceAspect: CGFloat = 0
@@ -184,37 +213,6 @@ final class CameraManager: NSObject, ObservableObject {
         static let targetHeight: Int32 = 2160
         static let targetFrameRate: Double = 30.0
         static let pixelFormat = kCVPixelFormatType_32BGRA
-    }
-    
-    // MARK: - Error Types
-    
-    enum CameraError: LocalizedError {
-        case noCameraAvailable
-        case sessionConfigurationFailed
-        case unsupportedFormat
-        case authorizationDenied
-        case noValidationClipSelected
-        case invalidValidationClip
-        case validationClipPlaybackFailed(String)
-        
-        var errorDescription: String? {
-            switch self {
-            case .noCameraAvailable:
-                return "No camera device found"
-            case .sessionConfigurationFailed:
-                return "Failed to configure capture session"
-            case .unsupportedFormat:
-                return "Camera does not support 4K capture"
-            case .authorizationDenied:
-                return "Camera access denied"
-            case .noValidationClipSelected:
-                return "Choose a validation clip before starting clip playback"
-            case .invalidValidationClip:
-                return "The selected validation clip does not contain a readable video track"
-            case .validationClipPlaybackFailed(let message):
-                return "Validation clip playback failed: \(message)"
-            }
-        }
     }
     
     // MARK: - Initialization
@@ -966,6 +964,7 @@ private final class VirtualCameraOutputSink: ProgramOutputSink {
 
     private let xpcManager = XPCConnectionManager()
     private(set) var lastFrameSendDuration: TimeInterval?
+    private var hasLoggedFirstFrameSend = false
     var onStateChange: (() -> Void)? {
         didSet {
             xpcManager.onStateChange = onStateChange
@@ -973,7 +972,10 @@ private final class VirtualCameraOutputSink: ProgramOutputSink {
     }
 
     var isAvailable: Bool {
-        true
+        if case .connected = xpcManager.connectionState {
+            return true
+        }
+        return false
     }
 
     var summary: String {
@@ -1014,6 +1016,25 @@ private final class VirtualCameraOutputSink: ProgramOutputSink {
         xpcManager.reconnectStatusDescription
     }
 
+    var bringUpChecks: [OutputBringUpCheck] {
+        [
+            OutputBringUpCheck(
+                id: "virtual.xpc",
+                title: "Virtual Camera · XPC Link",
+                status: xpcStatusTitle,
+                detail: xpcStatusDetail,
+                level: xpcStatusLevel
+            ),
+            OutputBringUpCheck(
+                id: "virtual.frames",
+                title: "Virtual Camera · Frame Handoff",
+                status: frameHandoffStatusTitle,
+                detail: frameHandoffDetail,
+                level: frameHandoffLevel
+            )
+        ]
+    }
+
     func connect() {
         xpcManager.connect()
     }
@@ -1027,6 +1048,11 @@ private final class VirtualCameraOutputSink: ProgramOutputSink {
     }
 
     func updateCaptureStatus(isRunning: Bool) {
+        if isRunning {
+            Self.logger.notice("Sending capture status RUNNING to virtual camera extension")
+        } else {
+            Self.logger.notice("Sending capture status STOPPED to virtual camera extension")
+        }
         xpcManager.remoteProxy()?.updateCaptureStatus(isRunning: isRunning)
     }
 
@@ -1046,31 +1072,178 @@ private final class VirtualCameraOutputSink: ProgramOutputSink {
             width: Int32(CVPixelBufferGetWidth(pixelBuffer)),
             height: Int32(CVPixelBufferGetHeight(pixelBuffer))
         )
+        if !hasLoggedFirstFrameSend {
+            hasLoggedFirstFrameSend = true
+            Self.logger.notice(
+                "First frame handed to virtual camera extension at \(timestamp, privacy: .public)s"
+            )
+        }
         lastFrameSendDuration = CACurrentMediaTime() - sendStart
         Self.signposter.endInterval("xpcSend", sendInterval)
         return true
+    }
+
+    private var xpcStatusTitle: String {
+        switch xpcManager.connectionState {
+        case .connected:
+            return "Connected"
+        case .connecting:
+            return "Connecting"
+        case .disconnected:
+            return "Disconnected"
+        case .error:
+            return "Error"
+        }
+    }
+
+    private var xpcStatusDetail: String {
+        switch xpcManager.connectionState {
+        case .connected:
+            return "Host app can reach the CMIO extension Mach service."
+        case .connecting:
+            return "Waiting for the extension service to answer the XPC ping."
+        case .disconnected:
+            return "The CMIO extension is not connected. Check that the system extension is installed and loaded."
+        case .error(let message):
+            return message
+        }
+    }
+
+    private var xpcStatusLevel: OutputCheckLevel {
+        switch xpcManager.connectionState {
+        case .connected:
+            return .ok
+        case .connecting:
+            return .info
+        case .disconnected:
+            return .warning
+        case .error:
+            return .error
+        }
+    }
+
+    private var frameHandoffStatusTitle: String {
+        if lastFrameSendDuration != nil {
+            return "Sending"
+        }
+        if case .connected = xpcManager.connectionState {
+            return "Connected"
+        }
+        return "Waiting"
+    }
+
+    private var frameHandoffDetail: String {
+        if let lastFrameSendDuration {
+            return String(
+                format: "Frames are being handed to the extension over XPC. Last send: %.2f ms.",
+                lastFrameSendDuration * 1000
+            )
+        }
+        if case .connected = xpcManager.connectionState {
+            return "XPC is connected, but no program frames have been handed off yet."
+        }
+        return "No frame handoff is possible until the XPC link is connected."
+    }
+
+    private var frameHandoffLevel: OutputCheckLevel {
+        if lastFrameSendDuration != nil {
+            return .ok
+        }
+        if case .connected = xpcManager.connectionState {
+            return .info
+        }
+        return .warning
     }
 }
 
 @MainActor
 private final class BlackmagicOutputSink: ProgramOutputSink {
     let route: ProgramOutputManager.Route = .blackmagicSDI
+    private enum SDKState {
+        case missing
+        case located(URL)
+    }
+
+    private static let candidateSDKLocations: [String] = [
+        "/Library/Frameworks/DeckLinkAPI.framework",
+        "/Library/Application Support/Blackmagic Design/Desktop Video",
+        "/Applications/Blackmagic Media Express.app",
+        "/Applications/Blackmagic Desktop Video"
+    ]
+
     var onStateChange: (() -> Void)?
+
+    private var sdkState: SDKState {
+        let fileManager = FileManager.default
+        for path in Self.candidateSDKLocations where fileManager.fileExists(atPath: path) {
+            return .located(URL(fileURLWithPath: path))
+        }
+        return .missing
+    }
 
     var isAvailable: Bool {
         false
     }
 
     var summary: String {
-        "Blackmagic playback sink is not integrated yet."
+        switch sdkState {
+        case .missing:
+            return "Desktop Video SDK was not found on this Mac."
+        case .located:
+            return "Desktop Video SDK is present, but playback output is not wired into this build yet."
+        }
     }
 
     var detail: String {
-        "Add the Desktop Video SDK playback path here to send the processed feed to UltraStudio or DeckLink hardware."
+        switch sdkState {
+        case .missing:
+            return "Install the Blackmagic Desktop Video SDK and Desktop Video software before ATEM output can be tested."
+        case .located(let url):
+            return "SDK/runtime found at \(url.path). The DeckLink playback bridge still needs implementation before frames can be sent to ATEM hardware."
+        }
     }
 
     var lastErrorDescription: String? {
         nil
+    }
+
+    var bringUpChecks: [OutputBringUpCheck] {
+        switch sdkState {
+        case .missing:
+            return [
+                OutputBringUpCheck(
+                    id: "blackmagic.sdk",
+                    title: "Blackmagic SDI · SDK",
+                    status: "Missing",
+                    detail: "No Desktop Video SDK or runtime install was found in the standard Blackmagic locations on this Mac.",
+                    level: .error
+                ),
+                OutputBringUpCheck(
+                    id: "blackmagic.device",
+                    title: "Blackmagic SDI · Hardware Path",
+                    status: "Blocked",
+                    detail: "Device discovery and playback cannot start until the Desktop Video SDK/runtime is installed.",
+                    level: .warning
+                )
+            ]
+        case .located(let url):
+            return [
+                OutputBringUpCheck(
+                    id: "blackmagic.sdk",
+                    title: "Blackmagic SDI · SDK",
+                    status: "Installed",
+                    detail: "Blackmagic runtime detected at \(url.path).",
+                    level: .ok
+                ),
+                OutputBringUpCheck(
+                    id: "blackmagic.device",
+                    title: "Blackmagic SDI · Playback Bridge",
+                    status: "Pending",
+                    detail: "This build still needs the DeckLink playback bridge wired before an ATEM-facing output can be opened.",
+                    level: .warning
+                )
+            ]
+        }
     }
 
     func connect() {}

@@ -5,59 +5,69 @@
 //  Created by Codex on 4/27/2026.
 //
 
+import Combine
 import SwiftUI
+
+enum SettingsTab: String, CaseIterable, Identifiable {
+    case composer
+    case detection
+    case crop
+    case output
+
+    var id: String { rawValue }
+
+    var title: String {
+        switch self {
+        case .composer:
+            return "Composer"
+        case .detection:
+            return "Detection"
+        case .crop:
+            return "Crop"
+        case .output:
+            return "Output"
+        }
+    }
+
+    var systemImage: String {
+        switch self {
+        case .composer:
+            return "film"
+        case .detection:
+            return "person.crop.rectangle"
+        case .crop:
+            return "crop.rotate"
+        case .output:
+            return "video.badge.waveform"
+        }
+    }
+
+    var summary: String {
+        switch self {
+        case .composer:
+            return "Shot logic, framing style, deadzone, smoothing, and target hold behavior."
+        case .detection:
+            return "Vision person detection sensitivity, confidence, accuracy mode, and live statistics."
+        case .crop:
+            return "Crop engine quality, output profile, render smoothing, and GPU performance."
+        case .output:
+            return "Program route health, dropped frames, reconnect controls, and live latency."
+        }
+    }
+}
+
+final class SettingsWindowController: ObservableObject {
+    @Published var selectedTab: SettingsTab = .composer
+
+    func open(_ tab: SettingsTab) {
+        selectedTab = tab
+    }
+}
 
 struct SettingsWindow: View {
     @ObservedObject var cameraManager: CameraManager
-    @State private var selectedTab: SettingsTab = .composer
-
-    enum SettingsTab: String, CaseIterable, Identifiable {
-        case composer
-        case detection
-        case crop
-        case output
-
-        var id: String { rawValue }
-
-        var title: String {
-            switch self {
-            case .composer:
-                return "Composer"
-            case .detection:
-                return "Detection"
-            case .crop:
-                return "Crop"
-            case .output:
-                return "Output"
-            }
-        }
-
-        var systemImage: String {
-            switch self {
-            case .composer:
-                return "film"
-            case .detection:
-                return "person.crop.rectangle"
-            case .crop:
-                return "crop.rotate"
-            case .output:
-                return "video.badge.waveform"
-            }
-        }
-
-        var summary: String {
-            switch self {
-            case .composer:
-                return "Shot logic, framing style, deadzone, smoothing, and target hold behavior."
-            case .detection:
-                return "Vision person detection sensitivity, confidence, accuracy mode, and live statistics."
-            case .crop:
-                return "Crop engine quality, output profile, render smoothing, and GPU performance."
-            case .output:
-                return "Program route health, dropped frames, reconnect controls, and live latency."
-            }
-        }
-    }
+    @ObservedObject var systemExtensionManager: SystemExtensionActivationManager
+    @ObservedObject var controller: SettingsWindowController
 
     var body: some View {
         VStack(spacing: 0) {
@@ -65,7 +75,7 @@ struct SettingsWindow: View {
 
             Divider()
 
-            TabView(selection: $selectedTab) {
+            TabView(selection: $controller.selectedTab) {
                 ComposerTab(shotComposer: cameraManager.shotComposer)
                     .tabItem {
                         Label(SettingsTab.composer.title, systemImage: SettingsTab.composer.systemImage)
@@ -84,7 +94,10 @@ struct SettingsWindow: View {
                     }
                     .tag(SettingsTab.crop)
 
-                ProgramOutputSettingsView(programOutput: cameraManager.programOutput)
+                ProgramOutputSettingsView(
+                    programOutput: cameraManager.programOutput,
+                    systemExtensionManager: systemExtensionManager
+                )
                     .tabItem {
                         Label(SettingsTab.output.title, systemImage: SettingsTab.output.systemImage)
                     }
@@ -99,7 +112,7 @@ struct SettingsWindow: View {
             Text("Alfie Settings")
                 .font(.system(size: 24, weight: .semibold, design: .rounded))
 
-            Text(selectedTab.summary)
+            Text(controller.selectedTab.summary)
                 .font(.system(size: 13, weight: .medium, design: .rounded))
                 .foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
@@ -184,5 +197,9 @@ private struct SettingsUnavailableView: View {
 }
 
 #Preview {
-    SettingsWindow(cameraManager: CameraManager())
+    SettingsWindow(
+        cameraManager: CameraManager(),
+        systemExtensionManager: SystemExtensionActivationManager(),
+        controller: SettingsWindowController()
+    )
 }

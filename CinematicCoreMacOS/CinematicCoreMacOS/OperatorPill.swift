@@ -124,16 +124,13 @@ struct OperatorPill: View {
     // MARK: - Framing segmented
 
     private var framingSegmentedSection: some View {
-        let preset = cameraManager.shotComposer.config.shotPreset
+        let framing = cameraManager.shotComposer.config.shotFraming
         return HStack(spacing: 2) {
-            framingSegment(label: "Wide", isOn: preset == .wideSafety) {
-                cameraManager.shotComposer.config.shotPreset = .wideSafety
+            framingSegment(label: "Waist", isOn: framing == .waistUp) {
+                cameraManager.shotComposer.config.shotFraming = .waistUp
             }
-            framingSegment(label: "Medium", isOn: preset == .medium) {
-                cameraManager.shotComposer.config.shotPreset = .medium
-            }
-            framingSegment(label: "Waist Up", isOn: preset == .waistUp) {
-                cameraManager.shotComposer.config.shotPreset = .waistUp
+            framingSegment(label: "Chest", isOn: framing == .chestUp) {
+                cameraManager.shotComposer.config.shotFraming = .chestUp
             }
         }
         .padding(3)

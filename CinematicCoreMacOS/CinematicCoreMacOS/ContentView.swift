@@ -14,6 +14,7 @@ struct ContentView: View {
 
     @ObservedObject var cameraManager: CameraManager
     @ObservedObject var systemExtensionManager: SystemExtensionActivationManager
+    @ObservedObject var settingsWindowController: SettingsWindowController
 
     @State private var showError = false
     @State private var inspectorOpen = false
@@ -24,9 +25,14 @@ struct ContentView: View {
 
     private let elapsedTimer = Timer.publish(every: 1, on: .main, in: .common).autoconnect()
 
-    init(cameraManager: CameraManager, systemExtensionManager: SystemExtensionActivationManager) {
+    init(
+        cameraManager: CameraManager,
+        systemExtensionManager: SystemExtensionActivationManager,
+        settingsWindowController: SettingsWindowController
+    ) {
         self.cameraManager = cameraManager
         self.systemExtensionManager = systemExtensionManager
+        self.settingsWindowController = settingsWindowController
     }
 
     var body: some View {
@@ -46,7 +52,7 @@ struct ContentView: View {
                     manualLockedTargetID: cameraManager.manualLockedTargetID,
                     trackedSubjectRect: cameraManager.shotComposer.lastTrackedBounds,
                     isRecovering: cameraManager.trackingPaused,
-                    framingTitle: cameraManager.shotComposer.config.shotPreset.title,
+                    framingTitle: cameraManager.shotComposer.config.shotFraming.title,
                     onSelectPerson: cameraManager.lockTarget
                 )
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -99,6 +105,7 @@ struct ContentView: View {
                 InspectorDrawer(
                     cameraManager: cameraManager,
                     systemExtensionManager: systemExtensionManager,
+                    settingsWindowController: settingsWindowController,
                     isOpen: $inspectorOpen
                 )
                 .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .trailing)
@@ -480,7 +487,8 @@ extension View {
 #Preview {
     ContentView(
         cameraManager: CameraManager(),
-        systemExtensionManager: SystemExtensionActivationManager()
+        systemExtensionManager: SystemExtensionActivationManager(),
+        settingsWindowController: SettingsWindowController()
     )
-        .frame(width: 1200, height: 800)
+    .frame(width: 1200, height: 800)
 }

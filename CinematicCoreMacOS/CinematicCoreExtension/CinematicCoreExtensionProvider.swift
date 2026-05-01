@@ -68,10 +68,14 @@ class CinematicCoreExtensionDeviceSource: NSObject, CMIOExtensionDeviceSource {
 	
 	// Track if we're receiving frames from host
 	private var isReceivingFrames = false
+	private var hasLoggedFirstCaptureStart = false
+	private var hasLoggedFirstEnqueuedFrame = false
+	private var hasLoggedFirstDequeuedFrame = false
 	
 	init(localizedName: String) {
 		
 		super.init()
+		os_log(.info, "Initializing CMIO extension device source %{public}@", localizedName)
 		let deviceID = UUID() // replace this with your device UUID
 		self.device = CMIOExtensionDevice(localizedName: localizedName, deviceID: deviceID, legacyDeviceID: nil, source: self)
 		
@@ -118,6 +122,10 @@ class CinematicCoreExtensionDeviceSource: NSObject, CMIOExtensionDeviceSource {
 	/// Receive video frame from host app via XPC
 	func enqueueFrame(surfaceID: UInt32, timestamp: Double, width: Int32, height: Int32) {
 		Task {
+			if !hasLoggedFirstEnqueuedFrame {
+				hasLoggedFirstEnqueuedFrame = true
+				os_log(.info, "First frame enqueued from host via XPC at %{public}.3f", timestamp)
+			}
 			await frameQueue.enqueue(surfaceID: surfaceID, timestamp: timestamp, width: width, height: height)
 			isReceivingFrames = true
 		}
@@ -132,6 +140,10 @@ class CinematicCoreExtensionDeviceSource: NSObject, CMIOExtensionDeviceSource {
 			isReceivingFrames = false
 			os_log(.info, "Host app stopped capturing")
 		} else {
+			if !hasLoggedFirstCaptureStart {
+				hasLoggedFirstCaptureStart = true
+				os_log(.info, "First capture-status RUNNING received from host")
+			}
 			os_log(.info, "Host app started capturing")
 		}
 	}
@@ -149,6 +161,10 @@ class CinematicCoreExtensionDeviceSource: NSObject, CMIOExtensionDeviceSource {
 			// Try to get frame from queue
 			Task {
 				if let frame = await self.frameQueue.dequeue() {
+					if !self.hasLoggedFirstDequeuedFrame {
+						self.hasLoggedFirstDequeuedFrame = true
+						os_log(.info, "First frame dequeued for CMIO stream at %{public}.3f", frame.timestamp)
+					}
 					// We have a real frame from the host app - forward it
 					self.sendFrameFromIOSurface(surfaceID: frame.surfaceID, timestamp: frame.timestamp, width: frame.width, height: frame.height)
 				} else if self.isReceivingFrames {
@@ -424,6 +440,7 @@ class CinematicCoreExtensionProviderSource: NSObject, CMIOExtensionProviderSourc
 	init(clientQueue: DispatchQueue?) {
 		
 		super.init()
+		os_log(.info, "Initializing CMIO extension provider source")
 		
 		provider = CMIOExtensionProvider(source: self, clientQueue: clientQueue)
 		deviceSource = CinematicCoreExtensionDeviceSource(localizedName: "Alfie")
@@ -444,17 +461,19 @@ class CinematicCoreExtensionProviderSource: NSObject, CMIOExtensionProviderSourc
 		xpcListener = NSXPCListener(machServiceName: CinematicCoreXPC.machServiceName)
 		xpcListener?.delegate = self
 		xpcListener?.resume()
-		os_log(.info, "XPC listener started on \(CinematicCoreXPC.machServiceName)")
+		os_log(.info, "XPC listener started on %{public}@", CinematicCoreXPC.machServiceName)
 	}
 	
 	func connect(to client: CMIOExtensionClient) throws {
 		
 		// Handle client connect
+		os_log(.info, "CMIO client connected")
 	}
 	
 	func disconnect(from client: CMIOExtensionClient) {
 		
 		// Handle client disconnect
+		os_log(.info, "CMIO client disconnected")
 	}
 	
 	var availableProperties: Set<CMIOExtensionProperty> {
@@ -520,6 +539,7 @@ private class XPCServiceImplementation: NSObject, CinematicCoreXPCProtocol {
 	}
 	
 	func updateCaptureStatus(isRunning: Bool) {
+		os_log(.info, "Extension received capture status update: %{public}@", isRunning ? "running" : "stopped")
 		deviceSource?.updateCaptureStatus(isRunning: isRunning)
 	}
 	

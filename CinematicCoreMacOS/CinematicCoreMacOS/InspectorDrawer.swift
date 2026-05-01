@@ -13,8 +13,10 @@ import SwiftUI
 struct InspectorDrawer: View {
     @ObservedObject var cameraManager: CameraManager
     @ObservedObject var systemExtensionManager: SystemExtensionActivationManager
+    @ObservedObject var settingsWindowController: SettingsWindowController
     @Binding var isOpen: Bool
 
+    @Environment(\.openSettings) private var openSettings
     @State private var showCameraList = false
     @State private var showAgentSettings = false
     @State private var showRecorderSettings = false
@@ -256,21 +258,16 @@ struct InspectorDrawer: View {
 
             HStack {
                 smallButton("Settings…", systemImage: "gearshape", equalWidth: true) {
-                    openSettingsWindow()
+                    openSettingsWindow(.composer)
                 }
             }
             .padding(.top, 10)
         }
     }
 
-    private func openSettingsWindow() {
-        // Standard macOS hook for the Settings scene. Works with SwiftUI's
-        // `Settings { ... }` scene declared in CinematicCoreMacOSApp.
-        if #available(macOS 14, *) {
-            NSApp.sendAction(Selector(("showSettingsWindow:")), to: nil, from: nil)
-        } else {
-            NSApp.sendAction(Selector(("showPreferencesWindow:")), to: nil, from: nil)
-        }
+    private func openSettingsWindow(_ tab: SettingsTab) {
+        settingsWindowController.open(tab)
+        openSettings()
     }
 
     // MARK: - Output
@@ -296,7 +293,7 @@ struct InspectorDrawer: View {
 
             HStack(spacing: 8) {
                 smallButton("Output settings…", systemImage: "dot.radiowaves.left.and.right") {
-                    openSettingsWindow()
+                    openSettingsWindow(.output)
                 }
                 Spacer()
             }
@@ -316,7 +313,7 @@ struct InspectorDrawer: View {
                 description: "Active. Heuristic controller v1.4.",
                 isActive: true
             ) {
-                openSettingsWindow()
+                openSettingsWindow(.composer)
             }
 
             if DeveloperFlags.exposeClipPlaybackControls {
@@ -339,7 +336,7 @@ struct InspectorDrawer: View {
                 description: outputSummary,
                 isActive: cameraManager.programOutput.activeRoute != nil
             ) {
-                openSettingsWindow()
+                openSettingsWindow(.output)
             }
 
             if DeveloperFlags.exposeMLAgentControls {

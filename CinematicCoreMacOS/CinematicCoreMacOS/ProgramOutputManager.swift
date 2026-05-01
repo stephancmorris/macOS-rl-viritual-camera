@@ -12,6 +12,58 @@ import Foundation
 import OSLog
 import SwiftUI
 
+enum OutputCheckLevel {
+    case ok
+    case info
+    case warning
+    case error
+
+    var title: String {
+        switch self {
+        case .ok:
+            return "OK"
+        case .info:
+            return "Info"
+        case .warning:
+            return "Warning"
+        case .error:
+            return "Error"
+        }
+    }
+
+    var color: Color {
+        switch self {
+        case .ok:
+            return .green
+        case .info:
+            return .secondary
+        case .warning:
+            return .orange
+        case .error:
+            return .red
+        }
+    }
+}
+
+struct OutputBringUpCheck: Identifiable {
+    let id: String
+    let title: String
+    let status: String
+    let detail: String
+    let level: OutputCheckLevel
+}
+
+@MainActor
+protocol SystemExtensionStatusProviding: ObservableObject {
+    var badgeTitle: String { get }
+    var summaryText: String { get }
+    var primaryActionTitle: String? { get }
+    var primaryActionSystemImage: String { get }
+    var outputCheckLevel: OutputCheckLevel { get }
+
+    func triggerPrimaryAction() async
+}
+
 @MainActor
 protocol ProgramOutputSink: AnyObject {
     var route: ProgramOutputManager.Route { get }
@@ -22,6 +74,7 @@ protocol ProgramOutputSink: AnyObject {
     var lastFrameSendDuration: TimeInterval? { get }
     var canReconnect: Bool { get }
     var reconnectStatus: String? { get }
+    var bringUpChecks: [OutputBringUpCheck] { get }
     var onStateChange: (() -> Void)? { get set }
 
     func connect()
@@ -36,6 +89,7 @@ extension ProgramOutputSink {
     var lastFrameSendDuration: TimeInterval? { nil }
     var canReconnect: Bool { false }
     var reconnectStatus: String? { nil }
+    var bringUpChecks: [OutputBringUpCheck] { [] }
     func reconnect() {}
 }
 
@@ -163,6 +217,7 @@ final class ProgramOutputManager: ObservableObject {
     @Published private(set) var lastDropTimestamp: Double?
     @Published private(set) var lastDropReason: String?
     @Published private(set) var stageLatencies: [StageLatency] = []
+    @Published private(set) var bringUpChecks: [OutputBringUpCheck] = []
 
     private let sinks: [any ProgramOutputSink]
     private var isCaptureRunning = false
@@ -173,7 +228,7 @@ final class ProgramOutputManager: ObservableObject {
         self.sinks = sinks
         self.sinks.forEach { sink in
             sink.onStateChange = { [weak self] in
-                self?.refreshStatuses()
+                self?.refreshRoutingDecision()
             }
         }
         refreshRoutingDecision()
@@ -202,6 +257,7 @@ final class ProgramOutputManager: ObservableObject {
         }
         activeRoute = nil
         refreshStatuses()
+        refreshBringUpChecks()
     }
 
     func updateCaptureStatus(isRunning: Bool) {
@@ -220,6 +276,7 @@ final class ProgramOutputManager: ObservableObject {
     func sendFrame(_ pixelBuffer: CVPixelBuffer, timestamp: Double) {
         guard let activeSink else {
             refreshStatuses()
+            refreshBringUpChecks()
             return
         }
 
@@ -243,6 +300,7 @@ final class ProgramOutputManager: ObservableObject {
         }
         framesSent += 1
         refreshStatuses()
+        refreshBringUpChecks()
     }
 
     func recordDroppedFrame(timestamp: Double, reason: String) {
@@ -311,6 +369,7 @@ final class ProgramOutputManager: ObservableObject {
     }
 
     private func refreshRoutingDecision() {
+        let previousRoute = activeRoute
         let preferredSink = sink(for: preferredRoute)
         let resolvedRoute: Route?
         if let preferredSink, preferredSink.isAvailable {
@@ -323,7 +382,17 @@ final class ProgramOutputManager: ObservableObject {
 
         activeRoute = isCaptureRunning ? resolvedRoute : nil
 
+        if previousRoute != activeRoute {
+            if let previousRoute, let previousSink = sink(for: previousRoute) {
+                previousSink.updateCaptureStatus(isRunning: false)
+            }
+            if isCaptureRunning, let activeRoute, let currentSink = sink(for: activeRoute) {
+                currentSink.updateCaptureStatus(isRunning: true)
+            }
+        }
+
         refreshStatuses()
+        refreshBringUpChecks()
     }
 
     private func refreshStatuses() {
@@ -360,10 +429,15 @@ final class ProgramOutputManager: ObservableObject {
             return StageLatency(stage: stage, averageDuration: total / Double(samples.count))
         }
     }
+
+    private func refreshBringUpChecks() {
+        bringUpChecks = sinks.flatMap(\.bringUpChecks)
+    }
 }
 
-struct ProgramOutputSettingsView: View {
+struct ProgramOutputSettingsView<SystemExtensionManager: SystemExtensionStatusProviding>: View {
     @ObservedObject var programOutput: ProgramOutputManager
+    @ObservedObject var systemExtensionManager: SystemExtensionManager
 
     var body: some View {
         Form {
@@ -432,6 +506,32 @@ struct ProgramOutputSettingsView: View {
                 }
             }
 
+            Section("Bring-Up Checklist") {
+                bringUpCheckRow(
+                    title: "Virtual Camera Extension",
+                    status: systemExtensionManager.badgeTitle,
+                    detail: systemExtensionManager.summaryText,
+                    level: systemExtensionManager.outputCheckLevel
+                )
+
+                if let actionTitle = systemExtensionManager.primaryActionTitle {
+                    Button {
+                        Task { await systemExtensionManager.triggerPrimaryAction() }
+                    } label: {
+                        Label(actionTitle, systemImage: systemExtensionManager.primaryActionSystemImage)
+                    }
+                }
+
+                ForEach(programOutput.bringUpChecks) { check in
+                    bringUpCheckRow(
+                        title: check.title,
+                        status: check.status,
+                        detail: check.detail,
+                        level: check.level
+                    )
+                }
+            }
+
             Section("Sink Health") {
                 ForEach(programOutput.sinkStatuses, id: \.id) { status in
                     VStack(alignment: .leading, spacing: 4) {
@@ -477,10 +577,36 @@ struct ProgramOutputSettingsView: View {
         .formStyle(.grouped)
         .frame(width: 420, height: 420)
     }
+
+    @ViewBuilder
+    private func bringUpCheckRow(
+        title: String,
+        status: String,
+        detail: String,
+        level: OutputCheckLevel
+    ) -> some View {
+        VStack(alignment: .leading, spacing: 4) {
+            HStack {
+                Text(title)
+                Spacer()
+                Text(status)
+                    .foregroundStyle(level.color)
+            }
+
+            Text(detail)
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+        .padding(.vertical, 4)
+    }
 }
 
 #Preview {
-    ProgramOutputSettingsView(programOutput: ProgramOutputManager(sinks: [PreviewOutputSink()]))
+    ProgramOutputSettingsView(
+        programOutput: ProgramOutputManager(sinks: [PreviewOutputSink()]),
+        systemExtensionManager: PreviewSystemExtensionStatusManager()
+    )
 }
 
 @MainActor
@@ -492,10 +618,32 @@ private final class PreviewOutputSink: ProgramOutputSink {
     var lastErrorDescription: String? { nil }
     var canReconnect: Bool { false }
     var reconnectStatus: String? { nil }
+    var bringUpChecks: [OutputBringUpCheck] {
+        [
+            OutputBringUpCheck(
+                id: "preview.virtual.link",
+                title: "Virtual Camera · XPC Link",
+                status: "Preview",
+                detail: "Preview output sink is active only inside SwiftUI previews.",
+                level: .info
+            )
+        ]
+    }
     var onStateChange: (() -> Void)?
     func connect() {}
     func disconnect() {}
     func reconnect() {}
     func updateCaptureStatus(isRunning: Bool) {}
     func sendFrame(pixelBuffer: CVPixelBuffer, timestamp: Double) -> Bool { true }
+}
+
+@MainActor
+private final class PreviewSystemExtensionStatusManager: ObservableObject, SystemExtensionStatusProviding {
+    let badgeTitle = "Extension Ready"
+    let summaryText = "Preview system extension manager is active only inside SwiftUI previews."
+    let primaryActionTitle: String? = nil
+    let primaryActionSystemImage = "checkmark.seal"
+    let outputCheckLevel: OutputCheckLevel = .ok
+
+    func triggerPrimaryAction() async {}
 }

@@ -525,6 +525,21 @@ final class SystemExtensionActivationManager: NSObject, ObservableObject {
     }
 }
 
+extension SystemExtensionActivationManager: SystemExtensionStatusProviding {
+    var outputCheckLevel: OutputCheckLevel {
+        switch status {
+        case .installed:
+            return .ok
+        case .activationRequested, .unknown:
+            return .info
+        case .awaitingUserApproval, .notInstalled:
+            return .warning
+        case .failed:
+            return .error
+        }
+    }
+}
+
 extension SystemExtensionActivationManager: @preconcurrency OSSystemExtensionRequestDelegate {
     func requestNeedsUserApproval(_ request: OSSystemExtensionRequest) {
         logger.notice("System extension activation requires user approval")

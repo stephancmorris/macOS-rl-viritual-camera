@@ -159,7 +159,7 @@ final class ShotComposer: ObservableObject {
         /// Vertical framing: chest-up or waist-up. Anchors the crop's top edge
         /// to the top of the tracked subject (plus a small headroom) and
         /// extends downward by a fraction of the subject's height.
-        var shotFraming: ShotFraming = .chestUp
+        var shotFraming: ShotFraming = .waistUp
 
         /// Output aspect ratio (width / height)
         var outputAspectRatio: CGFloat {
