@@ -55,7 +55,7 @@ final class SystemExtensionActivationManager: NSObject, ObservableObject {
     @Published private(set) var status: Status
 
     private let logger = Logger(
-        subsystem: Bundle.main.bundleIdentifier ?? "Morris.CinematicCoreMacOS",
+        subsystem: "com.alfie",
         category: "SystemExtensionActivation"
     )
     private let extensionIdentifier: String
@@ -213,6 +213,8 @@ final class SystemExtensionActivationManager: NSObject, ObservableObject {
     }
 
     func ensureInstalledForSessionStart() async -> Bool {
+        logger.notice("ensureInstalledForSessionStart invoked while status = \(self.statusLogValue, privacy: .public)")
+        AlfieDiagnosticsLog.append("SystemExtension", "ensureInstalledForSessionStart status=\(statusLogValue)")
         switch status {
         case .installed:
             return true
@@ -228,6 +230,10 @@ final class SystemExtensionActivationManager: NSObject, ObservableObject {
     }
 
     func triggerPrimaryAction() async {
+        logger.notice(
+            "Retry Install / primary extension action pressed while status = \(self.statusLogValue, privacy: .public)"
+        )
+        AlfieDiagnosticsLog.append("SystemExtension", "Retry Install pressed status=\(statusLogValue)")
         switch status {
         case .unknown, .notInstalled:
             _ = await ensureInstalledForSessionStart()
@@ -274,11 +280,18 @@ final class SystemExtensionActivationManager: NSObject, ObservableObject {
         if let preflightFailure = preflightFailure() {
             let details = Self.failureDetails(for: preflightFailure)
             logger.error("System-extension preflight failed: \(details.detail, privacy: .public)")
+            AlfieDiagnosticsLog.append("SystemExtension", "Preflight failed title=\(details.title) detail=\(details.detail)")
             markFailed(details)
             return
         }
 
-        logger.notice("Submitting activation request for \(self.extensionIdentifier, privacy: .public)")
+        logger.notice(
+            "Submitting activation request for \(self.extensionIdentifier, privacy: .public); appBundle=\(Bundle.main.bundleURL.path, privacy: .public); systemExtensionsDir=\(Self.systemExtensionsDirectoryURL().path, privacy: .public)"
+        )
+        AlfieDiagnosticsLog.append(
+            "SystemExtension",
+            "Submitting activation request identifier=\(extensionIdentifier) appBundle=\(Bundle.main.bundleURL.path) systemExtensionsDir=\(Self.systemExtensionsDirectoryURL().path)"
+        )
         requestInFlight = true
         status = .activationRequested
 
@@ -292,7 +305,13 @@ final class SystemExtensionActivationManager: NSObject, ObservableObject {
     }
 
     private func refreshInstalledState() {
-        logger.notice("Refreshing system-extension status for \(self.extensionIdentifier, privacy: .public)")
+        logger.notice(
+            "Refreshing system-extension status for \(self.extensionIdentifier, privacy: .public); appBundle=\(Bundle.main.bundleURL.path, privacy: .public)"
+        )
+        AlfieDiagnosticsLog.append(
+            "SystemExtension",
+            "Refreshing installed state identifier=\(extensionIdentifier) appBundle=\(Bundle.main.bundleURL.path)"
+        )
         status = .unknown
 
         let request = OSSystemExtensionRequest.propertiesRequest(
@@ -331,6 +350,8 @@ final class SystemExtensionActivationManager: NSObject, ObservableObject {
     }
 
     private func markInstalled() {
+        logger.notice("System-extension status -> installed")
+        AlfieDiagnosticsLog.append("SystemExtension", "Status -> installed")
         defaults.set(true, forKey: installDefaultsKey)
         status = .installed
         requestInFlight = false
@@ -338,11 +359,15 @@ final class SystemExtensionActivationManager: NSObject, ObservableObject {
     }
 
     private func markNotInstalled() {
+        logger.notice("System-extension status -> notInstalled")
+        AlfieDiagnosticsLog.append("SystemExtension", "Status -> notInstalled")
         defaults.set(false, forKey: installDefaultsKey)
         status = .notInstalled
     }
 
     private func markAwaitingUserApproval() {
+        logger.notice("System-extension status -> awaitingUserApproval")
+        AlfieDiagnosticsLog.append("SystemExtension", "Status -> awaitingUserApproval")
         defaults.set(false, forKey: installDefaultsKey)
         status = .awaitingUserApproval
         requestInFlight = false
@@ -350,10 +375,62 @@ final class SystemExtensionActivationManager: NSObject, ObservableObject {
     }
 
     private func markFailed(_ details: FailureDetails) {
+        logger.error(
+            "System-extension status -> failed; title=\(details.title, privacy: .public); summary=\(details.summary, privacy: .public); detail=\(details.detail, privacy: .public)"
+        )
+        AlfieDiagnosticsLog.append(
+            "SystemExtension",
+            "Status -> failed title=\(details.title) summary=\(details.summary) detail=\(details.detail)"
+        )
         defaults.set(false, forKey: installDefaultsKey)
         status = .failed(details)
         requestInFlight = false
         resolveWaiters(with: false)
+    }
+
+    private var statusLogValue: String {
+        switch status {
+        case .unknown:
+            return "unknown"
+        case .notInstalled:
+            return "notInstalled"
+        case .activationRequested:
+            return "activationRequested"
+        case .awaitingUserApproval:
+            return "awaitingUserApproval"
+        case .installed:
+            return "installed"
+        case .failed(let details):
+            return "failed(\(details.title))"
+        }
+    }
+
+    private static func diagnosticSummary(for error: Error) -> String {
+        let nsError = error as NSError
+        var parts: [String] = []
+        parts.append("domain=\(nsError.domain)")
+        parts.append("code=\(nsError.code)")
+        parts.append("description=\(nsError.localizedDescription)")
+
+        if let reason = nsError.userInfo[NSLocalizedFailureReasonErrorKey] as? String, !reason.isEmpty {
+            parts.append("reason=\(reason)")
+        }
+        if let suggestion = nsError.userInfo[NSLocalizedRecoverySuggestionErrorKey] as? String, !suggestion.isEmpty {
+            parts.append("suggestion=\(suggestion)")
+        }
+        if let debugDescription = nsError.userInfo[NSDebugDescriptionErrorKey] as? String, !debugDescription.isEmpty {
+            parts.append("debug=\(debugDescription)")
+        }
+
+        var underlying = nsError.userInfo[NSUnderlyingErrorKey] as? NSError
+        var depth = 1
+        while let current = underlying, depth <= 3 {
+            parts.append("underlying\(depth)=\(current.domain)(\(current.code)): \(current.localizedDescription)")
+            underlying = current.userInfo[NSUnderlyingErrorKey] as? NSError
+            depth += 1
+        }
+
+        return parts.joined(separator: " | ")
     }
 
     private static func resolveBundledExtensionIdentifier() -> String {
@@ -542,17 +619,28 @@ extension SystemExtensionActivationManager: SystemExtensionStatusProviding {
 
 extension SystemExtensionActivationManager: @preconcurrency OSSystemExtensionRequestDelegate {
     func requestNeedsUserApproval(_ request: OSSystemExtensionRequest) {
-        logger.notice("System extension activation requires user approval")
+        logger.notice(
+            "System extension activation requires user approval for \(self.extensionIdentifier, privacy: .public)"
+        )
+        AlfieDiagnosticsLog.append("SystemExtension", "Request needs user approval identifier=\(extensionIdentifier)")
         requestKinds.removeValue(forKey: ObjectIdentifier(request))
         markAwaitingUserApproval()
     }
 
     func request(_ request: OSSystemExtensionRequest, didFailWithError error: Error) {
-        logger.error("System extension activation failed: \(String(describing: error), privacy: .public)")
+        logger.error(
+            "System extension request failed for \(self.extensionIdentifier, privacy: .public): \(Self.diagnosticSummary(for: error), privacy: .public)"
+        )
+        AlfieDiagnosticsLog.append(
+            "SystemExtension",
+            "Request failed identifier=\(extensionIdentifier) \(Self.diagnosticSummary(for: error))"
+        )
         let kind = requestKinds.removeValue(forKey: ObjectIdentifier(request))
         switch kind {
         case .properties:
-            logger.error("System-extension properties request failed: \(String(describing: error), privacy: .public)")
+            logger.error(
+                "System-extension properties request failed: \(Self.diagnosticSummary(for: error), privacy: .public)"
+            )
             if defaults.bool(forKey: installDefaultsKey) {
                 status = .installed
             } else {
@@ -569,7 +657,13 @@ extension SystemExtensionActivationManager: @preconcurrency OSSystemExtensionReq
     }
 
     func request(_ request: OSSystemExtensionRequest, didFinishWithResult result: OSSystemExtensionRequest.Result) {
-        logger.notice("System extension activation finished with result \(String(describing: result), privacy: .public)")
+        logger.notice(
+            "System extension request finished for \(self.extensionIdentifier, privacy: .public) with result \(String(describing: result), privacy: .public)"
+        )
+        AlfieDiagnosticsLog.append(
+            "SystemExtension",
+            "Request finished identifier=\(extensionIdentifier) result=\(String(describing: result))"
+        )
         let kind = requestKinds.removeValue(forKey: ObjectIdentifier(request))
         switch kind {
         case .activation, .none:

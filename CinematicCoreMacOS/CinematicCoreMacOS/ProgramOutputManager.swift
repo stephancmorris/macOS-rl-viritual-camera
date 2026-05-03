@@ -12,6 +12,51 @@ import Foundation
 import OSLog
 import SwiftUI
 
+enum AlfieDiagnosticsLog {
+    private static let queue = DispatchQueue(label: "com.alfie.diagnostics-log")
+
+    static var fileURL: URL {
+        let logsDirectory = FileManager.default
+            .urls(for: .libraryDirectory, in: .userDomainMask)
+            .first?
+            .appendingPathComponent("Logs", isDirectory: true)
+            .appendingPathComponent("Alfie", isDirectory: true)
+            ?? URL(fileURLWithPath: NSHomeDirectory())
+            .appendingPathComponent("Library", isDirectory: true)
+            .appendingPathComponent("Logs", isDirectory: true)
+            .appendingPathComponent("Alfie", isDirectory: true)
+
+        return logsDirectory.appendingPathComponent("alfie-diagnostics.log")
+    }
+
+    static func append(_ category: String, _ message: String) {
+        let timestamp = ISO8601DateFormatter().string(from: Date())
+        let line = "[\(timestamp)] [\(category)] \(message)\n"
+
+        queue.async {
+            let url = fileURL
+            let directory = url.deletingLastPathComponent()
+            do {
+                try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+
+                if FileManager.default.fileExists(atPath: url.path) {
+                    let handle = try FileHandle(forWritingTo: url)
+                    defer { try? handle.close() }
+                    try handle.seekToEnd()
+                    if let data = line.data(using: .utf8) {
+                        try handle.write(contentsOf: data)
+                    }
+                } else {
+                    try line.write(to: url, atomically: true, encoding: .utf8)
+                }
+            } catch {
+                Logger(subsystem: "com.alfie", category: "DiagnosticsFile")
+                    .error("Failed to append diagnostics log: \(error.localizedDescription, privacy: .public)")
+            }
+        }
+    }
+}
+
 enum OutputCheckLevel {
     case ok
     case info
@@ -355,8 +400,17 @@ final class ProgramOutputManager: ObservableObject {
     }
 
     func reconnectPreferredRoute() {
-        sink(for: preferredRoute)?.reconnect()
+        let sink = sink(for: preferredRoute)
+        logger.notice(
+            "Reconnect Output pressed; preferredRoute=\(self.preferredRoute.title, privacy: .public); activeRoute=\(self.activeRoute?.title ?? "none", privacy: .public); sinkAvailable=\((sink?.isAvailable ?? false), privacy: .public); sinkSummary=\(sink?.summary ?? "missing", privacy: .public); sinkDetail=\(sink?.detail ?? "missing", privacy: .public); sinkError=\(sink?.lastErrorDescription ?? "none", privacy: .public)"
+        )
+        AlfieDiagnosticsLog.append(
+            "ProgramOutput",
+            "Reconnect Output pressed preferredRoute=\(preferredRoute.title) activeRoute=\(activeRoute?.title ?? "none") sinkAvailable=\(sink?.isAvailable ?? false) sinkSummary=\(sink?.summary ?? "missing") sinkDetail=\(sink?.detail ?? "missing") sinkError=\(sink?.lastErrorDescription ?? "none")"
+        )
+        sink?.reconnect()
         refreshStatuses()
+        refreshBringUpChecks()
     }
 
     private var activeSink: (any ProgramOutputSink)? {

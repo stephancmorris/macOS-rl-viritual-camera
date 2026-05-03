@@ -60,6 +60,13 @@ final class XPCConnectionManager {
     
     /// Establish XPC connection to the system extension
     func connect() {
+        logger.notice(
+            "XPC connect requested; service=\(CinematicCoreXPC.machServiceName, privacy: .public); state=\(String(describing: self.connectionState), privacy: .public); shouldMaintain=\(self.shouldMaintainConnection, privacy: .public)"
+        )
+        AlfieDiagnosticsLog.append(
+            "XPC",
+            "connect requested service=\(CinematicCoreXPC.machServiceName) state=\(String(describing: connectionState)) shouldMaintain=\(shouldMaintainConnection)"
+        )
         shouldMaintainConnection = true
         reconnectTask?.cancel()
         reconnectTask = nil
@@ -120,6 +127,13 @@ final class XPCConnectionManager {
 
     /// Force an immediate reconnect attempt without waiting for backoff.
     func forceReconnect() {
+        logger.notice(
+            "XPC forceReconnect requested; service=\(CinematicCoreXPC.machServiceName, privacy: .public); state=\(String(describing: self.connectionState), privacy: .public); lastError=\(self.lastErrorDescription ?? "none", privacy: .public)"
+        )
+        AlfieDiagnosticsLog.append(
+            "XPC",
+            "forceReconnect requested service=\(CinematicCoreXPC.machServiceName) state=\(String(describing: connectionState)) lastError=\(lastErrorDescription ?? "none")"
+        )
         guard shouldMaintainConnection else {
             connect()
             return
@@ -165,6 +179,7 @@ final class XPCConnectionManager {
         return connection.remoteObjectProxyWithErrorHandler { [weak self] error in
             Task { @MainActor in
                 self?.logger.error("XPC proxy error: \(error.localizedDescription)")
+                AlfieDiagnosticsLog.append("XPC", "proxy error: \(error.localizedDescription)")
                 self?.lastErrorDescription = error.localizedDescription
                 self?.connectionState = .error(error.localizedDescription)
                 self?.onStateChange?()
@@ -176,8 +191,13 @@ final class XPCConnectionManager {
     // MARK: - Connection Verification
     
     private func verifyConnection() {
+        logger.notice(
+            "Verifying XPC connection with ping; service=\(CinematicCoreXPC.machServiceName, privacy: .public)"
+        )
+        AlfieDiagnosticsLog.append("XPC", "verifyConnection service=\(CinematicCoreXPC.machServiceName)")
         guard let proxy = remoteProxy() else {
             logger.error("Failed to get remote proxy")
+            AlfieDiagnosticsLog.append("XPC", "verifyConnection failed: remote proxy unavailable")
             lastErrorDescription = "Failed to create the XPC remote proxy."
             connectionState = .error("Failed to create the XPC remote proxy.")
             onStateChange?()
@@ -189,6 +209,7 @@ final class XPCConnectionManager {
             Task { @MainActor in
                 guard let self = self else { return }
                 self.logger.info("✓ XPC connection verified")
+                AlfieDiagnosticsLog.append("XPC", "connection verified")
                 self.reconnectAttemptCount = 0
                 self.nextReconnectDelay = nil
                 self.reconnectTask = nil
@@ -203,6 +224,7 @@ final class XPCConnectionManager {
     
     private func handleInterruption() {
         logger.warning("⚠️ XPC connection interrupted")
+        AlfieDiagnosticsLog.append("XPC", "connection interrupted")
         connection = nil
         lastErrorDescription = "The CMIO extension connection was interrupted."
         connectionState = .error("The CMIO extension connection was interrupted.")
@@ -212,6 +234,7 @@ final class XPCConnectionManager {
     
     private func handleInvalidation() {
         logger.info("XPC connection invalidated")
+        AlfieDiagnosticsLog.append("XPC", "connection invalidated")
         connection = nil
         if suppressNextInvalidationReconnect {
             suppressNextInvalidationReconnect = false

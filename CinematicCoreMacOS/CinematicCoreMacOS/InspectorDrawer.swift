@@ -488,13 +488,9 @@ struct InspectorDrawer: View {
     }
 
     private func revealLogsInFinder() {
-        let logsURL = FileManager.default
-            .urls(for: .libraryDirectory, in: .userDomainMask)
-            .first?
-            .appendingPathComponent("Logs")
-        if let logsURL {
-            NSWorkspace.shared.open(logsURL)
-        }
+        let logsURL = AlfieDiagnosticsLog.fileURL.deletingLastPathComponent()
+        try? FileManager.default.createDirectory(at: logsURL, withIntermediateDirectories: true)
+        NSWorkspace.shared.open(logsURL)
     }
 }
 
