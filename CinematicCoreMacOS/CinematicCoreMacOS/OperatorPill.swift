@@ -2,7 +2,7 @@
 //  OperatorPill.swift
 //  CinematicCoreMacOS
 //
-//  Floating glass operator pill: lock state · framing segmented ·
+//  Floating glass operator pill: lock state · shot preset segmented ·
 //  Return to Wide · Resume Tracking · Stop session.
 //
 
@@ -17,7 +17,7 @@ struct OperatorPill: View {
         HStack(spacing: 0) {
             lockStateSection
             divider
-            framingSegmentedSection
+            shotPresetSegmentedSection
             divider
             cropToggleButton
             divider
@@ -121,16 +121,15 @@ struct OperatorPill: View {
         }
     }
 
-    // MARK: - Framing segmented
+    // MARK: - Shot preset segmented
 
-    private var framingSegmentedSection: some View {
-        let framing = cameraManager.shotComposer.config.shotFraming
+    private var shotPresetSegmentedSection: some View {
+        let preset = cameraManager.shotComposer.config.shotPreset
         return HStack(spacing: 2) {
-            framingSegment(label: "Waist", isOn: framing == .waistUp) {
-                cameraManager.shotComposer.config.shotFraming = .waistUp
-            }
-            framingSegment(label: "Chest", isOn: framing == .chestUp) {
-                cameraManager.shotComposer.config.shotFraming = .chestUp
+            ForEach(ShotComposer.Config.ShotPreset.allCases) { option in
+                shotPresetSegment(option: option, isOn: preset == option) {
+                    cameraManager.shotComposer.config.shotPreset = option
+                }
             }
         }
         .padding(3)
@@ -141,9 +140,13 @@ struct OperatorPill: View {
         .padding(.horizontal, 4)
     }
 
-    private func framingSegment(label: String, isOn: Bool, action: @escaping () -> Void) -> some View {
+    private func shotPresetSegment(
+        option: ShotComposer.Config.ShotPreset,
+        isOn: Bool,
+        action: @escaping () -> Void
+    ) -> some View {
         Button(action: action) {
-            Text(label)
+            Text(option.operatorTitle)
                 .font(.system(size: 12, weight: isOn ? .semibold : .medium))
                 .foregroundStyle(.white.opacity(isOn ? 1.0 : 0.62))
                 .padding(.horizontal, 12)

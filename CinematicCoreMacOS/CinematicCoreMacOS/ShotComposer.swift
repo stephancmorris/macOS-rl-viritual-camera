@@ -93,6 +93,17 @@ final class ShotComposer: ObservableObject {
                 }
             }
 
+            var operatorTitle: String {
+                switch self {
+                case .wideSafety:
+                    return "Full Body"
+                case .medium:
+                    return "Medium"
+                case .waistUp:
+                    return "Waist Up"
+                }
+            }
+
             var detail: String {
                 switch self {
                 case .wideSafety:
@@ -116,9 +127,9 @@ final class ShotComposer: ObservableObject {
             var title: String {
                 switch self {
                 case .chestUp:
-                    return "Chest"
+                    return "Tight"
                 case .waistUp:
-                    return "Waist"
+                    return "Wide"
                 }
             }
 

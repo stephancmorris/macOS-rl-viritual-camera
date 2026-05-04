@@ -25,12 +25,12 @@ struct ShotComposerSettingsView: View {
     }
 
     /// The everyday operator-facing knobs: enable/disable, frame profile,
-    /// shot preset, head anchor.
+    /// and vertical crop framing.
     @ViewBuilder
     var basicSection: some View {
         Section("Shot Composer") {
             Toggle("Enable Composer", isOn: $shotComposer.config.isEnabled)
-            Text("Aims for a stable waist-up shot when pose keypoints are available.")
+            Text("Aims for a stable speaker shot when pose keypoints are available.")
                 .font(.caption)
                 .foregroundStyle(.secondary)
         }
@@ -42,20 +42,16 @@ struct ShotComposerSettingsView: View {
                 }
             }
 
-            LiquidPresetSwitch(selection: $shotComposer.config.shotPreset)
-                .disabled(!shotComposer.config.isEnabled)
-
             Text("Use `Livestream Rectangle` for normal YouTube or switcher feeds. `Portrait Profile` is a secondary vertical option.")
-                .font(.caption)
-                .foregroundStyle(.secondary)
-
-            Text(shotComposer.config.shotPreset.detail)
                 .font(.caption)
                 .foregroundStyle(.secondary)
         }
 
-        Section("Live Crop Controls") {
-            Text("The live operator pill now handles `Waist` and `Chest` directly. Composer settings focus on overall shot size: `Wide`, `Medium`, or `Waist Up`.")
+        Section("Vertical Framing") {
+            LiquidFramingSwitch(selection: $shotComposer.config.shotFraming)
+                .disabled(!shotComposer.config.isEnabled)
+
+            Text("Choose how far down the crop should hold the speaker after the live shot size is selected from the main operator pill.")
                 .font(.caption)
                 .foregroundStyle(.secondary)
         }
@@ -167,7 +163,12 @@ struct ShotComposerSettingsView: View {
 
             LabeledContent(
                 "Shot Preset",
-                value: shotComposer.config.shotPreset.title
+                value: shotComposer.config.shotPreset.operatorTitle
+            )
+
+            LabeledContent(
+                "Vertical Framing",
+                value: shotComposer.config.shotFraming.title
             )
 
             LabeledContent(
@@ -260,10 +261,11 @@ struct LiquidFramingSwitch: View {
     @Binding var selection: ShotComposer.Config.ShotFraming
     @Environment(\.isEnabled) private var isEnabled
     @Namespace private var indicatorNamespace
+    private let options: [ShotComposer.Config.ShotFraming] = [.waistUp, .chestUp]
 
     var body: some View {
         HStack(spacing: 2) {
-            ForEach(ShotComposer.Config.ShotFraming.allCases) { option in
+            ForEach(options) { option in
                 segment(for: option)
             }
         }
