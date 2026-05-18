@@ -375,6 +375,10 @@ final class ProgramOutputManager: ObservableObject {
         activeRoute?.title ?? "No Active Output"
     }
 
+    var configuredRoutes: [Route] {
+        sinks.map(\.route)
+    }
+
     var routingSummary: String {
         guard isCaptureRunning else {
             return "\(preferredRoute.title) is selected and will carry the processed feed when capture is running."
@@ -497,7 +501,7 @@ struct ProgramOutputSettingsView<SystemExtensionManager: SystemExtensionStatusPr
         Form {
             Section("Output Route") {
                 Picker("Preferred Route", selection: $programOutput.preferredRoute) {
-                    ForEach(ProgramOutputManager.Route.allCases) { route in
+                    ForEach(programOutput.configuredRoutes) { route in
                         Label(route.title, systemImage: route.systemImage)
                             .tag(route)
                     }
@@ -656,6 +660,7 @@ struct ProgramOutputSettingsView<SystemExtensionManager: SystemExtensionStatusPr
     }
 }
 
+#if DEBUG
 #Preview {
     ProgramOutputSettingsView(
         programOutput: ProgramOutputManager(sinks: [PreviewOutputSink()]),
@@ -701,3 +706,4 @@ private final class PreviewSystemExtensionStatusManager: ObservableObject, Syste
 
     func triggerPrimaryAction() async {}
 }
+#endif

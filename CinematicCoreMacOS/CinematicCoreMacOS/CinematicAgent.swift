@@ -27,6 +27,8 @@ final class CinematicAgent: ObservableObject {
     @Published private(set) var isModelLoaded: Bool = false
     @Published private(set) var modelStatus: String = "Model idle"
     @Published private(set) var lastPredictedCrop: CropEngine.CropRect?
+    @Published private(set) var inferenceFailureCount: Int = 0
+    @Published private(set) var lastInferenceErrorDescription: String?
 
     // MARK: - Constants (must match cinematic_env.py exactly)
 
@@ -48,6 +50,7 @@ final class CinematicAgent: ObservableObject {
     private var cropY:    Float = 0.0
     private var cropZoom: Float = 1.0
     private var modelLoadWorkItem: DispatchWorkItem?
+    private var lastInferenceStatusUpdate = Date.distantPast
 
     // MARK: - Lifecycle
 
@@ -131,6 +134,7 @@ final class CinematicAgent: ObservableObject {
         cropY    = 0.0
         cropZoom = 1.0
         lastPredictedCrop = nil
+        lastInferenceErrorDescription = nil
     }
 
     /// Run one inference step.
@@ -153,6 +157,7 @@ final class CinematicAgent: ObservableObject {
 
         // Build MLMultiArray input (shape: [1, 18])
         guard let input = try? MLMultiArray(shape: [1, 18], dataType: .float32) else {
+            recordInferenceFailure("Could not allocate model input.")
             return currentCrop
         }
         for (i, value) in obs.enumerated() {
@@ -167,6 +172,12 @@ final class CinematicAgent: ObservableObject {
             let output = try model.prediction(from: inputProvider)
 
             guard let actionArray = output.featureValue(for: "action")?.multiArrayValue else {
+                recordInferenceFailure("Model output did not include an action tensor.")
+                return currentCrop
+            }
+
+            guard actionArray.count >= 3 else {
+                recordInferenceFailure("Model action tensor had \(actionArray.count) value(s); expected 3.")
                 return currentCrop
             }
 
@@ -176,11 +187,23 @@ final class CinematicAgent: ObservableObject {
 
             let newCrop = applyCropUpdate(dx: dx, dy: dy, dz: dz)
             lastPredictedCrop = newCrop
+            lastInferenceErrorDescription = nil
             return newCrop
 
         } catch {
+            recordInferenceFailure(error.localizedDescription)
             return currentCrop
         }
+    }
+
+    private func recordInferenceFailure(_ message: String) {
+        inferenceFailureCount += 1
+        lastInferenceErrorDescription = message
+
+        let now = Date()
+        guard now.timeIntervalSince(lastInferenceStatusUpdate) >= 2 else { return }
+        lastInferenceStatusUpdate = now
+        modelStatus = "Inference fallback: \(message)"
     }
 
     // MARK: - Observation Vector

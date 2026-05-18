@@ -13,10 +13,28 @@ import IOSurface
 import OSLog
 
 private final class SendablePixelBufferBox: @unchecked Sendable {
-    let pixelBuffer: CVPixelBuffer
+    nonisolated(unsafe) let pixelBuffer: CVPixelBuffer
 
-    init(_ pixelBuffer: CVPixelBuffer) {
+    nonisolated init(_ pixelBuffer: CVPixelBuffer) {
         self.pixelBuffer = pixelBuffer
+    }
+}
+
+private actor CaptureFrameProcessingGate {
+    private var isProcessing = false
+
+    func begin() -> Bool {
+        guard !isProcessing else { return false }
+        isProcessing = true
+        return true
+    }
+
+    func finish() {
+        isProcessing = false
+    }
+
+    func reset() {
+        isProcessing = false
     }
 }
 
@@ -118,10 +136,13 @@ final class CameraManager: NSObject, ObservableObject {
 
     /// Routes the processed program feed to the currently active output sink.
     let programOutput = ProgramOutputManager(
-        sinks: [
-            VirtualCameraOutputSink(),
-            BlackmagicOutputSink()
-        ]
+        sinks: {
+            var sinks: [any ProgramOutputSink] = [VirtualCameraOutputSink()]
+            if DeveloperFlags.exposeBlackmagicOutputRoute {
+                sinks.append(BlackmagicOutputSink())
+            }
+            return sinks
+        }()
     )
 
     /// Cropped output frame (for ATEM output)
@@ -195,6 +216,7 @@ final class CameraManager: NSObject, ObservableObject {
     )
     private var cancellables = Set<AnyCancellable>()
     private var clipPlaybackTask: Task<Void, Never>?
+    private nonisolated let frameProcessingGate = CaptureFrameProcessingGate()
 
     /// Last source pixel aspect (width/height) forwarded to the shot composer.
     /// Used to skip the per-frame update when aspect is unchanged.
@@ -314,6 +336,7 @@ final class CameraManager: NSObject, ObservableObject {
     func startCapture() async throws {
         let sourceTitle = preferredInputSource.title
         Self.logger.notice("Starting capture from \(sourceTitle, privacy: .public)")
+        await frameProcessingGate.reset()
         programOutput.start()
 
         if preferredInputSource == .validationClip {
@@ -372,6 +395,10 @@ final class CameraManager: NSObject, ObservableObject {
         Self.logger.notice("Stopping capture")
         clipPlaybackTask?.cancel()
         clipPlaybackTask = nil
+        Task { await frameProcessingGate.reset() }
+        if trainingDataRecorder.isRecording {
+            Task { await trainingDataRecorder.stopRecording() }
+        }
         programOutput.updateCaptureStatus(isRunning: false)
         if captureSession.isRunning {
             captureSession.stopRunning()
@@ -814,7 +841,7 @@ final class CameraManager: NSObject, ObservableObject {
             kCVPixelBufferIOSurfacePropertiesKey as String: [:] as CFDictionary,
             kCVPixelBufferMetalCompatibilityKey as String: true
         ]
-        output.alwaysDiscardsLateVideoFrames = false
+        output.alwaysDiscardsLateVideoFrames = true
         output.setSampleBufferDelegate(self, queue: videoOutputQueue)
         
         guard captureSession.canAddOutput(output) else {
@@ -1275,12 +1302,23 @@ extension CameraManager: AVCaptureVideoDataOutputSampleBufferDelegate {
         
         let timestampSeconds = CMSampleBufferGetPresentationTimeStamp(sampleBuffer).seconds
 
-        // Process frame asynchronously (avoid blocking capture queue)
-        Task { @MainActor in
+        Task {
+            let accepted = await self.frameProcessingGate.begin()
+            guard accepted else {
+                await MainActor.run {
+                    self.programOutput.recordDroppedFrame(
+                        timestamp: timestampSeconds,
+                        reason: "Dropped frame because the previous frame is still processing."
+                    )
+                }
+                return
+            }
+
             await self.processFrame(
                 pixelBuffer: pixelBuffer,
                 timestampSeconds: timestampSeconds
             )
+            await self.frameProcessingGate.finish()
         }
     }
     

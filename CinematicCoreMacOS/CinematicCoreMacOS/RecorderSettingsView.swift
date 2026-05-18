@@ -16,8 +16,12 @@ struct RecorderSettingsView: View {
     var body: some View {
         Form {
             Section("Recording") {
+                Toggle("Consent to Training Data", isOn: $recorder.hasUserConsentedToTrainingData)
+                    .disabled(recorder.isRecording)
+
                 Toggle("Record Training Data", isOn: recordingBinding)
                     .tint(.red)
+                    .disabled(!recorder.hasUserConsentedToTrainingData)
 
                 Toggle("Manual Crop Labels", isOn: manualOverrideBinding)
                     .help("Use manual crop adjustments as ideal labels instead of auto ShotComposer output")
@@ -39,6 +43,13 @@ struct RecorderSettingsView: View {
                     step: 50
                 )
                 .disabled(recorder.isRecording)
+
+                Stepper(
+                    "Retention: \(recorder.config.retentionDays) days",
+                    value: $recorder.config.retentionDays,
+                    in: 1...365
+                )
+                .disabled(recorder.isRecording)
             }
 
             Section("Output") {
@@ -48,6 +59,16 @@ struct RecorderSettingsView: View {
                     }
                     .buttonStyle(.borderless)
                 }
+
+                Button("Delete Expired Sessions") {
+                    recorder.deleteExpiredSessions()
+                }
+                .disabled(recorder.isRecording)
+
+                Button("Delete Completed Sessions", role: .destructive) {
+                    recorder.deleteAllCompletedSessions()
+                }
+                .disabled(recorder.isRecording)
             }
 
             Section("Session Statistics") {
@@ -62,10 +83,17 @@ struct RecorderSettingsView: View {
 
                 LabeledContent("Dropped Frames",
                                value: "\(recorder.stats.droppedFrames)")
+
+                if let lastError = recorder.lastErrorDescription {
+                    Text(lastError)
+                        .font(.caption)
+                        .foregroundStyle(.red)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
             }
         }
         .formStyle(.grouped)
-        .frame(width: 350, height: 480)
+        .frame(width: 390, height: 590)
     }
 
     // MARK: - Bindings
@@ -85,7 +113,9 @@ struct RecorderSettingsView: View {
                         detectorConfig: cameraManager.personDetector.config
                     )
                 } else {
-                    recorder.stopRecording()
+                    Task {
+                        await recorder.stopRecording()
+                    }
                 }
             }
         )

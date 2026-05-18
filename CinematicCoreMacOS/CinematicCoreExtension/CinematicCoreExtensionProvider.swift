@@ -10,10 +10,72 @@ import CoreMediaIO
 import IOKit.audio
 import os.log
 import IOSurface
+import Security
 
 // MARK: - Configuration
 
 let kFrameRate: Int = 30  // Match CameraManager target frame rate
+
+private enum ExtensionSecurityPolicy {
+	static let expectedHostBundleIdentifier = "Morris.CinematicCoreMacOS"
+	static let minFrameDimension: Int32 = 16
+	static let maxFrameDimension: Int32 = 4096
+	static let maxFrameArea: Int64 = 4096 * 4096
+
+	static func validateFrameMetadata(
+		surfaceID: UInt32,
+		timestamp: Double,
+		width: Int32,
+		height: Int32
+	) -> Bool {
+		guard surfaceID != 0,
+			  timestamp.isFinite,
+			  timestamp >= 0,
+			  width >= minFrameDimension,
+			  height >= minFrameDimension,
+			  width <= maxFrameDimension,
+			  height <= maxFrameDimension else {
+			return false
+		}
+
+		return Int64(width) * Int64(height) <= maxFrameArea
+	}
+
+	static func signingIdentifier(for connection: NSXPCConnection) -> String? {
+		let attributes = [
+			kSecGuestAttributePid as String: NSNumber(value: connection.processIdentifier)
+		] as CFDictionary
+
+		var code: SecCode?
+		let codeStatus = SecCodeCopyGuestWithAttributes(nil, attributes, [], &code)
+		guard codeStatus == errSecSuccess, let code else {
+			os_log(.error, "Failed to resolve XPC caller signing code: %{public}d", codeStatus)
+			return nil
+		}
+
+		var staticCode: SecStaticCode?
+		let staticStatus = SecCodeCopyStaticCode(code, [], &staticCode)
+		guard staticStatus == errSecSuccess, let staticCode else {
+			os_log(.error, "Failed to resolve XPC caller static code: %{public}d", staticStatus)
+			return nil
+		}
+
+		var signingInfo: CFDictionary?
+		let infoStatus = SecCodeCopySigningInformation(
+			staticCode,
+			SecCSFlags(rawValue: kSecCSSigningInformation),
+			&signingInfo
+		)
+		guard infoStatus == errSecSuccess,
+			  let info = signingInfo as? [String: Any],
+			  let identifier = info[kSecCodeInfoIdentifier as String] as? String else {
+			os_log(.error, "Failed to read XPC caller signing identifier: %{public}d", infoStatus)
+			return nil
+		}
+
+		return identifier
+	}
+}
 
 // MARK: - Shared Frame Queue
 
@@ -121,6 +183,23 @@ class CinematicCoreExtensionDeviceSource: NSObject, CMIOExtensionDeviceSource {
 	
 	/// Receive video frame from host app via XPC
 	func enqueueFrame(surfaceID: UInt32, timestamp: Double, width: Int32, height: Int32) {
+		guard ExtensionSecurityPolicy.validateFrameMetadata(
+			surfaceID: surfaceID,
+			timestamp: timestamp,
+			width: width,
+			height: height
+		) else {
+			os_log(
+				.error,
+				"Rejected invalid frame metadata surface=%{public}u timestamp=%{public}.3f size=%{public}dx%{public}d",
+				surfaceID,
+				timestamp,
+				width,
+				height
+			)
+			return
+		}
+
 		Task {
 			if !hasLoggedFirstEnqueuedFrame {
 				hasLoggedFirstEnqueuedFrame = true
@@ -227,6 +306,23 @@ class CinematicCoreExtensionDeviceSource: NSObject, CMIOExtensionDeviceSource {
 		}
 		
 		let pixelBuffer = unmanagedPixelBuffer.takeRetainedValue()
+		let actualWidth = Int32(CVPixelBufferGetWidth(pixelBuffer))
+		let actualHeight = Int32(CVPixelBufferGetHeight(pixelBuffer))
+		let pixelFormat = CVPixelBufferGetPixelFormatType(pixelBuffer)
+		guard actualWidth == width,
+			  actualHeight == height,
+			  pixelFormat == kCVPixelFormatType_32BGRA else {
+			os_log(
+				.error,
+				"Rejected IOSurface mismatch expected=%{public}dx%{public}d actual=%{public}dx%{public}d pixelFormat=%{public}u",
+				width,
+				height,
+				actualWidth,
+				actualHeight,
+				pixelFormat
+			)
+			return
+		}
 		
 		let frameDescription = formatDescription(width: width, height: height)
 
@@ -502,6 +598,16 @@ extension CinematicCoreExtensionProviderSource: NSXPCListenerDelegate {
 	
 	func listener(_ listener: NSXPCListener, shouldAcceptNewConnection newConnection: NSXPCConnection) -> Bool {
 		os_log(.info, "Received XPC connection request")
+
+		let signingIdentifier = ExtensionSecurityPolicy.signingIdentifier(for: newConnection)
+		guard signingIdentifier == ExtensionSecurityPolicy.expectedHostBundleIdentifier else {
+			os_log(
+				.error,
+				"Rejected XPC connection from unexpected signing identifier %{public}@",
+				signingIdentifier ?? "unknown"
+			)
+			return false
+		}
 		
 		// Configure connection
 		newConnection.exportedInterface = NSXPCInterface(with: CinematicCoreXPCProtocol.self)

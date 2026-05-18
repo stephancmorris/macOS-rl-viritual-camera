@@ -31,6 +31,20 @@ struct CinematicAgentSettingsView: View {
                             .foregroundStyle(.secondary)
                     }
                 }
+
+                if cameraManager.cinematicAgent.inferenceFailureCount > 0 {
+                    LabeledContent(
+                        "Fallbacks",
+                        value: "\(cameraManager.cinematicAgent.inferenceFailureCount)"
+                    )
+
+                    if let lastError = cameraManager.cinematicAgent.lastInferenceErrorDescription {
+                        Text(lastError)
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                }
             }
 
             if let crop = cameraManager.cinematicAgent.lastPredictedCrop {

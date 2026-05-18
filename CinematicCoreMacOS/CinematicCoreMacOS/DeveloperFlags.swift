@@ -25,6 +25,10 @@ enum DeveloperFlags {
     /// start/stop recordings from the toolbar.
     nonisolated static let exposeTrainingRecorderControls = false
 
+    /// Exposes the unfinished Blackmagic SDI route. Keep this hidden for
+    /// App Store-facing builds until the DeckLink playback bridge is complete.
+    nonisolated static let exposeBlackmagicOutputRoute = false
+
     /// Enables verbose per-frame logging in the capture loop. Keep this off
     /// for operator-facing builds because it can emit hundreds of log lines
     /// per second while tracking is active.
