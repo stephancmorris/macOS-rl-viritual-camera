@@ -50,7 +50,7 @@
 /* End PBXCopyFilesBuildPhase section */
 
 /* Begin PBXFileReference section */
-		F90A3D752F30B1AF0037BACD /* CinematicCoreMacOS.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = CinematicCoreMacOS.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		F90A3D752F30B1AF0037BACD /* Alfie.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = Alfie.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		F90A3D822F30B1B00037BACD /* CinematicCoreMacOSTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = CinematicCoreMacOSTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		F90A3D8C2F30B1B00037BACD /* CinematicCoreMacOSUITests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = CinematicCoreMacOSUITests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		F90A3DA32F30B1F90037BACD /* Morris.CinematicCoreMacOS.CinematicCoreExtension.systemextension */ = {isa = PBXFileReference; explicitFileType = "wrapper.system-extension"; includeInIndex = 0; path = Morris.CinematicCoreMacOS.CinematicCoreExtension.systemextension; sourceTree = BUILT_PRODUCTS_DIR; };
@@ -157,7 +157,7 @@
 		F90A3D762F30B1AF0037BACD /* Products */ = {
 			isa = PBXGroup;
 			children = (
-				F90A3D752F30B1AF0037BACD /* CinematicCoreMacOS.app */,
+				F90A3D752F30B1AF0037BACD /* Alfie.app */,
 				F90A3D822F30B1B00037BACD /* CinematicCoreMacOSTests.xctest */,
 				F90A3D8C2F30B1B00037BACD /* CinematicCoreMacOSUITests.xctest */,
 				F90A3DA32F30B1F90037BACD /* Morris.CinematicCoreMacOS.CinematicCoreExtension.systemextension */,
@@ -198,7 +198,7 @@
 			packageProductDependencies = (
 			);
 			productName = CinematicCoreMacOS;
-			productReference = F90A3D752F30B1AF0037BACD /* CinematicCoreMacOS.app */;
+			productReference = F90A3D752F30B1AF0037BACD /* Alfie.app */;
 			productType = "com.apple.product-type.application";
 		};
 		F90A3D812F30B1B00037BACD /* CinematicCoreMacOSTests */ = {
@@ -560,6 +560,7 @@
 				SWIFT_APPROACHABLE_CONCURRENCY = YES;
 				SWIFT_DEFAULT_ACTOR_ISOLATION = MainActor;
 				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_OBJC_BRIDGING_HEADER = "CinematicCoreMacOS/CinematicCoreMacOS-Bridging-Header.h";
 				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
 				SWIFT_VERSION = 5.0;
 			};
@@ -607,6 +608,7 @@
 				SWIFT_APPROACHABLE_CONCURRENCY = YES;
 				SWIFT_DEFAULT_ACTOR_ISOLATION = MainActor;
 				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_OBJC_BRIDGING_HEADER = "CinematicCoreMacOS/CinematicCoreMacOS-Bridging-Header.h";
 				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
 				SWIFT_VERSION = 5.0;
 			};

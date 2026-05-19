@@ -625,10 +625,11 @@ final class CameraManager: NSObject, ObservableObject {
 
         var programImage = ciImage
         var outputPixelBuffer = pixelBuffer
-        if cropEnabled, let cropEngine {
-            frameLog("🔍 DEBUG: Crop enabled, starting crop processing...")
-
-            if trackingPaused {
+        if let cropEngine {
+            if !cropEnabled {
+                cropEngine.targetCrop = .fullFrame
+                cropEngine.jumpToTarget()
+            } else if trackingPaused {
                 frameLog("🔍 DEBUG: Tracking paused, holding wide safety shot")
             } else if useMLAgent {
                 cropEngine.config.transitionSmoothing = 0.05
@@ -1186,100 +1187,87 @@ private final class VirtualCameraOutputSink: ProgramOutputSink {
 @MainActor
 private final class BlackmagicOutputSink: ProgramOutputSink {
     let route: ProgramOutputManager.Route = .blackmagicSDI
-    private enum SDKState {
-        case missing
-        case located(URL)
-    }
-
-    private static let candidateSDKLocations: [String] = [
-        "/Library/Frameworks/DeckLinkAPI.framework",
-        "/Library/Application Support/Blackmagic Design/Desktop Video",
-        "/Applications/Blackmagic Media Express.app",
-        "/Applications/Blackmagic Desktop Video"
-    ]
+    private let bridge = DeckLinkOutputBridge()
+    private static let logger = Logger(subsystem: "com.alfie", category: "BlackmagicOutput")
+    private static let signposter = OSSignposter(logger: logger)
+    private var hasLoggedFirstFrameSend = false
 
     var onStateChange: (() -> Void)?
 
-    private var sdkState: SDKState {
-        let fileManager = FileManager.default
-        for path in Self.candidateSDKLocations where fileManager.fileExists(atPath: path) {
-            return .located(URL(fileURLWithPath: path))
-        }
-        return .missing
-    }
-
     var isAvailable: Bool {
-        false
+        bridge.isConnected
     }
 
     var summary: String {
-        switch sdkState {
-        case .missing:
-            return "Desktop Video SDK was not found on this Mac."
-        case .located:
-            return "Desktop Video SDK is present, but playback output is not wired into this build yet."
+        if bridge.isConnected {
+            return "Blackmagic SDI output is connected and active."
         }
+        return "Blackmagic SDI output is disconnected."
     }
 
     var detail: String {
-        switch sdkState {
-        case .missing:
-            return "Install the Blackmagic Desktop Video SDK and Desktop Video software before ATEM output can be tested."
-        case .located(let url):
-            return "SDK/runtime found at \(url.path). The DeckLink playback bridge still needs implementation before frames can be sent to ATEM hardware."
+        if bridge.isConnected {
+            return "Sending video frames to the connected UltraStudio device."
         }
+        if let error = bridge.lastErrorDescription {
+            return "Connection failed: \(error)"
+        }
+        return "Start capture to initialize the Blackmagic SDI output."
     }
 
     var lastErrorDescription: String? {
-        nil
+        bridge.lastErrorDescription
     }
 
     var bringUpChecks: [OutputBringUpCheck] {
-        switch sdkState {
-        case .missing:
-            return [
-                OutputBringUpCheck(
-                    id: "blackmagic.sdk",
-                    title: "Blackmagic SDI · SDK",
-                    status: "Missing",
-                    detail: "No Desktop Video SDK or runtime install was found in the standard Blackmagic locations on this Mac.",
-                    level: .error
-                ),
-                OutputBringUpCheck(
-                    id: "blackmagic.device",
-                    title: "Blackmagic SDI · Hardware Path",
-                    status: "Blocked",
-                    detail: "Device discovery and playback cannot start until the Desktop Video SDK/runtime is installed.",
-                    level: .warning
-                )
-            ]
-        case .located(let url):
-            return [
-                OutputBringUpCheck(
-                    id: "blackmagic.sdk",
-                    title: "Blackmagic SDI · SDK",
-                    status: "Installed",
-                    detail: "Blackmagic runtime detected at \(url.path).",
-                    level: .ok
-                ),
-                OutputBringUpCheck(
-                    id: "blackmagic.device",
-                    title: "Blackmagic SDI · Playback Bridge",
-                    status: "Pending",
-                    detail: "This build still needs the DeckLink playback bridge wired before an ATEM-facing output can be opened.",
-                    level: .warning
-                )
-            ]
+        [
+            OutputBringUpCheck(
+                id: "blackmagic.connection",
+                title: "Blackmagic SDI · Hardware",
+                status: bridge.isConnected ? "Connected" : "Disconnected",
+                detail: bridge.isConnected ? "UltraStudio HD is connected." : (bridge.lastErrorDescription ?? "Waiting for connection."),
+                level: bridge.isConnected ? .ok : (bridge.lastErrorDescription != nil ? .error : .warning)
+            )
+        ]
+    }
+
+    func connect() {
+        Self.logger.notice("Initializing Blackmagic SDI Output...")
+        bridge.connect()
+        onStateChange?()
+    }
+
+    func disconnect() {
+        bridge.disconnect()
+        onStateChange?()
+    }
+
+    func reconnect() {
+        bridge.reconnect()
+        onStateChange?()
+    }
+
+    func updateCaptureStatus(isRunning: Bool) {
+        if isRunning && !bridge.isConnected {
+            connect()
+        } else if !isRunning && bridge.isConnected {
+            disconnect()
         }
     }
 
-    func connect() {}
-    func disconnect() {}
-    func reconnect() {}
-    func updateCaptureStatus(isRunning: Bool) {}
-    func sendFrame(pixelBuffer: CVPixelBuffer, timestamp: Double) -> Bool { false }
+    func sendFrame(pixelBuffer: CVPixelBuffer, timestamp: Double) -> Bool {
+        let sendInterval = Self.signposter.beginInterval("sdiSend")
+        let result = bridge.sendFrame(with: pixelBuffer, timestamp: timestamp)
+        
+        if result && !hasLoggedFirstFrameSend {
+            hasLoggedFirstFrameSend = true
+            Self.logger.notice("First frame handed to DeckLink output bridge at \(timestamp, privacy: .public)s")
+        }
+        
+        Self.signposter.endInterval("sdiSend", sendInterval)
+        return result
+    }
 }
-
 // MARK: - AVCaptureVideoDataOutputSampleBufferDelegate
 
 extension CameraManager: AVCaptureVideoDataOutputSampleBufferDelegate {

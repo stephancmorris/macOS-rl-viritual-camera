@@ -246,7 +246,7 @@ final class ProgramOutputManager: ObservableObject {
         var id: Route { route }
     }
 
-    @Published var preferredRoute: Route = .virtualCamera {
+    @Published var preferredRoute: Route = .blackmagicSDI {
         didSet {
             refreshRoutingDecision()
         }
