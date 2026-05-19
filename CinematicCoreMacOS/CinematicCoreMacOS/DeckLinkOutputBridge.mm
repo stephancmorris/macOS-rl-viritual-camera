@@ -31,8 +31,8 @@ typedef long HRESULT;
     self = [super init];
     if (self) {
         _isConnected = NO;
-        _frameDuration = 1001;
-        _frameTimescale = 60000; // 60000 / 1001 = 59.94fps
+        _frameDuration = 1;
+        _frameTimescale = 50; // 50fps
         _totalFramesScheduled = 0;
     }
     return self;
@@ -66,8 +66,8 @@ typedef long HRESULT;
         return;
     }
     
-    // Configure for 1080p59.94 to match standard ATEM/Broadcast framerates
-    BMDDisplayMode displayMode = bmdModeHD1080p5994;
+    // Configure for 1080p50 to match standard ATEM/Broadcast framerates
+    BMDDisplayMode displayMode = bmdModeHD1080p50;
     HRESULT hr = _deckLinkOutput->EnableVideoOutput(displayMode, bmdVideoOutputFlagDefault);
     
     if (hr != S_OK) {
@@ -114,6 +114,7 @@ typedef long HRESULT;
 
 - (BOOL)sendFrameWithPixelBuffer:(CVPixelBufferRef)pixelBuffer timestamp:(double)timestamp {
     if (!self.isConnected) {
+        self.lastErrorDescription = @"Bridge is not connected";
         return NO;
     }
     
@@ -124,7 +125,8 @@ typedef long HRESULT;
         IDeckLinkMutableVideoFrame *deckLinkFrame = nullptr;
         
         // Zero-copy mapping of the Apple CVPixelBuffer directly into Blackmagic hardware!
-        if (macOutput->CreateVideoFrameFromCVPixelBufferRef((void*)pixelBuffer, &deckLinkFrame) == S_OK) {
+        HRESULT createResult = macOutput->CreateVideoFrameFromCVPixelBufferRef((void*)pixelBuffer, &deckLinkFrame);
+        if (createResult == S_OK) {
             
             _deckLinkOutput->ScheduleVideoFrame(deckLinkFrame, 
                                                 _totalFramesScheduled * _frameDuration, 
@@ -140,11 +142,16 @@ typedef long HRESULT;
             _totalFramesScheduled++;
             macOutput->Release();
             return YES;
+        } else {
+            self.lastErrorDescription = [NSString stringWithFormat:@"CreateVideoFrame failed with HRESULT: 0x%08X", (unsigned int)createResult];
         }
         macOutput->Release();
+    } else {
+        self.lastErrorDescription = @"Failed to QueryInterface for IDeckLinkMacOutput";
     }
     return NO;
 #else
+    self.lastErrorDescription = @"DeckLinkAPI.h not included";
     return NO;
 #endif
 }

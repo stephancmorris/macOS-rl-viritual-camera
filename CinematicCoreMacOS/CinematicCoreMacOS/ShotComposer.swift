@@ -76,42 +76,41 @@ final class ShotComposer: ObservableObject {
         }
 
         enum ShotPreset: String, CaseIterable, Identifiable, Sendable {
-            case wideSafety
-            case medium
+            case wide
+            case fullBody
             case waistUp
 
             var id: String { rawValue }
 
             var title: String {
                 switch self {
-                case .wideSafety:
-                    return "Wide Safety"
-                case .medium:
-                    return "Medium"
-                case .waistUp:
-                    return "Waist Up"
+                case .wide: return "Wide"
+                case .fullBody: return "Full Body"
+                case .waistUp: return "Waist Up"
                 }
             }
 
             var operatorTitle: String {
                 switch self {
-                case .wideSafety:
-                    return "Full Body"
-                case .medium:
-                    return "Medium"
-                case .waistUp:
-                    return "Waist Up"
+                case .wide: return "Wide"
+                case .fullBody: return "Full Body"
+                case .waistUp: return "Waist Up"
                 }
             }
 
             var detail: String {
                 switch self {
-                case .wideSafety:
-                    return "Keeps more stage context and movement room."
-                case .medium:
-                    return "Balanced framing for live speaking shots."
-                case .waistUp:
-                    return "Tighter speaker-led framing for livestream focus."
+                case .wide: return "Extremely wide shot with maximum stage context."
+                case .fullBody: return "Frames the speaker from above head to below feet."
+                case .waistUp: return "Wide crop capturing 60% of target."
+                }
+            }
+            
+            var subjectHeightFraction: CGFloat {
+                switch self {
+                case .wide: return 1.80      // Massive height coverage
+                case .fullBody: return 1.15  // 100% of subject + 15% footroom
+                case .waistUp: return 0.60   // Exactly 60% of the target as requested
                 }
             }
         }
@@ -165,7 +164,7 @@ final class ShotComposer: ObservableObject {
         var frameProfile: FrameProfile = .livestream
 
         /// Operator-facing shot style.
-        var shotPreset: ShotPreset = .waistUp
+        var shotPreset: ShotPreset = .wide
 
         /// Vertical framing: chest-up or waist-up. Anchors the crop's top edge
         /// to the top of the tracked subject (plus a small headroom) and
@@ -392,7 +391,8 @@ final class ShotComposer: ObservableObject {
         let headroom = subjectBounds.height * tuning.cropHeadroomMultiplier
         let cropTop = min(1.0, subjectTop + headroom)
 
-        let desiredHeight = subjectBounds.height * config.shotFraming.subjectHeightFraction
+        // Instead of using shotFraming, we now use the strict preset's height fraction!
+        let desiredHeight = subjectBounds.height * config.shotPreset.subjectHeightFraction
         var cropHeight = max(desiredHeight, tuning.minimumCropHeight)
         var cropWidth = cropHeight * aspect
 
@@ -616,76 +616,76 @@ final class ShotComposer: ObservableObject {
 
     private var framingTuning: FramingTuning {
         switch (config.frameProfile, config.shotPreset) {
-        case (.livestream, .wideSafety):
+        case (.livestream, .wide):
             return FramingTuning(
-                minimumCropHeight: 0.28,
+                minimumCropHeight: 0.55,
+                horizontalPaddingMultiplier: 0.50,
+                trackedWidthMultiplier: 1.00,
+                trackedAspectFloor: 0.80,
+                poseHeadroomMultiplier: 0.15,
+                poseLowerMarginMultiplier: 0.25,
+                fallbackHeightMultiplier: 0.90,
+                cropHeadroomMultiplier: 0.25,
+                cropLowerMarginMultiplier: 0.25
+            )
+        case (.livestream, .fullBody):
+            return FramingTuning(
+                minimumCropHeight: 0.35,
                 horizontalPaddingMultiplier: 0.32,
                 trackedWidthMultiplier: 0.90,
                 trackedAspectFloor: 0.68,
                 poseHeadroomMultiplier: 0.10,
                 poseLowerMarginMultiplier: 0.22,
                 fallbackHeightMultiplier: 0.74,
-                cropHeadroomMultiplier: 0.12,
-                cropLowerMarginMultiplier: 0.08
-            )
-        case (.livestream, .medium):
-            return FramingTuning(
-                minimumCropHeight: 0.22,
-                horizontalPaddingMultiplier: 0.20,
-                trackedWidthMultiplier: 0.82,
-                trackedAspectFloor: 0.64,
-                poseHeadroomMultiplier: 0.08,
-                poseLowerMarginMultiplier: 0.18,
-                fallbackHeightMultiplier: 0.68,
-                cropHeadroomMultiplier: 0.10,
-                cropLowerMarginMultiplier: 0.06
+                cropHeadroomMultiplier: 0.15, // Important: extra headroom
+                cropLowerMarginMultiplier: 0.15 // Important: ensure shoes are visible
             )
         case (.livestream, .waistUp):
             return FramingTuning(
-                minimumCropHeight: 0.18,
-                horizontalPaddingMultiplier: 0.05,
+                minimumCropHeight: 0.22,
+                horizontalPaddingMultiplier: 0.15,
                 trackedWidthMultiplier: 0.76,
                 trackedAspectFloor: 0.60,
-                poseHeadroomMultiplier: 0.06,
+                poseHeadroomMultiplier: 0.08,
                 poseLowerMarginMultiplier: 0.14,
                 fallbackHeightMultiplier: 0.62,
-                cropHeadroomMultiplier: 0.10,
-                cropLowerMarginMultiplier: 0.04
+                cropHeadroomMultiplier: 0.12,
+                cropLowerMarginMultiplier: 0.05
             )
-        case (.portrait, .wideSafety):
+        case (.portrait, .wide):
             return FramingTuning(
-                minimumCropHeight: 0.36,
+                minimumCropHeight: 0.65,
                 horizontalPaddingMultiplier: 0.28,
                 trackedWidthMultiplier: 0.96,
                 trackedAspectFloor: 0.48,
                 poseHeadroomMultiplier: 0.16,
                 poseLowerMarginMultiplier: 0.16,
                 fallbackHeightMultiplier: 0.82,
-                cropHeadroomMultiplier: 0.12,
+                cropHeadroomMultiplier: 0.18,
                 cropLowerMarginMultiplier: 0.22
             )
-        case (.portrait, .medium):
+        case (.portrait, .fullBody):
             return FramingTuning(
-                minimumCropHeight: 0.30,
+                minimumCropHeight: 0.45,
                 horizontalPaddingMultiplier: 0.18,
                 trackedWidthMultiplier: 0.92,
                 trackedAspectFloor: 0.44,
                 poseHeadroomMultiplier: 0.14,
                 poseLowerMarginMultiplier: 0.14,
                 fallbackHeightMultiplier: 0.76,
-                cropHeadroomMultiplier: 0.10,
+                cropHeadroomMultiplier: 0.15,
                 cropLowerMarginMultiplier: 0.18
             )
         case (.portrait, .waistUp):
             return FramingTuning(
-                minimumCropHeight: 0.24,
+                minimumCropHeight: 0.30,
                 horizontalPaddingMultiplier: 0.10,
                 trackedWidthMultiplier: 0.88,
                 trackedAspectFloor: 0.40,
                 poseHeadroomMultiplier: 0.12,
                 poseLowerMarginMultiplier: 0.12,
                 fallbackHeightMultiplier: 0.70,
-                cropHeadroomMultiplier: 0.08,
+                cropHeadroomMultiplier: 0.12,
                 cropLowerMarginMultiplier: 0.12
             )
         }

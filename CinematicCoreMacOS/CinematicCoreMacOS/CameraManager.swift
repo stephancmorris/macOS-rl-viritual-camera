@@ -233,7 +233,7 @@ final class CameraManager: NSObject, ObservableObject {
     private enum Config {
         static let targetWidth: Int32 = 3840
         static let targetHeight: Int32 = 2160
-        static let targetFrameRate: Double = 30.0
+        static let targetFrameRate: Double = 50.0
         static let pixelFormat = kCVPixelFormatType_32BGRA
     }
     
