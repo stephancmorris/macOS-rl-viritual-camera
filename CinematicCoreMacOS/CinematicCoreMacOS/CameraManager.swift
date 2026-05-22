@@ -20,20 +20,29 @@ private final class SendablePixelBufferBox: @unchecked Sendable {
     }
 }
 
-private actor CaptureFrameProcessingGate {
+private final class CaptureFrameProcessingGate: @unchecked Sendable {
+    private let lock = NSLock()
     private var isProcessing = false
 
-    func begin() -> Bool {
+    nonisolated init() {}
+
+    nonisolated func begin() -> Bool {
+        lock.lock()
+        defer { lock.unlock() }
         guard !isProcessing else { return false }
         isProcessing = true
         return true
     }
 
-    func finish() {
+    nonisolated func finish() {
+        lock.lock()
+        defer { lock.unlock() }
         isProcessing = false
     }
 
-    func reset() {
+    nonisolated func reset() {
+        lock.lock()
+        defer { lock.unlock() }
         isProcessing = false
     }
 }
@@ -151,19 +160,28 @@ final class CameraManager: NSObject, ObservableObject {
     /// Raw camera frame cropped to the detection bounding box (no padding, no aspect enforcement)
     @Published private(set) var detectionCroppedFrame: CIImage?
     
-    /// Enable/disable cropping
-    @Published var cropEnabled: Bool = false {
-        didSet {
-            if !cropEnabled {
-                trackingPaused = false
-                shotComposer.reset(clearManualLock: true)
-                cinematicAgent.reset()
-            }
-        }
+
+
+    /// Operation modes for crop control
+    enum OperationMode {
+        case wide
+        case autoTracking
+        case manualCrop
+        case autoPan
     }
 
-    /// Operator override that forces a safe wide shot until tracking is resumed.
-    @Published private(set) var trackingPaused: Bool = false
+    /// Current operation mode for the crop engine
+    @Published var activeMode: OperationMode = .wide
+
+    /// The center point for the manual crop (normalized 0-1)
+    @Published var manualCropPoint: CGPoint = CGPoint(x: 0.5, y: 0.5)
+
+    // State for Auto Pan
+    private var autoPanPhase: CGFloat = 0.5
+    private var autoPanDirection: CGFloat = 1.0
+    private var autoPanPauseUntil: Double = 0
+
+
     
     // MARK: - Camera Device Model
     
@@ -395,7 +413,7 @@ final class CameraManager: NSObject, ObservableObject {
         Self.logger.notice("Stopping capture")
         clipPlaybackTask?.cancel()
         clipPlaybackTask = nil
-        Task { await frameProcessingGate.reset() }
+        frameProcessingGate.reset()
         if trainingDataRecorder.isRecording {
             Task { await trainingDataRecorder.stopRecording() }
         }
@@ -406,7 +424,7 @@ final class CameraManager: NSObject, ObservableObject {
         programOutput.stop()
         isRunning = false
         activeInputSource = preferredInputSource
-        trackingPaused = false
+        activeMode = .wide
         shotComposer.reset(clearManualLock: true)
         cinematicAgent.reset()
         if validationClipURL != nil, preferredInputSource == .validationClip {
@@ -419,8 +437,8 @@ final class CameraManager: NSObject, ObservableObject {
     func returnToWide() {
         guard let cropEngine else { return }
 
-        trackingPaused = true
-        shotComposer.reset()
+        activeMode = .wide
+        shotComposer.reset(clearManualLock: true)
         cinematicAgent.reset()
         cropEngine.resetToFullFrame()
         cropEngine.jumpToTarget()
@@ -428,7 +446,8 @@ final class CameraManager: NSObject, ObservableObject {
 
     /// Hand control back to the tracker after a manual wide hold.
     func resumeTracking() {
-        trackingPaused = false
+        activeMode = .autoTracking
+        cropEngine?.resetToFullFrame()
         shotComposer.reset()
         cinematicAgent.reset()
 
@@ -438,10 +457,12 @@ final class CameraManager: NSObject, ObservableObject {
     }
 
     func lockTarget(personID: UUID) {
+        activeMode = .autoTracking
         shotComposer.lockTarget(personID)
     }
 
     func clearManualTargetLock() {
+        activeMode = .autoTracking
         shotComposer.clearManualLock()
     }
     
@@ -539,7 +560,7 @@ final class CameraManager: NSObject, ObservableObject {
         error = nil
         isRunning = true
         activeInputSource = .validationClip
-        trackingPaused = false
+        activeMode = .wide
         shotComposer.reset(clearManualLock: true)
         cinematicAgent.reset()
         currentFrame = nil
@@ -605,7 +626,7 @@ final class CameraManager: NSObject, ObservableObject {
 
         let composeInterval = Self.signposter.beginInterval("compose")
         let composeStart = CACurrentMediaTime()
-        let primaryPerson = trackingPaused
+        let primaryPerson = activeMode != .autoTracking
             ? nil
             : shotComposer.primaryPerson(from: detectedPersons)
 
@@ -623,32 +644,82 @@ final class CameraManager: NSObject, ObservableObject {
             detectionCroppedFrame = nil
         }
 
+        func manualCropRect(center: CGPoint) -> CropEngine.CropRect {
+            let aspect = shotComposer.normalizedAspect
+            let baseHeight: CGFloat
+            switch shotComposer.config.shotPreset {
+            case .wide: baseHeight = 1.0
+            case .fullBody: baseHeight = 0.8
+            case .waistUp: baseHeight = 0.5
+            }
+            var cropHeight = baseHeight
+            var cropWidth = cropHeight * aspect
+            if cropWidth > 1.0 {
+                cropWidth = 1.0
+                cropHeight = cropWidth / aspect
+            }
+            if cropHeight > 1.0 {
+                cropHeight = 1.0
+                cropWidth = cropHeight * aspect
+            }
+            
+            let originX = center.x - cropWidth / 2.0
+            let originY = center.y - cropHeight / 2.0
+            
+            return CropEngine.CropRect(
+                origin: CGPoint(x: originX, y: originY),
+                size: CGSize(width: cropWidth, height: cropHeight)
+            ).clamped()
+        }
+
         var programImage = ciImage
         var outputPixelBuffer = pixelBuffer
         if let cropEngine {
-            if !cropEnabled {
-                cropEngine.targetCrop = .fullFrame
-                cropEngine.jumpToTarget()
-            } else if trackingPaused {
-                frameLog("🔍 DEBUG: Tracking paused, holding wide safety shot")
-            } else if useMLAgent {
-                cropEngine.config.transitionSmoothing = 0.05
-                let newCrop = cinematicAgent.predict(
-                    person: primaryPerson,
-                    currentCrop: cropEngine.currentCrop
-                )
-                cropEngine.targetCrop = newCrop
-            } else {
-                cropEngine.config.transitionSmoothing = shotComposer.config.smoothingFactor
-                if let primaryPerson {
-                    frameLog("🔍 DEBUG: Composing shot for person at \(primaryPerson.boundingBox)")
-                    if let idealCrop = shotComposer.compose(person: primaryPerson) {
-                        cropEngine.targetCrop = idealCrop
+            switch activeMode {
+            case .wide:
+                    cropEngine.targetCrop = .fullFrame
+                    cropEngine.jumpToTarget()
+                case .autoTracking:
+                    if useMLAgent {
+                        cropEngine.config.transitionSmoothing = 0.05
+                        let newCrop = cinematicAgent.predict(
+                            person: primaryPerson,
+                            currentCrop: cropEngine.currentCrop
+                        )
+                        cropEngine.targetCrop = newCrop
+                    } else {
+                        cropEngine.config.transitionSmoothing = shotComposer.config.smoothingFactor
+                        if let primaryPerson {
+                            frameLog("🔍 DEBUG: Composing shot for person at \(primaryPerson.boundingBox)")
+                            if let idealCrop = shotComposer.compose(person: primaryPerson) {
+                                cropEngine.targetCrop = idealCrop
+                            }
+                        } else {
+                            frameLog("🔍 DEBUG: No persons detected, holding last position")
+                        }
                     }
-                } else {
-                    frameLog("🔍 DEBUG: No persons detected, holding last position")
+                case .manualCrop:
+                    cropEngine.config.transitionSmoothing = shotComposer.config.smoothingFactor
+                    let idealCrop = manualCropRect(center: manualCropPoint)
+                    cropEngine.targetCrop = idealCrop
+                case .autoPan:
+                    cropEngine.config.transitionSmoothing = shotComposer.config.smoothingFactor
+                    let now = CACurrentMediaTime()
+                    if now > autoPanPauseUntil {
+                        autoPanPhase += CGFloat(shotComposer.config.autoPanSpeed) * autoPanDirection * 0.1 // Scaled down the multiplier to make it slower
+                        if autoPanPhase >= 1.0 {
+                            autoPanPhase = 1.0
+                            autoPanDirection = -1.0
+                            autoPanPauseUntil = now + 1.0 // Pause for 1.0s
+                        } else if autoPanPhase <= 0.0 {
+                            autoPanPhase = 0.0
+                            autoPanDirection = 1.0
+                            autoPanPauseUntil = now + 1.0 // Pause for 1.0s
+                        }
+                    }
+                    let panCenter = CGPoint(x: autoPanPhase, y: 0.5)
+                    cropEngine.targetCrop = manualCropRect(center: panCenter)
                 }
-            }
             let composeDuration = CACurrentMediaTime() - composeStart
             Self.signposter.endInterval("compose", composeInterval)
             programOutput.recordLatency(stage: .compose, duration: composeDuration)
@@ -726,7 +797,7 @@ final class CameraManager: NSObject, ObservableObject {
         programOutput.stop()
         isRunning = false
         activeInputSource = preferredInputSource
-        trackingPaused = false
+        activeMode = .wide
         shotComposer.reset(clearManualLock: true)
         cinematicAgent.reset()
 
@@ -1290,23 +1361,19 @@ extension CameraManager: AVCaptureVideoDataOutputSampleBufferDelegate {
         
         let timestampSeconds = CMSampleBufferGetPresentationTimeStamp(sampleBuffer).seconds
 
-        Task {
-            let accepted = await self.frameProcessingGate.begin()
-            guard accepted else {
-                await MainActor.run {
-                    self.programOutput.recordDroppedFrame(
-                        timestamp: timestampSeconds,
-                        reason: "Dropped frame because the previous frame is still processing."
-                    )
-                }
-                return
-            }
+        guard frameProcessingGate.begin() else {
+            Self.logger.warning("Dropped frame: processing gate busy")
+            return
+        }
 
+        let sendableBuffer = SendablePixelBufferBox(pixelBuffer)
+
+        Task(priority: .userInitiated) { @MainActor in
+            defer { self.frameProcessingGate.finish() }
             await self.processFrame(
-                pixelBuffer: pixelBuffer,
+                pixelBuffer: sendableBuffer.pixelBuffer,
                 timestampSeconds: timestampSeconds
             )
-            await self.frameProcessingGate.finish()
         }
     }
     
@@ -1318,7 +1385,7 @@ extension CameraManager: AVCaptureVideoDataOutputSampleBufferDelegate {
         // Performance monitoring: frame drops indicate system overload
         frameLog("⚠️ Dropped frame")
         let timestampSeconds = CMSampleBufferGetPresentationTimeStamp(sampleBuffer).seconds
-        Task { @MainActor in
+        Task(priority: .userInitiated) { @MainActor in
             self.programOutput.recordDroppedFrame(
                 timestamp: timestampSeconds,
                 reason: "AVCapture dropped a frame before processing."

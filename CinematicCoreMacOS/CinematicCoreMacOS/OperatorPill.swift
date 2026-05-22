@@ -21,9 +21,11 @@ struct OperatorPill: View {
             divider
             cropToggleButton
             divider
-            returnToWideButton
+            manualCropButton
             divider
-            resumeTrackingButton
+            autoPanButton
+            divider
+            returnToWideButton
             divider
             stopSessionButton
         }
@@ -60,10 +62,10 @@ struct OperatorPill: View {
                 Circle()
                     .fill(state.dotColor)
                     .frame(width: 7, height: 7)
-                    .shadow(color: state.dotColor.opacity(0.8), radius: state.dotColor == Color(.sRGB, white: 1, opacity: 0.3) ? 0 : 6)
+                    .shadow(color: state.dotColor.opacity(0.8), radius: state.hasGlow ? 6 : 0)
                 Text(state.label)
                     .font(.system(size: 12, weight: .medium))
-                    .foregroundStyle(.white.opacity(state.isInteractive ? 0.92 : 0.55))
+                    .foregroundStyle(.white.opacity(state.labelOpacity))
             }
             .padding(.horizontal, 14)
             .padding(.vertical, 9)
@@ -74,11 +76,11 @@ struct OperatorPill: View {
     }
 
     private var lockState: LockState {
-        if cameraManager.trackingPaused {
-            return .recovering
-        }
         if cameraManager.isManualTargetLockActive {
             return .locked
+        }
+        if !cameraManager.personDetector.detectedPersons.isEmpty {
+            return .idleWithDetections
         }
         return .idle
     }
@@ -87,36 +89,49 @@ struct OperatorPill: View {
         switch lockState {
         case .locked:
             cameraManager.clearManualTargetLock()
-        case .recovering:
-            cameraManager.resumeTracking()
-        case .idle:
+        case .idle, .idleWithDetections:
             break
         }
     }
 
     private enum LockState {
-        case idle, locked, recovering
+        case idle, idleWithDetections, locked
 
         var label: String {
             switch self {
-            case .idle: return "Tap a person to lock"
+            case .idle: return "Tap a person in the frame to lock"
+            case .idleWithDetections: return "Tap a person in the frame to lock"
             case .locked: return "Locked on subject · tap to unlock"
-            case .recovering: return "Recovering subject…"
             }
         }
 
         var dotColor: Color {
             switch self {
             case .idle: return Color(.sRGB, white: 1, opacity: 0.3)
+            case .idleWithDetections: return Color(red: 0.47, green: 0.86, blue: 1.0)
             case .locked: return Color(red: 0.04, green: 0.52, blue: 1.0)
-            case .recovering: return Color(red: 1.0, green: 0.72, blue: 0.24)
+            }
+        }
+
+        var labelOpacity: Double {
+            switch self {
+            case .idle: return 0.45
+            case .idleWithDetections: return 0.78
+            case .locked: return 0.92
+            }
+        }
+
+        var hasGlow: Bool {
+            switch self {
+            case .idle: return false
+            case .idleWithDetections, .locked: return true
             }
         }
 
         var isInteractive: Bool {
             switch self {
-            case .idle: return false
-            case .locked, .recovering: return true
+            case .idle, .idleWithDetections: return false
+            case .locked: return true
             }
         }
     }
@@ -162,15 +177,20 @@ struct OperatorPill: View {
     // MARK: - Return to Wide
 
     private var returnToWideButton: some View {
-        let enabled = cameraManager.isRunning && cameraManager.cropEnabled && !cameraManager.trackingPaused
+        let isOn = cameraManager.activeMode == .wide
+        let enabled = cameraManager.isRunning && !isOn
         return Button {
             cameraManager.returnToWide()
         } label: {
             Text("Return to Wide")
-                .font(.system(size: 12, weight: .medium))
-                .foregroundStyle(.white.opacity(enabled ? 0.86 : 0.32))
+                .font(.system(size: 12, weight: isOn ? .semibold : .medium))
+                .foregroundStyle(.white.opacity(isOn ? 1.0 : (enabled ? 0.86 : 0.32)))
                 .padding(.horizontal, 14)
                 .padding(.vertical, 9)
+                .background(
+                    RoundedRectangle(cornerRadius: 11, style: .continuous)
+                        .fill(Color.white.opacity(isOn ? 0.14 : 0.0))
+                )
                 .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
@@ -180,10 +200,10 @@ struct OperatorPill: View {
     // MARK: - Crop toggle
 
     private var cropToggleButton: some View {
-        let isOn = cameraManager.cropEnabled
-        let enabled = cameraManager.isRunning
+        let isOn = cameraManager.activeMode == .autoTracking
+        let enabled = cameraManager.isRunning && !isOn
         return Button {
-            cameraManager.cropEnabled.toggle()
+            cameraManager.activeMode = .autoTracking
         } label: {
             HStack(spacing: 7) {
                 Circle()
@@ -192,30 +212,76 @@ struct OperatorPill: View {
                           : Color.white.opacity(0.3))
                     .frame(width: 6, height: 6)
                 Text("Crop")
-                    .font(.system(size: 12, weight: .medium))
-                    .foregroundStyle(.white.opacity(enabled ? (isOn ? 1.0 : 0.86) : 0.32))
+                    .font(.system(size: 12, weight: isOn ? .semibold : .medium))
+                    .foregroundStyle(.white.opacity(isOn ? 1.0 : (enabled ? 0.86 : 0.32)))
             }
             .padding(.horizontal, 14)
             .padding(.vertical, 9)
+            .background(
+                RoundedRectangle(cornerRadius: 11, style: .continuous)
+                    .fill(Color.white.opacity(isOn ? 0.14 : 0.0))
+            )
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
         .disabled(!enabled)
     }
 
-    // MARK: - Resume Tracking
+    // MARK: - Manual Crop toggle
 
-    private var resumeTrackingButton: some View {
-        let enabled = cameraManager.isRunning && cameraManager.cropEnabled && cameraManager.trackingPaused
+    private var manualCropButton: some View {
+        let isOn = cameraManager.activeMode == .manualCrop
+        let enabled = cameraManager.isRunning && !isOn
         return Button {
-            cameraManager.resumeTracking()
+            cameraManager.activeMode = .manualCrop
         } label: {
-            Text("Resume Tracking")
-                .font(.system(size: 12, weight: .medium))
-                .foregroundStyle(.white.opacity(enabled ? 0.86 : 0.32))
-                .padding(.horizontal, 14)
-                .padding(.vertical, 9)
-                .contentShape(Rectangle())
+            HStack(spacing: 7) {
+                Circle()
+                    .fill(isOn
+                          ? Color(red: 0.31, green: 0.93, blue: 0.78)
+                          : Color.white.opacity(0.3))
+                    .frame(width: 6, height: 6)
+                Text("Manual Crop")
+                    .font(.system(size: 12, weight: isOn ? .semibold : .medium))
+                    .foregroundStyle(.white.opacity(isOn ? 1.0 : (enabled ? 0.86 : 0.32)))
+            }
+            .padding(.horizontal, 14)
+            .padding(.vertical, 9)
+            .background(
+                RoundedRectangle(cornerRadius: 11, style: .continuous)
+                    .fill(Color.white.opacity(isOn ? 0.14 : 0.0))
+            )
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .disabled(!enabled)
+    }
+
+    // MARK: - Auto Pan toggle
+
+    private var autoPanButton: some View {
+        let isOn = cameraManager.activeMode == .autoPan
+        let enabled = cameraManager.isRunning && !isOn
+        return Button {
+            cameraManager.activeMode = .autoPan
+        } label: {
+            HStack(spacing: 7) {
+                Circle()
+                    .fill(isOn
+                          ? Color(red: 0.31, green: 0.93, blue: 0.78)
+                          : Color.white.opacity(0.3))
+                    .frame(width: 6, height: 6)
+                Text("Auto Pan")
+                    .font(.system(size: 12, weight: isOn ? .semibold : .medium))
+                    .foregroundStyle(.white.opacity(isOn ? 1.0 : (enabled ? 0.86 : 0.32)))
+            }
+            .padding(.horizontal, 14)
+            .padding(.vertical, 9)
+            .background(
+                RoundedRectangle(cornerRadius: 11, style: .continuous)
+                    .fill(Color.white.opacity(isOn ? 0.14 : 0.0))
+            )
+            .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
         .disabled(!enabled)

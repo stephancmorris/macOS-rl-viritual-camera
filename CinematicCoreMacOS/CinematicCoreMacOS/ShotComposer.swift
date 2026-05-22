@@ -158,7 +158,10 @@ final class ShotComposer: ObservableObject {
         var stageHorizontalMargin: CGFloat = 0.08
 
         /// Vertical stage margin used to avoid drifting into ceiling or front-row space.
-        var stageVerticalMargin: CGFloat = 0.03
+        var stageVerticalMargin: CGFloat = 0.04
+
+        /// Speed of the auto pan sweep across the stage.
+        var autoPanSpeed: Float = 0.053
 
         /// Output frame profile. Default is stream-friendly landscape.
         var frameProfile: FrameProfile = .livestream
@@ -250,16 +253,19 @@ final class ShotComposer: ObservableObject {
     /// Operator-selected subject lock. When set, auto-selection must defer to it.
     @Published private(set) var manualLockedTargetID: UUID?
 
-    private var lastTargetSeenTime: TimeInterval?
-    private var lastTrackingPoint: CGPoint?
     private var manualLockLostSince: TimeInterval?
+    private var lastTrackingPoint: CGPoint?
 
     // MARK: - Public Methods
 
     /// Select the primary speaker to frame.
     ///
-    /// Uses a sticky target preference so the camera does not jump eagerly
-    /// between people when a second person appears on stage.
+    /// Acquires a target by scoring detections, then holds that target until
+    /// the operator changes it (tap-to-lock) or exits Crop mode (Return to
+    /// Wide). The scorer never runs while an active target exists, so the
+    /// camera will not hop between people even if a newcomer outscores the
+    /// current subject. When the active target leaves the frame, the crop
+    /// engine holds its last position rather than re-acquiring.
     func primaryPerson(
         from persons: [PersonDetector.DetectedPerson]
     ) -> PersonDetector.DetectedPerson? {
@@ -284,20 +290,17 @@ final class ShotComposer: ObservableObject {
             return nil
         }
 
-        guard !persons.isEmpty else {
-            if let lastTargetSeenTime,
-               now - lastTargetSeenTime > config.targetHoldDuration {
-                activeTargetID = nil
-                hasActiveTarget = false
+        if let activeTargetID {
+            if let active = persons.first(where: { $0.id == activeTargetID }) {
+                return finalizeSelection(active, now: now)
             }
             return nil
         }
 
-        let selected = persons.max { lhs, rhs in
-            score(for: lhs) < score(for: rhs)
+        guard !persons.isEmpty else { return nil }
+        guard let selected = persons.max(by: { score(for: $0) < score(for: $1) }) else {
+            return nil
         }
-
-        guard let selected else { return nil }
         return finalizeSelection(selected, now: now)
     }
 
@@ -344,10 +347,9 @@ final class ShotComposer: ObservableObject {
         lastComputedCrop = nil
         lastTrackedBounds = nil
         activeTargetID = nil
-        lastTargetSeenTime = nil
-        lastTrackingPoint = nil
         manualLockLostSince = nil
-        
+        lastTrackingPoint = nil
+
         subjectVelocity = 0.0
         lastComposeTime = 0
         lastComposeTrackingCenter = nil
@@ -377,7 +379,7 @@ final class ShotComposer: ObservableObject {
     /// Aspect of the crop rect in Vision's normalized coordinate space such
     /// that when the rect is sampled from the source pixels it yields the
     /// configured output pixel aspect.
-    private var normalizedAspect: CGFloat {
+    var normalizedAspect: CGFloat {
         config.outputAspectRatio / sourcePixelAspect
     }
 
@@ -573,7 +575,6 @@ final class ShotComposer: ObservableObject {
     ) -> PersonDetector.DetectedPerson {
         activeTargetID = selected.id
         hasActiveTarget = true
-        lastTargetSeenTime = now
         lastTrackingPoint = trackingPoint(for: selected)
         return selected
     }

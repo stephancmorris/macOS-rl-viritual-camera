@@ -21,6 +21,7 @@ struct CropPreviewView: View {
     let isRecovering: Bool
     let framingTitle: String
     var onSelectPerson: ((UUID) -> Void)? = nil
+    var onTapPoint: ((CGPoint) -> Void)? = nil
 
     var body: some View {
         HStack(spacing: 0) {
@@ -32,6 +33,7 @@ struct CropPreviewView: View {
                 manualLockedTargetID: manualLockedTargetID,
                 trackedSubjectRect: trackedSubjectRect,
                 onSelectPerson: onSelectPerson,
+                onTapPoint: onTapPoint,
                 cropIndicator: cropRect,
                 isRecovering: isRecovering,
                 framingTitle: framingTitle,
@@ -91,23 +93,7 @@ struct CropSettingsView: View {
             .padding(.bottom, 8)
             
             Divider()
-            
-            // Enable/Disable Cropping
-            Toggle(isOn: $cameraManager.cropEnabled) {
-                VStack(alignment: .leading, spacing: 4) {
-                    Text("Enable Cropping")
-                        .font(.subheadline)
-                    Text("Apply intelligent crop to video feed")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                }
-            }
-            .toggleStyle(.switch)
-            
-            if cameraManager.cropEnabled {
-                Divider()
-                
-                // Output Resolution
+            // Output Resolution
                 VStack(alignment: .leading, spacing: 8) {
                     Text("Output Resolution")
                         .font(.subheadline)
@@ -253,7 +239,6 @@ struct CropSettingsView: View {
                         .buttonStyle(.bordered)
                     }
                 }
-            }
         }
         .padding()
         .frame(width: 350)

@@ -86,12 +86,24 @@ final class PersonDetector: ObservableObject {
     
     private let processingQueue = DispatchQueue(
         label: "com.cinematiccore.personDetection",
-        qos: .userInitiated
+        qos: .default
     )
     
     // Person tracking state
     private var trackedPersons: [UUID: TrackedPerson] = [:]
     private let trackingTimeout: TimeInterval = 1.0 // Drop tracks after 1 second
+    
+    // Cached Vision Requests
+    nonisolated(unsafe) private let cachedRectRequest: VNDetectHumanRectanglesRequest = {
+        let req = VNDetectHumanRectanglesRequest()
+        req.upperBodyOnly = false
+        return req
+    }()
+    
+    nonisolated(unsafe) private let cachedPoseRequest: VNDetectHumanBodyPoseRequest = {
+        let req = VNDetectHumanBodyPoseRequest()
+        return req
+    }()
     
     private struct TrackedPerson {
         let id: UUID
@@ -161,14 +173,13 @@ final class PersonDetector: ObservableObject {
         let sendablePixelBuffer = SendablePixelBuffer(value: pixelBuffer)
 
         return await withCheckedContinuation { continuation in
-            processingQueue.async {
-                let rectRequest = VNDetectHumanRectanglesRequest()
+            processingQueue.async { [self] in
                 if config.useHighAccuracy {
-                    rectRequest.revision = VNDetectHumanRectanglesRequestRevision2
+                    self.cachedRectRequest.revision = VNDetectHumanRectanglesRequestRevision2
+                } else {
+                    self.cachedRectRequest.revision = VNDetectHumanRectanglesRequestRevision1
                 }
-                rectRequest.upperBodyOnly = true
 
-                let poseRequest = VNDetectHumanBodyPoseRequest()
                 let handler = VNImageRequestHandler(
                     cvPixelBuffer: sendablePixelBuffer.value,
                     orientation: .up,
@@ -177,13 +188,13 @@ final class PersonDetector: ObservableObject {
 
                 do {
                     // Run both requests together for efficiency.
-                    try handler.perform([rectRequest, poseRequest])
+                    try handler.perform([self.cachedRectRequest, self.cachedPoseRequest])
 
-                    let rectResults = (rectRequest.results ?? [])
+                    let rectResults = (self.cachedRectRequest.results ?? [])
                         .filter { $0.confidence >= config.confidenceThreshold }
                     let limited = Array(rectResults.prefix(config.maxPersons))
 
-                    let poseResults = poseRequest.results ?? []
+                    let poseResults = self.cachedPoseRequest.results ?? []
 
                     continuation.resume(returning: (limited, poseResults))
                 } catch {

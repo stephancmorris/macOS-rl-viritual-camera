@@ -139,6 +139,20 @@ struct ShotComposerSettingsView: View {
                 step: 0.01
             )
             .disabled(!shotComposer.config.isEnabled)
+            
+            HStack {
+                Text("Auto Pan Speed")
+                Spacer()
+                Text(String(format: "%.0f%%", shotComposer.config.autoPanSpeed * 100))
+                    .foregroundStyle(.secondary)
+                    .monospacedDigit()
+            }
+            
+            Slider(
+                value: $shotComposer.config.autoPanSpeed,
+                in: 0.01...0.20,
+                step: 0.01
+            )
         }
     }
 

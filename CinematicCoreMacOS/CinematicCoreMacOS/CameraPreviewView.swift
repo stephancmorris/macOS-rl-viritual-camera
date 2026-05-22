@@ -18,6 +18,7 @@ struct CameraPreviewView: View {
     let manualLockedTargetID: UUID?
     var trackedSubjectRect: CGRect? = nil
     var onSelectPerson: ((UUID) -> Void)? = nil
+    var onTapPoint: ((CGPoint) -> Void)? = nil
     var cropIndicator: CropEngine.CropRect? = nil
     var isRecovering: Bool = false
     var framingTitle: String = "Wide"
@@ -56,6 +57,29 @@ struct CameraPreviewView: View {
                             isRecovering: isRecovering
                         )
                         .allowsHitTesting(false)
+                    }
+
+                    if onTapPoint != nil {
+                        Color.clear
+                            .contentShape(Rectangle())
+                            .onTapGesture { location in
+                                let viewSize = geometry.size
+                                let imageSize = image.extent.size
+                                let scale = aspectFill 
+                                    ? max(viewSize.width / imageSize.width, viewSize.height / imageSize.height)
+                                    : min(viewSize.width / imageSize.width, viewSize.height / imageSize.height)
+                                let displayWidth = imageSize.width * scale
+                                let displayHeight = imageSize.height * scale
+                                let offsetX = (viewSize.width - displayWidth) / 2
+                                let offsetY = (viewSize.height - displayHeight) / 2
+
+                                let x = (location.x - offsetX) / displayWidth
+                                let y = 1.0 - ((location.y - offsetY) / displayHeight)
+
+                                if x >= 0 && x <= 1 && y >= 0 && y <= 1 {
+                                    onTapPoint?(CGPoint(x: x, y: y))
+                                }
+                            }
                     }
                 }
             } else {

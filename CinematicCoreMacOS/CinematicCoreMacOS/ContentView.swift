@@ -47,13 +47,18 @@ struct ContentView: View {
                     croppedFrame: cameraManager.croppedFrame,
                     detectedPersons: cameraManager.personDetector.detectedPersons,
                     showDetections: true,
-                    cropRect: cameraManager.cropEnabled ? cameraManager.cropEngine?.currentCrop : nil,
+                    cropRect: cameraManager.activeMode != .wide ? cameraManager.cropEngine?.currentCrop : nil,
                     activeTargetID: cameraManager.shotComposer.activeTargetID,
                     manualLockedTargetID: cameraManager.manualLockedTargetID,
                     trackedSubjectRect: cameraManager.shotComposer.lastTrackedBounds,
-                    isRecovering: cameraManager.trackingPaused,
+                    isRecovering: false,
                     framingTitle: cameraManager.shotComposer.config.shotFraming.title,
-                    onSelectPerson: cameraManager.lockTarget
+                    onSelectPerson: cameraManager.lockTarget,
+                    onTapPoint: { point in
+                        if cameraManager.activeMode == .manualCrop {
+                            cameraManager.manualCropPoint = point
+                        }
+                    }
                 )
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
             } else {
