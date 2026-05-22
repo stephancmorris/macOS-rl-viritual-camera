@@ -56,6 +56,11 @@ final class CropEngine: ObservableObject {
     /// Whether we're actively interpolating between crops
     @Published private(set) var isInterpolating: Bool = false
 
+    /// Spring physics state
+    private var velocityOrigin: CGPoint = .zero
+    private var velocitySize: CGSize = .zero
+    private var lastInterpolationTime: TimeInterval = 0
+
     /// Performance statistics
     @Published private(set) var stats: Stats = .init()
 
@@ -337,28 +342,79 @@ final class CropEngine: ObservableObject {
     /// Jump to target immediately (no smooth transition)
     func jumpToTarget() {
         currentCrop = targetCrop
+        velocityOrigin = .zero
+        velocitySize = .zero
         isInterpolating = false
+        lastInterpolationTime = 0
     }
     
     // MARK: - Private Methods
     
     private func updateInterpolation() {
-        guard isInterpolating else { return }
+        guard isInterpolating else {
+            lastInterpolationTime = 0
+            return
+        }
         
-        // Smooth interpolation using configurable factor
-        currentCrop = currentCrop.lerp(
-            to: targetCrop,
-            factor: config.transitionSmoothing
+        let now = CACurrentMediaTime()
+        if lastInterpolationTime == 0 {
+            lastInterpolationTime = now
+            return // Skip first frame to get a valid delta time
+        }
+        
+        let dt = CGFloat(min(now - lastInterpolationTime, 0.1)) // Cap dt at 100ms
+        lastInterpolationTime = now
+        
+        // Map transitionSmoothing (0.05 to 0.30) to a spring stiffness.
+        // Higher value = stiffer spring = faster snap.
+        let stiffness = CGFloat(config.transitionSmoothing) * 300.0
+        let damping = 2.0 * sqrt(stiffness) // Critically damped
+        
+        // Spring physics: acceleration = (target - current) * stiffness - velocity * damping
+        
+        // Origin X
+        let accX = (targetCrop.origin.x - currentCrop.origin.x) * stiffness - velocityOrigin.x * damping
+        velocityOrigin.x += accX * dt
+        let newX = currentCrop.origin.x + velocityOrigin.x * dt
+        
+        // Origin Y
+        let accY = (targetCrop.origin.y - currentCrop.origin.y) * stiffness - velocityOrigin.y * damping
+        velocityOrigin.y += accY * dt
+        let newY = currentCrop.origin.y + velocityOrigin.y * dt
+        
+        // Size Width
+        let accW = (targetCrop.size.width - currentCrop.size.width) * stiffness - velocitySize.width * damping
+        velocitySize.width += accW * dt
+        let newW = currentCrop.size.width + velocitySize.width * dt
+        
+        // Size Height
+        let accH = (targetCrop.size.height - currentCrop.size.height) * stiffness - velocitySize.height * damping
+        velocitySize.height += accH * dt
+        let newH = currentCrop.size.height + velocitySize.height * dt
+        
+        currentCrop = CropRect(
+            origin: CGPoint(x: newX, y: newY),
+            size: CGSize(width: newW, height: newH)
         )
         
-        // Check if we're close enough to stop interpolating
-        let threshold: CGFloat = 0.001
-        if abs(currentCrop.origin.x - targetCrop.origin.x) < threshold &&
-           abs(currentCrop.origin.y - targetCrop.origin.y) < threshold &&
-           abs(currentCrop.size.width - targetCrop.size.width) < threshold &&
-           abs(currentCrop.size.height - targetCrop.size.height) < threshold {
+        // Check if we're close enough and moving slow enough to stop interpolating
+        let distanceThreshold: CGFloat = 0.001
+        let velocityThreshold: CGFloat = 0.005
+        
+        if abs(currentCrop.origin.x - targetCrop.origin.x) < distanceThreshold &&
+           abs(currentCrop.origin.y - targetCrop.origin.y) < distanceThreshold &&
+           abs(currentCrop.size.width - targetCrop.size.width) < distanceThreshold &&
+           abs(currentCrop.size.height - targetCrop.size.height) < distanceThreshold &&
+           abs(velocityOrigin.x) < velocityThreshold &&
+           abs(velocityOrigin.y) < velocityThreshold &&
+           abs(velocitySize.width) < velocityThreshold &&
+           abs(velocitySize.height) < velocityThreshold {
+            
             currentCrop = targetCrop
+            velocityOrigin = .zero
+            velocitySize = .zero
             isInterpolating = false
+            lastInterpolationTime = 0
         }
     }
     

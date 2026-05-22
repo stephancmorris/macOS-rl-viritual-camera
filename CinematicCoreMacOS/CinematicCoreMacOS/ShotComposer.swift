@@ -214,6 +214,10 @@ final class ShotComposer: ObservableObject {
     /// once so a new preset/anchor takes effect even when the speaker is still.
     private var lastAppliedFramingFingerprint: FramingFingerprint?
 
+    private var subjectVelocity: CGFloat = 0.0
+    private var lastComposeTime: TimeInterval = 0
+    private var lastComposeTrackingCenter: CGPoint?
+
     private struct FramingFingerprint: Equatable {
         let frameProfile: Config.FrameProfile
         let shotPreset: Config.ShotPreset
@@ -343,6 +347,10 @@ final class ShotComposer: ObservableObject {
         lastTargetSeenTime = nil
         lastTrackingPoint = nil
         manualLockLostSince = nil
+        
+        subjectVelocity = 0.0
+        lastComposeTime = 0
+        lastComposeTrackingCenter = nil
 
         if clearManualLock {
             manualLockedTargetID = nil
@@ -393,6 +401,7 @@ final class ShotComposer: ObservableObject {
 
         // Instead of using shotFraming, we now use the strict preset's height fraction!
         let desiredHeight = subjectBounds.height * config.shotPreset.subjectHeightFraction
+        
         var cropHeight = max(desiredHeight, tuning.minimumCropHeight)
         var cropWidth = cropHeight * aspect
 
@@ -409,7 +418,14 @@ final class ShotComposer: ObservableObject {
 
         let centerX = subjectBounds.midX
         let originX = centerX - cropWidth / 2.0
-        let originY = cropTop - cropHeight
+        
+        let originY: CGFloat
+        if config.shotPreset == .wide {
+            let intendedCropCenterY = cropTop - (desiredHeight / 2.0)
+            originY = intendedCropCenterY - (cropHeight / 2.0)
+        } else {
+            originY = cropTop - cropHeight
+        }
 
         return clampAndAccept(
             CropEngine.CropRect(
@@ -514,6 +530,24 @@ final class ShotComposer: ObservableObject {
 
         let fingerprint = currentFramingFingerprint
         let framingChanged = lastAppliedFramingFingerprint != fingerprint
+        
+        // Calculate velocity for dynamic deadzone
+        let now = CACurrentMediaTime()
+        if let lastCenter = lastComposeTrackingCenter, lastComposeTime > 0 {
+            let dt = max(now - lastComposeTime, 0.001)
+            let distance = hypot(trackingCenter.x - lastCenter.x, trackingCenter.y - lastCenter.y)
+            let instantVelocity = distance / CGFloat(dt)
+            // Smooth the velocity to prevent noise spikes
+            subjectVelocity = (subjectVelocity * 0.8) + (instantVelocity * 0.2)
+        }
+        lastComposeTrackingCenter = trackingCenter
+        lastComposeTime = now
+
+        // Dynamic deadzone: if subject is moving fast (e.g. > 2% of screen per second),
+        // shrink deadzone to allow continuous tracking for the spring physics.
+        // If they are slow, use the configured deadzone to lock down.
+        let isMoving = subjectVelocity > 0.02 
+        let effectiveDeadzone = isMoving ? 0.005 : config.deadzoneThreshold
 
         // Deadzone: skip updates when the tracked subject anchor hasn't moved
         // enough to matter, so we don't chase detection noise. Bypass the gate
@@ -522,7 +556,7 @@ final class ShotComposer: ObservableObject {
         if !framingChanged, let lastCenter = lastAcceptedCenter {
             let dx = abs(trackingCenter.x - lastCenter.x)
             let dy = abs(trackingCenter.y - lastCenter.y)
-            if dx < config.deadzoneThreshold && dy < config.deadzoneThreshold {
+            if dx < effectiveDeadzone && dy < effectiveDeadzone {
                 return nil
             }
         }

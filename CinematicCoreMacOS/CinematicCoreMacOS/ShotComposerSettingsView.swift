@@ -77,7 +77,7 @@ struct ShotComposerSettingsView: View {
             .disabled(!shotComposer.config.isEnabled)
 
             HStack {
-                Text("Smoothing")
+                Text("Responsiveness (Spring)")
                 Spacer()
                 Text(String(format: "%.0f%%",
                             Double(shotComposer.config.smoothingFactor) * 100))
