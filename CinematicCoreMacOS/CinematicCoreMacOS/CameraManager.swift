@@ -491,9 +491,13 @@ final class CameraManager: NSObject, ObservableObject {
         shotComposer.lockTarget(personID)
     }
 
+    /// Smoothly release the operator's lock and zoom back out to a wide shot.
+    /// Differs from `returnToWide()` which snaps — this animates so the
+    /// operator gets a soft pull-back when tapping "unlock" on the lock pill.
     func clearManualTargetLock() {
-        activeMode = .autoTracking
+        activeMode = .wide
         shotComposer.clearManualLock()
+        boostFramingTransition()
     }
     
     /// Restart capture with a different camera
@@ -709,8 +713,17 @@ final class CameraManager: NSObject, ObservableObject {
         if let cropEngine {
             switch activeMode {
             case .wide:
+                    // Drive the spring toward full frame. Explicit "Return to
+                    // Wide" snaps via cropEngine.jumpToTarget() in returnToWide();
+                    // entering .wide via a softer path (e.g. unlocking the
+                    // subject) animates instead. Honour the framing-boost
+                    // window so the pull-back arrives in ~0.5s rather than
+                    // crawling at the default subject-tracking smoothing.
+                    let smoothing = CACurrentMediaTime() < fastFramingUntil
+                        ? Self.fastFramingSmoothing
+                        : shotComposer.config.smoothingFactor
+                    cropEngine.config.transitionSmoothing = smoothing
                     cropEngine.targetCrop = .fullFrame
-                    cropEngine.jumpToTarget()
                 case .autoTracking:
                     if useMLAgent {
                         cropEngine.config.transitionSmoothing = 0.05
