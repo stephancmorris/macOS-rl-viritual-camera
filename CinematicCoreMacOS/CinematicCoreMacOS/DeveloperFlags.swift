@@ -34,7 +34,9 @@ enum DeveloperFlags {
     /// per second while tracking is active.
     nonisolated static let verboseFrameLogging = false
 
-    /// Enables verbose GPU render tracing inside CropEngine. Useful when
-    /// diagnosing Metal or crop-geometry issues, but too noisy for normal use.
-    nonisolated static let verboseRenderLogging = false
+    /// Emits one structured `[LATENCY]` line per processed frame summarising
+    /// total, detection, crop, and compose timings plus accumulated gate-drop
+    /// counts. Use this when diagnosing choppy output — see the
+    /// "as-a-senior-software-stateful-penguin" plan for expected baselines.
+    nonisolated static let latencyConsoleLogging = true
 }

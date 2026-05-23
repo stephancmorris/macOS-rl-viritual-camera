@@ -20,30 +20,41 @@ private final class SendablePixelBufferBox: @unchecked Sendable {
     }
 }
 
-private final class CaptureFrameProcessingGate: @unchecked Sendable {
+private nonisolated final class CaptureFrameProcessingGate: @unchecked Sendable {
     private let lock = NSLock()
     private var isProcessing = false
+    private var droppedFrames: UInt64 = 0
 
-    nonisolated init() {}
+    init() {}
 
-    nonisolated func begin() -> Bool {
+    func begin() -> Bool {
         lock.lock()
         defer { lock.unlock() }
-        guard !isProcessing else { return false }
+        guard !isProcessing else {
+            droppedFrames &+= 1
+            return false
+        }
         isProcessing = true
         return true
     }
 
-    nonisolated func finish() {
+    func finish() {
         lock.lock()
         defer { lock.unlock() }
         isProcessing = false
     }
 
-    nonisolated func reset() {
+    func reset() {
         lock.lock()
         defer { lock.unlock() }
         isProcessing = false
+        droppedFrames = 0
+    }
+
+    var droppedFrameCount: UInt64 {
+        lock.lock()
+        defer { lock.unlock() }
+        return droppedFrames
     }
 }
 
@@ -246,6 +257,12 @@ final class CameraManager: NSObject, ObservableObject {
         Self.logger.debug("\(resolvedMessage, privacy: .public)")
     }
 
+    private nonisolated func latencyLog(_ message: @autoclosure () -> String) {
+        guard DeveloperFlags.latencyConsoleLogging else { return }
+        let resolved = message()
+        Self.logger.notice("[LATENCY] \(resolved, privacy: .public)")
+    }
+
     // MARK: - Configuration Constants
     
     private enum Config {
@@ -354,7 +371,7 @@ final class CameraManager: NSObject, ObservableObject {
     func startCapture() async throws {
         let sourceTitle = preferredInputSource.title
         Self.logger.notice("Starting capture from \(sourceTitle, privacy: .public)")
-        await frameProcessingGate.reset()
+        frameProcessingGate.reset()
         programOutput.start()
 
         if preferredInputSource == .validationClip {
@@ -674,6 +691,8 @@ final class CameraManager: NSObject, ObservableObject {
 
         var programImage = ciImage
         var outputPixelBuffer = pixelBuffer
+        var composeDuration: TimeInterval = 0
+        var cropDuration: TimeInterval = 0
         if let cropEngine {
             switch activeMode {
             case .wide:
@@ -720,16 +739,22 @@ final class CameraManager: NSObject, ObservableObject {
                     let panCenter = CGPoint(x: autoPanPhase, y: 0.5)
                     cropEngine.targetCrop = manualCropRect(center: panCenter)
                 }
-            let composeDuration = CACurrentMediaTime() - composeStart
+            composeDuration = CACurrentMediaTime() - composeStart
             Self.signposter.endInterval("compose", composeInterval)
             programOutput.recordLatency(stage: .compose, duration: composeDuration)
 
             frameLog("🔍 DEBUG: About to call processCrop...")
             do {
                 let cropStart = CACurrentMediaTime()
-                let croppedBuffer = try await cropEngine.processCrop(pixelBuffer)
-                let cropDuration = CACurrentMediaTime() - cropStart
+                let snapshot = cropEngine.tickInterpolation()
+                let croppedBuffer = try cropEngine.processCrop(
+                    pixelBuffer,
+                    crop: snapshot.crop,
+                    outputSize: snapshot.outputSize
+                )
+                cropDuration = CACurrentMediaTime() - cropStart
                 programOutput.recordLatency(stage: .cropRender, duration: cropDuration)
+                cropEngine.publishRenderStats(renderTime: cropDuration)
                 frameLog("🔍 DEBUG: processCrop returned successfully")
                 programImage = CIImage(cvPixelBuffer: croppedBuffer)
                 outputPixelBuffer = croppedBuffer
@@ -742,7 +767,7 @@ final class CameraManager: NSObject, ObservableObject {
             }
             frameLog("🔍 DEBUG: Crop processing complete")
         } else {
-            let composeDuration = CACurrentMediaTime() - composeStart
+            composeDuration = CACurrentMediaTime() - composeStart
             Self.signposter.endInterval("compose", composeInterval)
             programOutput.recordLatency(stage: .compose, duration: composeDuration)
         }
@@ -766,6 +791,15 @@ final class CameraManager: NSObject, ObservableObject {
         let totalDuration = CACurrentMediaTime() - captureStart
         programOutput.recordLatency(stage: .total, duration: totalDuration)
         Self.signposter.endInterval("captureFrame", captureInterval)
+
+        let gateDrops = frameProcessingGate.droppedFrameCount
+        latencyLog(
+            "total=\(String(format: "%.1f", totalDuration * 1000))ms " +
+            "detect=\(String(format: "%.1f", detectionDuration * 1000))ms " +
+            "crop=\(String(format: "%.1f", cropDuration * 1000))ms " +
+            "compose=\(String(format: "%.1f", composeDuration * 1000))ms " +
+            "gateDrops=\(gateDrops)"
+        )
     }
 
     private func processValidationFrame(
@@ -1383,7 +1417,7 @@ extension CameraManager: AVCaptureVideoDataOutputSampleBufferDelegate {
         from connection: AVCaptureConnection
     ) {
         // Performance monitoring: frame drops indicate system overload
-        frameLog("⚠️ Dropped frame")
+        latencyLog("avcapture-drop (system overload upstream of processing gate)")
         let timestampSeconds = CMSampleBufferGetPresentationTimeStamp(sampleBuffer).seconds
         Task(priority: .userInitiated) { @MainActor in
             self.programOutput.recordDroppedFrame(

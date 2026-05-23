@@ -7,15 +7,15 @@
 //
 
 import Metal
-import MetalKit
 import CoreVideo
 import CoreImage
 import QuartzCore
 import Combine
 import OSLog
 
-/// High-performance Metal-based crop and scale engine
-/// Maintains full quality while extracting regions from 4K video
+/// CoreImage-based crop and scale engine. Renders cropped output at display
+/// priority, sidestepping the GPU power-state idling seen with isolated Metal
+/// compute kernels on Apple Silicon (~30-45ms scheduler slot per frame).
 @MainActor
 final class CropEngine: ObservableObject {
     private nonisolated static let logger = Logger(subsystem: "com.alfie", category: "CropEngine")
@@ -71,21 +71,12 @@ final class CropEngine: ObservableObject {
         var gpuUtilization: Float = 0
     }
 
-    // MARK: - Metal Resources (nonisolated for GPU work)
+    // MARK: - Rendering Resources
 
-    // These are thread-safe and can be used from any context
     private let device: MTLDevice
-    private let commandQueue: MTLCommandQueue
-    private let pipelineState: MTLComputePipelineState
-    private nonisolated(unsafe) let textureCache: CVMetalTextureCache
     private let ciContext: CIContext
 
-    private nonisolated func renderLog(_ message: @autoclosure () -> String) {
-        guard DeveloperFlags.verboseRenderLogging else { return }
-        let resolvedMessage = message()
-        Self.logger.debug("\(resolvedMessage, privacy: .public)")
-    }
-    
+
     // MARK: - Crop Rectangle Model
     
     struct CropRect: Equatable, Sendable {
@@ -170,54 +161,12 @@ final class CropEngine: ObservableObject {
     // MARK: - Initialization
     
     init?() {
-        // Get Metal device
         guard let device = MTLCreateSystemDefaultDevice() else {
             Self.logger.error("Metal is not supported on this device")
             return nil
         }
         self.device = device
-        
-        // Create command queue
-        guard let queue = device.makeCommandQueue() else {
-            Self.logger.error("Failed to create Metal command queue")
-            return nil
-        }
-        self.commandQueue = queue
-        
-        // Load Metal library and create pipeline
-        guard let library = device.makeDefaultLibrary(),
-              let cropFunction = library.makeFunction(name: "cropAndScale") else {
-            Self.logger.error("Failed to load Metal shader library")
-            return nil
-        }
 
-        do {
-            self.pipelineState = try device.makeComputePipelineState(function: cropFunction)
-            Self.logger.notice("Created compute pipeline state")
-            Self.logger.debug("Thread execution width: \(self.pipelineState.threadExecutionWidth)")
-            Self.logger.debug("Max threads per threadgroup: \(self.pipelineState.maxTotalThreadsPerThreadgroup)")
-        } catch {
-            Self.logger.error("Failed to create compute pipeline: \(error.localizedDescription, privacy: .public)")
-            return nil
-        }
-        
-        // Create texture cache for efficient CVPixelBuffer → MTLTexture conversion
-        var cache: CVMetalTextureCache?
-        let result = CVMetalTextureCacheCreate(
-            kCFAllocatorDefault,
-            nil,
-            device,
-            nil,
-            &cache
-        )
-
-        guard result == kCVReturnSuccess, let textureCache = cache else {
-            Self.logger.error("Failed to create texture cache")
-            return nil
-        }
-        self.textureCache = textureCache
-        
-        // Create CIContext for additional image processing if needed
         self.ciContext = CIContext(
             mtlDevice: device,
             options: [
@@ -226,106 +175,79 @@ final class CropEngine: ObservableObject {
                 .name: "CropEngine.CIContext"
             ]
         )
-        
+
         Self.logger.notice("CropEngine initialized with Metal device: \(device.name, privacy: .public)")
     }
     
     // MARK: - Public Methods
-    
-    /// Process a video frame and apply the crop
-    /// - Parameter pixelBuffer: Input video frame
-    /// - Returns: Cropped and scaled pixel buffer
-    nonisolated func processCrop(_ pixelBuffer: CVPixelBuffer) async throws -> CVPixelBuffer {
-        renderLog("🔧 CropEngine.processCrop: START")
+
+    /// MainActor-only: advance interpolation toward `targetCrop`, then snapshot
+    /// the values `processCrop` needs. Call this from `processFrame` before
+    /// invoking `processCrop` so the heavy crop work runs without an actor hop.
+    @MainActor
+    func tickInterpolation() -> (crop: CropRect, outputSize: CGSize, smoothingFactor: Float) {
+        updateInterpolation()
+        return (currentCrop, config.outputSize, config.transitionSmoothing)
+    }
+
+    /// Crop and scale a video frame using CoreImage. Caller must have already
+    /// advanced interpolation via `tickInterpolation()` to obtain the snapshot
+    /// values — doing it here would force a MainActor hop that serializes
+    /// against SwiftUI rendering. (See git history for the Metal compute path
+    /// that this replaces; it hit an Apple Silicon GPU power-state issue where
+    /// isolated compute kernels were scheduled into a 30-45ms idle slot.)
+    nonisolated func processCrop(
+        _ pixelBuffer: CVPixelBuffer,
+        crop: CropRect,
+        outputSize: CGSize
+    ) throws -> CVPixelBuffer {
         let cropInterval = Self.signposter.beginInterval("cropRender")
         defer {
             Self.signposter.endInterval("cropRender", cropInterval)
         }
-        let startTime = CACurrentMediaTime()
 
-        // Get ALL data from main actor before doing any work
-        renderLog("🔧 CropEngine.processCrop: Getting data from main actor...")
-        let (crop, outputSize, smoothingFactor) = await MainActor.run { () -> (CropRect, CGSize, Float) in
-            self.renderLog("🔧 CropEngine.processCrop: Inside MainActor.run, calling updateInterpolation")
-            updateInterpolation()
-            self.renderLog("🔧 CropEngine.processCrop: updateInterpolation done, returning config")
-            return (currentCrop, config.outputSize, config.transitionSmoothing)
-        }
-        renderLog("🔧 CropEngine.processCrop: Got data - crop: \(crop), outputSize: \(outputSize)")
+        let sourceImage = CIImage(cvPixelBuffer: pixelBuffer)
+        let extent = sourceImage.extent
 
-        // Create Metal textures from pixel buffers
-        renderLog("🔧 CropEngine.processCrop: Creating source texture...")
-        guard let sourceTexture = makeTexture(from: pixelBuffer) else {
-            renderLog("🔧 CropEngine.processCrop: FAILED to create source texture")
-            throw CropError.textureCreationFailed
-        }
-        renderLog("🔧 CropEngine.processCrop: Source texture created: \(sourceTexture.width)x\(sourceTexture.height)")
-
-        // Create output pixel buffer
-        renderLog("🔧 CropEngine.processCrop: Creating output buffer...")
-        let outputBuffer = try createOutputBuffer(size: outputSize)
-        renderLog("🔧 CropEngine.processCrop: Output buffer created")
-
-        renderLog("🔧 CropEngine.processCrop: Creating output texture...")
-        guard let outputTexture = makeTexture(from: outputBuffer) else {
-            renderLog("🔧 CropEngine.processCrop: FAILED to create output texture")
-            throw CropError.textureCreationFailed
-        }
-        renderLog("🔧 CropEngine.processCrop: Output texture created: \(outputTexture.width)x\(outputTexture.height)")
-
-        // Perform Metal rendering (GPU work, all off main thread)
-        renderLog("🔧 CropEngine.processCrop: Starting Metal render...")
-        try render(
-            source: sourceTexture,
-            destination: outputTexture,
-            crop: crop,
-            outputSize: outputSize,
-            smoothingFactor: smoothingFactor
-        )
-        renderLog("🔧 CropEngine.processCrop: Metal render complete")
-
-        // Update stats on main actor
-        let renderTime = CACurrentMediaTime() - startTime
-        await MainActor.run {
-            updateStats(renderTime: renderTime)
-        }
-
-        renderLog("🔧 CropEngine.processCrop: END (took \(renderTime * 1000)ms)")
-        return outputBuffer
-    }
-    
-    /// Process using CIImage (alternative API)
-    nonisolated func processCrop(_ ciImage: CIImage) async throws -> CIImage {
-        // Update interpolation on main actor
-        await MainActor.run {
-            updateInterpolation()
-        }
-        
-        // Get current state from main actor
-        let crop = await currentCrop
-        let outputSize = await config.outputSize
-        
-        // Use CIImage cropping (less efficient than Metal, but simpler)
-        let extent = ciImage.extent
-        
-        // Convert normalized crop to pixel coordinates
+        // Vision and CIImage both use bottom-left origin, so we can map the
+        // normalized crop directly.
         let cropRect = CGRect(
             x: crop.origin.x * extent.width,
             y: crop.origin.y * extent.height,
             width: crop.size.width * extent.width,
             height: crop.size.height * extent.height
         )
-        
-        // Crop and scale
-        let cropped = ciImage.cropped(to: cropRect)
-        let scaled = cropped.transformed(by: CGAffineTransform(
+
+        // Translate the cropped origin to (0,0) before scaling so the renderer
+        // writes into the full output buffer.
+        let translated = sourceImage
+            .cropped(to: cropRect)
+            .transformed(by: CGAffineTransform(translationX: -cropRect.origin.x, y: -cropRect.origin.y))
+        let scaled = translated.transformed(by: CGAffineTransform(
             scaleX: outputSize.width / cropRect.width,
             y: outputSize.height / cropRect.height
         ))
-        
-        return scaled
+
+        let outputBuffer = try createOutputBuffer(size: outputSize)
+        ciContext.render(
+            scaled,
+            to: outputBuffer,
+            bounds: CGRect(origin: .zero, size: outputSize),
+            colorSpace: CGColorSpace(name: CGColorSpace.sRGB)
+        )
+
+        return outputBuffer
     }
-    
+
+    /// MainActor-only: record a completed render for the stats HUD. Called
+    /// fire-and-forget after `processCrop` returns so the cooperative thread
+    /// isn't blocked on SwiftUI updates.
+    @MainActor
+    func publishRenderStats(renderTime: TimeInterval) {
+        updateStats(renderTime: renderTime)
+    }
+
+
     /// Set crop to frame a detected person with smooth transition
     func framePerson(_ person: PersonDetector.DetectedPerson, padding: CGFloat = 0.15) {
         targetCrop = CropRect.framing(
@@ -418,109 +340,6 @@ final class CropEngine: ObservableObject {
         }
     }
     
-    private nonisolated func render(
-        source: MTLTexture,
-        destination: MTLTexture,
-        crop: CropRect,
-        outputSize: CGSize,
-        smoothingFactor: Float
-    ) throws {
-        renderLog("🔧 render: START")
-        renderLog("🔧 render: source texture: \(source.width)x\(source.height)")
-        renderLog("🔧 render: destination texture: \(destination.width)x\(destination.height)")
-        renderLog("🔧 render: outputSize: \(outputSize)")
-
-        renderLog("🔧 render: Creating command buffer...")
-        guard let commandBuffer = commandQueue.makeCommandBuffer() else {
-            renderLog("🔧 render: FAILED to create command buffer")
-            throw CropError.renderingFailed
-        }
-        renderLog("🔧 render: Command buffer created")
-
-        renderLog("🔧 render: Creating compute encoder...")
-        guard let encoder = commandBuffer.makeComputeCommandEncoder() else {
-            renderLog("🔧 render: FAILED to create compute encoder")
-            throw CropError.renderingFailed
-        }
-        renderLog("🔧 render: Compute encoder created")
-
-        encoder.setComputePipelineState(pipelineState)
-        encoder.setTexture(source, index: 0)
-        encoder.setTexture(destination, index: 1)
-
-        // Prepare crop parameters
-        var params = CropParams(
-            cropOrigin: SIMD2<Float>(Float(crop.origin.x), Float(crop.origin.y)),
-            cropSize: SIMD2<Float>(Float(crop.size.width), Float(crop.size.height)),
-            outputSize: SIMD2<UInt32>(
-                UInt32(outputSize.width),
-                UInt32(outputSize.height)
-            ),
-            smoothingFactor: smoothingFactor
-        )
-        renderLog("🔧 render: CropParams - origin: \(params.cropOrigin), size: \(params.cropSize), output: \(params.outputSize)")
-
-        encoder.setBytes(&params, length: MemoryLayout<CropParams>.size, index: 0)
-
-        // Calculate threadgroup sizes
-        let w = pipelineState.threadExecutionWidth
-        let h = pipelineState.maxTotalThreadsPerThreadgroup / w
-        let threadgroupSize = MTLSize(width: w, height: h, depth: 1)
-        renderLog("🔧 render: threadgroupSize: \(threadgroupSize)")
-
-        // Calculate grid size
-        let gridSize = MTLSize(
-            width: Int(outputSize.width),
-            height: Int(outputSize.height),
-            depth: 1
-        )
-        renderLog("🔧 render: gridSize: \(gridSize)")
-
-        // Check if device supports non-uniform threadgroups
-        renderLog("🔧 render: Dispatching threads...")
-        encoder.dispatchThreads(gridSize, threadsPerThreadgroup: threadgroupSize)
-        encoder.endEncoding()
-        renderLog("🔧 render: Encoder ended, committing...")
-
-        commandBuffer.commit()
-        renderLog("🔧 render: Committed, waiting for completion...")
-
-        // Wait and check for errors - THIS IS LIKELY WHERE IT HANGS
-        commandBuffer.waitUntilCompleted()
-        renderLog("🔧 render: Completed!")
-
-        if let error = commandBuffer.error {
-            Self.logger.error("Metal command buffer error: \(error.localizedDescription, privacy: .public)")
-            throw CropError.renderingFailed
-        }
-        renderLog("🔧 render: END (success)")
-    }
-    
-    private nonisolated func makeTexture(from pixelBuffer: CVPixelBuffer) -> MTLTexture? {
-        let width = CVPixelBufferGetWidth(pixelBuffer)
-        let height = CVPixelBufferGetHeight(pixelBuffer)
-        
-        var texture: CVMetalTexture?
-        let result = CVMetalTextureCacheCreateTextureFromImage(
-            kCFAllocatorDefault,
-            textureCache,
-            pixelBuffer,
-            nil,
-            .bgra8Unorm,
-            width,
-            height,
-            0,
-            &texture
-        )
-        
-        guard result == kCVReturnSuccess,
-              let cvTexture = texture else {
-            return nil
-        }
-        
-        return CVMetalTextureGetTexture(cvTexture)
-    }
-    
     private nonisolated func createOutputBuffer(size: CGSize) throws -> CVPixelBuffer {
         var pixelBuffer: CVPixelBuffer?
         
@@ -562,26 +381,12 @@ final class CropEngine: ObservableObject {
 
 // MARK: - Supporting Types
 
-/// Crop parameters struct (must match Metal shader layout exactly)
-/// Metal aligns structs to 16-byte boundaries, so we need padding
-struct CropParams {
-    var cropOrigin: SIMD2<Float>      // 8 bytes (offset 0)
-    var cropSize: SIMD2<Float>        // 8 bytes (offset 8)
-    var outputSize: SIMD2<UInt32>     // 8 bytes (offset 16)
-    var smoothingFactor: Float        // 4 bytes (offset 24)
-    var _padding: Float = 0           // 4 bytes (offset 28) - padding to reach 32 bytes
-}
-
 enum CropError: LocalizedError {
-    case textureCreationFailed
     case bufferCreationFailed
-    case renderingFailed
-    
+
     var errorDescription: String? {
         switch self {
-        case .textureCreationFailed: return "Failed to create Metal texture"
         case .bufferCreationFailed: return "Failed to create output buffer"
-        case .renderingFailed: return "Metal rendering failed"
         }
     }
 }

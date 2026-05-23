@@ -86,7 +86,7 @@ final class PersonDetector: ObservableObject {
     
     private let processingQueue = DispatchQueue(
         label: "com.cinematiccore.personDetection",
-        qos: .default
+        qos: .userInitiated
     )
     
     // Person tracking state
