@@ -143,7 +143,9 @@ struct OperatorPill: View {
         return HStack(spacing: 2) {
             ForEach(ShotComposer.Config.ShotPreset.allCases) { option in
                 shotPresetSegment(option: option, isOn: preset == option) {
+                    guard preset != option else { return }
                     cameraManager.shotComposer.config.shotPreset = option
+                    cameraManager.boostFramingTransition()
                 }
             }
         }
@@ -201,7 +203,8 @@ struct OperatorPill: View {
 
     private var cropToggleButton: some View {
         let isOn = cameraManager.activeMode == .autoTracking
-        let enabled = cameraManager.isRunning && !isOn
+        let hasLock = cameraManager.manualLockedTargetID != nil
+        let enabled = cameraManager.isRunning && !isOn && hasLock
         return Button {
             cameraManager.activeMode = .autoTracking
         } label: {
@@ -225,6 +228,7 @@ struct OperatorPill: View {
         }
         .buttonStyle(.plain)
         .disabled(!enabled)
+        .help(hasLock ? "Frame the locked subject." : "Tap a person in the preview to lock a subject first.")
     }
 
     // MARK: - Manual Crop toggle

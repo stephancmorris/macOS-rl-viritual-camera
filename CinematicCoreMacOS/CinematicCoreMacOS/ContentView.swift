@@ -54,11 +54,9 @@ struct ContentView: View {
                     isRecovering: false,
                     framingTitle: cameraManager.shotComposer.config.shotFraming.title,
                     onSelectPerson: cameraManager.lockTarget,
-                    onTapPoint: { point in
-                        if cameraManager.activeMode == .manualCrop {
-                            cameraManager.manualCropPoint = point
-                        }
-                    }
+                    onTapPoint: cameraManager.activeMode == .manualCrop
+                        ? { point in cameraManager.manualCropPoint = point }
+                        : nil
                 )
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
             } else {

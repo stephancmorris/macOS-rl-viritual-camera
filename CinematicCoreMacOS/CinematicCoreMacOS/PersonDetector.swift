@@ -110,7 +110,14 @@ final class PersonDetector: ObservableObject {
         var lastSeen: TimeInterval
         var lastBoundingBox: CGRect
         var confidence: Float
+        var lastVelocity: CGVector = .zero
+        var lastPose: PoseKeypoints? = nil
+        var lastPoseTime: TimeInterval = 0
     }
+
+    // Velocity clamp in frame-widths-per-second. Prevents stale tracks with a
+    // large dt from extrapolating a wildly displaced predicted box.
+    private static let maxVelocityComponent: CGFloat = 2.0
     
     // MARK: - Initialization
 
@@ -265,7 +272,7 @@ final class PersonDetector: ObservableObject {
             let confidence = observation.confidence
 
             // Match this rect to the best-overlapping pose observation
-            let keypoints: PoseKeypoints? = {
+            let freshKeypoints: PoseKeypoints? = {
                 let bestPose = poseObservations.max { a, b in
                     let bboxA = poseBoundingBox(a)
                     let bboxB = poseBoundingBox(b)
@@ -281,16 +288,52 @@ final class PersonDetector: ObservableObject {
             // Try to match with existing track
             let matchedID = findMatchingTrack(boundingBox: boundingBox, timestamp: timestamp)
             let personID = matchedID ?? UUID()
+            let existing = matchedID.flatMap { trackedPersons[$0] }
 
-            // Update or create track
+            // Compute velocity from the previous box position (Step 1). On
+            // first sighting (no existing track) velocity is zero.
+            let velocity: CGVector
+            if let existing {
+                let dt = max(timestamp - existing.lastSeen, 0.001)
+                let rawDx = (boundingBox.midX - existing.lastBoundingBox.midX) / CGFloat(dt)
+                let rawDy = (boundingBox.midY - existing.lastBoundingBox.midY) / CGFloat(dt)
+                velocity = CGVector(
+                    dx: clamp(rawDx, to: Self.maxVelocityComponent),
+                    dy: clamp(rawDy, to: Self.maxVelocityComponent)
+                )
+            } else {
+                velocity = .zero
+            }
+
+            // Pose carry-forward (Step 3). If this frame's pose match failed
+            // but the track has a recent pose (<0.3s old), reuse it to keep
+            // the composer on its pose-driven framing branch.
+            let cachedPose = existing?.lastPose
+            let cachedPoseTime = existing?.lastPoseTime ?? 0
+            let keypoints: PoseKeypoints?
+            let poseTimeToStore: TimeInterval
+            if let freshKeypoints {
+                keypoints = freshKeypoints
+                poseTimeToStore = timestamp
+            } else if let cachedPose, timestamp - cachedPoseTime < 0.3 {
+                keypoints = cachedPose
+                poseTimeToStore = cachedPoseTime
+            } else {
+                keypoints = nil
+                poseTimeToStore = cachedPoseTime
+            }
+            let poseToStore = keypoints ?? cachedPose
+
             trackedPersons[personID] = TrackedPerson(
                 id: personID,
                 lastSeen: timestamp,
                 lastBoundingBox: boundingBox,
-                confidence: confidence
+                confidence: confidence,
+                lastVelocity: velocity,
+                lastPose: poseToStore,
+                lastPoseTime: poseTimeToStore
             )
 
-            // Create detected person with optional pose keypoints
             let detectedPerson = DetectedPerson(
                 id: personID,
                 boundingBox: boundingBox,
@@ -301,29 +344,83 @@ final class PersonDetector: ObservableObject {
             updatedPersons.append(detectedPerson)
         }
 
+        // Cached-detection fallback (Step 2). When Vision dropped this frame
+        // entirely, synthesize entries from recent tracks so the composer
+        // doesn't see [] and lose lock. Only triggered when rectObservations
+        // is empty — if Vision found anyone, trust its result.
+        if rectObservations.isEmpty {
+            for (id, track) in trackedPersons {
+                let age = timestamp - track.lastSeen
+                guard age < 0.3 else { continue }
+                let projectedBox = predictedBox(for: track, at: timestamp)
+                let synthesized = DetectedPerson(
+                    id: id,
+                    boundingBox: projectedBox,
+                    confidence: track.confidence * 0.5,
+                    timestamp: timestamp,
+                    poseKeypoints: track.lastPose
+                )
+                updatedPersons.append(synthesized)
+            }
+        }
+
         detectedPersons = updatedPersons
+    }
+
+    private func clamp(_ value: CGFloat, to absLimit: CGFloat) -> CGFloat {
+        return min(max(value, -absLimit), absLimit)
     }
     
     private func findMatchingTrack(boundingBox: CGRect, timestamp: TimeInterval) -> UUID? {
-        // Find track with highest IoU (Intersection over Union)
-        var bestMatch: (id: UUID, iou: CGFloat)? = nil
-        
+        // Match against each track's *predicted* current box (lastBoundingBox
+        // advanced by lastVelocity * dt). This handles a person taking a step
+        // between frames better than matching against a stale box.
+        var bestIoU: (id: UUID, iou: CGFloat)? = nil
+
         for (id, track) in trackedPersons {
-            let iou = calculateIoU(boundingBox, track.lastBoundingBox)
-            
-            // Require at least 30% overlap to consider it the same person
-            if iou > 0.3 {
-                if let current = bestMatch {
-                    if iou > current.iou {
-                        bestMatch = (id, iou)
-                    }
+            let predicted = predictedBox(for: track, at: timestamp)
+            let iou = calculateIoU(boundingBox, predicted)
+            if iou > 0.2 {
+                if let current = bestIoU {
+                    if iou > current.iou { bestIoU = (id, iou) }
                 } else {
-                    bestMatch = (id, iou)
+                    bestIoU = (id, iou)
                 }
             }
         }
-        
-        return bestMatch?.id
+
+        if let match = bestIoU { return match.id }
+
+        // Fallback: closest centroid within 15% of frame width. Catches fast
+        // lateral motion where the predicted box doesn't quite overlap.
+        let centroid = CGPoint(x: boundingBox.midX, y: boundingBox.midY)
+        var bestDistance: (id: UUID, distance: CGFloat)? = nil
+        let maxDistance: CGFloat = 0.15
+
+        for (id, track) in trackedPersons {
+            let predicted = predictedBox(for: track, at: timestamp)
+            let predictedCentroid = CGPoint(x: predicted.midX, y: predicted.midY)
+            let dx = centroid.x - predictedCentroid.x
+            let dy = centroid.y - predictedCentroid.y
+            let distance = (dx * dx + dy * dy).squareRoot()
+            if distance < maxDistance {
+                if let current = bestDistance {
+                    if distance < current.distance { bestDistance = (id, distance) }
+                } else {
+                    bestDistance = (id, distance)
+                }
+            }
+        }
+
+        return bestDistance?.id
+    }
+
+    private func predictedBox(for track: TrackedPerson, at timestamp: TimeInterval) -> CGRect {
+        let dt = CGFloat(max(timestamp - track.lastSeen, 0))
+        return track.lastBoundingBox.offsetBy(
+            dx: track.lastVelocity.dx * dt,
+            dy: track.lastVelocity.dy * dt
+        )
     }
     
     /// Compute an approximate bounding box from a pose observation's recognized points

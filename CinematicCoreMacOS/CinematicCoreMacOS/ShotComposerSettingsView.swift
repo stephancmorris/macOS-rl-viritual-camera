@@ -147,10 +147,24 @@ struct ShotComposerSettingsView: View {
                     .foregroundStyle(.secondary)
                     .monospacedDigit()
             }
-            
+
             Slider(
                 value: $shotComposer.config.autoPanSpeed,
                 in: 0.01...0.20,
+                step: 0.01
+            )
+
+            HStack {
+                Text("Auto Pan Height")
+                Spacer()
+                Text(String(format: "%.0f%%", shotComposer.config.autoPanHeight * 100))
+                    .foregroundStyle(.secondary)
+                    .monospacedDigit()
+            }
+
+            Slider(
+                value: $shotComposer.config.autoPanHeight,
+                in: 0.20...0.80,
                 step: 0.01
             )
         }

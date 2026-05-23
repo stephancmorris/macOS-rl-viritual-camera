@@ -192,6 +192,19 @@ final class CameraManager: NSObject, ObservableObject {
     private var autoPanDirection: CGFloat = 1.0
     private var autoPanPauseUntil: Double = 0
 
+    // Briefly boost crop smoothing after an operator-driven shot-preset change so
+    // the camera reaches the new framing quickly (instead of crawling there with
+    // the default subject-tracking smoothing).
+    private var fastFramingUntil: Double = 0
+    private static let fastFramingDuration: Double = 0.5
+    private static let fastFramingSmoothing: Float = 0.25
+
+    /// Call after changing `shotComposer.config.shotPreset` so the crop animates
+    /// faster to the newly-chosen framing for the next ~0.5s.
+    func boostFramingTransition() {
+        fastFramingUntil = CACurrentMediaTime() + Self.fastFramingDuration
+    }
+
 
     
     // MARK: - Camera Device Model
@@ -707,7 +720,10 @@ final class CameraManager: NSObject, ObservableObject {
                         )
                         cropEngine.targetCrop = newCrop
                     } else {
-                        cropEngine.config.transitionSmoothing = shotComposer.config.smoothingFactor
+                        let smoothing = CACurrentMediaTime() < fastFramingUntil
+                            ? Self.fastFramingSmoothing
+                            : shotComposer.config.smoothingFactor
+                        cropEngine.config.transitionSmoothing = smoothing
                         if let primaryPerson {
                             frameLog("🔍 DEBUG: Composing shot for person at \(primaryPerson.boundingBox)")
                             if let idealCrop = shotComposer.compose(person: primaryPerson) {
@@ -729,14 +745,14 @@ final class CameraManager: NSObject, ObservableObject {
                         if autoPanPhase >= 1.0 {
                             autoPanPhase = 1.0
                             autoPanDirection = -1.0
-                            autoPanPauseUntil = now + 1.0 // Pause for 1.0s
+                            autoPanPauseUntil = now + 0.4 // Brief beat at the edge before reversing.
                         } else if autoPanPhase <= 0.0 {
                             autoPanPhase = 0.0
                             autoPanDirection = 1.0
-                            autoPanPauseUntil = now + 1.0 // Pause for 1.0s
+                            autoPanPauseUntil = now + 0.4 // Brief beat at the edge before reversing.
                         }
                     }
-                    let panCenter = CGPoint(x: autoPanPhase, y: 0.5)
+                    let panCenter = CGPoint(x: autoPanPhase, y: shotComposer.config.autoPanHeight)
                     cropEngine.targetCrop = manualCropRect(center: panCenter)
                 }
             composeDuration = CACurrentMediaTime() - composeStart

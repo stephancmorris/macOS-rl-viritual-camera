@@ -163,6 +163,12 @@ final class ShotComposer: ObservableObject {
         /// Speed of the auto pan sweep across the stage.
         var autoPanSpeed: Float = 0.053
 
+        /// Vertical center of the auto-pan crop. Vision coordinates: 0 = bottom,
+        /// 1 = top of frame. 0.5 keeps the camera at chest height for an
+        /// average-height speaker; raise to focus higher (heads), lower for a
+        /// fuller-body sweep.
+        var autoPanHeight: CGFloat = 0.5
+
         /// Output frame profile. Default is stream-friendly landscape.
         var frameProfile: FrameProfile = .livestream
 
@@ -253,55 +259,33 @@ final class ShotComposer: ObservableObject {
     /// Operator-selected subject lock. When set, auto-selection must defer to it.
     @Published private(set) var manualLockedTargetID: UUID?
 
-    private var manualLockLostSince: TimeInterval?
     private var lastTrackingPoint: CGPoint?
 
     // MARK: - Public Methods
 
-    /// Select the primary speaker to frame.
+    /// Return the manually-locked subject if visible, otherwise nil.
     ///
-    /// Acquires a target by scoring detections, then holds that target until
-    /// the operator changes it (tap-to-lock) or exits Crop mode (Return to
-    /// Wide). The scorer never runs while an active target exists, so the
-    /// camera will not hop between people even if a newcomer outscores the
-    /// current subject. When the active target leaves the frame, the crop
-    /// engine holds its last position rather than re-acquiring.
+    /// Auto-tracking can only engage when the operator has tap-locked a subject
+    /// (see `OperatorPill.cropToggleButton` — the Crop button is disabled until
+    /// `manualLockedTargetID != nil`). When the locked subject leaves the frame
+    /// or is briefly undetected, returning nil holds the last crop indefinitely;
+    /// only the operator clears the lock (Return to Wide, or tap a different
+    /// subject to swap).
     func primaryPerson(
         from persons: [PersonDetector.DetectedPerson]
     ) -> PersonDetector.DetectedPerson? {
         let now = CACurrentMediaTime()
 
-        if let manualLockedTargetID {
-            if let lockedPerson = persons.first(where: { $0.id == manualLockedTargetID }) {
-                manualLockLostSince = nil
-                return finalizeSelection(lockedPerson, now: now)
-            }
-
-            if let manualLockLostSince {
-                if now - manualLockLostSince > config.targetHoldDuration {
-                    clearManualLock()
-                    activeTargetID = nil
-                    hasActiveTarget = false
-                }
-            } else {
-                manualLockLostSince = now
-            }
-
+        guard let manualLockedTargetID else {
             return nil
         }
 
-        if let activeTargetID {
-            if let active = persons.first(where: { $0.id == activeTargetID }) {
-                return finalizeSelection(active, now: now)
-            }
-            return nil
+        if let lockedPerson = persons.first(where: { $0.id == manualLockedTargetID }) {
+            return finalizeSelection(lockedPerson, now: now)
         }
 
-        guard !persons.isEmpty else { return nil }
-        guard let selected = persons.max(by: { score(for: $0) < score(for: $1) }) else {
-            return nil
-        }
-        return finalizeSelection(selected, now: now)
+        // Locked subject not visible this frame — hold crop indefinitely.
+        return nil
     }
 
     /// Compose a stage-friendly speaker shot.
@@ -347,7 +331,6 @@ final class ShotComposer: ObservableObject {
         lastComputedCrop = nil
         lastTrackedBounds = nil
         activeTargetID = nil
-        manualLockLostSince = nil
         lastTrackingPoint = nil
 
         subjectVelocity = 0.0
@@ -362,12 +345,10 @@ final class ShotComposer: ObservableObject {
     func lockTarget(_ targetID: UUID) {
         manualLockedTargetID = targetID
         activeTargetID = targetID
-        manualLockLostSince = nil
     }
 
     func clearManualLock() {
         manualLockedTargetID = nil
-        manualLockLostSince = nil
     }
 
     var isManualLockActive: Bool {
@@ -577,34 +558,6 @@ final class ShotComposer: ObservableObject {
         hasActiveTarget = true
         lastTrackingPoint = trackingPoint(for: selected)
         return selected
-    }
-
-    private func score(for person: PersonDetector.DetectedPerson) -> CGFloat {
-        let bbox = person.boundingBox
-        let areaScore = min(bbox.width * bbox.height * 4.0, 1.0)
-
-        let centerDistance = hypot(bbox.midX - 0.5, bbox.midY - 0.5)
-        let centerScore = max(0.0, 1.0 - (centerDistance / 0.75))
-        let stageScore = stagePriorityScore(for: trackingPoint(for: person))
-
-        let continuityScore: CGFloat
-        if let lastTrackingPoint {
-            let point = trackingPoint(for: person)
-            let distance = hypot(point.x - lastTrackingPoint.x, point.y - lastTrackingPoint.y)
-            continuityScore = max(0.0, 1.0 - (distance / 0.5))
-        } else {
-            continuityScore = 0.5
-        }
-
-        let stickyBonus: CGFloat = person.id == activeTargetID ? 1.0 : 0.0
-        let confidenceScore = CGFloat(person.confidence) * 0.25
-
-        return stickyBonus
-            + (continuityScore * 0.9)
-            + (centerScore * 0.5)
-            + (areaScore * 0.7)
-            + (stageScore * 0.9)
-            + confidenceScore
     }
 
     private func trackingPoint(for person: PersonDetector.DetectedPerson) -> CGPoint {

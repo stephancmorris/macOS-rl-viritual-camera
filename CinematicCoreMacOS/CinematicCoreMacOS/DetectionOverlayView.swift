@@ -4,7 +4,7 @@
 //
 //  Hairline subject rectangles with corner ticks. Three states:
 //   - idle  → cyan
-//   - locked → white, with PROGRAM CROP chip top-left
+//   - locked → neon green, with PROGRAM CROP chip top-left
 //   - recovering → amber, pulsing
 //
 
@@ -119,7 +119,7 @@ struct BoundingBoxView: View {
         Text(style.label)
             .font(.system(size: 9.5, weight: .semibold, design: .monospaced))
             .tracking(1.3)
-            .foregroundStyle(.black.opacity(0.85))
+            .foregroundStyle(style.labelColor)
             .padding(.horizontal, 8)
             .padding(.vertical, 4)
             .background(
@@ -137,19 +137,22 @@ struct BoundingBoxView: View {
         if isRecovering {
             return BoxStyle(
                 color: Color(red: 1.0, green: 0.72, blue: 0.24),
+                labelColor: .black.opacity(0.85),
                 label: "RECOVERING · \(Int(person.confidence * 100))%",
                 isPulsing: true
             )
         }
         if isLocked || isActive {
             return BoxStyle(
-                color: Color.white.opacity(0.98),
+                color: Color(red: 0.22, green: 1.0, blue: 0.08),
+                labelColor: .black.opacity(0.85),
                 label: "PROGRAM CROP · \(framingTitle.uppercased()) · \(Int(person.confidence * 100))%",
                 isPulsing: false
             )
         }
         return BoxStyle(
             color: Color(red: 0.47, green: 0.86, blue: 1.0),
+            labelColor: .black.opacity(0.85),
             label: "PERSON · \(Int(person.confidence * 100))%",
             isPulsing: false
         )
@@ -157,6 +160,7 @@ struct BoundingBoxView: View {
 
     private struct BoxStyle {
         let color: Color
+        let labelColor: Color
         let label: String
         let isPulsing: Bool
     }
