@@ -653,6 +653,9 @@ final class CameraManager: NSObject, ObservableObject {
 
         let detectionInterval = Self.signposter.beginInterval("detection")
         let detectionStart = CACurrentMediaTime()
+        // Hand the matcher the current operator lock so it can bind that track
+        // first with a relaxed threshold (PersonDetector.swift assignTracks).
+        personDetector.lockedTargetID = shotComposer.manualLockedTargetID
         let detectedPersons = await personDetector.processFrame(pixelBuffer)
         let detectionDuration = CACurrentMediaTime() - detectionStart
         Self.signposter.endInterval("detection", detectionInterval)
@@ -660,6 +663,29 @@ final class CameraManager: NSObject, ObservableObject {
 
         let composeInterval = Self.signposter.beginInterval("compose")
         let composeStart = CACurrentMediaTime()
+
+        // Advance the lock state machine. tracking → hold when the locked
+        // subject goes missing, hold → wideWaiting after holdDuration. The
+        // outcome tells us whether to apply a one-shot camera effect
+        // (pull-back to wide on hold expiry; resume tracking on re-acq).
+        // pixelBuffer is passed so the composer can capture face signatures
+        // for re-acquisition.
+        let lockOutcome = shotComposer.tick(
+            detections: detectedPersons,
+            timestamp: CACurrentMediaTime(),
+            pixelBuffer: pixelBuffer
+        )
+        switch lockOutcome {
+        case .noChange:
+            break
+        case .pullBackToWide:
+            activeMode = .wide
+            boostFramingTransition()
+        case .resumeTracking:
+            activeMode = .autoTracking
+            boostFramingTransition()
+        }
+
         let primaryPerson = activeMode != .autoTracking
             ? nil
             : shotComposer.primaryPerson(from: detectedPersons)

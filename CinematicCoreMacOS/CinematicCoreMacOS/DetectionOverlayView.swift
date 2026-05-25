@@ -237,7 +237,9 @@ private struct CornerTick: View {
             boundingBox: CGRect(x: 0.3, y: 0.3, width: 0.4, height: 0.6),
             confidence: 0.95,
             timestamp: 0,
-            poseKeypoints: nil
+            poseKeypoints: nil,
+            faceBoundingBox: nil,
+            faceLandmarkRatios: nil
         )
     ]
     return DetectionOverlayView(

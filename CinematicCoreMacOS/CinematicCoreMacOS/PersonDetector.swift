@@ -48,6 +48,18 @@ final class PersonDetector: ObservableObject {
         let confidence: Float
         let timestamp: TimeInterval
         let poseKeypoints: PoseKeypoints? // nil when pose detection fails
+        /// Face bbox in normalized Vision coordinates (bottom-left origin),
+        /// when a face was detected inside this person's body bbox.
+        /// Consumed by FaceSignatureExtractor for identity capture and
+        /// re-acquisition. Nil if the subject is facing away or Vision
+        /// could not find a face this frame.
+        let faceBoundingBox: CGRect?
+        /// Pose-invariant geometry ratios derived from the face landmarks
+        /// (eyes / nose / mouth) of the matched face. Used during
+        /// re-acquisition as a veto signal — see `LandmarkRatios`. Nil
+        /// when landmarks couldn't be extracted (face turned, partly
+        /// occluded, or the face wasn't matched to this body).
+        let faceLandmarkRatios: LandmarkRatios?
 
         /// Convert normalized rect to pixel coordinates
         func pixelBoundingBox(imageSize: CGSize) -> CGRect {
@@ -92,6 +104,18 @@ final class PersonDetector: ObservableObject {
     // Person tracking state
     private var trackedPersons: [UUID: TrackedPerson] = [:]
     private let trackingTimeout: TimeInterval = 1.0 // Drop tracks after 1 second
+
+    /// UUID of the operator-locked subject, pushed from CameraManager each frame.
+    /// When set, the matcher binds this track first using a relaxed threshold so
+    /// a same-frame confidence reshuffle can't yank the lock onto a neighbour.
+    var lockedTargetID: UUID? = nil
+
+    // Matching thresholds. Looser for the locked track so brief occlusion or a
+    // detection-confidence flicker doesn't drop it.
+    private static let normalIoUThreshold: CGFloat = 0.2
+    private static let normalCentroidThreshold: CGFloat = 0.15
+    private static let lockedIoUThreshold: CGFloat = 0.1
+    private static let lockedCentroidThreshold: CGFloat = 0.25
     
     // Cached Vision Requests
     nonisolated(unsafe) private let cachedRectRequest: VNDetectHumanRectanglesRequest = {
@@ -102,6 +126,17 @@ final class PersonDetector: ObservableObject {
     
     nonisolated(unsafe) private let cachedPoseRequest: VNDetectHumanBodyPoseRequest = {
         let req = VNDetectHumanBodyPoseRequest()
+        return req
+    }()
+
+    /// Face detection request — runs alongside rect + pose. Produces both
+    /// the face bbox AND landmark points (eyes, nose, mouth) so the lock
+    /// FSM can extract pose-invariant geometry ratios for the
+    /// re-acquisition veto signal (see `LandmarkRatios`). Cost ~1 ms,
+    /// roughly the same as the bbox-only request — the landmark model is
+    /// fast on Apple Silicon.
+    nonisolated(unsafe) private let cachedFaceRequest: VNDetectFaceLandmarksRequest = {
+        let req = VNDetectFaceLandmarksRequest()
         return req
     }()
     
@@ -136,8 +171,8 @@ final class PersonDetector: ObservableObject {
         let startTime = CACurrentMediaTime()
         let configSnapshot = config
 
-        // Perform detection on background queue (rect + pose together)
-        let (rectObservations, poseObservations) = await performDetection(
+        // Perform detection on background queue (rect + pose + face together).
+        let (rectObservations, poseObservations, faceObservations) = await performDetection(
             pixelBuffer: pixelBuffer,
             config: configSnapshot
         )
@@ -150,6 +185,7 @@ final class PersonDetector: ObservableObject {
             updateTracking(
                 rectObservations: rectObservations,
                 poseObservations: poseObservations,
+                faceObservations: faceObservations,
                 timestamp: startTime
             )
             updateStats(detectionTime: detectionTime)
@@ -176,7 +212,7 @@ final class PersonDetector: ObservableObject {
     private nonisolated func performDetection(
         pixelBuffer: CVPixelBuffer,
         config: Config
-    ) async -> ([VNHumanObservation], [VNHumanBodyPoseObservation]) {
+    ) async -> ([VNHumanObservation], [VNHumanBodyPoseObservation], [VNFaceObservation]) {
         let sendablePixelBuffer = SendablePixelBuffer(value: pixelBuffer)
 
         return await withCheckedContinuation { continuation in
@@ -194,19 +230,25 @@ final class PersonDetector: ObservableObject {
                 )
 
                 do {
-                    // Run both requests together for efficiency.
-                    try handler.perform([self.cachedRectRequest, self.cachedPoseRequest])
+                    // Run all three requests together for efficiency — Vision
+                    // batches them through a shared image-prep pipeline.
+                    try handler.perform([
+                        self.cachedRectRequest,
+                        self.cachedPoseRequest,
+                        self.cachedFaceRequest
+                    ])
 
                     let rectResults = (self.cachedRectRequest.results ?? [])
                         .filter { $0.confidence >= config.confidenceThreshold }
                     let limited = Array(rectResults.prefix(config.maxPersons))
 
                     let poseResults = self.cachedPoseRequest.results ?? []
+                    let faceResults = self.cachedFaceRequest.results ?? []
 
-                    continuation.resume(returning: (limited, poseResults))
+                    continuation.resume(returning: (limited, poseResults, faceResults))
                 } catch {
                     Self.logger.error("Person detection error: \(error.localizedDescription, privacy: .public)")
-                    continuation.resume(returning: ([], []))
+                    continuation.resume(returning: ([], [], []))
                 }
             }
         }
@@ -258,6 +300,7 @@ final class PersonDetector: ObservableObject {
     private func updateTracking(
         rectObservations: [VNHumanObservation],
         poseObservations: [VNHumanBodyPoseObservation],
+        faceObservations: [VNFaceObservation],
         timestamp: TimeInterval
     ) {
         // Remove stale tracks
@@ -265,9 +308,21 @@ final class PersonDetector: ObservableObject {
             timestamp - person.lastSeen < trackingTimeout
         }
 
+        // Assign track IDs to detections via two-pass optimal-greedy matching:
+        //   Pass A: locked track binds first against a relaxed threshold.
+        //   Pass B: all remaining (detection, track) pairs are scored and the
+        //           highest-scoring pair is taken repeatedly until none clear
+        //           the threshold. This avoids the classic greedy failure where
+        //           two detections both overlap one track and the second is
+        //           assigned a fresh UUID.
+        let assignments = assignTracks(
+            detections: rectObservations,
+            timestamp: timestamp
+        )
+
         var updatedPersons: [DetectedPerson] = []
 
-        for observation in rectObservations {
+        for (index, observation) in rectObservations.enumerated() {
             let boundingBox = observation.boundingBox
             let confidence = observation.confidence
 
@@ -285,8 +340,26 @@ final class PersonDetector: ObservableObject {
                 return extractKeypoints(from: pose)
             }()
 
-            // Try to match with existing track
-            let matchedID = findMatchingTrack(boundingBox: boundingBox, timestamp: timestamp)
+            // Match this rect to a face that sits inside it. A person's bbox
+            // is in normalised Vision coords (bottom-left origin); so is the
+            // face bbox. The face is "inside" the body when its centroid
+            // falls within the body bbox. If multiple faces qualify (rare
+            // for typical framing), take the one with highest confidence.
+            //
+            // We keep the full VNFaceObservation (not just the bbox) so we
+            // can extract landmark ratios for the re-acquisition veto
+            // signal — see `LandmarkRatios`.
+            let matchedFace: VNFaceObservation? = {
+                let candidates = faceObservations.filter { face in
+                    let centroid = CGPoint(x: face.boundingBox.midX, y: face.boundingBox.midY)
+                    return boundingBox.contains(centroid)
+                }
+                return candidates.max { $0.confidence < $1.confidence }
+            }()
+            let faceBoundingBox = matchedFace?.boundingBox
+            let faceLandmarkRatios = matchedFace.flatMap { LandmarkRatios.extract(from: $0) }
+
+            let matchedID = assignments[index]
             let personID = matchedID ?? UUID()
             let existing = matchedID.flatMap { trackedPersons[$0] }
 
@@ -339,7 +412,9 @@ final class PersonDetector: ObservableObject {
                 boundingBox: boundingBox,
                 confidence: confidence,
                 timestamp: timestamp,
-                poseKeypoints: keypoints
+                poseKeypoints: keypoints,
+                faceBoundingBox: faceBoundingBox,
+                faceLandmarkRatios: faceLandmarkRatios
             )
             updatedPersons.append(detectedPerson)
         }
@@ -358,7 +433,9 @@ final class PersonDetector: ObservableObject {
                     boundingBox: projectedBox,
                     confidence: track.confidence * 0.5,
                     timestamp: timestamp,
-                    poseKeypoints: track.lastPose
+                    poseKeypoints: track.lastPose,
+                    faceBoundingBox: nil,           // synthesized entries have no fresh face
+                    faceLandmarkRatios: nil
                 )
                 updatedPersons.append(synthesized)
             }
@@ -371,48 +448,209 @@ final class PersonDetector: ObservableObject {
         return min(max(value, -absLimit), absLimit)
     }
     
-    private func findMatchingTrack(boundingBox: CGRect, timestamp: TimeInterval) -> UUID? {
-        // Match against each track's *predicted* current box (lastBoundingBox
-        // advanced by lastVelocity * dt). This handles a person taking a step
-        // between frames better than matching against a stale box.
-        var bestIoU: (id: UUID, iou: CGFloat)? = nil
+    /// Assign every detection (by index) to at most one track UUID.
+    ///
+    /// Two passes:
+    ///   1. The locked track (if any) gets first pick against a relaxed
+    ///      threshold (lower IoU floor, larger centroid radius). Brief
+    ///      occlusion or a detection-confidence wobble can't steal it.
+    ///   2. Remaining detections and tracks are paired by repeatedly taking
+    ///      the highest-scoring qualifying pair from a precomputed cost
+    ///      matrix. Each detection and each track is consumed at most once,
+    ///      so two detections can never both claim the same track.
+    ///
+    /// Returns a sparse map: index → UUID for matched detections only.
+    /// Unmatched detection indices receive a fresh UUID upstream.
+    private func assignTracks(
+        detections: [VNHumanObservation],
+        timestamp: TimeInterval
+    ) -> [Int: UUID] {
+        guard !detections.isEmpty, !trackedPersons.isEmpty else { return [:] }
 
-        for (id, track) in trackedPersons {
-            let predicted = predictedBox(for: track, at: timestamp)
-            let iou = calculateIoU(boundingBox, predicted)
-            if iou > 0.2 {
-                if let current = bestIoU {
-                    if iou > current.iou { bestIoU = (id, iou) }
-                } else {
-                    bestIoU = (id, iou)
+        // Precompute predicted boxes once per track.
+        let predicted: [UUID: CGRect] = trackedPersons.mapValues {
+            predictedBox(for: $0, at: timestamp)
+        }
+
+        var assignments: [Int: UUID] = [:]
+        var usedDetections = Set<Int>()
+        var usedTracks = Set<UUID>()
+
+        // Pass A — locked track first.
+        //
+        // Livestream principle: the lock must stick to the same physical person
+        // even when another detection scores higher under naive IoU. Tiebreaks
+        // use *geometric identity* (size + aspect + position) — never Vision's
+        // detection-confidence score, which reshuffles frame-to-frame.
+        //
+        // We also use the track's *last known* box (not the velocity-projected
+        // box) as the reference. Velocity projection over-extrapolates when a
+        // subject is held still or being carried, dragging the reference into
+        // a neighbour's detection.
+        var lockedDiag: (lockedID: UUID, scores: [(idx: Int, iou: CGFloat, dist: CGFloat, score: CGFloat)], chosen: Int?)? = nil
+        if let lockedID = lockedTargetID,
+           let lockedTrack = trackedPersons[lockedID] {
+            let referenceBox = lockedTrack.lastBoundingBox
+            var best: (index: Int, score: CGFloat)? = nil
+            var diagScores: [(idx: Int, iou: CGFloat, dist: CGFloat, score: CGFloat)] = []
+            for (idx, det) in detections.enumerated() {
+                let iou = calculateIoU(det.boundingBox, referenceBox)
+                let dx = det.boundingBox.midX - referenceBox.midX
+                let dy = det.boundingBox.midY - referenceBox.midY
+                let dist = (dx * dx + dy * dy).squareRoot()
+                let score = lockedMatchScore(
+                    detection: det.boundingBox,
+                    reference: referenceBox
+                )
+                diagScores.append((idx, iou, dist, score))
+                guard score > 0 else { continue }
+                if best == nil || score > best!.score {
+                    best = (idx, score)
+                }
+            }
+            if let best {
+                assignments[best.index] = lockedID
+                usedDetections.insert(best.index)
+                usedTracks.insert(lockedID)
+            }
+            lockedDiag = (lockedID, diagScores, best?.index)
+        }
+
+        // Pass B — build cost matrix over remaining detections × tracks,
+        // then repeatedly take the best qualifying pair.
+        struct Pair {
+            let detectionIndex: Int
+            let trackID: UUID
+            let score: CGFloat
+        }
+
+        var pairs: [Pair] = []
+        pairs.reserveCapacity(detections.count * trackedPersons.count)
+
+        for (idx, det) in detections.enumerated() where !usedDetections.contains(idx) {
+            for (id, box) in predicted where !usedTracks.contains(id) {
+                let score = matchScore(
+                    detection: det.boundingBox,
+                    predicted: box,
+                    iouThreshold: Self.normalIoUThreshold,
+                    centroidThreshold: Self.normalCentroidThreshold
+                )
+                if score > 0 {
+                    pairs.append(Pair(detectionIndex: idx, trackID: id, score: score))
                 }
             }
         }
 
-        if let match = bestIoU { return match.id }
+        // Sort once, then sweep — each detection/track can only be claimed once,
+        // so we skip pairs whose endpoints are already used. N is tiny (≤ maxPersons²).
+        pairs.sort { $0.score > $1.score }
+        for pair in pairs {
+            if usedDetections.contains(pair.detectionIndex) { continue }
+            if usedTracks.contains(pair.trackID) { continue }
+            assignments[pair.detectionIndex] = pair.trackID
+            usedDetections.insert(pair.detectionIndex)
+            usedTracks.insert(pair.trackID)
+        }
 
-        // Fallback: closest centroid within 15% of frame width. Catches fast
-        // lateral motion where the predicted box doesn't quite overlap.
-        let centroid = CGPoint(x: boundingBox.midX, y: boundingBox.midY)
-        var bestDistance: (id: UUID, distance: CGFloat)? = nil
-        let maxDistance: CGFloat = 0.15
-
-        for (id, track) in trackedPersons {
-            let predicted = predictedBox(for: track, at: timestamp)
-            let predictedCentroid = CGPoint(x: predicted.midX, y: predicted.midY)
-            let dx = centroid.x - predictedCentroid.x
-            let dy = centroid.y - predictedCentroid.y
-            let distance = (dx * dx + dy * dy).squareRoot()
-            if distance < maxDistance {
-                if let current = bestDistance {
-                    if distance < current.distance { bestDistance = (id, distance) }
-                } else {
-                    bestDistance = (id, distance)
-                }
+        // Diagnostic: when a lock is active and >1 person is in view, log per-
+        // detection IoU/distance/score against the locked track. Filter the
+        // Console for subsystem com.alfie, category Vision to capture these.
+        if let diag = lockedDiag, detections.count > 1 {
+            let shortID = String(diag.lockedID.uuidString.prefix(8))
+            let perDet = diag.scores.map { entry in
+                let marker = entry.idx == diag.chosen ? "*" : " "
+                return String(
+                    format: "%@d%d[conf=%.2f iou=%.3f dist=%.3f score=%.3f]",
+                    marker, entry.idx,
+                    detections[entry.idx].confidence,
+                    Float(entry.iou),
+                    Float(entry.dist),
+                    Float(entry.score)
+                )
+            }.joined(separator: " ")
+            if diag.chosen == nil {
+                Self.logger.warning("LOCK-PASS-A lock=\(shortID, privacy: .public) NO_MATCH \(perDet, privacy: .public)")
+            } else {
+                Self.logger.info("LOCK-PASS-A lock=\(shortID, privacy: .public) \(perDet, privacy: .public)")
             }
         }
 
-        return bestDistance?.id
+        return assignments
+    }
+
+    /// Score a candidate detection against the locked subject's *last known*
+    /// box, prioritising geometric identity over overlap.
+    ///
+    /// When two people stand close together (e.g. a parent holding a child),
+    /// both detections will overlap the locked reference box. Picking by
+    /// overlap is a coin flip — the larger person usually wins, which is
+    /// exactly the "lock jumps to the bigger person" bug.
+    ///
+    /// Identity cues, in order of weight:
+    ///   1. Size similarity — a child's bbox area differs from an adult's by
+    ///      ~3-10×. Strong discriminator even at close range.
+    ///   2. Aspect-ratio similarity — body proportions differ between adults
+    ///      and children, and between standing and crouching poses.
+    ///   3. Centroid proximity — relevant only when the above ties.
+    ///
+    /// Returns 0 if the candidate is clearly not the same subject (size or
+    /// position too divergent). Higher score = better identity match.
+    private func lockedMatchScore(
+        detection: CGRect,
+        reference: CGRect
+    ) -> CGFloat {
+        let dx = detection.midX - reference.midX
+        let dy = detection.midY - reference.midY
+        let distance = (dx * dx + dy * dy).squareRoot()
+
+        // Hard reject: if the candidate is more than half a frame-width away,
+        // it's definitely not the locked subject.
+        guard distance < 0.5 else { return 0 }
+
+        let detArea = max(detection.width * detection.height, 0.0001)
+        let refArea = max(reference.width * reference.height, 0.0001)
+        let areaRatio = min(detArea, refArea) / max(detArea, refArea)  // 0..1, 1 = identical
+
+        // Hard reject: a candidate that's less than a third the area of the
+        // locked subject (or more than 3×) is a different physical person.
+        // This is the daughter-vs-adult guard.
+        guard areaRatio > 0.33 else { return 0 }
+
+        let detAspect = detection.width / max(detection.height, 0.0001)
+        let refAspect = reference.width / max(reference.height, 0.0001)
+        let aspectRatio = min(detAspect, refAspect) / max(detAspect, refAspect)  // 0..1
+
+        // Weights: size dominates (it's the strongest identity cue), then
+        // aspect, then position. Position is last because the locked subject
+        // can move — but they can't change size suddenly.
+        let sizeTerm = areaRatio * 0.6
+        let aspectTerm = aspectRatio * 0.25
+        let positionTerm = max(0, (0.5 - distance) / 0.5) * 0.15
+
+        return sizeTerm + aspectTerm + positionTerm
+    }
+
+    /// Score a (detection, predicted-track) pair. Returns 0 when neither the
+    /// IoU nor the centroid distance qualifies. Higher score = better match.
+    /// IoU dominates when overlap exists; otherwise centroid proximity rescues
+    /// fast lateral motion where the predicted box just barely misses.
+    private func matchScore(
+        detection: CGRect,
+        predicted: CGRect,
+        iouThreshold: CGFloat,
+        centroidThreshold: CGFloat
+    ) -> CGFloat {
+        let iou = calculateIoU(detection, predicted)
+        if iou > iouThreshold {
+            return 1.0 + iou
+        }
+        let dx = detection.midX - predicted.midX
+        let dy = detection.midY - predicted.midY
+        let distance = (dx * dx + dy * dy).squareRoot()
+        if distance < centroidThreshold {
+            return (centroidThreshold - distance) / centroidThreshold
+        }
+        return 0
     }
 
     private func predictedBox(for track: TrackedPerson, at timestamp: TimeInterval) -> CGRect {
