@@ -11,6 +11,7 @@ import CoreImage
 import Combine
 import IOSurface
 import OSLog
+import os
 
 private final class SendablePixelBufferBox: @unchecked Sendable {
     nonisolated(unsafe) let pixelBuffer: CVPixelBuffer
@@ -93,6 +94,25 @@ enum CameraError: LocalizedError {
 final class CameraManager: NSObject, ObservableObject {
     private nonisolated static let logger = Logger(subsystem: "com.alfie", category: "Camera")
     private nonisolated static let signposter = OSSignposter(logger: logger)
+    private nonisolated static let firstFrameLogged = OSAllocatedUnfairLock<Bool>(initialState: false)
+
+    /// One-shot log of the delivered pixel buffer dimensions. The activeFormat
+    /// is set to 4K, but BMD's CMIO driver has been known to ignore that and
+    /// serve 1080p — if this prints anything below 3840x2160 we're cropping a
+    /// 1080p source, which would dwarf every other quality fix.
+    private nonisolated static func logFirstFrameResolution(_ pixelBuffer: CVPixelBuffer) {
+        let shouldLog = firstFrameLogged.withLock { logged -> Bool in
+            guard !logged else { return false }
+            logged = true
+            return true
+        }
+        guard shouldLog else { return }
+
+        let width = CVPixelBufferGetWidth(pixelBuffer)
+        let height = CVPixelBufferGetHeight(pixelBuffer)
+        let format = CVPixelBufferGetPixelFormatType(pixelBuffer)
+        logger.notice("First frame delivered: \(width)x\(height), pixelFormat=\(format, format: .hex, privacy: .public)")
+    }
     
     // MARK: - Published Properties
     
@@ -191,6 +211,9 @@ final class CameraManager: NSObject, ObservableObject {
     private var autoPanPhase: CGFloat = 0.5
     private var autoPanDirection: CGFloat = 1.0
     private var autoPanPauseUntil: Double = 0
+    private var autoPanLastTick: Double = 0
+
+    private static let autoPanPauseDuration: Double = 2.0
 
     // Briefly boost crop smoothing after an operator-driven shot-preset change so
     // the camera reaches the new framing quickly (instead of crawling there with
@@ -779,16 +802,21 @@ final class CameraManager: NSObject, ObservableObject {
                 case .autoPan:
                     cropEngine.config.transitionSmoothing = shotComposer.config.smoothingFactor
                     let now = CACurrentMediaTime()
+                    let dt = autoPanLastTick > 0 ? now - autoPanLastTick : 0
+                    autoPanLastTick = now
                     if now > autoPanPauseUntil {
-                        autoPanPhase += CGFloat(shotComposer.config.autoPanSpeed) * autoPanDirection * 0.1 // Scaled down the multiplier to make it slower
+                        // Constant phase velocity throughout the sweep.
+                        // autoPanSpeed (0.01–0.05) is treated as phase units per second * 3.
+                        let rate = CGFloat(shotComposer.config.autoPanSpeed) * 3.0
+                        autoPanPhase += rate * autoPanDirection * CGFloat(dt)
                         if autoPanPhase >= 1.0 {
                             autoPanPhase = 1.0
                             autoPanDirection = -1.0
-                            autoPanPauseUntil = now + 0.4 // Brief beat at the edge before reversing.
+                            autoPanPauseUntil = now + Self.autoPanPauseDuration
                         } else if autoPanPhase <= 0.0 {
                             autoPanPhase = 0.0
                             autoPanDirection = 1.0
-                            autoPanPauseUntil = now + 0.4 // Brief beat at the edge before reversing.
+                            autoPanPauseUntil = now + Self.autoPanPauseDuration
                         }
                     }
                     let panCenter = CGPoint(x: autoPanPhase, y: shotComposer.config.autoPanHeight)
@@ -1066,6 +1094,7 @@ final class CameraManager: NSObject, ObservableObject {
             let sourceAspect = CGFloat(dims.width) / CGFloat(dims.height)
             shotComposer.updateSourcePixelAspect(sourceAspect)
             lastAppliedSourceAspect = sourceAspect
+            cinematicAgent.updateSourceResolution(width: Int(dims.width), height: Int(dims.height))
         }
 
         Self.logger.debug("Supported frame rates follow")
@@ -1447,7 +1476,9 @@ extension CameraManager: AVCaptureVideoDataOutputSampleBufferDelegate {
             assertionFailure("PixelBuffer must be IOSurface-backed for zero-copy operations")
             return
         }
-        
+
+        Self.logFirstFrameResolution(pixelBuffer)
+
         let timestampSeconds = CMSampleBufferGetPresentationTimeStamp(sampleBuffer).seconds
 
         guard frameProcessingGate.begin() else {

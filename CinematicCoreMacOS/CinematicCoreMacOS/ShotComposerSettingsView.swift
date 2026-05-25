@@ -150,7 +150,7 @@ struct ShotComposerSettingsView: View {
 
             Slider(
                 value: $shotComposer.config.autoPanSpeed,
-                in: 0.01...0.20,
+                in: 0.01...0.05,
                 step: 0.01
             )
 

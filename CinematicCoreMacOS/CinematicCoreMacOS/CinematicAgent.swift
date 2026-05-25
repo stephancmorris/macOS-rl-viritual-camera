@@ -10,6 +10,7 @@ import Combine
 @preconcurrency import CoreML
 import CoreGraphics
 import Foundation
+import OSLog
 
 /// RL-trained cinematic framing agent backed by a CoreML model.
 ///
@@ -21,6 +22,8 @@ import Foundation
 /// `training/cinematic_env.py` and `training/bc_dataset.py`.
 @MainActor
 final class CinematicAgent: ObservableObject {
+
+    private nonisolated static let logger = Logger(subsystem: "com.alfie", category: "CinematicAgent")
 
     // MARK: - Published State
 
@@ -35,8 +38,17 @@ final class CinematicAgent: ObservableObject {
     private let maxPanSpeed:  Float = 0.02
     private let maxTiltSpeed: Float = 0.02
     private let maxZoomSpeed: Float = 0.05
+    /// Model normalization constant. Must match `cinematic_env.py` exactly —
+    /// the PPO observation normalizes zoom against this value, so changing it
+    /// shifts what the network sees and breaks the trained policy.
     private let maxZoom:      Float = 4.0
     private let aspectRatio:  Float = 16.0 / 9.0
+
+    /// Runtime quality clamp derived from the source resolution. The smallest
+    /// crop the agent is allowed to take is one resolution tier below the
+    /// source (e.g. 4K source → 1080p min crop = 2× max zoom). Updated by
+    /// `updateSourceResolution(_:)` whenever capture format changes.
+    private var qualityMaxZoom: Float = 2.0
 
     // MARK: - Private State
 
@@ -125,6 +137,31 @@ final class CinematicAgent: ObservableObject {
         cropY    = Float(crop.origin.y)
         cropZoom = crop.size.height > 0.001 ? Float(1.0 / crop.size.height) : 1.0
         previousSpeakerCenter = nil
+    }
+
+    /// Update the resolution-derived quality clamp. Call whenever the
+    /// capture format changes (e.g. on camera switch or `activeFormat` change).
+    /// Smallest allowed crop is one resolution tier below the source.
+    func updateSourceResolution(width: Int, height: Int) {
+        let newCap = Self.qualityMaxZoom(forSourceHeight: height)
+        guard newCap != qualityMaxZoom else { return }
+        qualityMaxZoom = newCap
+        Self.logger.notice("Quality clamp updated: source \(width)x\(height), maxZoom=\(newCap, privacy: .public)")
+    }
+
+    /// Map source pixel height to the maximum zoom that keeps the crop at or
+    /// above the next resolution tier down (e.g. 4K → min crop 1080p → 2×).
+    static func qualityMaxZoom(forSourceHeight height: Int) -> Float {
+        let minCropHeight: Int
+        switch height {
+        case 4320...:    minCropHeight = 2160  // 8K+ → 4K
+        case 2160..<4320: minCropHeight = 1080 // 4K → 1080p
+        case 1080..<2160: minCropHeight = 720  // 1080p → 720p
+        case 720..<1080:  minCropHeight = 540  // 720p → 540p
+        default:          minCropHeight = max(height / 2, 360)
+        }
+        guard minCropHeight > 0 else { return 1.0 }
+        return Float(height) / Float(minCropHeight)
     }
 
     /// Clear tracking state (e.g. on subject change or session end).
@@ -285,8 +322,12 @@ final class CinematicAgent: ObservableObject {
     /// Apply velocity deltas to internal crop state and return the new CropRect.
     /// Clamp logic mirrors `CinematicFramingEnv._apply_action()` in cinematic_env.py.
     private func applyCropUpdate(dx: Float, dy: Float, dz: Float) -> CropEngine.CropRect {
-        // Update zoom, clamped [1, maxZoom]
-        cropZoom = max(1.0, min(maxZoom, cropZoom + dz))
+        // Update zoom, clamped [1, effectiveMaxZoom]. The effective ceiling is
+        // the smaller of the model's training-time max (4.0) and the runtime
+        // quality clamp derived from source resolution — the latter prevents
+        // crops that would require upscaling past one resolution tier.
+        let effectiveMaxZoom = min(maxZoom, qualityMaxZoom)
+        cropZoom = max(1.0, min(effectiveMaxZoom, cropZoom + dz))
 
         // Compute crop dimensions from zoom (enforce 16:9, fit within canvas)
         var h = 1.0 / cropZoom

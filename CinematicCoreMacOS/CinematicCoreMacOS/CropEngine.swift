@@ -223,10 +223,20 @@ final class CropEngine: ObservableObject {
         let translated = sourceImage
             .cropped(to: cropRect)
             .transformed(by: CGAffineTransform(translationX: -cropRect.origin.x, y: -cropRect.origin.y))
-        let scaled = translated.transformed(by: CGAffineTransform(
-            scaleX: outputSize.width / cropRect.width,
-            y: outputSize.height / cropRect.height
-        ))
+
+        // Lanczos resampling for sharper edges than CoreImage's default
+        // bilinear. `scale` sets the vertical factor; `aspectRatio` adds any
+        // extra horizontal stretch when the crop's aspect differs from the
+        // output's (which can happen during interpolation between targets).
+        let scaleY = outputSize.height / cropRect.height
+        let scaleX = outputSize.width / cropRect.width
+        let lanczos = CIFilter(name: "CILanczosScaleTransform")!
+        lanczos.setValue(translated, forKey: kCIInputImageKey)
+        lanczos.setValue(scaleY, forKey: kCIInputScaleKey)
+        lanczos.setValue(scaleX / scaleY, forKey: kCIInputAspectRatioKey)
+        let scaled = lanczos.outputImage ?? translated.transformed(
+            by: CGAffineTransform(scaleX: scaleX, y: scaleY)
+        )
 
         let outputBuffer = try createOutputBuffer(size: outputSize)
         ciContext.render(
