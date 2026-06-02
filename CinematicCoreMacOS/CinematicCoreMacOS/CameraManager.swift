@@ -207,6 +207,41 @@ final class CameraManager: NSObject, ObservableObject {
     /// The center point for the manual crop (normalized 0-1)
     @Published var manualCropPoint: CGPoint = CGPoint(x: 0.5, y: 0.5)
 
+    // MARK: - Passive subject discovery
+    //
+    // Detection is off by default. The operator taps "Detect" to enter the
+    // tap-a-subject state; tapping a point seeds a one-shot ROI scan that finds
+    // and acquires that single person. No full-frame multi-person scan ever runs.
+
+    /// True after the operator taps Detect and before a subject is selected.
+    /// Drives the `.awaitingTap` detection mode and the preview tap affordance.
+    @Published var detectionDiscoveryActive: Bool = false
+
+    /// A tapped point (normalized Vision coords) awaiting its one-shot ROI scan
+    /// on the next frame. Cleared once consumed.
+    private var pendingTapPoint: CGPoint?
+
+    /// True from the instant the operator taps until that tap has been resolved
+    /// (a subject bound, or the scan found no one). Drives an immediate "tap
+    /// pending" acknowledgment in the UI so the operator knows the tap landed
+    /// even before acquisition begins.
+    @Published private(set) var tapPending: Bool = false
+
+    /// Wall-clock deadline after which an unfulfilled discovery auto-cancels
+    /// back to `.off` so we don't sit in `.awaitingTap` forever.
+    private var discoveryTimeoutAt: TimeInterval = 0
+    private static let discoveryTimeout: TimeInterval = 12.0
+
+    /// Padding multiplier applied to the locked subject's last box to form the
+    /// tracking ROI, so a moving subject stays inside the scanned region.
+    private static let lockedROIPadding: CGFloat = 1.8
+
+    /// Last detected bounding box of the acquiring/locked subject. Updated
+    /// every frame from detections and used to seed the next frame's ROI. This
+    /// works even during `.acquiring` (before `lastTrackedBounds` is set by the
+    /// composer) so ROI scanning stays tight throughout acquisition.
+    private var lastSubjectROIBox: CGRect?
+
     // State for Auto Pan
     private var autoPanPhase: CGFloat = 0.5
     private var autoPanDirection: CGFloat = 1.0
@@ -322,9 +357,16 @@ final class CameraManager: NSObject, ObservableObject {
             Self.logger.notice("CropEngine initialized successfully")
         }
 
+        // Restore the persisted cinematic format (Stage/Webcam) before wiring
+        // bindings so the initial state matches the operator's last choice.
+        if let raw = UserDefaults.standard.string(forKey: "cinematicFormat"),
+           let fmt = ShotComposer.Config.CinematicFormat(rawValue: raw) {
+            shotComposer.config.cinematicFormat = fmt
+        }
+
         configureFramingBindings()
         applyFrameProfile(shotComposer.config.frameProfile)
-        
+
         // Discover cameras on initialization
         discoverCameras()
     }
@@ -510,8 +552,39 @@ final class CameraManager: NSObject, ObservableObject {
     }
 
     func lockTarget(personID: UUID) {
-        activeMode = .autoTracking
+        // Selection made — leave discovery and begin acquisition. Cropping
+        // stays wide until the gallery is ready (ShotComposer promotes
+        // acquiring → tracking and we get the .acquired tick outcome).
+        detectionDiscoveryActive = false
+        pendingTapPoint = nil
+        tapPending = false
         shotComposer.lockTarget(personID)
+    }
+
+    /// Operator tapped the "Detect" button. Arm the tap-a-subject state. No
+    /// Vision runs yet — the preview just shows a tap affordance until the
+    /// operator taps a point (or the discovery window times out).
+    func beginDetection() {
+        guard !shotComposer.isManualLockActive else { return }
+        detectionDiscoveryActive = true
+        pendingTapPoint = nil
+        discoveryTimeoutAt = CACurrentMediaTime() + Self.discoveryTimeout
+    }
+
+    /// Cancel discovery and return to the passive (off) state.
+    func cancelDetection() {
+        detectionDiscoveryActive = false
+        pendingTapPoint = nil
+        tapPending = false
+    }
+
+    /// Operator tapped a point on the preview to pick a subject. Stored for a
+    /// one-shot ROI scan on the next frame; the scan finds the single person
+    /// at that point and starts acquisition.
+    func selectSubject(at point: CGPoint) {
+        guard detectionDiscoveryActive else { return }
+        pendingTapPoint = point
+        tapPending = true
     }
 
     /// Smoothly release the operator's lock and zoom back out to a wide shot.
@@ -519,8 +592,99 @@ final class CameraManager: NSObject, ObservableObject {
     /// operator gets a soft pull-back when tapping "unlock" on the lock pill.
     func clearManualTargetLock() {
         activeMode = .wide
+        detectionDiscoveryActive = false
+        pendingTapPoint = nil
+        tapPending = false
         shotComposer.clearManualLock()
         boostFramingTransition()
+    }
+
+    /// Compute this frame's detection plan from the discovery flag + lock FSM.
+    /// This is the single place that decides whether and where Vision runs.
+    private func currentDetectionPlan() -> PersonDetector.DetectionRequestPlan {
+        // A pending tap takes priority: scan a ROI around it to acquire.
+        if let tap = pendingTapPoint {
+            return PersonDetector.DetectionRequestPlan(
+                mode: .acquiring,
+                roi: tapROI(around: tap)
+            )
+        }
+
+        switch shotComposer.lockState {
+        case .acquiring:
+            // Acquisition needs the FACE request to fill the gallery, so use
+            // `.acquiring` mode (not `.lockedROI`, which drops face). Scan the
+            // padded body box so the head is included even when the operator
+            // tapped the torso.
+            return PersonDetector.DetectionRequestPlan(
+                mode: .acquiring,
+                roi: lockedROI()
+            )
+        case .tracking, .hold:
+            return PersonDetector.DetectionRequestPlan(
+                mode: .lockedROI,
+                roi: lockedROI()
+            )
+        case .wideWaiting:
+            return PersonDetector.DetectionRequestPlan(mode: .reacquiring, roi: nil)
+        case .inactive:
+            return detectionDiscoveryActive
+                ? PersonDetector.DetectionRequestPlan(mode: .awaitingTap, roi: nil)
+                : .off
+        }
+    }
+
+    /// ROI for the one-shot SELECTION scan around the operator's tap. The
+    /// human-rectangles model needs to see most of a body to fire, so this is
+    /// deliberately generous: a near-full-height vertical column centered on
+    /// the tap's x. That reliably captures the whole standing/seated person
+    /// (head included) while still excluding people to the left/right — which
+    /// is what keeps the scan cheap in a crowd. Subsequent acquiring frames
+    /// narrow to the detected body box via `lockedROI()`.
+    private func tapROI(around point: CGPoint) -> CGRect {
+        let halfW: CGFloat = 0.28   // ~56% of frame width, centered on the tap
+        return CGRect(
+            x: point.x - halfW,
+            y: 0,
+            width: halfW * 2,
+            height: 1
+        ).intersection(CGRect(x: 0, y: 0, width: 1, height: 1))
+    }
+
+    /// Padded ROI around the locked subject's last known box. Falls back to a
+    /// generous centered region if no tracked bounds are available yet.
+    private func lockedROI() -> CGRect {
+        let unit = CGRect(x: 0, y: 0, width: 1, height: 1)
+        // Prefer the subject's last raw detected box (available during
+        // acquiring too); fall back to the composer's tracked bounds.
+        guard let box = lastSubjectROIBox ?? shotComposer.lastTrackedBounds,
+              !box.isEmpty else {
+            return unit
+        }
+        let p = Self.lockedROIPadding
+        let w = min(box.width * p, 1)
+        let hgt = min(box.height * p, 1)
+        return CGRect(
+            x: box.midX - w / 2, y: box.midY - hgt / 2,
+            width: w, height: hgt
+        ).intersection(unit)
+    }
+
+    /// Pick the detected person whose box contains the tapped point; if none
+    /// contains it (the tap landed just off the body), fall back to the person
+    /// whose box center is closest to the tap.
+    private func personNearest(
+        to point: CGPoint,
+        in persons: [PersonDetector.DetectedPerson]
+    ) -> PersonDetector.DetectedPerson? {
+        if let hit = persons.first(where: { $0.boundingBox.contains(point) }) {
+            return hit
+        }
+        return persons.min { a, b in
+            let da = hypot(a.boundingBox.midX - point.x, a.boundingBox.midY - point.y)
+            let db = hypot(b.boundingBox.midX - point.x, b.boundingBox.midY - point.y)
+            return da < db
+        }
     }
     
     /// Restart capture with a different camera
@@ -585,6 +749,20 @@ final class CameraManager: NSObject, ObservableObject {
             .removeDuplicates()
             .sink { [weak self] profile in
                 self?.applyFrameProfile(profile)
+            }
+            .store(in: &cancellables)
+
+        // Webcam format hides Manual Crop / Auto Pan; if the operator is in one
+        // of those modes when switching to Webcam, fall back to a valid mode.
+        shotComposer.$config
+            .map(\.cinematicFormat)
+            .removeDuplicates()
+            .sink { [weak self] format in
+                guard let self else { return }
+                if format == .webcam,
+                   self.activeMode == .manualCrop || self.activeMode == .autoPan {
+                    self.activeMode = (self.manualLockedTargetID != nil) ? .autoTracking : .wide
+                }
             }
             .store(in: &cancellables)
     }
@@ -676,10 +854,47 @@ final class CameraManager: NSObject, ObservableObject {
 
         let detectionInterval = Self.signposter.beginInterval("detection")
         let detectionStart = CACurrentMediaTime()
+        // Auto-cancel a stale discovery (operator tapped Detect but never
+        // picked anyone) so we fall back to the passive off state.
+        if detectionDiscoveryActive,
+           pendingTapPoint == nil,
+           !shotComposer.isManualLockActive,
+           CACurrentMediaTime() > discoveryTimeoutAt {
+            detectionDiscoveryActive = false
+        }
+
+        // Decide whether/where Vision runs this frame (off by default).
+        let detectionPlan = currentDetectionPlan()
         // Hand the matcher the current operator lock so it can bind that track
         // first with a relaxed threshold (PersonDetector.swift assignTracks).
         personDetector.lockedTargetID = shotComposer.manualLockedTargetID
-        let detectedPersons = await personDetector.processFrame(pixelBuffer)
+        let detectedPersons = await personDetector.processFrame(pixelBuffer, plan: detectionPlan)
+
+        // The pending tap drove exactly one ROI scan. Bind acquisition to the
+        // detected person nearest the tap point. If nothing was found, keep
+        // discovery armed so the operator can tap again.
+        if let tap = pendingTapPoint {
+            pendingTapPoint = nil
+            tapPending = false
+            if let picked = personNearest(to: tap, in: detectedPersons) {
+                lockTarget(personID: picked.id)   // → .acquiring, leaves discovery
+                lastSubjectROIBox = picked.boundingBox
+            } else {
+                // Scan found no one at the tap — re-arm discovery so the
+                // operator can try again, and surface that nothing was found.
+                detectionDiscoveryActive = true
+                discoveryTimeoutAt = CACurrentMediaTime() + Self.discoveryTimeout
+            }
+        }
+
+        // Track the acquiring/locked subject's latest box to seed the next
+        // frame's ROI. Cleared when no subject is being followed.
+        if let subjectID = shotComposer.manualLockedTargetID,
+           let box = detectedPersons.first(where: { $0.id == subjectID })?.boundingBox {
+            lastSubjectROIBox = box
+        } else if shotComposer.manualLockedTargetID == nil {
+            lastSubjectROIBox = nil
+        }
         let detectionDuration = CACurrentMediaTime() - detectionStart
         Self.signposter.endInterval("detection", detectionInterval)
         programOutput.recordLatency(stage: .detection, duration: detectionDuration)
@@ -705,6 +920,11 @@ final class CameraManager: NSObject, ObservableObject {
             activeMode = .wide
             boostFramingTransition()
         case .resumeTracking:
+            activeMode = .autoTracking
+            boostFramingTransition()
+        case .acquired:
+            // Gallery ready → lock promoted to tracking (green box). Start
+            // framing the subject and snap toward them quickly.
             activeMode = .autoTracking
             boostFramingTransition()
         }

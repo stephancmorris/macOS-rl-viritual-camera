@@ -156,6 +156,47 @@ final class ShotComposer: ObservableObject {
             }
         }
 
+        /// Top-level use case. Stage targets distant speakers/performers
+        /// (the original behaviour). Webcam targets a close-range subject on a
+        /// video call and uses a simpler, tighter, head-anchored framing.
+        enum CinematicFormat: String, CaseIterable, Identifiable, Sendable {
+            case stage
+            case webcam
+
+            var id: String { rawValue }
+
+            var title: String { self == .stage ? "Stage" : "Webcam" }
+
+            var detail: String {
+                switch self {
+                case .stage:
+                    return "Auto-frame a speaker or performer on a stage (distant subjects)."
+                case .webcam:
+                    return "Close-range framing for a video call or webcam."
+                }
+            }
+        }
+
+        /// Operator-facing crop choice in Webcam format. `wide` is just inside a
+        /// full frame; `tight` is a head-and-shoulders shot.
+        enum WebcamPreset: String, CaseIterable, Identifiable, Sendable {
+            case wide
+            case tight
+
+            var id: String { rawValue }
+
+            var operatorTitle: String { self == .wide ? "Wide" : "Tight" }
+            var title: String { operatorTitle }
+
+            /// Fraction of the tracked subject's height the crop should cover.
+            var subjectHeightFraction: CGFloat {
+                switch self {
+                case .wide: return 1.30
+                case .tight: return 0.95
+                }
+            }
+        }
+
         /// Minimum movement (fraction of frame) before updating target crop.
         /// Prevents jitter from small detection noise.
         var deadzoneThreshold: CGFloat = 0.05 // 5% of frame
@@ -191,6 +232,21 @@ final class ShotComposer: ObservableObject {
         /// to the top of the tracked subject (plus a small headroom) and
         /// extends downward by a fraction of the subject's height.
         var shotFraming: ShotFraming = .waistUp
+
+        /// Top-level use case. Defaults to Stage (original behaviour).
+        var cinematicFormat: CinematicFormat = .stage
+
+        /// Operator-facing crop choice while in Webcam format.
+        var webcamPreset: WebcamPreset = .wide
+
+        /// Subject-height fraction for the active format. Stage uses the shot
+        /// preset; Webcam uses the webcam preset.
+        var activeSubjectHeightFraction: CGFloat {
+            switch cinematicFormat {
+            case .stage: return shotPreset.subjectHeightFraction
+            case .webcam: return webcamPreset.subjectHeightFraction
+            }
+        }
 
         /// Output aspect ratio (width / height)
         var outputAspectRatio: CGFloat {
@@ -243,13 +299,17 @@ final class ShotComposer: ObservableObject {
         let frameProfile: Config.FrameProfile
         let shotPreset: Config.ShotPreset
         let shotFraming: Config.ShotFraming
+        let cinematicFormat: Config.CinematicFormat
+        let webcamPreset: Config.WebcamPreset
     }
 
     private var currentFramingFingerprint: FramingFingerprint {
         FramingFingerprint(
             frameProfile: config.frameProfile,
             shotPreset: config.shotPreset,
-            shotFraming: config.shotFraming
+            shotFraming: config.shotFraming,
+            cinematicFormat: config.cinematicFormat,
+            webcamPreset: config.webcamPreset
         )
     }
 
@@ -329,6 +389,11 @@ final class ShotComposer: ObservableObject {
 
     enum LockState {
         case inactive
+        /// Operator tapped a subject; we have a track UUID but haven't locked
+        /// yet. Detection runs ROI-only around the subject while the gallery
+        /// fills. When `gallery.isReady` we promote to `tracking` (green box)
+        /// and cropping begins. No program crop is produced while acquiring.
+        case acquiring(targetID: UUID, gallery: FaceSignatureGallery, sinceTime: TimeInterval)
         case tracking(targetID: UUID, gallery: FaceSignatureGallery)
         case hold(targetID: UUID, gallery: FaceSignatureGallery, sinceTime: TimeInterval)
         /// Pulled back to wide, waiting for the original speaker to return.
@@ -433,9 +498,33 @@ final class ShotComposer: ObservableObject {
         switch lockState {
         case .inactive, .wideWaiting:
             return nil
-        case .tracking(let id, _), .hold(let id, _, _):
+        case .acquiring(let id, _, _), .tracking(let id, _), .hold(let id, _, _):
             return id
         }
+    }
+
+    /// The target currently being *acquired* (gallery still filling, not yet
+    /// locked). Non-nil only in `acquiring`. Drives the amber overlay box and
+    /// the "Acquiring…" button label. Distinct from `activeTargetID`, which is
+    /// the locked subject (green box).
+    var acquiringTargetID: UUID? {
+        if case .acquiring(let id, _, _) = lockState { return id }
+        return nil
+    }
+
+    /// Whether the lock is mid-acquisition (amber). Exposed for UI.
+    var isAcquiring: Bool {
+        if case .acquiring = lockState { return true }
+        return false
+    }
+
+    /// Acquisition progress 0.0–1.0 = captured gallery entries / readyThreshold.
+    /// This is the *true* lock-on progress (how close the gallery is to ready),
+    /// distinct from per-person detection confidence. Returns nil when not
+    /// acquiring. Clamped to 1.0.
+    var acquisitionProgress: Double? {
+        guard case .acquiring(_, let gallery, _) = lockState else { return nil }
+        return min(1.0, Double(gallery.size) / Double(FaceSignatureGallery.readyThreshold))
     }
 
     /// Whether the lock is in the WIDE-WAITING state — armed but pulled
@@ -494,7 +583,16 @@ final class ShotComposer: ObservableObject {
         /// Lock just transitioned wideWaiting → tracking via re-acquisition
         /// (Step 3). Camera manager should flip mode back to .autoTracking.
         case resumeTracking
+        /// Acquisition completed: the gallery reached readyThreshold and the
+        /// lock promoted acquiring → tracking. Camera manager should flip to
+        /// .autoTracking and boost the framing transition (green box, crop on).
+        case acquired
     }
+
+    /// How long acquisition may keep its track-missing grace before giving up
+    /// and releasing back to `.inactive` (operator mis-tapped / subject left
+    /// before the gallery was ready).
+    static let acquireGrace: TimeInterval = 1.5
 
     @discardableResult
     func tick(
@@ -520,6 +618,40 @@ final class ShotComposer: ObservableObject {
 
         switch lockState {
         case .inactive:
+            return .noChange
+
+        case .acquiring(let targetID, let gallery, let sinceTime):
+            let lockedDetection = detections.first { $0.id == targetID }
+
+            if let lockedDetection {
+                // Keep filling the gallery from the subject's face. When it
+                // reaches readyThreshold we promote to tracking (green box).
+                maybeAppendToGallery(
+                    for: targetID,
+                    person: lockedDetection,
+                    pixelBuffer: pixelBuffer,
+                    gallery: gallery,
+                    timestamp: timestamp
+                )
+
+                if currentGallery(forTarget: targetID)?.isReady ?? gallery.isReady {
+                    Self.logger.info("LOCK-STATE old=acquiring new=tracking reason=gallery_ready target=\(String(targetID.uuidString.prefix(8)), privacy: .public)")
+                    lockState = .tracking(targetID: targetID, gallery: currentGallery(forTarget: targetID) ?? gallery)
+                    activeTargetID = targetID
+                    return .acquired
+                }
+                return .noChange
+            }
+
+            // Subject not visible this frame. Allow a short grace (the tap may
+            // have briefly missed, or the subject turned). If they stay gone
+            // past acquireGrace, release the half-built lock back to inactive.
+            if timestamp - sinceTime >= Self.acquireGrace {
+                Self.logger.info("LOCK-STATE old=acquiring new=inactive reason=acquire_timeout target=\(String(targetID.uuidString.prefix(8)), privacy: .public)")
+                lockState = .inactive
+                activeTargetID = nil
+                return .noChange
+            }
             return .noChange
 
         case .tracking(let targetID, let gallery):
@@ -672,6 +804,12 @@ final class ShotComposer: ObservableObject {
         )
 
         switch lockState {
+        case .acquiring(let currentID, var gallery, let sinceTime) where currentID == targetID:
+            gallery.append(newSig)
+            let elapsedStr = String(format: "%.1f", elapsedMs)
+            let hasLm = landmarkVector != nil ? "yes" : "no"
+            Self.logger.info("SIGNATURE captured (acquiring) target=\(String(targetID.uuidString.prefix(8)), privacy: .public) size=\(gallery.size, privacy: .public)/\(FaceSignatureGallery.maxSize, privacy: .public) landmarks=\(hasLm, privacy: .public) in \(elapsedStr, privacy: .public)ms")
+            lockState = .acquiring(targetID: targetID, gallery: gallery, sinceTime: sinceTime)
         case .tracking(let currentID, var gallery) where currentID == targetID:
             gallery.append(newSig)
             let elapsedStr = String(format: "%.1f", elapsedMs)
@@ -683,6 +821,22 @@ final class ShotComposer: ObservableObject {
             lockState = .hold(targetID: targetID, gallery: gallery, sinceTime: sinceTime)
         default:
             break  // discard — state moved on
+        }
+    }
+
+    /// Read the current gallery bound to `targetID` from `lockState`. Used by
+    /// the acquiring branch of `tick()` to check readiness after a capture may
+    /// have landed asynchronously on a prior frame.
+    private func currentGallery(forTarget targetID: UUID) -> FaceSignatureGallery? {
+        switch lockState {
+        case .acquiring(let id, let gallery, _) where id == targetID:
+            return gallery
+        case .tracking(let id, let gallery) where id == targetID:
+            return gallery
+        case .hold(let id, let gallery, _) where id == targetID:
+            return gallery
+        default:
+            return nil
         }
     }
 
@@ -940,14 +1094,19 @@ final class ShotComposer: ObservableObject {
         }
     }
 
-    /// Operator tapped a person — start (or replace) a manual lock.
-    /// Always enters `tracking` immediately with an empty gallery; the
-    /// gallery fills asynchronously over the first ~3 s of healthy frames.
-    /// Re-acquisition is disabled until the gallery reaches `readyThreshold`.
+    /// Operator tapped a person — start acquisition. Enters `acquiring` with
+    /// an empty gallery; detection runs ROI-only around the subject while the
+    /// gallery fills. No program crop is produced yet (amber box). When the
+    /// gallery reaches `readyThreshold` the FSM promotes to `tracking` (green
+    /// box) and cropping begins. Accuracy/consistency over instant lock.
     func lockTarget(_ targetID: UUID) {
-        Self.logger.info("LOCK-STATE old=\(self.lockStateName, privacy: .public) new=tracking reason=operator_lock target=\(String(targetID.uuidString.prefix(8)), privacy: .public)")
-        lockState = .tracking(targetID: targetID, gallery: FaceSignatureGallery())
-        activeTargetID = targetID
+        Self.logger.info("LOCK-STATE old=\(self.lockStateName, privacy: .public) new=acquiring reason=operator_select target=\(String(targetID.uuidString.prefix(8)), privacy: .public)")
+        lockState = .acquiring(
+            targetID: targetID,
+            gallery: FaceSignatureGallery(),
+            sinceTime: CACurrentMediaTime()
+        )
+        activeTargetID = nil
         reacquisitionConsecutive.removeAll()
         latestScores.removeAll()
     }
@@ -969,6 +1128,7 @@ final class ShotComposer: ObservableObject {
     private var lockStateName: String {
         switch lockState {
         case .inactive: return "inactive"
+        case .acquiring: return "acquiring"
         case .tracking: return "tracking"
         case .hold: return "hold"
         case .wideWaiting: return "wide_waiting"
@@ -1002,8 +1162,8 @@ final class ShotComposer: ObservableObject {
         let headroom = subjectBounds.height * tuning.cropHeadroomMultiplier
         let cropTop = min(1.0, subjectTop + headroom)
 
-        // Instead of using shotFraming, we now use the strict preset's height fraction!
-        let desiredHeight = subjectBounds.height * config.shotPreset.subjectHeightFraction
+        // Use the active format's height fraction (stage preset or webcam preset).
+        let desiredHeight = subjectBounds.height * config.activeSubjectHeightFraction
         
         var cropHeight = max(desiredHeight, tuning.minimumCropHeight)
         var cropWidth = cropHeight * aspect
@@ -1023,7 +1183,7 @@ final class ShotComposer: ObservableObject {
         let originX = centerX - cropWidth / 2.0
         
         let originY: CGFloat
-        if config.shotPreset == .wide {
+        if config.cinematicFormat == .stage && config.shotPreset == .wide {
             let intendedCropCenterY = cropTop - (desiredHeight / 2.0)
             originY = intendedCropCenterY - (cropHeight / 2.0)
         } else {
@@ -1223,6 +1383,47 @@ final class ShotComposer: ObservableObject {
     }
 
     private var framingTuning: FramingTuning {
+        switch config.cinematicFormat {
+        case .webcam:
+            return webcamFramingTuning
+        case .stage:
+            return stageFramingTuning
+        }
+    }
+
+    /// Close-range framing tuned for a video call: low headroom, low minimum
+    /// crop height, and tight side padding (single near subject, no stage
+    /// context to preserve).
+    private var webcamFramingTuning: FramingTuning {
+        switch config.webcamPreset {
+        case .wide:
+            return FramingTuning(
+                minimumCropHeight: 0.40,
+                horizontalPaddingMultiplier: 0.18,
+                trackedWidthMultiplier: 0.92,
+                trackedAspectFloor: 0.60,
+                poseHeadroomMultiplier: 0.10,
+                poseLowerMarginMultiplier: 0.14,
+                fallbackHeightMultiplier: 0.80,
+                cropHeadroomMultiplier: 0.08,
+                cropLowerMarginMultiplier: 0.10
+            )
+        case .tight:
+            return FramingTuning(
+                minimumCropHeight: 0.30,
+                horizontalPaddingMultiplier: 0.12,
+                trackedWidthMultiplier: 0.88,
+                trackedAspectFloor: 0.56,
+                poseHeadroomMultiplier: 0.08,
+                poseLowerMarginMultiplier: 0.10,
+                fallbackHeightMultiplier: 0.72,
+                cropHeadroomMultiplier: 0.08,
+                cropLowerMarginMultiplier: 0.06
+            )
+        }
+    }
+
+    private var stageFramingTuning: FramingTuning {
         switch (config.frameProfile, config.shotPreset) {
         case (.livestream, .wide):
             return FramingTuning(

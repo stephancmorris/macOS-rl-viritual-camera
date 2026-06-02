@@ -17,6 +17,7 @@ struct CropPreviewView: View {
     let cropRect: CropEngine.CropRect?
     let activeTargetID: UUID?
     let manualLockedTargetID: UUID?
+    let acquiringTargetID: UUID?
     let trackedSubjectRect: CGRect?
     let isRecovering: Bool
     let framingTitle: String
@@ -31,6 +32,7 @@ struct CropPreviewView: View {
                 showDetections: showDetections,
                 activeTargetID: activeTargetID,
                 manualLockedTargetID: manualLockedTargetID,
+                acquiringTargetID: acquiringTargetID,
                 trackedSubjectRect: trackedSubjectRect,
                 onSelectPerson: onSelectPerson,
                 onTapPoint: onTapPoint,

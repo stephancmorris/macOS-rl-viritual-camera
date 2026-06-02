@@ -69,6 +69,21 @@ struct TelemetryOverlay: View {
 
     var body: some View {
         HStack(alignment: .top, spacing: 26) {
+            if let progress = cameraManager.shotComposer.acquisitionProgress {
+                telemetryBlock(
+                    label: "ACQUIRING",
+                    value: "\(Int(progress * 100))%",
+                    monospaced: true,
+                    valueColor: Color(red: 1.0, green: 0.74, blue: 0.23)
+                )
+            } else if cameraManager.tapPending {
+                telemetryBlock(
+                    label: "SUBJECT",
+                    value: "FINDING",
+                    monospaced: true,
+                    valueColor: Color(red: 0.47, green: 0.86, blue: 1.0)
+                )
+            }
             telemetryBlock(
                 label: "DETECTION",
                 value: detectionValue,
@@ -94,7 +109,12 @@ struct TelemetryOverlay: View {
         return String(format: "%.1fms", ms)
     }
 
-    private func telemetryBlock(label: String, value: String, monospaced: Bool) -> some View {
+    private func telemetryBlock(
+        label: String,
+        value: String,
+        monospaced: Bool,
+        valueColor: Color = .white.opacity(0.92)
+    ) -> some View {
         VStack(alignment: .trailing, spacing: 4) {
             Text(label)
                 .font(.system(size: 9, weight: .semibold, design: .monospaced))
@@ -106,7 +126,7 @@ struct TelemetryOverlay: View {
                     weight: .semibold,
                     design: monospaced ? .monospaced : .rounded
                 ))
-                .foregroundStyle(.white.opacity(0.92))
+                .foregroundStyle(valueColor)
         }
     }
 }

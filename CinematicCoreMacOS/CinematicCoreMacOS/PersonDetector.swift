@@ -78,6 +78,40 @@ final class PersonDetector: ObservableObject {
         var lastDetectionTime: TimeInterval = 0
         var personsDetectedCount: Int = 0
     }
+
+    // MARK: - Detection gating
+
+    /// How detection should run this frame. The pipeline is passive by
+    /// default — full-frame multi-person scanning never happens. Vision runs
+    /// only when a subject is being selected, acquired, or tracked, and then
+    /// only over a region of interest around that one person.
+    enum DetectionMode: Sendable, Equatable {
+        /// No subject and the operator hasn't tapped Detect — skip Vision entirely.
+        case off
+        /// Operator tapped Detect; preview shows a tap affordance. Still no Vision.
+        case awaitingTap
+        /// Operator tapped a point; scan a ROI around it to find + acquire the
+        /// single person there (rect + pose + face for gallery fill).
+        case acquiring
+        /// Subject locked; scan a ROI around their last box. Runs rect + pose
+        /// ONLY — the face request is dropped to save a full inference per
+        /// frame (the gallery is already full and re-acquisition only needs
+        /// faces in the wide `.reacquiring` state).
+        case lockedROI
+        /// Subject lost and we're wide; face request runs full-frame so a
+        /// returning subject can be re-acquired anywhere in the frame.
+        case reacquiring
+    }
+
+    /// What to run this frame and where. `roi` is a normalized Vision rect
+    /// (bottom-left origin) used by `.acquiring` and `.lockedROI`; ignored by
+    /// the other modes.
+    struct DetectionRequestPlan: Sendable {
+        var mode: DetectionMode
+        var roi: CGRect?
+
+        static let off = DetectionRequestPlan(mode: .off, roi: nil)
+    }
     
     // MARK: - Configuration
     
@@ -164,8 +198,19 @@ final class PersonDetector: ObservableObject {
     /// - Parameter pixelBuffer: The video frame to analyze
     /// - Returns: Array of detected persons
     @discardableResult
-    func processFrame(_ pixelBuffer: CVPixelBuffer) async -> [DetectedPerson] {
+    func processFrame(
+        _ pixelBuffer: CVPixelBuffer,
+        plan: DetectionRequestPlan = DetectionRequestPlan(mode: .acquiring, roi: nil)
+    ) async -> [DetectedPerson] {
         guard isEnabled else { return [] }
+
+        // Off / awaitingTap: no Vision at all. Clear detections so the overlay
+        // shows nothing and the crop holds wide — the passive default.
+        if plan.mode == .off || plan.mode == .awaitingTap {
+            if !detectedPersons.isEmpty { detectedPersons = [] }
+            trackedPersons.removeAll()
+            return []
+        }
 
         let detectionInterval = Self.signposter.beginInterval("visionDetection")
         let startTime = CACurrentMediaTime()
@@ -174,7 +219,8 @@ final class PersonDetector: ObservableObject {
         // Perform detection on background queue (rect + pose + face together).
         let (rectObservations, poseObservations, faceObservations) = await performDetection(
             pixelBuffer: pixelBuffer,
-            config: configSnapshot
+            config: configSnapshot,
+            plan: plan
         )
 
         let detectionTime = CACurrentMediaTime() - startTime
@@ -195,12 +241,15 @@ final class PersonDetector: ObservableObject {
     }
     
     /// Process a CIImage frame
-    func processFrame(_ ciImage: CIImage) async -> [DetectedPerson] {
+    func processFrame(
+        _ ciImage: CIImage,
+        plan: DetectionRequestPlan = DetectionRequestPlan(mode: .acquiring, roi: nil)
+    ) async -> [DetectedPerson] {
         // Convert CIImage to CVPixelBuffer
         guard let pixelBuffer = ciImage.toPixelBuffer() else {
             return []
         }
-        return await processFrame(pixelBuffer)
+        return await processFrame(pixelBuffer, plan: plan)
     }
     
     // MARK: - Private Methods
@@ -211,7 +260,8 @@ final class PersonDetector: ObservableObject {
 
     private nonisolated func performDetection(
         pixelBuffer: CVPixelBuffer,
-        config: Config
+        config: Config,
+        plan: DetectionRequestPlan
     ) async -> ([VNHumanObservation], [VNHumanBodyPoseObservation], [VNFaceObservation]) {
         let sendablePixelBuffer = SendablePixelBuffer(value: pixelBuffer)
 
@@ -223,6 +273,43 @@ final class PersonDetector: ObservableObject {
                     self.cachedRectRequest.revision = VNDetectHumanRectanglesRequestRevision1
                 }
 
+                // Region of interest. Acquiring / lockedROI scope every request
+                // to the padded box around the one subject, so cost is flat
+                // regardless of how many other guests are in frame. Other modes
+                // reset to the full frame. Vision still returns results in
+                // full-image normalized coords, so nothing downstream changes.
+                let fullFrame = CGRect(x: 0, y: 0, width: 1, height: 1)
+                let roi: CGRect
+                switch plan.mode {
+                case .acquiring, .lockedROI:
+                    roi = (plan.roi ?? fullFrame).intersection(fullFrame)
+                case .off, .awaitingTap, .reacquiring:
+                    roi = fullFrame
+                }
+                let effectiveROI = roi.isEmpty ? fullFrame : roi
+                self.cachedRectRequest.regionOfInterest = effectiveROI
+                self.cachedPoseRequest.regionOfInterest = effectiveROI
+                self.cachedFaceRequest.regionOfInterest = effectiveROI
+
+                // Which requests to run. Each request is a separate model
+                // inference; ROI does NOT shrink that cost, so the latency win
+                // once locked comes from running fewer requests.
+                //   acquiring  → rect + pose + face  (face fills the gallery)
+                //   lockedROI  → rect + pose ONLY    (gallery already full; face
+                //                only matters for re-acquisition, which is wide.
+                //                Dropping it removes a full inference per frame.)
+                //   reacquiring→ rect + pose + face  (returning subject anywhere)
+                // `if case` avoids needing Equatable on the main-actor-isolated
+                // enum from this nonisolated closure.
+                let isLockedROI: Bool = { if case .lockedROI = plan.mode { return true }; return false }()
+                var requests: [VNRequest] = [
+                    self.cachedRectRequest,
+                    self.cachedPoseRequest
+                ]
+                if !isLockedROI {
+                    requests.append(self.cachedFaceRequest)
+                }
+
                 let handler = VNImageRequestHandler(
                     cvPixelBuffer: sendablePixelBuffer.value,
                     orientation: .up,
@@ -230,20 +317,18 @@ final class PersonDetector: ObservableObject {
                 )
 
                 do {
-                    // Run all three requests together for efficiency — Vision
-                    // batches them through a shared image-prep pipeline.
-                    try handler.perform([
-                        self.cachedRectRequest,
-                        self.cachedPoseRequest,
-                        self.cachedFaceRequest
-                    ])
+                    try handler.perform(requests)
 
                     let rectResults = (self.cachedRectRequest.results ?? [])
                         .filter { $0.confidence >= config.confidenceThreshold }
                     let limited = Array(rectResults.prefix(config.maxPersons))
 
                     let poseResults = self.cachedPoseRequest.results ?? []
-                    let faceResults = self.cachedFaceRequest.results ?? []
+                    // Only read face results when the face request actually ran
+                    // this frame — otherwise the cached request still holds the
+                    // previous frame's faces, which would attach a stale face to
+                    // the locked subject and trigger spurious gallery captures.
+                    let faceResults = isLockedROI ? [] : (self.cachedFaceRequest.results ?? [])
 
                     continuation.resume(returning: (limited, poseResults, faceResults))
                 } catch {

@@ -14,6 +14,22 @@ import SwiftUI
 struct ShotComposerSettingsView: View {
     @ObservedObject var shotComposer: ShotComposer
 
+    @AppStorage("cinematicFormat") private var storedFormat: String =
+        ShotComposer.Config.CinematicFormat.stage.rawValue
+
+    /// Mirrors the persisted format and the live composer config. Writing here
+    /// updates both, which drives the operator pill and triggers the activeMode
+    /// reset binding in CameraManager.
+    private var formatBinding: Binding<ShotComposer.Config.CinematicFormat> {
+        Binding(
+            get: { ShotComposer.Config.CinematicFormat(rawValue: storedFormat) ?? .stage },
+            set: { newValue in
+                storedFormat = newValue.rawValue
+                shotComposer.config.cinematicFormat = newValue
+            }
+        )
+    }
+
     var body: some View {
         Form {
             basicSection
@@ -35,6 +51,19 @@ struct ShotComposerSettingsView: View {
                 .foregroundStyle(.secondary)
         }
 
+        Section("Format") {
+            Picker("Format", selection: formatBinding) {
+                ForEach(ShotComposer.Config.CinematicFormat.allCases) { format in
+                    Text(format.title).tag(format)
+                }
+            }
+            .pickerStyle(.segmented)
+
+            Text(formatBinding.wrappedValue.detail)
+                .font(.caption)
+                .foregroundStyle(.secondary)
+        }
+
         Section("Framing Style") {
             Picker("Frame Profile", selection: $shotComposer.config.frameProfile) {
                 ForEach(ShotComposer.Config.FrameProfile.allCases) { profile in
@@ -43,15 +72,6 @@ struct ShotComposerSettingsView: View {
             }
 
             Text("Use `Livestream Rectangle` for normal YouTube or switcher feeds. `Portrait Profile` is a secondary vertical option.")
-                .font(.caption)
-                .foregroundStyle(.secondary)
-        }
-
-        Section("Vertical Framing") {
-            LiquidFramingSwitch(selection: $shotComposer.config.shotFraming)
-                .disabled(!shotComposer.config.isEnabled)
-
-            Text("Choose how far down the crop should hold the speaker after the live shot size is selected from the main operator pill.")
                 .font(.caption)
                 .foregroundStyle(.secondary)
         }
@@ -190,14 +210,21 @@ struct ShotComposerSettingsView: View {
             )
 
             LabeledContent(
-                "Shot Preset",
-                value: shotComposer.config.shotPreset.operatorTitle
+                "Format",
+                value: shotComposer.config.cinematicFormat.title
             )
 
-            LabeledContent(
-                "Vertical Framing",
-                value: shotComposer.config.shotFraming.title
-            )
+            if shotComposer.config.cinematicFormat == .webcam {
+                LabeledContent(
+                    "Webcam Preset",
+                    value: shotComposer.config.webcamPreset.operatorTitle
+                )
+            } else {
+                LabeledContent(
+                    "Shot Preset",
+                    value: shotComposer.config.shotPreset.operatorTitle
+                )
+            }
 
             LabeledContent(
                 "Stage Window",

@@ -16,6 +16,7 @@ struct CameraPreviewView: View {
     let showDetections: Bool
     let activeTargetID: UUID?
     let manualLockedTargetID: UUID?
+    var acquiringTargetID: UUID? = nil
     var trackedSubjectRect: CGRect? = nil
     var onSelectPerson: ((UUID) -> Void)? = nil
     var onTapPoint: ((CGPoint) -> Void)? = nil
@@ -42,6 +43,7 @@ struct CameraPreviewView: View {
                             imageSize: image.extent.size,
                             activeTargetID: activeTargetID,
                             manualLockedTargetID: manualLockedTargetID,
+                            acquiringTargetID: acquiringTargetID,
                             trackedSubjectRect: trackedSubjectRect,
                             isRecovering: isRecovering,
                             framingTitle: framingTitle,

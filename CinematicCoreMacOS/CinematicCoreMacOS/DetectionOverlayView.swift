@@ -15,6 +15,10 @@ struct DetectionOverlayView: View {
     let imageSize: CGSize
     let activeTargetID: UUID?
     let manualLockedTargetID: UUID?
+    /// Subject mid-acquisition (gallery still filling). Drawn amber; takes
+    /// precedence over the locked/green style so the operator can see Alfie is
+    /// still learning the subject before the box turns green.
+    let acquiringTargetID: UUID?
     let trackedSubjectRect: CGRect?
     let isRecovering: Bool
     let framingTitle: String
@@ -24,7 +28,9 @@ struct DetectionOverlayView: View {
         GeometryReader { geometry in
             ZStack {
                 ForEach(detectedPersons) { person in
-                    let usesTrackedRect = person.id == activeTargetID || person.id == manualLockedTargetID
+                    let isAcquiring = person.id == acquiringTargetID
+                    let usesTrackedRect = !isAcquiring
+                        && (person.id == activeTargetID || person.id == manualLockedTargetID)
                     BoundingBoxView(
                         person: person,
                         displayBoundingBox: usesTrackedRect
@@ -32,8 +38,9 @@ struct DetectionOverlayView: View {
                             : person.boundingBox,
                         imageSize: imageSize,
                         viewSize: geometry.size,
-                        isLocked: person.id == manualLockedTargetID,
-                        isActive: person.id == activeTargetID,
+                        isLocked: !isAcquiring && person.id == manualLockedTargetID,
+                        isActive: !isAcquiring && person.id == activeTargetID,
+                        isAcquiring: isAcquiring,
                         isRecovering: isRecovering && (person.id == activeTargetID || person.id == manualLockedTargetID),
                         framingTitle: framingTitle,
                         onSelect: onSelectPerson
@@ -53,6 +60,7 @@ struct BoundingBoxView: View {
     let viewSize: CGSize
     let isLocked: Bool
     let isActive: Bool
+    var isAcquiring: Bool = false
     let isRecovering: Bool
     let framingTitle: String
     var onSelect: ((UUID) -> Void)?
@@ -134,6 +142,14 @@ struct BoundingBoxView: View {
     }
 
     private var currentStyle: BoxStyle {
+        if isAcquiring {
+            return BoxStyle(
+                color: Color(red: 1.0, green: 0.74, blue: 0.23),
+                labelColor: .black.opacity(0.85),
+                label: "ACQUIRING",
+                isPulsing: true
+            )
+        }
         if isRecovering {
             return BoxStyle(
                 color: Color(red: 1.0, green: 0.72, blue: 0.24),
@@ -247,6 +263,7 @@ private struct CornerTick: View {
         imageSize: CGSize(width: 1920, height: 1080),
         activeTargetID: mockPersons.first?.id,
         manualLockedTargetID: mockPersons.first?.id,
+        acquiringTargetID: nil,
         trackedSubjectRect: mockPersons.first?.boundingBox,
         isRecovering: false,
         framingTitle: "Waist Up"

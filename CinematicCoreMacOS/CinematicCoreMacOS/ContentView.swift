@@ -50,13 +50,12 @@ struct ContentView: View {
                     cropRect: cameraManager.activeMode != .wide ? cameraManager.cropEngine?.currentCrop : nil,
                     activeTargetID: cameraManager.shotComposer.activeTargetID,
                     manualLockedTargetID: cameraManager.manualLockedTargetID,
+                    acquiringTargetID: cameraManager.shotComposer.acquiringTargetID,
                     trackedSubjectRect: cameraManager.shotComposer.lastTrackedBounds,
                     isRecovering: false,
                     framingTitle: cameraManager.shotComposer.config.shotFraming.title,
                     onSelectPerson: cameraManager.lockTarget,
-                    onTapPoint: cameraManager.activeMode == .manualCrop
-                        ? { point in cameraManager.manualCropPoint = point }
-                        : nil
+                    onTapPoint: tapPointHandler
                 )
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
             } else {
@@ -143,6 +142,19 @@ struct ContentView: View {
         } message: { error in
             Text(error.localizedDescription)
         }
+    }
+
+    /// Preview tap handler. While discovering a subject (operator tapped
+    /// Detect), a tap picks the subject to acquire. In manual-crop mode it
+    /// repositions the crop. Otherwise taps are ignored.
+    private var tapPointHandler: ((CGPoint) -> Void)? {
+        if cameraManager.detectionDiscoveryActive {
+            return { point in cameraManager.selectSubject(at: point) }
+        }
+        if cameraManager.activeMode == .manualCrop {
+            return { point in cameraManager.manualCropPoint = point }
+        }
+        return nil
     }
 
     private func startCamera() async {
