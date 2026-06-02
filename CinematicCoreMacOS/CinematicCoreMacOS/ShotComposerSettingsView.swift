@@ -75,6 +75,22 @@ struct ShotComposerSettingsView: View {
                 .font(.caption)
                 .foregroundStyle(.secondary)
         }
+
+        Section("Auto-Framing Feel") {
+            LiquidTuningSwitch(
+                selection: Binding(
+                    get: { shotComposer.config.tuningPreset },
+                    set: { shotComposer.config.apply($0) }
+                )
+            )
+            .frame(maxWidth: .infinity, alignment: .center)
+            .disabled(!shotComposer.config.isEnabled)
+            .listRowBackground(Color.clear)
+
+            Text(shotComposer.config.tuningPreset.detail)
+                .font(.caption)
+                .foregroundStyle(.secondary)
+        }
     }
 
     /// Tuning knobs that change live but are too subtle for an everyday operator.
@@ -161,20 +177,6 @@ struct ShotComposerSettingsView: View {
             .disabled(!shotComposer.config.isEnabled)
             
             HStack {
-                Text("Auto Pan Speed")
-                Spacer()
-                Text(String(format: "%.0f%%", shotComposer.config.autoPanSpeed * 100))
-                    .foregroundStyle(.secondary)
-                    .monospacedDigit()
-            }
-
-            Slider(
-                value: $shotComposer.config.autoPanSpeed,
-                in: 0.01...0.05,
-                step: 0.01
-            )
-
-            HStack {
                 Text("Auto Pan Height")
                 Spacer()
                 Text(String(format: "%.0f%%", shotComposer.config.autoPanHeight * 100))
@@ -187,6 +189,32 @@ struct ShotComposerSettingsView: View {
                 in: 0.20...0.80,
                 step: 0.01
             )
+
+            Text("Auto Pan Speed")
+
+            LiquidAutoPanSpeedSwitch(
+                selection: Binding(
+                    get: { ShotComposer.Config.AutoPanSpeed.nearest(to: shotComposer.config.autoPanSpeed) },
+                    set: { shotComposer.config.autoPanSpeed = $0.rawValue }
+                )
+            )
+            .frame(maxWidth: .infinity, alignment: .center)
+            .disabled(!shotComposer.config.isEnabled)
+        }
+        // Editing any of the four preset-controlled sliders flips the Basic
+        // selection to Custom (or back to a preset if the values happen to match).
+        .onChange(of: shotComposer.config.deadzoneThreshold) { syncTuningPreset() }
+        .onChange(of: shotComposer.config.smoothingFactor) { syncTuningPreset() }
+        .onChange(of: shotComposer.config.targetHoldDuration) { syncTuningPreset() }
+        .onChange(of: shotComposer.config.autoPanSpeed) { syncTuningPreset() }
+    }
+
+    /// Recompute which preset (if any) the current tuning values match, without
+    /// re-applying a bundle (so it won't fight the slider that just changed).
+    private func syncTuningPreset() {
+        let matched = shotComposer.config.matchedPreset
+        if shotComposer.config.tuningPreset != matched {
+            shotComposer.config.tuningPreset = matched
         }
     }
 
@@ -202,6 +230,11 @@ struct ShotComposerSettingsView: View {
             LabeledContent(
                 "Manual Override",
                 value: shotComposer.isManualLockActive ? "Locked" : "Auto"
+            )
+
+            LabeledContent(
+                "Tuning Preset",
+                value: shotComposer.config.tuningPreset.title
             )
 
             LabeledContent(
@@ -282,7 +315,7 @@ struct LiquidPresetSwitch: View {
         } label: {
             Text(option.title)
                 .font(.system(size: 12, weight: .semibold, design: .rounded))
-                .foregroundStyle(isSelected ? Color.black.opacity(0.88) : Color.white.opacity(0.82))
+                .foregroundStyle(isSelected ? Color.black.opacity(0.88) : Color.primary)
                 .padding(.horizontal, 12)
                 .padding(.vertical, 6)
                 .background {
@@ -305,6 +338,143 @@ struct LiquidPresetSwitch: View {
                             .shadow(color: .mint.opacity(0.35), radius: 8, y: 2)
                     }
                 }
+        }
+        .buttonStyle(.plain)
+    }
+}
+
+// MARK: - Liquid Glass Tuning Preset Switch
+
+/// Beginner-facing preset selector for the auto-framing feel. Mirrors the
+/// mint-capsule look of `LiquidPresetSwitch` but is bound to `TuningPreset`
+/// and lays its segments out equally so four options stay readable.
+struct LiquidTuningSwitch: View {
+    @Binding var selection: ShotComposer.Config.TuningPreset
+    @Environment(\.isEnabled) private var isEnabled
+
+    var body: some View {
+        HStack(spacing: 2) {
+            ForEach(ShotComposer.Config.TuningPreset.selectable) { option in
+                segment(for: option)
+            }
+        }
+        .padding(3)
+        .background {
+            Capsule(style: .continuous)
+                .fill(.ultraThinMaterial)
+                .overlay(
+                    Capsule(style: .continuous)
+                        .strokeBorder(.white.opacity(0.12), lineWidth: 1)
+                )
+        }
+        .opacity(isEnabled ? 1.0 : 0.5)
+    }
+
+    @ViewBuilder
+    private func segment(for option: ShotComposer.Config.TuningPreset) -> some View {
+        let isSelected = selection == option
+        Button {
+            guard isEnabled else { return }
+            withAnimation(.spring(response: 0.32, dampingFraction: 0.82)) {
+                selection = option
+            }
+        } label: {
+            Text(option.title)
+                .font(.system(size: 12, weight: .semibold, design: .rounded))
+                .foregroundStyle(isSelected ? Color.black.opacity(0.88) : Color.primary)
+                .lineLimit(1)
+                .minimumScaleFactor(0.8)
+                .frame(maxWidth: .infinity)
+                .padding(.horizontal, 8)
+                .padding(.vertical, 6)
+                .background {
+                    if isSelected {
+                        Capsule(style: .continuous)
+                            .fill(
+                                LinearGradient(
+                                    colors: [
+                                        Color.mint.opacity(0.95),
+                                        Color.green.opacity(0.85)
+                                    ],
+                                    startPoint: .topLeading,
+                                    endPoint: .bottomTrailing
+                                )
+                            )
+                            .overlay(
+                                Capsule(style: .continuous)
+                                    .strokeBorder(.white.opacity(0.35), lineWidth: 1)
+                            )
+                            .shadow(color: .mint.opacity(0.35), radius: 8, y: 2)
+                    }
+                }
+                .contentShape(Capsule(style: .continuous))
+        }
+        .buttonStyle(.plain)
+    }
+}
+
+// MARK: - Liquid Glass Auto Pan Speed Switch
+
+/// Three-option auto-pan speed selector (Slow / Normal / Fast). Mirrors the
+/// mint-capsule look of `LiquidTuningSwitch`, laid out with equal-width
+/// segments. Bound to the raw `autoPanSpeed` Float via `AutoPanSpeed`.
+struct LiquidAutoPanSpeedSwitch: View {
+    @Binding var selection: ShotComposer.Config.AutoPanSpeed
+
+    var body: some View {
+        HStack(spacing: 2) {
+            ForEach(ShotComposer.Config.AutoPanSpeed.allCases) { option in
+                segment(for: option)
+            }
+        }
+        .padding(3)
+        .background {
+            Capsule(style: .continuous)
+                .fill(.ultraThinMaterial)
+                .overlay(
+                    Capsule(style: .continuous)
+                        .strokeBorder(.white.opacity(0.12), lineWidth: 1)
+                )
+        }
+    }
+
+    @ViewBuilder
+    private func segment(for option: ShotComposer.Config.AutoPanSpeed) -> some View {
+        let isSelected = selection == option
+        Button {
+            withAnimation(.spring(response: 0.32, dampingFraction: 0.82)) {
+                selection = option
+            }
+        } label: {
+            Text(option.title)
+                .font(.system(size: 12, weight: .semibold, design: .rounded))
+                .foregroundStyle(isSelected ? Color.black.opacity(0.88) : Color.primary)
+                .lineLimit(1)
+                .minimumScaleFactor(0.8)
+                .frame(maxWidth: .infinity)
+                .padding(.horizontal, 8)
+                .padding(.vertical, 6)
+                .background {
+                    if isSelected {
+                        Capsule(style: .continuous)
+                            .fill(
+                                LinearGradient(
+                                    colors: [
+                                        Color.mint.opacity(0.95),
+                                        Color.green.opacity(0.85)
+                                    ],
+                                    startPoint: .topLeading,
+                                    endPoint: .bottomTrailing
+                                )
+                            )
+                            .overlay(
+                                Capsule(style: .continuous)
+                                    .strokeBorder(.white.opacity(0.35), lineWidth: 1)
+                            )
+                            .shadow(color: .mint.opacity(0.35), radius: 8, y: 2)
+                    }
+                }
+                .contentShape(Capsule(style: .continuous))
         }
         .buttonStyle(.plain)
     }

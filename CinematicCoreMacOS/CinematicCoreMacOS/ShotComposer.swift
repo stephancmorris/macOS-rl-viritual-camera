@@ -197,6 +197,93 @@ final class ShotComposer: ObservableObject {
             }
         }
 
+        /// The three discrete auto-pan speeds offered in the UI. Backed by the
+        /// `autoPanSpeed` phase-rate values consumed in CameraManager's `.autoPan`
+        /// case (Slow 0.01, Normal 0.02, Fast 0.03).
+        enum AutoPanSpeed: Float, CaseIterable, Identifiable, Sendable {
+            case slow = 0.01
+            case normal = 0.02
+            case fast = 0.03
+
+            var id: Float { rawValue }
+
+            var title: String {
+                switch self {
+                case .slow: return "Slow"
+                case .normal: return "Normal"
+                case .fast: return "Fast"
+                }
+            }
+
+            /// Nearest option for an arbitrary stored speed, so the control always
+            /// shows a selection even if an older value falls between stops.
+            static func nearest(to value: Float) -> AutoPanSpeed {
+                allCases.min(by: { abs($0.rawValue - value) < abs($1.rawValue - value) }) ?? .normal
+            }
+        }
+
+        /// Beginner-facing tuning bundle. Each non-custom case applies a coherent
+        /// set of values across the smoothness↔responsiveness axis (smoothing,
+        /// auto-pan speed, deadzone, target hold). `custom` means the operator has
+        /// hand-tuned the Advanced sliders away from any named preset.
+        enum TuningPreset: String, CaseIterable, Identifiable, Sendable {
+            case slowPan
+            case balanced
+            case fastFollow
+            case lockedDown
+            case custom
+
+            var id: String { rawValue }
+
+            /// Presets the operator can choose from (excludes `custom`, which is
+            /// only ever entered by editing sliders directly).
+            static var selectable: [TuningPreset] {
+                [.slowPan, .balanced, .fastFollow, .lockedDown]
+            }
+
+            var title: String {
+                switch self {
+                case .slowPan: return "Slow Pan"
+                case .balanced: return "Balanced"
+                case .fastFollow: return "Fast Follow"
+                case .lockedDown: return "Locked Down"
+                case .custom: return "Custom"
+                }
+            }
+
+            var detail: String {
+                switch self {
+                case .slowPan:
+                    return "Smooth, gentle moves for talks and panels."
+                case .balanced:
+                    return "Everyday tracking that keeps up without rushing."
+                case .fastFollow:
+                    return "Snappy tracking for fast-moving presenters."
+                case .lockedDown:
+                    return "Near-static framing for a fixed podium."
+                case .custom:
+                    return "Custom — adjust the sliders in Advanced."
+                }
+            }
+
+            /// The tuning bundle this preset applies. `nil` for `custom`.
+            /// Order: smoothing, autoPanSpeed, deadzone, targetHold.
+            var bundle: (smoothing: Float,
+                         autoPanSpeed: Float,
+                         deadzone: CGFloat,
+                         targetHold: TimeInterval)? {
+                switch self {
+                // autoPanSpeed is one of the three discrete UI options:
+                // Slow 0.01, Normal 0.02, Fast 0.03.
+                case .slowPan: return (0.07, 0.01, 0.08, 1.20)
+                case .balanced: return (0.10, 0.02, 0.05, 0.75)
+                case .fastFollow: return (0.20, 0.03, 0.03, 0.40)
+                case .lockedDown: return (0.06, 0.01, 0.12, 2.00)
+                case .custom: return nil
+                }
+            }
+        }
+
         /// Minimum movement (fraction of frame) before updating target crop.
         /// Prevents jitter from small detection noise.
         var deadzoneThreshold: CGFloat = 0.05 // 5% of frame
@@ -213,8 +300,9 @@ final class ShotComposer: ObservableObject {
         /// Vertical stage margin used to avoid drifting into ceiling or front-row space.
         var stageVerticalMargin: CGFloat = 0.04
 
-        /// Speed of the auto pan sweep across the stage.
-        var autoPanSpeed: Float = 0.053
+        /// Speed of the auto pan sweep across the stage. One of the three
+        /// discrete UI options: Slow 0.01, Normal 0.02, Fast 0.03.
+        var autoPanSpeed: Float = 0.02
 
         /// Vertical center of the auto-pan crop. Vision coordinates: 0 = bottom,
         /// 1 = top of frame. 0.5 keeps the camera at chest height for an
@@ -251,6 +339,37 @@ final class ShotComposer: ObservableObject {
         /// Output aspect ratio (width / height)
         var outputAspectRatio: CGFloat {
             frameProfile.aspectRatio
+        }
+
+        /// Currently selected beginner tuning preset. Defaults to the balanced
+        /// bundle, which mirrors the per-field defaults above.
+        var tuningPreset: TuningPreset = .balanced
+
+        /// Apply a named tuning preset, writing its bundle into the four
+        /// preset-controlled fields. `custom` only records the selection.
+        mutating func apply(_ preset: TuningPreset) {
+            tuningPreset = preset
+            guard let bundle = preset.bundle else { return }
+            smoothingFactor = bundle.smoothing
+            autoPanSpeed = bundle.autoPanSpeed
+            deadzoneThreshold = bundle.deadzone
+            targetHoldDuration = bundle.targetHold
+        }
+
+        /// The preset whose bundle matches the current tuning values (within a
+        /// small epsilon), or `.custom` if no preset matches. Used to flip the
+        /// selection back to Custom when Advanced sliders are edited.
+        var matchedPreset: TuningPreset {
+            for preset in TuningPreset.selectable {
+                guard let b = preset.bundle else { continue }
+                if abs(smoothingFactor - b.smoothing) < 0.005,
+                   abs(autoPanSpeed - b.autoPanSpeed) < 0.005,
+                   abs(deadzoneThreshold - b.deadzone) < 0.005,
+                   abs(targetHoldDuration - b.targetHold) < 0.025 {
+                    return preset
+                }
+            }
+            return .custom
         }
 
         /// Master toggle

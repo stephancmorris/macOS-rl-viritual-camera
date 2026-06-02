@@ -85,167 +85,113 @@ struct CropSettingsView: View {
     }
     
     var body: some View {
-        VStack(alignment: .leading, spacing: 16) {
-            // Header
-            HStack {
-                Image(systemName: "crop.rotate")
-                Text("Crop Engine Settings")
-                    .font(.headline)
+        Form {
+            Section("Output Resolution") {
+                if cameraManager.shotComposer.config.frameProfile == .livestream {
+                    LabeledContent("Output", value: "1920 × 1080 (Locked)")
+                } else {
+                    Picker("Resolution", selection: $cropEngine.config.outputSize) {
+                        ForEach(resolutionOptions, id: \.0) { option in
+                            Text(option.0).tag(option.1)
+                        }
+                    }
+                    .pickerStyle(.menu)
+                }
+
+                Text(cameraManager.shotComposer.config.frameProfile.detail)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
             }
-            .padding(.bottom, 8)
-            
-            Divider()
-            // Output Resolution
-                VStack(alignment: .leading, spacing: 8) {
-                    Text("Output Resolution")
-                        .font(.subheadline)
 
-                    Text(cameraManager.shotComposer.config.frameProfile.detail)
-                        .font(.caption)
+            Section("Transition Smoothing") {
+                HStack {
+                    Text("Smoothing")
+                    Spacer()
+                    Text(String(format: "%.0f%%", cropEngine.config.transitionSmoothing * 100))
                         .foregroundStyle(.secondary)
+                        .monospacedDigit()
+                }
 
-                    if cameraManager.shotComposer.config.frameProfile == .livestream {
-                        LabeledContent("MVP Output", value: "1920 × 1080 (Locked)")
+                Slider(
+                    value: Binding(
+                        get: { Double(cropEngine.config.transitionSmoothing) },
+                        set: { cropEngine.config.transitionSmoothing = Float($0) }
+                    ),
+                    in: 0.05...0.3
+                )
+
+                HStack {
+                    Text("Fast")
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                    Spacer()
+                    Text("Cinematic")
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                }
+            }
+
+            Section("Quality") {
+                Toggle(isOn: $cropEngine.config.useHighQuality) {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("High Quality Mode")
+                        Text("Better image quality, slightly more GPU usage")
                             .font(.caption)
-                    } else {
-                        Picker("Resolution", selection: $cropEngine.config.outputSize) {
-                            ForEach(resolutionOptions, id: \.0) { option in
-                                Text(option.0).tag(option.1)
-                            }
-                        }
-                        .pickerStyle(.menu)
+                            .foregroundStyle(.secondary)
                     }
                 }
-                
-                // Transition Smoothing
-                VStack(alignment: .leading, spacing: 8) {
-                    HStack {
-                        Text("Transition Smoothing")
-                            .font(.subheadline)
-                        Spacer()
-                        Text(String(format: "%.0f%%", cropEngine.config.transitionSmoothing * 100))
+
+                Toggle(isOn: $cropEngine.config.enableVignette) {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("Cinematic Vignette")
+                        Text("Subtle edge darkening for cinematic look")
                             .font(.caption)
                             .foregroundStyle(.secondary)
                     }
-                    
-                    Slider(
-                        value: Binding(
-                            get: { Double(cropEngine.config.transitionSmoothing) },
-                            set: { cropEngine.config.transitionSmoothing = Float($0) }
-                        ),
-                        in: 0.05...0.3
-                    )
-                    
-                    HStack {
-                        Text("Fast")
-                            .font(.caption2)
-                            .foregroundStyle(.secondary)
-                        Spacer()
-                        Text("Cinematic")
-                            .font(.caption2)
-                            .foregroundStyle(.secondary)
+                }
+            }
+
+            Section("Performance") {
+                LabeledContent(
+                    "Render Time",
+                    value: String(format: "%.2f ms", cropEngine.stats.lastRenderTime * 1000)
+                )
+                LabeledContent(
+                    "Average",
+                    value: String(format: "%.2f ms", cropEngine.stats.averageRenderTime * 1000)
+                )
+                LabeledContent(
+                    "Frames Rendered",
+                    value: "\(cropEngine.stats.totalFramesRendered)"
+                )
+                LabeledContent("Interpolating") {
+                    HStack(spacing: 4) {
+                        Circle()
+                            .fill(cropEngine.isInterpolating ? Color.green : Color.secondary)
+                            .frame(width: 6, height: 6)
+                        Text(cropEngine.isInterpolating ? "Yes" : "No")
                     }
                 }
-                
-                // Quality Settings
-                VStack(alignment: .leading, spacing: 8) {
-                    Toggle(isOn: $cropEngine.config.useHighQuality) {
-                        VStack(alignment: .leading, spacing: 4) {
-                            Text("High Quality Mode")
-                                .font(.subheadline)
-                            Text("Better image quality, slightly more GPU usage")
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
-                        }
+            }
+
+            Section("Manual Controls") {
+                HStack(spacing: 8) {
+                    Button("Reset to Full Frame") {
+                        cropEngine.resetToFullFrame(
+                            aspect: cameraManager.shotComposer.normalizedAspect
+                        )
                     }
-                    .toggleStyle(.switch)
-                    
-                    Toggle(isOn: $cropEngine.config.enableVignette) {
-                        VStack(alignment: .leading, spacing: 4) {
-                            Text("Cinematic Vignette")
-                                .font(.subheadline)
-                            Text("Subtle edge darkening for cinematic look")
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
-                        }
+                    .buttonStyle(.bordered)
+
+                    Button("Jump to Target") {
+                        cropEngine.jumpToTarget()
                     }
-                    .toggleStyle(.switch)
+                    .buttonStyle(.bordered)
                 }
-                
-                Divider()
-                
-                // Statistics
-                VStack(alignment: .leading, spacing: 8) {
-                    Text("Performance")
-                        .font(.subheadline)
-                    
-                    Grid(alignment: .leading, horizontalSpacing: 16, verticalSpacing: 4) {
-                        GridRow {
-                            Text("Render Time:")
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
-                            Text(String(format: "%.2f ms", cropEngine.stats.lastRenderTime * 1000))
-                                .font(.caption)
-                                .monospacedDigit()
-                        }
-                        
-                        GridRow {
-                            Text("Average:")
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
-                            Text(String(format: "%.2f ms", cropEngine.stats.averageRenderTime * 1000))
-                                .font(.caption)
-                                .monospacedDigit()
-                        }
-                        
-                        GridRow {
-                            Text("Frames Rendered:")
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
-                            Text("\(cropEngine.stats.totalFramesRendered)")
-                                .font(.caption)
-                                .monospacedDigit()
-                        }
-                        
-                        GridRow {
-                            Text("Interpolating:")
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
-                            HStack(spacing: 4) {
-                                Circle()
-                                    .fill(cropEngine.isInterpolating ? Color.green : Color.secondary)
-                                    .frame(width: 6, height: 6)
-                                Text(cropEngine.isInterpolating ? "Yes" : "No")
-                                    .font(.caption)
-                            }
-                        }
-                    }
-                }
-                
-                Divider()
-                
-                // Manual Controls
-                VStack(alignment: .leading, spacing: 8) {
-                    Text("Manual Controls")
-                        .font(.subheadline)
-                    
-                    HStack(spacing: 8) {
-                        Button("Reset to Full Frame") {
-                            cropEngine.resetToFullFrame(
-                                aspect: cameraManager.shotComposer.normalizedAspect
-                            )
-                        }
-                        .buttonStyle(.bordered)
-                        
-                        Button("Jump to Target") {
-                            cropEngine.jumpToTarget()
-                        }
-                        .buttonStyle(.bordered)
-                    }
-                }
+            }
         }
-        .padding()
-        .frame(width: 350)
+        .formStyle(.grouped)
+        .frame(width: 350, height: 500)
     }
 }
 

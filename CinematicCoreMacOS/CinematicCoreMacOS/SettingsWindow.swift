@@ -47,7 +47,7 @@ enum SettingsTab: String, CaseIterable, Identifiable {
         case .composer:
             return "Shot logic, framing style, deadzone, smoothing, and target hold behavior."
         case .detection:
-            return "Vision person detection sensitivity, confidence, accuracy mode, and live statistics."
+            return "Person detection accuracy, confidence, and live statistics. Detection runs in short bursts, triggered by the Detect button."
         case .crop:
             return "Crop engine quality, output profile, render smoothing, and GPU performance."
         case .output:

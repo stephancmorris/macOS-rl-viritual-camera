@@ -278,7 +278,7 @@ final class CameraManager: NSObject, ObservableObject {
     private var autoPanPauseUntil: Double = 0
     private var autoPanLastTick: Double = 0
 
-    private static let autoPanPauseDuration: Double = 2.0
+    private static let autoPanPauseDuration: Double = 1.5
 
     // Briefly boost crop smoothing after an operator-driven shot-preset change so
     // the camera reaches the new framing quickly (instead of crawling there with
@@ -998,7 +998,9 @@ final class CameraManager: NSObject, ObservableObject {
             detectionCroppedFrame = nil
         }
 
-        func manualCropRect(center: CGPoint) -> CropEngine.CropRect {
+        // Crop dimensions in normalized [0,1] space for the active preset+aspect.
+        // Single source of truth for both manualCropRect and the auto-pan range.
+        func manualCropSize() -> CGSize {
             let aspect = shotComposer.normalizedAspect
             let baseHeight: CGFloat
             switch shotComposer.config.shotPreset {
@@ -1016,13 +1018,17 @@ final class CameraManager: NSObject, ObservableObject {
                 cropHeight = 1.0
                 cropWidth = cropHeight * aspect
             }
-            
-            let originX = center.x - cropWidth / 2.0
-            let originY = center.y - cropHeight / 2.0
-            
+            return CGSize(width: cropWidth, height: cropHeight)
+        }
+
+        func manualCropRect(center: CGPoint) -> CropEngine.CropRect {
+            let size = manualCropSize()
+            let originX = center.x - size.width / 2.0
+            let originY = center.y - size.height / 2.0
+
             return CropEngine.CropRect(
                 origin: CGPoint(x: originX, y: originY),
-                size: CGSize(width: cropWidth, height: cropHeight)
+                size: size
             ).clamped()
         }
 
@@ -1074,27 +1080,59 @@ final class CameraManager: NSObject, ObservableObject {
                     let idealCrop = manualCropRect(center: manualCropPoint)
                     cropEngine.setTargetCrop(idealCrop)
                 case .autoPan:
-                    cropEngine.config.transitionSmoothing = shotComposer.config.smoothingFactor
+                    // Auto-pan drives the crop with deterministic constant-velocity
+                    // motion, NOT the subject-tracking spring (jumpToTarget below
+                    // snaps the visible crop to the phase each frame, so there is no
+                    // velocity-proportional lag and the dwell is exactly
+                    // autoPanPauseDuration).
+                    //
+                    // autoPanPhase is a normalized 0..1 sweep position, remapped onto
+                    // the VISIBLE center range [halfW, 1-halfW] — the only range over
+                    // which the crop actually moves before clamped() pins it. This
+                    // removes the "dead" edge travel that made the camera sit frozen
+                    // for tens of seconds at low speed: the reverse + pause now fire
+                    // the instant the camera reaches the true visible edge, at any
+                    // speed/preset.
                     let now = CACurrentMediaTime()
-                    let dt = autoPanLastTick > 0 ? now - autoPanLastTick : 0
+                    let dt = autoPanLastTick > 0 ? min(now - autoPanLastTick, 0.1) : 0
                     autoPanLastTick = now
-                    if now > autoPanPauseUntil {
-                        // Constant phase velocity throughout the sweep.
-                        // autoPanSpeed (0.01–0.05) is treated as phase units per second * 3.
-                        let rate = CGFloat(shotComposer.config.autoPanSpeed) * 3.0
-                        autoPanPhase += rate * autoPanDirection * CGFloat(dt)
-                        if autoPanPhase >= 1.0 {
-                            autoPanPhase = 1.0
-                            autoPanDirection = -1.0
-                            autoPanPauseUntil = now + Self.autoPanPauseDuration
-                        } else if autoPanPhase <= 0.0 {
-                            autoPanPhase = 0.0
-                            autoPanDirection = 1.0
-                            autoPanPauseUntil = now + Self.autoPanPauseDuration
+
+                    let cropWidth = manualCropSize().width
+                    let halfW = cropWidth / 2.0
+                    let travel = max(0.0, 1.0 - cropWidth)   // (1 - halfW) - halfW
+
+                    if travel <= 0.0001 {
+                        // Crop fills the width: no horizontal room. Hold center, don't
+                        // advance/flip (avoids thrash and a lingering pause state).
+                        autoPanPauseUntil = 0
+                        cropEngine.setTargetCrop(manualCropRect(center: CGPoint(x: 0.5, y: shotComposer.config.autoPanHeight)))
+                        cropEngine.jumpToTarget()
+                    } else {
+                        if now > autoPanPauseUntil {
+                            // Constant phase velocity throughout the sweep.
+                            // autoPanSpeed (0.01–0.05) is treated as phase units per
+                            // second * 9. The multiplier is high enough that even the
+                            // slowest (1%) setting moves visibly — at lower values the
+                            // near-edge crawl was only ~0.4 px/frame and looked frozen.
+                            let rate = CGFloat(shotComposer.config.autoPanSpeed) * 9.0
+                            autoPanPhase += rate * autoPanDirection * CGFloat(dt)
+                            if autoPanPhase >= 1.0 {
+                                autoPanPhase = 1.0
+                                autoPanDirection = -1.0
+                                autoPanPauseUntil = now + Self.autoPanPauseDuration
+                            } else if autoPanPhase <= 0.0 {
+                                autoPanPhase = 0.0
+                                autoPanDirection = 1.0
+                                autoPanPauseUntil = now + Self.autoPanPauseDuration
+                            }
                         }
+                        // Map normalized phase onto the visible center range.
+                        let centerX = halfW + autoPanPhase * travel
+                        let panCenter = CGPoint(x: centerX, y: shotComposer.config.autoPanHeight)
+                        cropEngine.setTargetCrop(manualCropRect(center: panCenter))
+                        // Zero spring lag: visible crop tracks the phase exactly.
+                        cropEngine.jumpToTarget()
                     }
-                    let panCenter = CGPoint(x: autoPanPhase, y: shotComposer.config.autoPanHeight)
-                    cropEngine.setTargetCrop(manualCropRect(center: panCenter))
                 }
             composeDuration = CACurrentMediaTime() - composeStart
             Self.signposter.endInterval("compose", composeInterval)

@@ -14,8 +14,6 @@ struct DetectionSettingsView: View {
     var body: some View {
         Form {
             Section("Detection") {
-                Toggle("Enable Detection", isOn: $personDetector.isEnabled)
-                
                 Toggle("High Accuracy Mode", isOn: $personDetector.config.useHighAccuracy)
                     .help("More accurate but slower (reduces frame rate)")
                 

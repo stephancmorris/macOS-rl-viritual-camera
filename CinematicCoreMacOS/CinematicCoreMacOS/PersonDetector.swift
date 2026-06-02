@@ -26,10 +26,7 @@ final class PersonDetector: ObservableObject {
     
     /// Detection statistics
     @Published private(set) var stats: DetectionStats = .init()
-    
-    /// Enable/disable detection
-    @Published var isEnabled: Bool = true
-    
+
     // MARK: - Models
 
     /// Body pose keypoints for rule-of-thirds composition (Task 2.3 - LOGIC-01)
@@ -202,8 +199,6 @@ final class PersonDetector: ObservableObject {
         _ pixelBuffer: CVPixelBuffer,
         plan: DetectionRequestPlan = DetectionRequestPlan(mode: .acquiring, roi: nil)
     ) async -> [DetectedPerson] {
-        guard isEnabled else { return [] }
-
         // Off / awaitingTap: no Vision at all. Clear detections so the overlay
         // shows nothing and the crop holds wide — the passive default.
         if plan.mode == .off || plan.mode == .awaitingTap {
