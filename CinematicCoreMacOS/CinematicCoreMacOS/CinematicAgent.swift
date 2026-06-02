@@ -151,17 +151,13 @@ final class CinematicAgent: ObservableObject {
 
     /// Map source pixel height to the maximum zoom that keeps the crop at or
     /// above the next resolution tier down (e.g. 4K → min crop 1080p → 2×).
+    /// Delegates to `CropEngine.QualityFloor`, the single source of truth for
+    /// the resolution-tier table — zoom is the reciprocal of the min crop
+    /// height fraction.
     static func qualityMaxZoom(forSourceHeight height: Int) -> Float {
-        let minCropHeight: Int
-        switch height {
-        case 4320...:    minCropHeight = 2160  // 8K+ → 4K
-        case 2160..<4320: minCropHeight = 1080 // 4K → 1080p
-        case 1080..<2160: minCropHeight = 720  // 1080p → 720p
-        case 720..<1080:  minCropHeight = 540  // 720p → 540p
-        default:          minCropHeight = max(height / 2, 360)
-        }
-        guard minCropHeight > 0 else { return 1.0 }
-        return Float(height) / Float(minCropHeight)
+        let fraction = CropEngine.QualityFloor.forSource(height: height).minCropHeightFraction
+        guard fraction > 0 else { return 1.0 }
+        return 1.0 / Float(fraction)
     }
 
     /// Clear tracking state (e.g. on subject change or session end).

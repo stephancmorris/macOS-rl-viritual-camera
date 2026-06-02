@@ -204,6 +204,36 @@ final class CameraManager: NSObject, ObservableObject {
     /// Current operation mode for the crop engine
     @Published var activeMode: OperationMode = .wide
 
+    /// Vertical pixel height of the most recent delivered source frame. Drives
+    /// the operator-facing output-resolution readout. 0 until the first frame.
+    @Published private(set) var sourcePixelHeight: Int = 0
+
+    /// Operator-facing label for the effective program output resolution while
+    /// a crop is active (e.g. "1080p", "2.2K", "4K"), derived from the source
+    /// height and the current crop's vertical fraction — i.e. the real number
+    /// of source pixels feeding the output before any upscale. `nil` when in
+    /// wide (no crop) or before the first frame.
+    var programOutputLabel: String? {
+        guard activeMode != .wide,
+              sourcePixelHeight > 0,
+              let crop = cropEngine?.currentCrop else { return nil }
+        let effectiveHeight = Int((crop.size.height * CGFloat(sourcePixelHeight)).rounded())
+        return Self.resolutionTierLabel(forHeight: effectiveHeight)
+    }
+
+    /// Snap a pixel height to a friendly resolution-tier label.
+    nonisolated static func resolutionTierLabel(forHeight height: Int) -> String {
+        switch height {
+        case 4320...:     return "8K"
+        case 2880..<4320: return "4K"
+        case 1800..<2880: return "2.2K"
+        case 1260..<1800: return "1080p"
+        case 990..<1260:  return "720p"
+        case 630..<990:   return "540p"
+        default:          return "\(height)p"
+        }
+    }
+
     /// The center point for the manual crop (normalized 0-1)
     @Published var manualCropPoint: CGPoint = CGPoint(x: 0.5, y: 0.5)
 
@@ -321,6 +351,10 @@ final class CameraManager: NSObject, ObservableObject {
     /// Last source pixel aspect (width/height) forwarded to the shot composer.
     /// Used to skip the per-frame update when aspect is unchanged.
     private var lastAppliedSourceAspect: CGFloat = 0
+
+    /// Last delivered source pixel height used to set the crop quality floor.
+    /// Skips the per-frame floor update when the resolution is unchanged.
+    private var lastFloorSourceHeight: Int = 0
 
     private nonisolated func frameLog(_ message: @autoclosure () -> String) {
         guard DeveloperFlags.verboseFrameLogging else { return }
@@ -535,14 +569,14 @@ final class CameraManager: NSObject, ObservableObject {
         activeMode = .wide
         shotComposer.reset(clearManualLock: true)
         cinematicAgent.reset()
-        cropEngine.resetToFullFrame()
+        cropEngine.resetToFullFrame(aspect: shotComposer.normalizedAspect)
         cropEngine.jumpToTarget()
     }
 
     /// Hand control back to the tracker after a manual wide hold.
     func resumeTracking() {
         activeMode = .autoTracking
-        cropEngine?.resetToFullFrame()
+        cropEngine?.resetToFullFrame(aspect: shotComposer.normalizedAspect)
         shotComposer.reset()
         cinematicAgent.reset()
 
@@ -850,6 +884,23 @@ final class CameraManager: NSObject, ObservableObject {
                 lastAppliedSourceAspect = bufferAspect
                 shotComposer.updateSourcePixelAspect(bufferAspect)
             }
+
+            // Drive the crop quality floor from the *actual delivered*
+            // resolution, not the advertised capture format — some drivers
+            // (e.g. BMD CMIO) advertise 4K but deliver 1080p, which would
+            // otherwise permit an unsafe 2× zoom. This single update covers
+            // all crop modes (the floor is applied in CropEngine.setTargetCrop)
+            // and corrects the ML agent's internal clamp to the same numbers.
+            let sourceHeight = Int(bufferHeight)
+            if sourceHeight != lastFloorSourceHeight {
+                lastFloorSourceHeight = sourceHeight
+                sourcePixelHeight = sourceHeight
+                cropEngine?.qualityFloor = .forSource(height: sourceHeight)
+                cinematicAgent.updateSourceResolution(
+                    width: Int(bufferWidth),
+                    height: sourceHeight
+                )
+            }
         }
 
         let detectionInterval = Self.signposter.beginInterval("detection")
@@ -992,7 +1043,10 @@ final class CameraManager: NSObject, ObservableObject {
                         ? Self.fastFramingSmoothing
                         : shotComposer.config.smoothingFactor
                     cropEngine.config.transitionSmoothing = smoothing
-                    cropEngine.targetCrop = .fullFrame
+                    // Aspect-correct wide: the largest 16:9 region of the
+                    // source. Sending .fullFrame here would stretch a non-16:9
+                    // source (e.g. 3576×2192) when rendered to the 16:9 output.
+                    cropEngine.setTargetCrop(.widest(aspect: shotComposer.normalizedAspect))
                 case .autoTracking:
                     if useMLAgent {
                         cropEngine.config.transitionSmoothing = 0.05
@@ -1000,7 +1054,7 @@ final class CameraManager: NSObject, ObservableObject {
                             person: primaryPerson,
                             currentCrop: cropEngine.currentCrop
                         )
-                        cropEngine.targetCrop = newCrop
+                        cropEngine.setTargetCrop(newCrop)
                     } else {
                         let smoothing = CACurrentMediaTime() < fastFramingUntil
                             ? Self.fastFramingSmoothing
@@ -1009,7 +1063,7 @@ final class CameraManager: NSObject, ObservableObject {
                         if let primaryPerson {
                             frameLog("🔍 DEBUG: Composing shot for person at \(primaryPerson.boundingBox)")
                             if let idealCrop = shotComposer.compose(person: primaryPerson) {
-                                cropEngine.targetCrop = idealCrop
+                                cropEngine.setTargetCrop(idealCrop)
                             }
                         } else {
                             frameLog("🔍 DEBUG: No persons detected, holding last position")
@@ -1018,7 +1072,7 @@ final class CameraManager: NSObject, ObservableObject {
                 case .manualCrop:
                     cropEngine.config.transitionSmoothing = shotComposer.config.smoothingFactor
                     let idealCrop = manualCropRect(center: manualCropPoint)
-                    cropEngine.targetCrop = idealCrop
+                    cropEngine.setTargetCrop(idealCrop)
                 case .autoPan:
                     cropEngine.config.transitionSmoothing = shotComposer.config.smoothingFactor
                     let now = CACurrentMediaTime()
@@ -1040,7 +1094,7 @@ final class CameraManager: NSObject, ObservableObject {
                         }
                     }
                     let panCenter = CGPoint(x: autoPanPhase, y: shotComposer.config.autoPanHeight)
-                    cropEngine.targetCrop = manualCropRect(center: panCenter)
+                    cropEngine.setTargetCrop(manualCropRect(center: panCenter))
                 }
             composeDuration = CACurrentMediaTime() - composeStart
             Self.signposter.endInterval("compose", composeInterval)
@@ -1314,6 +1368,11 @@ final class CameraManager: NSObject, ObservableObject {
             let sourceAspect = CGFloat(dims.width) / CGFloat(dims.height)
             shotComposer.updateSourcePixelAspect(sourceAspect)
             lastAppliedSourceAspect = sourceAspect
+            // First-guess clamp from the advertised format. processFrame()
+            // overrides this with the *actual delivered* resolution on the
+            // first frame (some drivers advertise 4K but deliver 1080p), which
+            // is the authoritative source for both the agent clamp and the
+            // CropEngine quality floor.
             cinematicAgent.updateSourceResolution(width: Int(dims.width), height: Int(dims.height))
         }
 

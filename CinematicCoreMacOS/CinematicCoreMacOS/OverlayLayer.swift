@@ -84,6 +84,14 @@ struct TelemetryOverlay: View {
                     valueColor: Color(red: 0.47, green: 0.86, blue: 1.0)
                 )
             }
+            if let output = cameraManager.programOutputLabel {
+                telemetryBlock(
+                    label: "OUTPUT",
+                    value: output,
+                    monospaced: true,
+                    valueColor: Color(red: 0.22, green: 1.0, blue: 0.42)
+                )
+            }
             telemetryBlock(
                 label: "DETECTION",
                 value: detectionValue,

@@ -45,12 +45,29 @@ final class CropEngine: ObservableObject {
     /// Current crop rectangle (normalized 0-1 coordinates)
     @Published private(set) var currentCrop: CropRect = .fullFrame
 
-    /// Target crop rectangle (where we're smoothly transitioning to)
+    /// Target crop rectangle (where we're smoothly transitioning to).
+    ///
+    /// Every assignment is clamped against `qualityFloor` so no caller — ML
+    /// agent, rule-based composer, manual crop, or auto-pan — can request a
+    /// crop tighter than one resolution tier below the source. This is the
+    /// single chokepoint all four modes pass through.
     @Published var targetCrop: CropRect = .fullFrame {
         didSet {
             // Automatically start interpolating
             isInterpolating = true
         }
+    }
+
+    /// Resolution-derived quality floor. Updated from the *actual delivered*
+    /// frame resolution (not the advertised capture format). Defaults to
+    /// `.unconstrained` until the first frame sets it.
+    var qualityFloor: QualityFloor = .unconstrained
+
+    /// Assign `targetCrop` with the quality floor applied. Use this instead of
+    /// setting `targetCrop` directly so over-tight crops are enlarged back to
+    /// the floor (re-centered) before interpolation.
+    func setTargetCrop(_ crop: CropRect) {
+        targetCrop = crop.clampedToQualityFloor(qualityFloor)
     }
 
     /// Whether we're actively interpolating between crops
@@ -77,19 +94,80 @@ final class CropEngine: ObservableObject {
     private let ciContext: CIContext
 
 
+    // MARK: - Quality Floor
+
+    /// Resolution-derived lower bound on how small a crop may be before the
+    /// upscale to the output buffer starts visibly softening the picture.
+    ///
+    /// The rule of thumb: a crop never pulls in tighter than one resolution
+    /// tier below the source (8K→4K, 4K→1080p, 1080p→720p, 720p→540p). Since
+    /// the output buffer's vertical scale is `outputSize.height / cropHeight`,
+    /// flooring the crop *height* caps the upscale factor at ~2×.
+    ///
+    /// This is the single source of truth for the tier table; `CinematicAgent`
+    /// delegates to it.
+    struct QualityFloor: Sendable, Equatable {
+        /// Smallest allowed normalized crop *height* (0–1).
+        /// `minCropHeightFraction = nextTierDownPixels / sourcePixels`.
+        var minCropHeightFraction: CGFloat
+
+        /// No source info yet (or no constraint): allow the full zoom range.
+        static let unconstrained = QualityFloor(minCropHeightFraction: 0.0)
+
+        /// Map source pixel height to the quality floor.
+        static func forSource(height: Int) -> QualityFloor {
+            guard height > 0 else { return .unconstrained }
+            let minCropHeight: Int
+            switch height {
+            case 4320...:     minCropHeight = 2160   // 8K+  → 4K
+            case 2160..<4320: minCropHeight = 1080   // 4K   → 1080p
+            case 1080..<2160: minCropHeight = 720    // 1080 → 720p
+            case 720..<1080:  minCropHeight = 540    // 720  → 540p
+            default:          minCropHeight = max(height / 2, 360)
+            }
+            return QualityFloor(
+                minCropHeightFraction: CGFloat(minCropHeight) / CGFloat(height)
+            )
+        }
+    }
+
     // MARK: - Crop Rectangle Model
-    
+
     struct CropRect: Equatable, Sendable {
         /// Normalized coordinates (0-1)
         var origin: CGPoint  // Bottom-left corner (Vision coordinate system)
         var size: CGSize     // Width and height
         
-        /// Full frame (no crop)
+        /// Full frame (no crop). NOTE: this is the entire source rectangle. On a
+        /// source whose pixel aspect differs from the output, rendering this to
+        /// the output buffer *stretches* the image. For an aspect-correct wide
+        /// shot use `widest(aspect:)` with the composer's `normalizedAspect`.
         static let fullFrame = CropRect(
             origin: CGPoint(x: 0, y: 0),
             size: CGSize(width: 1, height: 1)
         )
-        
+
+        /// Largest centered crop with the given normalized aspect (w/h) that
+        /// fits inside the [0,1] source canvas. This is the aspect-correct
+        /// "wide" shot — it crops off the source's excess height or width so the
+        /// rendered output keeps correct proportions instead of stretching.
+        ///
+        /// `aspect` is the *normalized* crop aspect (`outputAspect / sourcePixelAspect`),
+        /// not the raw output aspect.
+        static func widest(aspect: CGFloat) -> CropRect {
+            guard aspect > 0 else { return .fullFrame }
+            var w: CGFloat = 1.0
+            var h = w / aspect
+            if h > 1.0 {
+                h = 1.0
+                w = h * aspect
+            }
+            return CropRect(
+                origin: CGPoint(x: (1 - w) / 2, y: (1 - h) / 2),
+                size: CGSize(width: w, height: h)
+            )
+        }
+
         /// Create crop from center point and zoom level
         static func centered(at center: CGPoint, zoom: Float) -> CropRect {
             let width = 1.0 / CGFloat(zoom)
@@ -141,7 +219,43 @@ final class CropEngine: ObservableObject {
                 size: CGSize(width: clampedWidth, height: clampedHeight)
             )
         }
-        
+
+        /// Enlarge a too-tight crop back up to the quality floor, preserving the
+        /// crop's *own* width:height ratio and center, then re-fit inside the
+        /// [0,1] canvas. Crops already at or above the floor are returned
+        /// unchanged.
+        ///
+        /// Scaling both dimensions by the same factor (rather than imposing an
+        /// external aspect) is what keeps this correct in any source pixel
+        /// aspect — the incoming crop already encodes the right normalized
+        /// aspect for the current source, and we must not distort it.
+        func clampedToQualityFloor(_ floor: QualityFloor) -> CropRect {
+            guard size.height > 0, floor.minCropHeightFraction > size.height else { return self }
+
+            let centerX = origin.x + size.width / 2
+            let centerY = origin.y + size.height / 2
+
+            // Uniform scale to bring height up to the floor; width follows so
+            // the aspect is unchanged. Cap so neither dimension exceeds 1.0.
+            var scale = floor.minCropHeightFraction / size.height
+            let maxScale = min(
+                size.width  > 0 ? 1.0 / size.width  : .greatestFiniteMagnitude,
+                1.0 / size.height
+            )
+            scale = min(scale, maxScale)
+
+            let w = size.width * scale
+            let h = size.height * scale
+
+            let originX = max(0, min(1 - w, centerX - w / 2))
+            let originY = max(0, min(1 - h, centerY - h / 2))
+
+            return CropRect(
+                origin: CGPoint(x: originX, y: originY),
+                size: CGSize(width: w, height: h)
+            )
+        }
+
         /// Interpolate between two crop rectangles
         func lerp(to target: CropRect, factor: Float) -> CropRect {
             let f = CGFloat(factor)
@@ -260,15 +374,24 @@ final class CropEngine: ObservableObject {
 
     /// Set crop to frame a detected person with smooth transition
     func framePerson(_ person: PersonDetector.DetectedPerson, padding: CGFloat = 0.15) {
-        targetCrop = CropRect.framing(
-            boundingBox: person.boundingBox,
-            padding: padding
-        ).clamped()
+        setTargetCrop(
+            CropRect.framing(
+                boundingBox: person.boundingBox,
+                padding: padding
+            ).clamped()
+        )
     }
     
-    /// Reset to full frame
-    func resetToFullFrame() {
-        targetCrop = .fullFrame
+    /// Reset to a wide shot. Pass the composer's `normalizedAspect` for an
+    /// aspect-correct widest crop (largest output-aspect region of the source);
+    /// omit it only when an exact full-frame source rect is genuinely wanted
+    /// (note: that stretches a non-output-aspect source when rendered).
+    func resetToFullFrame(aspect: CGFloat? = nil) {
+        if let aspect {
+            targetCrop = .widest(aspect: aspect)
+        } else {
+            targetCrop = .fullFrame
+        }
     }
     
     /// Jump to target immediately (no smooth transition)

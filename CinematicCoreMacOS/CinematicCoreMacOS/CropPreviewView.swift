@@ -231,7 +231,9 @@ struct CropSettingsView: View {
                     
                     HStack(spacing: 8) {
                         Button("Reset to Full Frame") {
-                            cropEngine.resetToFullFrame()
+                            cropEngine.resetToFullFrame(
+                                aspect: cameraManager.shotComposer.normalizedAspect
+                            )
                         }
                         .buttonStyle(.bordered)
                         
