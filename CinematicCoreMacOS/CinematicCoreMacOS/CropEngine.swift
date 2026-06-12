@@ -93,6 +93,13 @@ final class CropEngine: ObservableObject {
     private let device: MTLDevice
     private let ciContext: CIContext
 
+    /// Reused pool of output buffers. Allocating a fresh CVPixelBuffer every frame
+    /// (50/sec) churns IOSurfaces and shows up in the per-frame budget; the pool
+    /// recycles buffers of the current output size instead. Lives in its own
+    /// `nonisolated` Sendable box so `processCrop` (which is `nonisolated`) can
+    /// reach it without an actor hop.
+    private let outputBufferPool = OutputBufferPool()
+
 
     // MARK: - Quality Floor
 
@@ -338,21 +345,35 @@ final class CropEngine: ObservableObject {
             .cropped(to: cropRect)
             .transformed(by: CGAffineTransform(translationX: -cropRect.origin.x, y: -cropRect.origin.y))
 
-        // Lanczos resampling for sharper edges than CoreImage's default
-        // bilinear. `scale` sets the vertical factor; `aspectRatio` adds any
-        // extra horizontal stretch when the crop's aspect differs from the
-        // output's (which can happen during interpolation between targets).
+        // Adaptive resampling. Lanczos gives sharper results than CoreImage's
+        // default bilinear, but it is markedly more expensive and that cost grows
+        // with the upscale factor — which is exactly the tight-crop case that was
+        // blowing the per-frame budget. Lanczos only meaningfully helps when
+        // *downscaling* (anti-aliasing a shrink); for upscales the difference is
+        // marginal, so use the cheap bilinear transform there. The quality floor
+        // already caps upscale at ~2×, so we never bilinear-stretch beyond that.
         let scaleY = outputSize.height / cropRect.height
         let scaleX = outputSize.width / cropRect.width
-        let lanczos = CIFilter(name: "CILanczosScaleTransform")!
-        lanczos.setValue(translated, forKey: kCIInputImageKey)
-        lanczos.setValue(scaleY, forKey: kCIInputScaleKey)
-        lanczos.setValue(scaleX / scaleY, forKey: kCIInputAspectRatioKey)
-        let scaled = lanczos.outputImage ?? translated.transformed(
-            by: CGAffineTransform(scaleX: scaleX, y: scaleY)
-        )
+        let scaled: CIImage
+        if scaleX <= 1.0 && scaleY <= 1.0 {
+            // Downscale: Lanczos. `scale` sets the vertical factor; `aspectRatio`
+            // adds any extra horizontal stretch when the crop's aspect differs
+            // from the output's (which can happen during interpolation).
+            let lanczos = CIFilter(name: "CILanczosScaleTransform")!
+            lanczos.setValue(translated, forKey: kCIInputImageKey)
+            lanczos.setValue(scaleY, forKey: kCIInputScaleKey)
+            lanczos.setValue(scaleX / scaleY, forKey: kCIInputAspectRatioKey)
+            scaled = lanczos.outputImage ?? translated.transformed(
+                by: CGAffineTransform(scaleX: scaleX, y: scaleY)
+            )
+        } else {
+            // Upscale (or mixed): cheap bilinear.
+            scaled = translated.transformed(
+                by: CGAffineTransform(scaleX: scaleX, y: scaleY)
+            )
+        }
 
-        let outputBuffer = try createOutputBuffer(size: outputSize)
+        let outputBuffer = try outputBufferPool.dequeue(size: outputSize)
         ciContext.render(
             scaled,
             to: outputBuffer,
@@ -473,35 +494,6 @@ final class CropEngine: ObservableObject {
         }
     }
     
-    private nonisolated func createOutputBuffer(size: CGSize) throws -> CVPixelBuffer {
-        var pixelBuffer: CVPixelBuffer?
-        
-        let attributes: [String: Any] = [
-            kCVPixelBufferWidthKey as String: Int(size.width),
-            kCVPixelBufferHeightKey as String: Int(size.height),
-            kCVPixelBufferPixelFormatTypeKey as String: kCVPixelFormatType_32BGRA,
-            kCVPixelBufferIOSurfacePropertiesKey as String: [:] as CFDictionary,
-            kCVPixelBufferMetalCompatibilityKey as String: true,
-            kCVPixelBufferCGImageCompatibilityKey as String: true,
-            kCVPixelBufferCGBitmapContextCompatibilityKey as String: true
-        ]
-        
-        let status = CVPixelBufferCreate(
-            kCFAllocatorDefault,
-            Int(size.width),
-            Int(size.height),
-            kCVPixelFormatType_32BGRA,
-            attributes as CFDictionary,
-            &pixelBuffer
-        )
-        
-        guard status == kCVReturnSuccess, let buffer = pixelBuffer else {
-            throw CropError.bufferCreationFailed
-        }
-        
-        return buffer
-    }
-    
     private func updateStats(renderTime: TimeInterval) {
         stats.lastRenderTime = renderTime
         stats.totalFramesRendered += 1
@@ -521,5 +513,86 @@ enum CropError: LocalizedError {
         switch self {
         case .bufferCreationFailed: return "Failed to create output buffer"
         }
+    }
+}
+
+/// Recycles render output buffers of the current output size. `processCrop` runs
+/// `nonisolated`, so this lives in its own `@unchecked Sendable` box with an
+/// internal lock rather than on the MainActor-isolated `CropEngine`.
+private final class OutputBufferPool: @unchecked Sendable {
+    private let lock = NSLock()
+    private var pool: CVPixelBufferPool?
+    private var poolSize: CGSize = .zero
+
+    /// Vend a recycled buffer, rebuilding the pool when the output size changes.
+    /// Falls back to a one-off allocation if the pool can't be created or is exhausted.
+    func dequeue(size: CGSize) throws -> CVPixelBuffer {
+        lock.lock()
+        defer { lock.unlock() }
+
+        if pool == nil || poolSize != size {
+            let bufferAttributes: [String: Any] = [
+                kCVPixelBufferWidthKey as String: Int(size.width),
+                kCVPixelBufferHeightKey as String: Int(size.height),
+                kCVPixelBufferPixelFormatTypeKey as String: kCVPixelFormatType_32BGRA,
+                kCVPixelBufferIOSurfacePropertiesKey as String: [:] as CFDictionary,
+                kCVPixelBufferMetalCompatibilityKey as String: true,
+                kCVPixelBufferCGImageCompatibilityKey as String: true,
+                kCVPixelBufferCGBitmapContextCompatibilityKey as String: true
+            ]
+            let poolAttributes: [String: Any] = [
+                kCVPixelBufferPoolMinimumBufferCountKey as String: 6
+            ]
+            var newPool: CVPixelBufferPool?
+            let status = CVPixelBufferPoolCreate(
+                kCFAllocatorDefault,
+                poolAttributes as CFDictionary,
+                bufferAttributes as CFDictionary,
+                &newPool
+            )
+            if status == kCVReturnSuccess, let newPool {
+                pool = newPool
+                poolSize = size
+            } else {
+                pool = nil
+                poolSize = .zero
+            }
+        }
+
+        if let pool {
+            var pixelBuffer: CVPixelBuffer?
+            if CVPixelBufferPoolCreatePixelBuffer(kCFAllocatorDefault, pool, &pixelBuffer) == kCVReturnSuccess,
+               let buffer = pixelBuffer {
+                return buffer
+            }
+        }
+
+        // Pool unavailable/exhausted — fall back to a direct allocation.
+        return try Self.allocateBuffer(size: size)
+    }
+
+    private static func allocateBuffer(size: CGSize) throws -> CVPixelBuffer {
+        var pixelBuffer: CVPixelBuffer?
+        let attributes: [String: Any] = [
+            kCVPixelBufferWidthKey as String: Int(size.width),
+            kCVPixelBufferHeightKey as String: Int(size.height),
+            kCVPixelBufferPixelFormatTypeKey as String: kCVPixelFormatType_32BGRA,
+            kCVPixelBufferIOSurfacePropertiesKey as String: [:] as CFDictionary,
+            kCVPixelBufferMetalCompatibilityKey as String: true,
+            kCVPixelBufferCGImageCompatibilityKey as String: true,
+            kCVPixelBufferCGBitmapContextCompatibilityKey as String: true
+        ]
+        let status = CVPixelBufferCreate(
+            kCFAllocatorDefault,
+            Int(size.width),
+            Int(size.height),
+            kCVPixelFormatType_32BGRA,
+            attributes as CFDictionary,
+            &pixelBuffer
+        )
+        guard status == kCVReturnSuccess, let buffer = pixelBuffer else {
+            throw CropError.bufferCreationFailed
+        }
+        return buffer
     }
 }

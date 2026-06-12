@@ -26,6 +26,15 @@ private nonisolated final class CaptureFrameProcessingGate: @unchecked Sendable 
     private var isProcessing = false
     private var droppedFrames: UInt64 = 0
 
+    // Windowed throughput diagnostics. The DeckLink output is hard 1080p50, so the
+    // delivered rate here is the ceiling on what reaches the SDI feed: if it sags
+    // below 50fps the hardware underflows and the picture goes choppy. Logged once
+    // per second under the existing lock so it stays thread-safe and cheap.
+    private static let logger = Logger(subsystem: "com.alfie", category: "CaptureThroughput")
+    private var windowStart: CFTimeInterval = CACurrentMediaTime()
+    private var windowDelivered: UInt64 = 0
+    private var windowDropped: UInt64 = 0
+
     init() {}
 
     func begin() -> Bool {
@@ -33,10 +42,32 @@ private nonisolated final class CaptureFrameProcessingGate: @unchecked Sendable 
         defer { lock.unlock() }
         guard !isProcessing else {
             droppedFrames &+= 1
+            windowDropped &+= 1
+            logThroughputIfDueLocked()
             return false
         }
         isProcessing = true
+        windowDelivered &+= 1
+        logThroughputIfDueLocked()
         return true
+    }
+
+    /// Caller must hold `lock`. Emits a delivered/dropped FPS summary once the
+    /// current 1-second window closes, then opens a new window.
+    private func logThroughputIfDueLocked() {
+        let now = CACurrentMediaTime()
+        let elapsed = now - windowStart
+        guard elapsed >= 1.0 else { return }
+        let deliveredFPS = Double(windowDelivered) / elapsed
+        let droppedFPS = Double(windowDropped) / elapsed
+        let total = windowDelivered + windowDropped
+        let dropPercent = total > 0 ? Double(windowDropped) / Double(total) * 100.0 : 0
+        Self.logger.notice(
+            "Capture throughput: \(deliveredFPS, format: .fixed(precision: 1)) fps delivered to pipeline (target 50), dropped \(droppedFPS, format: .fixed(precision: 1)) fps (\(dropPercent, format: .fixed(precision: 1))% of frames)"
+        )
+        windowStart = now
+        windowDelivered = 0
+        windowDropped = 0
     }
 
     func finish() {
@@ -50,6 +81,9 @@ private nonisolated final class CaptureFrameProcessingGate: @unchecked Sendable 
         defer { lock.unlock() }
         isProcessing = false
         droppedFrames = 0
+        windowStart = CACurrentMediaTime()
+        windowDelivered = 0
+        windowDropped = 0
     }
 
     var droppedFrameCount: UInt64 {

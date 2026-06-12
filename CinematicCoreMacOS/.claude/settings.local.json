@@ -1,0 +1,7 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(xcodebuild -project /Users/stephanmorris/Desktop/macOS-rl-viritual-camera/CinematicCoreMacOS/CinematicCoreMacOS.xcodeproj -list)"
+    ]
+  }
+}
