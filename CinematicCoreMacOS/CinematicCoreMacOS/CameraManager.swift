@@ -222,6 +222,10 @@ final class CameraManager: NSObject, ObservableObject {
     /// Cropped output frame (for ATEM output)
     @Published private(set) var croppedFrame: CIImage?
 
+    /// Counts processed frames so the preview publishes (`currentFrame`/
+    /// `croppedFrame`) can run at half frame rate; see `processFrame`.
+    private var previewPublishTick: UInt64 = 0
+
     /// Raw camera frame cropped to the detection bounding box (no padding, no aspect enforcement)
     @Published private(set) var detectionCroppedFrame: CIImage?
     
@@ -1213,8 +1217,16 @@ final class CameraManager: NSObject, ObservableObject {
             )
         }
 
-        currentFrame = ciImage
-        croppedFrame = programImage
+        // Publish the dual-pane preview at half frame rate. Each assignment
+        // forces a SwiftUI re-render of the full 4K source + crop preview on
+        // the MainActor — the same thread that owns the 20 ms frame budget.
+        // 25 fps is indistinguishable for monitoring; the program feed below
+        // still sends every frame.
+        previewPublishTick &+= 1
+        if previewPublishTick.isMultiple(of: 2) {
+            currentFrame = ciImage
+            croppedFrame = programImage
+        }
         programOutput.sendFrame(outputPixelBuffer, timestamp: timestampSeconds)
 
         let totalDuration = CACurrentMediaTime() - captureStart
@@ -1533,6 +1545,17 @@ private final class VirtualCameraOutputSink: ProgramOutputSink {
     private let xpcManager = XPCConnectionManager()
     private(set) var lastFrameSendDuration: TimeInterval?
     private var hasLoggedFirstFrameSend = false
+
+    /// The XPC message carries only an IOSurfaceID — nothing on the extension
+    /// side retains the backing CVPixelBuffer for us. The extension's frame
+    /// queue can hold a frame for ~166 ms (5 frames drained at 30 Hz), while
+    /// the CropEngine pool recycles a buffer as soon as the app drops its last
+    /// reference (~one frame later). Retaining the most recent sends here keeps
+    /// a surface alive until the extension has certainly consumed it; without
+    /// this, the next render can overwrite a surface the extension is still
+    /// reading (visible as tearing).
+    private static let retainedFrameDepth = 10
+    private var recentlySentBuffers: [CVPixelBuffer] = []
     var onStateChange: (() -> Void)? {
         didSet {
             xpcManager.onStateChange = onStateChange
@@ -1609,6 +1632,7 @@ private final class VirtualCameraOutputSink: ProgramOutputSink {
 
     func disconnect() {
         xpcManager.disconnect()
+        recentlySentBuffers.removeAll()
     }
 
     func reconnect() {
@@ -1640,6 +1664,10 @@ private final class VirtualCameraOutputSink: ProgramOutputSink {
             width: Int32(CVPixelBufferGetWidth(pixelBuffer)),
             height: Int32(CVPixelBufferGetHeight(pixelBuffer))
         )
+        recentlySentBuffers.append(pixelBuffer)
+        if recentlySentBuffers.count > Self.retainedFrameDepth {
+            recentlySentBuffers.removeFirst()
+        }
         if !hasLoggedFirstFrameSend {
             hasLoggedFirstFrameSend = true
             Self.logger.notice(
@@ -1760,7 +1788,7 @@ private final class BlackmagicOutputSink: ProgramOutputSink {
     }
 
     var bringUpChecks: [OutputBringUpCheck] {
-        [
+        var checks = [
             OutputBringUpCheck(
                 id: "blackmagic.connection",
                 title: "Blackmagic SDI · Hardware",
@@ -1769,6 +1797,27 @@ private final class BlackmagicOutputSink: ProgramOutputSink {
                 level: bridge.isConnected ? .ok : (bridge.lastErrorDescription != nil ? .error : .warning)
             )
         ]
+        if bridge.isConnected {
+            // Output-side health: the hardware queue depth is the real playout
+            // latency (buffered × 20 ms at 1080p50) — the in-app stage timings
+            // can't see it. Sustained backpressure or late frames here mean the
+            // pipeline is mismatched with the 50 fps playout clock.
+            let buffered = bridge.bufferedFrameCount
+            let backpressureDrops = bridge.backpressureDropCount
+            let late = bridge.displayedLateCount
+            let hwDropped = bridge.playoutDroppedCount
+            let healthy = backpressureDrops == 0 && late == 0 && hwDropped == 0
+            checks.append(
+                OutputBringUpCheck(
+                    id: "blackmagic.playout",
+                    title: "Blackmagic SDI · Playout",
+                    status: String(format: "%u buffered (~%.0f ms)", buffered, Double(buffered) * 20.0),
+                    detail: "Backpressure drops: \(backpressureDrops) · displayed late: \(late) · hardware drops: \(hwDropped).",
+                    level: healthy ? .ok : .warning
+                )
+            )
+        }
+        return checks
     }
 
     func connect() {

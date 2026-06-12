@@ -2,6 +2,8 @@
 #import <libkern/OSAtomic.h>
 #import <os/log.h>
 #import <atomic>
+#import <mutex>
+#import <unordered_map>
 
 // IMPORTANT: This requires the Blackmagic DeckLink Mac SDK headers.
 // Place DeckLinkAPI.h and related headers in this directory.
@@ -27,9 +29,18 @@ static const uint32_t kMaxBufferedFrames = 4; // drop incoming frames above this
 #if DECKLINK_SDK_AVAILABLE
 // MARK: - Frame completion callback
 //
-// Runs on a DeckLink-owned thread. We only accumulate atomic counters here so the
-// bridge can report real playout health (completed / displayed-late / dropped) for
-// diagnostics — this is the signal the old code lacked entirely.
+// Runs on a DeckLink-owned thread. Two responsibilities:
+//
+// 1. Accumulate atomic playout-health counters (completed / displayed-late /
+//    dropped) — the signal the old code lacked entirely.
+// 2. Own the lifetime of the CVPixelBuffers backing scheduled frames.
+//    CreateVideoFrameFromCVPixelBufferRef wraps the buffer zero-copy, and the
+//    CropEngine's buffer pool recycles a buffer as soon as the app drops its
+//    last reference (~one frame later) — while the hardware can hold a frame
+//    for the full queue depth (~80 ms). Without an explicit retain the pool
+//    can re-vend a surface the hardware is still scanning, which shows up as
+//    tearing on the SDI feed. Each scheduled frame's buffer is retained here
+//    and released only when the hardware reports that frame completed.
 class DeckLinkOutputCallback : public IDeckLinkVideoOutputCallback {
 public:
     DeckLinkOutputCallback() : _refCount(1) {}
@@ -39,7 +50,29 @@ public:
     std::atomic<uint64_t> dropped{0};
     std::atomic<uint64_t> flushed{0};
 
-    HRESULT ScheduledFrameCompleted(IDeckLinkVideoFrame* /*completedFrame*/,
+    void retainBuffer(IDeckLinkVideoFrame *frame, CVPixelBufferRef buffer) {
+        std::lock_guard<std::mutex> guard(_mutex);
+        _inFlightBuffers[frame] = CVPixelBufferRetain(buffer);
+    }
+
+    void releaseBuffer(IDeckLinkVideoFrame *frame) {
+        std::lock_guard<std::mutex> guard(_mutex);
+        auto it = _inFlightBuffers.find(frame);
+        if (it != _inFlightBuffers.end()) {
+            CVPixelBufferRelease(it->second);
+            _inFlightBuffers.erase(it);
+        }
+    }
+
+    void releaseAllBuffers() {
+        std::lock_guard<std::mutex> guard(_mutex);
+        for (auto &entry : _inFlightBuffers) {
+            CVPixelBufferRelease(entry.second);
+        }
+        _inFlightBuffers.clear();
+    }
+
+    HRESULT ScheduledFrameCompleted(IDeckLinkVideoFrame* completedFrame,
                                     BMDOutputFrameCompletionResult result) override {
         switch (result) {
             case bmdOutputFrameCompleted:      completed.fetch_add(1);     break;
@@ -48,10 +81,14 @@ public:
             case bmdOutputFrameFlushed:        flushed.fetch_add(1);       break;
             default: break;
         }
+        releaseBuffer(completedFrame);
         return S_OK;
     }
 
-    HRESULT ScheduledPlaybackHasStopped(void) override { return S_OK; }
+    HRESULT ScheduledPlaybackHasStopped(void) override {
+        releaseAllBuffers();
+        return S_OK;
+    }
 
     // IUnknown
     HRESULT QueryInterface(REFIID, void**) override { return E_NOINTERFACE; }
@@ -63,6 +100,8 @@ public:
     }
 
 private:
+    std::mutex _mutex;
+    std::unordered_map<IDeckLinkVideoFrame*, CVPixelBufferRef> _inFlightBuffers;
     std::atomic<ULONG> _refCount;
 };
 #endif
@@ -76,6 +115,7 @@ private:
     IDeckLink *_deckLink;
     IDeckLinkOutput *_deckLinkOutput;
 #if DECKLINK_SDK_AVAILABLE
+    IDeckLinkMacOutput *_macOutput;
     DeckLinkOutputCallback *_outputCallback;
 #endif
     os_log_t _log;
@@ -132,12 +172,26 @@ private:
         return;
     }
 
+    // The Mac-specific interface (zero-copy CVPixelBuffer wrapping) is queried
+    // once here rather than per frame; it lives as long as the connection.
+    if (_deckLinkOutput->QueryInterface(IID_IDeckLinkMacOutput, (void**)&_macOutput) != S_OK) {
+        self.lastErrorDescription = @"Device does not support the IDeckLinkMacOutput interface.";
+        _macOutput = nullptr;
+        _deckLinkOutput->Release();
+        _deckLinkOutput = nullptr;
+        _deckLink->Release();
+        _deckLink = nullptr;
+        return;
+    }
+
     // Configure for 1080p50 to match standard ATEM/Broadcast framerates
     BMDDisplayMode displayMode = bmdModeHD1080p50;
     HRESULT hr = _deckLinkOutput->EnableVideoOutput(displayMode, bmdVideoOutputFlagDefault);
 
     if (hr != S_OK) {
         self.lastErrorDescription = @"Failed to enable video output on the DeckLink device.";
+        _macOutput->Release();
+        _macOutput = nullptr;
         _deckLinkOutput->Release();
         _deckLinkOutput = nullptr;
         _deckLink->Release();
@@ -172,12 +226,21 @@ private:
         _deckLinkOutput->StopScheduledPlayback(0, nullptr, 0);
         _deckLinkOutput->SetScheduledFrameCompletionCallback(nullptr);
         _deckLinkOutput->DisableVideoOutput();
-        _deckLinkOutput->Release();
-        _deckLinkOutput = nullptr;
     }
     if (_outputCallback) {
+        // ScheduledPlaybackHasStopped normally flushes these, but the callback
+        // is deregistered above, so release any still-in-flight buffers here.
+        _outputCallback->releaseAllBuffers();
         _outputCallback->Release();
         _outputCallback = nullptr;
+    }
+    if (_macOutput) {
+        _macOutput->Release();
+        _macOutput = nullptr;
+    }
+    if (_deckLinkOutput) {
+        _deckLinkOutput->Release();
+        _deckLinkOutput = nullptr;
     }
     if (_deckLink) {
         _deckLink->Release();
@@ -203,12 +266,6 @@ private:
     }
 
 #if DECKLINK_SDK_AVAILABLE
-    IDeckLinkMacOutput *macOutput = nullptr;
-    if (_deckLinkOutput->QueryInterface(IID_IDeckLinkMacOutput, (void**)&macOutput) != S_OK) {
-        self.lastErrorDescription = @"Failed to QueryInterface for IDeckLinkMacOutput";
-        return NO;
-    }
-
     // Backpressure: if the hardware queue is already deep, the app is producing
     // faster than the DeckLink plays out. Drop this frame instead of scheduling it
     // further into the future — that future scheduling is exactly what accumulated
@@ -218,7 +275,6 @@ private:
         if (_deckLinkOutput->GetBufferedVideoFrameCount(&buffered) == S_OK &&
             buffered >= kMaxBufferedFrames) {
             _framesDroppedBackpressure++;
-            macOutput->Release();
             return YES; // intentional drop, not an error
         }
 
@@ -237,17 +293,30 @@ private:
 
     IDeckLinkMutableVideoFrame *deckLinkFrame = nullptr;
     // Zero-copy mapping of the Apple CVPixelBuffer directly into Blackmagic hardware.
-    HRESULT createResult = macOutput->CreateVideoFrameFromCVPixelBufferRef((void*)pixelBuffer, &deckLinkFrame);
+    HRESULT createResult = _macOutput->CreateVideoFrameFromCVPixelBufferRef((void*)pixelBuffer, &deckLinkFrame);
     if (createResult != S_OK) {
         self.lastErrorDescription = [NSString stringWithFormat:@"CreateVideoFrame failed with HRESULT: 0x%08X", (unsigned int)createResult];
-        macOutput->Release();
         return NO;
     }
 
-    _deckLinkOutput->ScheduleVideoFrame(deckLinkFrame,
-                                        _nextDisplayTime,
-                                        _frameDuration,
-                                        _frameTimescale);
+    // Keep the wrapped buffer alive until the hardware finishes with it (see
+    // DeckLinkOutputCallback). Must happen before scheduling: once scheduled,
+    // the frame can complete on the callback thread at any moment.
+    _outputCallback->retainBuffer(deckLinkFrame, pixelBuffer);
+
+    HRESULT scheduleResult = _deckLinkOutput->ScheduleVideoFrame(deckLinkFrame,
+                                                                 _nextDisplayTime,
+                                                                 _frameDuration,
+                                                                 _frameTimescale);
+    if (scheduleResult != S_OK) {
+        // The frame never entered the hardware queue: undo the retain and do
+        // NOT advance the scheduling cursor, or the next good frame would be
+        // scheduled one slot late forever.
+        _outputCallback->releaseBuffer(deckLinkFrame);
+        deckLinkFrame->Release();
+        self.lastErrorDescription = [NSString stringWithFormat:@"ScheduleVideoFrame failed with HRESULT: 0x%08X", (unsigned int)scheduleResult];
+        return NO;
+    }
     deckLinkFrame->Release();
 
     _nextDisplayTime += _frameDuration;
@@ -277,11 +346,44 @@ private:
                _outputCallback ? _outputCallback->dropped.load() : 0);
     }
 
-    macOutput->Release();
     return YES;
 #else
     self.lastErrorDescription = @"DeckLinkAPI.h not included";
     return NO;
+#endif
+}
+
+// MARK: - Health counters (read from the app for HUD/bring-up checks)
+
+- (uint64_t)backpressureDropCount {
+    return _framesDroppedBackpressure;
+}
+
+- (uint32_t)bufferedFrameCount {
+#if DECKLINK_SDK_AVAILABLE
+    if (_deckLinkOutput && _playbackStarted) {
+        uint32_t buffered = 0;
+        if (_deckLinkOutput->GetBufferedVideoFrameCount(&buffered) == S_OK) {
+            return buffered;
+        }
+    }
+#endif
+    return 0;
+}
+
+- (uint64_t)displayedLateCount {
+#if DECKLINK_SDK_AVAILABLE
+    return _outputCallback ? _outputCallback->displayedLate.load() : 0;
+#else
+    return 0;
+#endif
+}
+
+- (uint64_t)playoutDroppedCount {
+#if DECKLINK_SDK_AVAILABLE
+    return _outputCallback ? _outputCallback->dropped.load() : 0;
+#else
+    return 0;
 #endif
 }
 

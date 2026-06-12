@@ -98,6 +98,20 @@ actor FrameQueue {
         guard !frames.isEmpty else { return nil }
         return frames.removeFirst()
     }
+
+    /// Returns the newest frame and discards everything older. The host can
+    /// produce faster than the 30 Hz stream timer consumes; draining one frame
+    /// per tick lets the queue sit at its cap, which is a standing
+    /// (queue depth × tick) of latency on the virtual camera. Showing the
+    /// newest frame bounds that backlog to at most one frame.
+    func drainToLatest() -> (surfaceID: UInt32, timestamp: Double, width: Int32, height: Int32)? {
+        guard let latest = frames.last else { return nil }
+        if frames.count > 1 {
+            os_log(.debug, "Frame queue drained %d stale frames", frames.count - 1)
+        }
+        frames.removeAll()
+        return latest
+    }
     
     func clear() {
         frames.removeAll()
@@ -237,9 +251,10 @@ class CinematicCoreExtensionDeviceSource: NSObject, CMIOExtensionDeviceSource {
 		_timer!.setEventHandler { [weak self] in
 			guard let self = self else { return }
 			
-			// Try to get frame from queue
+			// Show the newest available frame; older queued frames are stale
+			// by definition (the timer is the playout clock) and only add latency.
 			Task {
-				if let frame = await self.frameQueue.dequeue() {
+				if let frame = await self.frameQueue.drainToLatest() {
 					if !self.hasLoggedFirstDequeuedFrame {
 						self.hasLoggedFirstDequeuedFrame = true
 						os_log(.info, "First frame dequeued for CMIO stream at %{public}.3f", frame.timestamp)

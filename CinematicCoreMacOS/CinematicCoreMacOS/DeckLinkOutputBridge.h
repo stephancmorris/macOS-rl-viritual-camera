@@ -14,6 +14,21 @@ NS_ASSUME_NONNULL_BEGIN
 /// An error description if a connection or playback error occurred.
 @property (nonatomic, readonly, nullable) NSString *lastErrorDescription;
 
+/// Frames intentionally dropped by backpressure because the hardware queue was
+/// already at its depth cap. A climbing value means the app is producing faster
+/// than the DeckLink plays out.
+@property (nonatomic, readonly) uint64_t backpressureDropCount;
+
+/// Frames currently buffered in the DeckLink hardware queue. Multiplied by the
+/// frame duration (20 ms at 1080p50) this is the real output-side latency.
+@property (nonatomic, readonly) uint32_t bufferedFrameCount;
+
+/// Frames the hardware reported as displayed late (scheduled behind the clock).
+@property (nonatomic, readonly) uint64_t displayedLateCount;
+
+/// Frames the hardware dropped on playout (distinct from backpressure drops).
+@property (nonatomic, readonly) uint64_t playoutDroppedCount;
+
 /// Initializes the bridge and attempts to connect to the first available DeckLink device.
 - (void)connect;
 

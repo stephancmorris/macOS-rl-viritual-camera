@@ -269,6 +269,24 @@ final class ProgramOutputManager: ObservableObject {
     private var dropTimestamps: [Double] = []
     private var latencySamples: [LatencyStage: [TimedDuration]] = [:]
 
+    // Per-frame counters land here (plain storage), NOT in the @Published
+    // properties above. Every @Published mutation fires objectWillChange on the
+    // MainActor — the same thread that owns the 20 ms frame budget — and
+    // sendFrame/recordLatency run 50–250×/sec. Publishing each one forced
+    // SwiftUI to re-evaluate observers at frame rate, which is exactly the kind
+    // of contention that makes the pipeline blow its budget the moment a
+    // settings window is open. The published snapshots are refreshed from this
+    // raw state by `refreshPublishedStatsIfDue()` at most every
+    // `statsRefreshInterval` seconds.
+    private var rawFramesSent: Int = 0
+    private var rawDroppedFrames: Int = 0
+    private var rawLastFrameSize: CGSize?
+    private var rawLastFrameTimestamp: Double?
+    private var rawLastDropTimestamp: Double?
+    private var rawLastDropReason: String?
+    private var lastStatsRefresh: TimeInterval = 0
+    private let statsRefreshInterval: TimeInterval = 0.5
+
     init(sinks: [any ProgramOutputSink] = []) {
         self.sinks = sinks
         self.sinks.forEach { sink in
@@ -287,6 +305,13 @@ final class ProgramOutputManager: ObservableObject {
         lastFrameTimestamp = nil
         lastDropTimestamp = nil
         lastDropReason = nil
+        rawFramesSent = 0
+        rawDroppedFrames = 0
+        rawLastFrameSize = nil
+        rawLastFrameTimestamp = nil
+        rawLastDropTimestamp = nil
+        rawLastDropReason = nil
+        lastStatsRefresh = 0
         dropTimestamps = []
         latencySamples = [:]
         stageLatencies = []
@@ -301,8 +326,9 @@ final class ProgramOutputManager: ObservableObject {
             $0.disconnect()
         }
         activeRoute = nil
-        refreshStatuses()
-        refreshBringUpChecks()
+        // Final flush so the HUD shows the session's closing numbers rather
+        // than whatever the last coalesced refresh happened to capture.
+        refreshPublishedStatsIfDue(force: true)
     }
 
     func updateCaptureStatus(isRunning: Bool) {
@@ -320,16 +346,15 @@ final class ProgramOutputManager: ObservableObject {
 
     func sendFrame(_ pixelBuffer: CVPixelBuffer, timestamp: Double) {
         guard let activeSink else {
-            refreshStatuses()
-            refreshBringUpChecks()
+            refreshPublishedStatsIfDue()
             return
         }
 
-        lastFrameSize = CGSize(
+        rawLastFrameSize = CGSize(
             width: CVPixelBufferGetWidth(pixelBuffer),
             height: CVPixelBufferGetHeight(pixelBuffer)
         )
-        lastFrameTimestamp = timestamp
+        rawLastFrameTimestamp = timestamp
 
         let didSend = activeSink.sendFrame(pixelBuffer: pixelBuffer, timestamp: timestamp)
         if !didSend {
@@ -337,25 +362,23 @@ final class ProgramOutputManager: ObservableObject {
                 timestamp: timestamp,
                 reason: "Active output route did not accept the frame."
             )
-            refreshStatuses()
             return
         }
         if let sendDuration = activeSink.lastFrameSendDuration {
             recordLatency(stage: .xpcSend, duration: sendDuration)
         }
-        framesSent += 1
-        refreshStatuses()
-        refreshBringUpChecks()
+        rawFramesSent += 1
+        refreshPublishedStatsIfDue()
     }
 
     func recordDroppedFrame(timestamp: Double, reason: String) {
-        droppedFrames += 1
-        lastDropTimestamp = timestamp
-        lastDropReason = reason
+        rawDroppedFrames += 1
+        rawLastDropTimestamp = timestamp
+        rawLastDropReason = reason
         dropTimestamps.append(timestamp)
         trimDropTimestamps(relativeTo: timestamp)
-        dropRatePerMinute = Double(dropTimestamps.count)
         logger.warning("Dropped frame: \(reason, privacy: .public)")
+        refreshPublishedStatsIfDue()
     }
 
     func recordLatency(
@@ -363,12 +386,33 @@ final class ProgramOutputManager: ObservableObject {
         duration: TimeInterval,
         timestamp: TimeInterval = CACurrentMediaTime()
     ) {
+        // Accumulate only; the published `stageLatencies` snapshot is rebuilt by
+        // the coalesced refresh, not on every sample (~250 samples/sec arrive here).
         var samples = latencySamples[stage, default: []]
         samples.append(TimedDuration(timestamp: timestamp, duration: duration))
         let windowStart = timestamp - 5
         samples.removeAll { $0.timestamp < windowStart }
         latencySamples[stage] = samples
+    }
+
+    /// Copies the per-frame raw counters into the @Published snapshots at most
+    /// once per `statsRefreshInterval`. This is the only place frame-cadence
+    /// data is allowed to touch a @Published property.
+    private func refreshPublishedStatsIfDue(force: Bool = false) {
+        let now = CACurrentMediaTime()
+        guard force || now - lastStatsRefresh >= statsRefreshInterval else { return }
+        lastStatsRefresh = now
+
+        framesSent = rawFramesSent
+        droppedFrames = rawDroppedFrames
+        dropRatePerMinute = Double(dropTimestamps.count)
+        lastFrameSize = rawLastFrameSize
+        lastFrameTimestamp = rawLastFrameTimestamp
+        lastDropTimestamp = rawLastDropTimestamp
+        lastDropReason = rawLastDropReason
         refreshLatencySnapshot()
+        refreshStatuses()
+        refreshBringUpChecks()
     }
 
     var activeRouteTitle: String {

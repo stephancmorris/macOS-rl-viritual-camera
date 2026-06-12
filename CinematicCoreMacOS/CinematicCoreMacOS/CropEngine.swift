@@ -88,6 +88,13 @@ final class CropEngine: ObservableObject {
         var gpuUtilization: Float = 0
     }
 
+    /// Per-frame stats accumulate here (plain storage); the @Published `stats`
+    /// snapshot is republished at most every `statsPublishInterval` so the
+    /// 50 fps render loop doesn't fire SwiftUI invalidations on every frame.
+    private var statsAccumulator: Stats = .init()
+    private var lastStatsPublish: TimeInterval = 0
+    private let statsPublishInterval: TimeInterval = 0.5
+
     // MARK: - Rendering Resources
 
     private let device: MTLDevice
@@ -345,20 +352,27 @@ final class CropEngine: ObservableObject {
             .cropped(to: cropRect)
             .transformed(by: CGAffineTransform(translationX: -cropRect.origin.x, y: -cropRect.origin.y))
 
-        // Adaptive resampling. Lanczos gives sharper results than CoreImage's
-        // default bilinear, but it is markedly more expensive and that cost grows
-        // with the upscale factor — which is exactly the tight-crop case that was
-        // blowing the per-frame budget. Lanczos only meaningfully helps when
-        // *downscaling* (anti-aliasing a shrink); for upscales the difference is
-        // marginal, so use the cheap bilinear transform there. The quality floor
-        // already caps upscale at ~2×, so we never bilinear-stretch beyond that.
+        // Adaptive resampling. Lanczos's cost scales with the *input* area it
+        // filters, not with the scale factor: the wide shot (full 4K frame down
+        // to 1080p) is the most expensive case, and on a 4K source the quality
+        // floor guarantees every frame is a downscale — so an upscale-only
+        // cheap path would be dead code. Lanczos's anti-aliasing only pays off
+        // visually on strong shrinks; for mild downscales and the rare upscale
+        // (capped ≈2× by the quality floor) the difference from bilinear is
+        // marginal, so take the cheap transform there.
+        //
+        // Frames shrunk by more than this factor get Lanczos; everything else
+        // uses the bilinear affine transform. Tune against the `cropRender`
+        // stage latency on the rig — if the wide-shot Lanczos still blows the
+        // 20 ms budget, lower the threshold (or move to MPSImageLanczosScale).
+        let lanczosScaleThreshold: CGFloat = 0.7
         let scaleY = outputSize.height / cropRect.height
         let scaleX = outputSize.width / cropRect.width
         let scaled: CIImage
-        if scaleX <= 1.0 && scaleY <= 1.0 {
-            // Downscale: Lanczos. `scale` sets the vertical factor; `aspectRatio`
-            // adds any extra horizontal stretch when the crop's aspect differs
-            // from the output's (which can happen during interpolation).
+        if min(scaleX, scaleY) < lanczosScaleThreshold {
+            // Strong downscale: Lanczos. `scale` sets the vertical factor;
+            // `aspectRatio` adds any extra horizontal stretch when the crop's
+            // aspect differs from the output's (possible during interpolation).
             let lanczos = CIFilter(name: "CILanczosScaleTransform")!
             lanczos.setValue(translated, forKey: kCIInputImageKey)
             lanczos.setValue(scaleY, forKey: kCIInputScaleKey)
@@ -367,7 +381,7 @@ final class CropEngine: ObservableObject {
                 by: CGAffineTransform(scaleX: scaleX, y: scaleY)
             )
         } else {
-            // Upscale (or mixed): cheap bilinear.
+            // Mild downscale or upscale: cheap bilinear.
             scaled = translated.transformed(
                 by: CGAffineTransform(scaleX: scaleX, y: scaleY)
             )
@@ -386,10 +400,16 @@ final class CropEngine: ObservableObject {
 
     /// MainActor-only: record a completed render for the stats HUD. Called
     /// fire-and-forget after `processCrop` returns so the cooperative thread
-    /// isn't blocked on SwiftUI updates.
+    /// isn't blocked on SwiftUI updates. Accumulates every frame but only
+    /// republishes the @Published snapshot at `statsPublishInterval`.
     @MainActor
     func publishRenderStats(renderTime: TimeInterval) {
         updateStats(renderTime: renderTime)
+        let now = CACurrentMediaTime()
+        if now - lastStatsPublish >= statsPublishInterval {
+            lastStatsPublish = now
+            stats = statsAccumulator
+        }
     }
 
 
@@ -495,12 +515,12 @@ final class CropEngine: ObservableObject {
     }
     
     private func updateStats(renderTime: TimeInterval) {
-        stats.lastRenderTime = renderTime
-        stats.totalFramesRendered += 1
-        
+        statsAccumulator.lastRenderTime = renderTime
+        statsAccumulator.totalFramesRendered += 1
+
         // Running average
         let alpha: TimeInterval = 0.1
-        stats.averageRenderTime = (alpha * renderTime) + ((1 - alpha) * stats.averageRenderTime)
+        statsAccumulator.averageRenderTime = (alpha * renderTime) + ((1 - alpha) * statsAccumulator.averageRenderTime)
     }
 }
 
@@ -518,8 +538,11 @@ enum CropError: LocalizedError {
 
 /// Recycles render output buffers of the current output size. `processCrop` runs
 /// `nonisolated`, so this lives in its own `@unchecked Sendable` box with an
-/// internal lock rather than on the MainActor-isolated `CropEngine`.
-private final class OutputBufferPool: @unchecked Sendable {
+/// internal lock rather than on the MainActor-isolated `CropEngine`. The explicit
+/// `nonisolated` matters: the module compiles with default MainActor isolation,
+/// which would otherwise put `dequeue` back on the MainActor and make every call
+/// from `processCrop` a cross-actor hop.
+private nonisolated final class OutputBufferPool: @unchecked Sendable {
     private let lock = NSLock()
     private var pool: CVPixelBufferPool?
     private var poolSize: CGSize = .zero
