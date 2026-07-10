@@ -70,6 +70,7 @@
 			membershipExceptions = (
 				CropRenderer.metal,
 				ProgramOutputManager.swift,
+				ShowStandard.swift,
 			);
 			target = F90A3DA22F30B1F90037BACD /* CinematicCoreExtension */;
 		};

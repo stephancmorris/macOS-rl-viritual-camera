@@ -77,7 +77,7 @@ struct ContentView: View {
                 .padding(.top, 24)
                 .allowsHitTesting(false)
 
-                TelemetryOverlay(cameraManager: cameraManager)
+                TelemetryOverlay(cameraManager: cameraManager, programOutput: cameraManager.programOutput)
                     .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topTrailing)
                     .padding(.top, 28)
                     .padding(.trailing, 72)

@@ -66,6 +66,7 @@ struct IdentityStackOverlay: View {
 
 struct TelemetryOverlay: View {
     @ObservedObject var cameraManager: CameraManager
+    @ObservedObject var programOutput: ProgramOutputManager
 
     var body: some View {
         HStack(alignment: .top, spacing: 26) {
@@ -84,10 +85,26 @@ struct TelemetryOverlay: View {
                     valueColor: Color(red: 0.47, green: 0.86, blue: 1.0)
                 )
             }
+            if programOutput.measuredInputFPS > 0 {
+                telemetryBlock(
+                    label: "IN",
+                    value: String(format: "%.1f", programOutput.measuredInputFPS),
+                    monospaced: true,
+                    valueColor: inputRateColor
+                )
+            }
             if let output = cameraManager.programOutputLabel {
                 telemetryBlock(
-                    label: "OUTPUT",
+                    label: "CROP RES",
                     value: output,
+                    monospaced: true,
+                    valueColor: Color(red: 0.22, green: 1.0, blue: 0.42)
+                )
+            }
+            if let frameSize = programOutput.lastFrameSize {
+                telemetryBlock(
+                    label: "OUTPUT",
+                    value: CameraManager.resolutionTierLabel(forHeight: Int(frameSize.height)),
                     monospaced: true,
                     valueColor: Color(red: 0.22, green: 1.0, blue: 0.42)
                 )
@@ -115,6 +132,16 @@ struct TelemetryOverlay: View {
         let ms = cameraManager.personDetector.stats.lastDetectionTime * 1000
         if ms <= 0 { return "—" }
         return String(format: "%.1fms", ms)
+    }
+
+    /// Amber when the delivered input rate disagrees with the active route's
+    /// playout clock — the mismatch that shows up as judder and queue latency.
+    private var inputRateColor: Color {
+        if let playoutRate = programOutput.activePlayoutFrameRate,
+           abs(programOutput.measuredInputFPS - playoutRate) > 0.5 {
+            return Color(red: 1.0, green: 0.74, blue: 0.23)
+        }
+        return .white.opacity(0.92)
     }
 
     private func telemetryBlock(

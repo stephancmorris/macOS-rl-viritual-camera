@@ -120,6 +120,10 @@ protocol ProgramOutputSink: AnyObject {
     var canReconnect: Bool { get }
     var reconnectStatus: String? { get }
     var bringUpChecks: [OutputBringUpCheck] { get }
+    /// The fixed hardware playout rate of this route, if it has one. `nil`
+    /// for routes with no clock of their own (e.g. the virtual camera, which
+    /// is drained at whatever rate the consuming app pulls frames).
+    var playoutFrameRate: Double? { get }
     var onStateChange: (() -> Void)? { get set }
 
     func connect()
@@ -135,6 +139,7 @@ extension ProgramOutputSink {
     var canReconnect: Bool { false }
     var reconnectStatus: String? { nil }
     var bringUpChecks: [OutputBringUpCheck] { [] }
+    var playoutFrameRate: Double? { nil }
     func reconnect() {}
 }
 
@@ -264,10 +269,25 @@ final class ProgramOutputManager: ObservableObject {
     @Published private(set) var stageLatencies: [StageLatency] = []
     @Published private(set) var bringUpChecks: [OutputBringUpCheck] = []
 
+    /// Frame rate actually delivered by the capture side, measured over a
+    /// rolling window of capture timestamps. This is the number that proves
+    /// (or disproves) that the input chain matches the playout clock — the
+    /// device's advertised format is not trustworthy here.
+    @Published private(set) var measuredInputFPS: Double = 0
+
+    /// Playout clock of the active route, if it has one (the DeckLink runs a
+    /// fixed hardware clock; the virtual camera has none). Drives the HUD
+    /// mismatch tint and the frame-rate bring-up check.
+    var activePlayoutFrameRate: Double? {
+        activeSink?.playoutFrameRate
+    }
+
     private let sinks: [any ProgramOutputSink]
     private var isCaptureRunning = false
     private var dropTimestamps: [Double] = []
     private var latencySamples: [LatencyStage: [TimedDuration]] = [:]
+    private var inputFrameTimestamps: [Double] = []
+    private static let inputRateWindow: Double = 2.0
 
     // Per-frame counters land here (plain storage), NOT in the @Published
     // properties above. Every @Published mutation fires objectWillChange on the
@@ -315,6 +335,8 @@ final class ProgramOutputManager: ObservableObject {
         dropTimestamps = []
         latencySamples = [:]
         stageLatencies = []
+        inputFrameTimestamps = []
+        measuredInputFPS = 0
         sinks.forEach { $0.connect() }
         refreshRoutingDecision()
     }
@@ -381,6 +403,20 @@ final class ProgramOutputManager: ObservableObject {
         refreshPublishedStatsIfDue()
     }
 
+    /// Called once per delivered capture frame with the frame's presentation
+    /// timestamp. Accumulate only (frame path — no @Published mutation here);
+    /// `measuredInputFPS` is rebuilt by the coalesced refresh.
+    func recordInputFrame(timestamp: Double) {
+        // A backwards timestamp means the source restarted (e.g. a looping
+        // validation clip); start the window over rather than mixing epochs.
+        if let last = inputFrameTimestamps.last, timestamp < last {
+            inputFrameTimestamps.removeAll()
+        }
+        inputFrameTimestamps.append(timestamp)
+        let windowStart = timestamp - Self.inputRateWindow
+        inputFrameTimestamps.removeAll { $0 < windowStart }
+    }
+
     func recordLatency(
         stage: LatencyStage,
         duration: TimeInterval,
@@ -410,6 +446,16 @@ final class ProgramOutputManager: ObservableObject {
         lastFrameTimestamp = rawLastFrameTimestamp
         lastDropTimestamp = rawLastDropTimestamp
         lastDropReason = rawLastDropReason
+        // Must precede refreshBringUpChecks() below — the frame-rate-match
+        // check reads this snapshot.
+        if inputFrameTimestamps.count >= 2,
+           let first = inputFrameTimestamps.first,
+           let last = inputFrameTimestamps.last,
+           last > first {
+            measuredInputFPS = Double(inputFrameTimestamps.count - 1) / (last - first)
+        } else {
+            measuredInputFPS = 0
+        }
         refreshLatencySnapshot()
         refreshStatuses()
         refreshBringUpChecks()
@@ -533,13 +579,39 @@ final class ProgramOutputManager: ObservableObject {
     }
 
     private func refreshBringUpChecks() {
-        bringUpChecks = sinks.flatMap(\.bringUpChecks)
+        var checks = sinks.flatMap(\.bringUpChecks)
+        // Frame-rate match: input faster than the playout clock pins the
+        // hardware queue at its cap (standing latency) and back-pressure drops
+        // the surplus (judder); slower means the hardware repeats frames.
+        if let playoutRate = activeSink?.playoutFrameRate, measuredInputFPS > 0 {
+            let matched = abs(measuredInputFPS - playoutRate) <= 0.5
+            checks.append(
+                OutputBringUpCheck(
+                    id: "programOutput.frameRateMatch",
+                    title: "Program Feed · Frame Rate Match",
+                    status: String(format: "In %.2f fps · out %g fps", measuredInputFPS, playoutRate),
+                    detail: matched
+                        ? "Capture delivery matches the playout clock."
+                        : String(
+                            format: "Capture is delivering %.2f fps but the output plays out at %g fps. Align the camera/capture chain with the output standard.",
+                            measuredInputFPS,
+                            playoutRate
+                        ),
+                    level: matched ? .ok : .warning
+                )
+            )
+        }
+        bringUpChecks = checks
     }
 }
 
 struct ProgramOutputSettingsView<SystemExtensionManager: SystemExtensionStatusProviding>: View {
     @ObservedObject var programOutput: ProgramOutputManager
     @ObservedObject var systemExtensionManager: SystemExtensionManager
+
+    /// Persisted show standard, as a raw string so it survives relaunch and is
+    /// read back by CameraManager/BlackmagicOutputSink at capture start.
+    @AppStorage(ShowStandard.userDefaultsKey) private var showStandardRaw = ShowStandard.p50.rawValue
 
     var body: some View {
         Form {
@@ -550,6 +622,16 @@ struct ProgramOutputSettingsView<SystemExtensionManager: SystemExtensionStatusPr
                             .tag(route)
                     }
                 }
+
+                Picker("Show Standard", selection: $showStandardRaw) {
+                    ForEach(ShowStandard.allCases) { standard in
+                        Text(standard.title).tag(standard.rawValue)
+                    }
+                }
+
+                Text("Must match the ATEM switcher's video standard. Applies the next time capture starts.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
 
                 LabeledContent("Active Route", value: programOutput.activeRouteTitle)
 

@@ -16,15 +16,61 @@
 typedef void* IDeckLink;
 typedef void* IDeckLinkOutput;
 typedef long HRESULT;
+// The frame-timing ivars are declared with these BMD scalar types regardless of
+// the SDK guard, so the stub path needs matching aliases to compile.
+typedef int64_t BMDTimeValue;
+typedef int64_t BMDTimeScale;
 #define DECKLINK_SDK_AVAILABLE 0
 #endif
 
-// Latency tuning. The DeckLink plays out at exactly 1080p50 on its own hardware
-// clock; the app produces frames at a variable rate. We keep a small, *constant*
-// buffer ahead of the hardware playout position so latency stays bounded and the
-// stream never underflows, rather than letting a count-based timeline drift.
-static const int      kPrerollFrames    = 3;  // frames to buffer before starting playback
-static const uint32_t kMaxBufferedFrames = 4; // drop incoming frames above this depth
+// Latency tuning. The DeckLink plays out at the selected standard's rate on its
+// own hardware clock; the app produces frames at a variable rate. We keep a
+// small, *constant* buffer ahead of the hardware playout position so latency
+// stays bounded and the stream never underflows, rather than letting a
+// count-based timeline drift. The preroll and cap are instance-configurable
+// (see prerollFrames / maxBufferedFrames); these are the defaults.
+static const int      kDefaultPrerollFrames     = 3;  // frames to buffer before starting playback
+static const uint32_t kDefaultMaxBufferedFrames = 4;  // drop incoming frames above this depth
+
+// Human-readable name for the connect log line. Takes only the ObjC enum, so it
+// lives outside the SDK guard.
+static const char *DeckLinkStandardName(DeckLinkOutputStandard standard) {
+    switch (standard) {
+        case DeckLinkOutputStandard1080p5994: return "1080p59.94";
+        case DeckLinkOutputStandard1080p6000: return "1080p60";
+        case DeckLinkOutputStandard1080p50:
+        default:                              return "1080p50";
+    }
+}
+
+#if DECKLINK_SDK_AVAILABLE
+// Maps an ObjC-visible output standard to its BMD display mode plus exact frame
+// timing. The fractional pairs matter: 1080p59.94 is 60000/1001, never an
+// approximation. Only compiled when the SDK's BMD types exist.
+static void DeckLinkTimingForStandard(DeckLinkOutputStandard standard,
+                                      BMDDisplayMode *outMode,
+                                      BMDTimeValue *outDuration,
+                                      BMDTimeScale *outTimescale) {
+    switch (standard) {
+        case DeckLinkOutputStandard1080p5994:
+            *outMode = bmdModeHD1080p5994;
+            *outDuration = 1001;
+            *outTimescale = 60000;
+            break;
+        case DeckLinkOutputStandard1080p6000:
+            *outMode = bmdModeHD1080p6000;
+            *outDuration = 1000;
+            *outTimescale = 60000;
+            break;
+        case DeckLinkOutputStandard1080p50:
+        default:
+            *outMode = bmdModeHD1080p50;
+            *outDuration = 1000;
+            *outTimescale = 50000;
+            break;
+    }
+}
+#endif
 
 #if DECKLINK_SDK_AVAILABLE
 // MARK: - Frame completion callback
@@ -125,6 +171,10 @@ private:
     BMDTimeValue _nextDisplayTime;   // stream time the next frame will be scheduled at
     BOOL _playbackStarted;
 
+    // The standard the current (or most recent) connection was made with, so
+    // reconnect() can preserve it.
+    DeckLinkOutputStandard _connectedStandard;
+
     uint64_t _framesScheduled;
     uint64_t _framesDroppedBackpressure;
 }
@@ -133,22 +183,47 @@ private:
     self = [super init];
     if (self) {
         _isConnected = NO;
-        _frameDuration = 1;
-        _frameTimescale = 50; // 50fps
+        // Default to 1080p50 timing (1000/50000) until connectWithStandard: sets
+        // the real values; this keeps frameDurationSeconds at 0.02 pre-connect.
+        _frameDuration = 1000;
+        _frameTimescale = 50000;
+        _connectedStandard = DeckLinkOutputStandard1080p50;
         _nextDisplayTime = 0;
         _playbackStarted = NO;
         _framesScheduled = 0;
         _framesDroppedBackpressure = 0;
+        _prerollFrames = kDefaultPrerollFrames;
+        _maxBufferedFrames = kDefaultMaxBufferedFrames;
         _log = os_log_create("com.alfie", "DeckLinkOutput");
     }
     return self;
 }
 
 - (void)connect {
+    [self connectWithStandard:DeckLinkOutputStandard1080p50];
+}
+
+- (void)connectWithStandard:(DeckLinkOutputStandard)standard {
+    _connectedStandard = standard;
+
+    // Clamp the operator-tunable buffer depths to sane bounds so a bad override
+    // can't wedge playout (preroll >= 1, cap always at least one deeper than the
+    // preroll so backpressure never fires before playback can start).
+    if (_prerollFrames < 1) {
+        _prerollFrames = 1;
+    }
+    if (_maxBufferedFrames < (uint32_t)(_prerollFrames + 1)) {
+        _maxBufferedFrames = (uint32_t)(_prerollFrames + 1);
+    }
+
 #if DECKLINK_SDK_AVAILABLE
     if (self.isConnected) {
         return;
     }
+
+    // Derive the BMD display mode and frame timing from the selected standard.
+    BMDDisplayMode displayMode = bmdModeHD1080p50;
+    DeckLinkTimingForStandard(standard, &displayMode, &_frameDuration, &_frameTimescale);
 
     IDeckLinkIterator *deckLinkIterator = CreateDeckLinkIteratorInstance();
     if (!deckLinkIterator) {
@@ -184,8 +259,7 @@ private:
         return;
     }
 
-    // Configure for 1080p50 to match standard ATEM/Broadcast framerates
-    BMDDisplayMode displayMode = bmdModeHD1080p50;
+    // Configure the video output for the standard selected above.
     HRESULT hr = _deckLinkOutput->EnableVideoOutput(displayMode, bmdVideoOutputFlagDefault);
 
     if (hr != S_OK) {
@@ -205,7 +279,7 @@ private:
 
     // Reset the scheduling clock. We intentionally do NOT call StartScheduledPlayback
     // here: starting with 0 frames buffered underflows instantly. Playback is deferred
-    // until kPrerollFrames have been scheduled (see sendFrameWithPixelBuffer).
+    // until prerollFrames have been scheduled (see sendFrameWithPixelBuffer).
     _nextDisplayTime = 0;
     _playbackStarted = NO;
     _framesScheduled = 0;
@@ -213,8 +287,8 @@ private:
 
     self.isConnected = YES;
     self.lastErrorDescription = nil;
-    os_log(_log, "DeckLink output connected: 1080p50, preroll=%d frames, max buffer=%u frames",
-           kPrerollFrames, kMaxBufferedFrames);
+    os_log(_log, "DeckLink output connected: %{public}s, preroll=%d frames, max buffer=%u frames",
+           DeckLinkStandardName(standard), _prerollFrames, _maxBufferedFrames);
 #else
     self.lastErrorDescription = @"DeckLink SDK headers are missing. Bridge is not compiled.";
 #endif
@@ -255,8 +329,11 @@ private:
 }
 
 - (void)reconnect {
+    // Preserve the standard the connection was made with; disconnect() leaves
+    // _connectedStandard untouched.
+    DeckLinkOutputStandard standard = _connectedStandard;
     [self disconnect];
-    [self connect];
+    [self connectWithStandard:standard];
 }
 
 - (BOOL)sendFrameWithPixelBuffer:(CVPixelBufferRef)pixelBuffer timestamp:(double)timestamp {
@@ -273,18 +350,19 @@ private:
     if (_playbackStarted) {
         uint32_t buffered = 0;
         if (_deckLinkOutput->GetBufferedVideoFrameCount(&buffered) == S_OK &&
-            buffered >= kMaxBufferedFrames) {
+            buffered >= _maxBufferedFrames) {
             _framesDroppedBackpressure++;
             return YES; // intentional drop, not an error
         }
 
         // Underflow recovery: if our scheduling cursor has fallen behind the
-        // hardware playout position (app ran slower than 50fps), re-anchor it a
-        // fixed preroll ahead of "now" so we never schedule into the past.
+        // hardware playout position (app ran slower than the playout rate),
+        // re-anchor it a fixed preroll ahead of "now" so we never schedule into
+        // the past.
         BMDTimeValue streamTime = 0;
         double playbackSpeed = 1.0;
         if (_deckLinkOutput->GetScheduledStreamTime(_frameTimescale, &streamTime, &playbackSpeed) == S_OK) {
-            BMDTimeValue minNextDisplayTime = streamTime + (BMDTimeValue)kPrerollFrames * _frameDuration;
+            BMDTimeValue minNextDisplayTime = streamTime + (BMDTimeValue)_prerollFrames * _frameDuration;
             if (_nextDisplayTime < minNextDisplayTime) {
                 _nextDisplayTime = minNextDisplayTime;
             }
@@ -324,7 +402,7 @@ private:
 
     // Defer playback start until we have a preroll buffer, so the hardware never
     // underflows on the very first frame.
-    if (!_playbackStarted && _framesScheduled >= (uint64_t)kPrerollFrames) {
+    if (!_playbackStarted && _framesScheduled >= (uint64_t)_prerollFrames) {
         _deckLinkOutput->StartScheduledPlayback(0, _frameTimescale, 1.0);
         _playbackStarted = YES;
         os_log(_log, "DeckLink scheduled playback started after %llu preroll frames", _framesScheduled);
@@ -357,6 +435,15 @@ private:
 
 - (uint64_t)backpressureDropCount {
     return _framesDroppedBackpressure;
+}
+
+- (double)frameDurationSeconds {
+    // Guard against a zero timescale (never set in practice) so callers can use
+    // this directly in latency math.
+    if (_frameTimescale == 0) {
+        return 0.02;
+    }
+    return (double)_frameDuration / (double)_frameTimescale;
 }
 
 - (uint32_t)bufferedFrameCount {

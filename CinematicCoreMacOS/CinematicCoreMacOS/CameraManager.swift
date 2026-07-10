@@ -246,11 +246,11 @@ final class CameraManager: NSObject, ObservableObject {
     /// the operator-facing output-resolution readout. 0 until the first frame.
     @Published private(set) var sourcePixelHeight: Int = 0
 
-    /// Operator-facing label for the effective program output resolution while
-    /// a crop is active (e.g. "1080p", "2.2K", "4K"), derived from the source
-    /// height and the current crop's vertical fraction — i.e. the real number
-    /// of source pixels feeding the output before any upscale. `nil` when in
-    /// wide (no crop) or before the first frame.
+    /// Crop-quality readout shown as "CROP RES" in the HUD: the effective number
+    /// of source pixels feeding the crop before any upscale (e.g. "540p" when
+    /// punched into a 1080p source at 50% zoom). This is NOT the routed output
+    /// signal — the program feed is always rendered to 1920×1080 regardless.
+    /// `nil` when in wide (no crop) or before the first frame.
     var programOutputLabel: String? {
         guard activeMode != .wide,
               sourcePixelHeight > 0,
@@ -411,7 +411,10 @@ final class CameraManager: NSObject, ObservableObject {
     private enum Config {
         static let targetWidth: Int32 = 3840
         static let targetHeight: Int32 = 2160
-        static let targetFrameRate: Double = 50.0
+        // Capture format preference and the playout clock must come from the same
+        // selection, so this reads the persisted show standard rather than a
+        // constant. Defaults to 1080p50 (50.0) when nothing is persisted.
+        static var targetFrameRate: Double { ShowStandard.current.frameRate }
         static let pixelFormat = kCVPixelFormatType_32BGRA
     }
     
@@ -916,6 +919,8 @@ final class CameraManager: NSObject, ObservableObject {
         let captureInterval = Self.signposter.beginInterval("captureFrame")
         let captureStart = CACurrentMediaTime()
 
+        programOutput.recordInputFrame(timestamp: timestampSeconds)
+
         if bufferHeight > 0 {
             let bufferAspect = bufferWidth / bufferHeight
             if abs(bufferAspect - lastAppliedSourceAspect) > 0.001 {
@@ -1359,20 +1364,18 @@ final class CameraManager: NSObject, ObservableObject {
         captureSession.inputs.forEach { captureSession.removeInput($0) }
         captureSession.outputs.forEach { captureSession.removeOutput($0) }
         
-        // Set session preset
-        if captureSession.canSetSessionPreset(.high) {
-            captureSession.sessionPreset = .high
-        }
+        // Do NOT set a session preset. AVCaptureSessionPresetInputPriority is
+        // iOS-only; the macOS equivalent is to leave the session at its default
+        // (no preset), which lets configureCameraDevice() own the activeFormat
+        // selection. A concrete preset like .high would reconfigure the device
+        // to match the preset resolution, clobbering the manually chosen 4K format.
         
         // Find camera to use
         guard let camera = findCameraToUse() else {
             error = .noCameraAvailable
             throw CameraError.noCameraAvailable
         }
-        
-        // Configure camera format
-        try configureCameraDevice(camera)
-        
+
         // Add camera input
         let input = try AVCaptureDeviceInput(device: camera)
         guard captureSession.canAddInput(input) else {
@@ -1380,6 +1383,12 @@ final class CameraManager: NSObject, ObservableObject {
             throw CameraError.sessionConfigurationFailed
         }
         captureSession.addInput(input)
+
+        // Configure camera format AFTER attaching the input: with the device already
+        // in the session and inside this begin/commitConfiguration transaction, the
+        // format chosen here dictates the session's quality of service (macOS has no
+        // .inputPriority preset), rather than being clobbered when the input is added.
+        try configureCameraDevice(camera)
         
         // Configure video output
         let output = AVCaptureVideoDataOutput()
@@ -1752,6 +1761,24 @@ private final class VirtualCameraOutputSink: ProgramOutputSink {
     }
 }
 
+private extension ShowStandard {
+    /// The matching ObjC-visible DeckLink standard. Lives here (app target) rather
+    /// than in ShowStandard.swift because it references the DeckLink bridge type,
+    /// which the shared system-extension target does not link.
+    var deckLinkStandard: DeckLinkOutputStandard {
+        // The NS_ENUM cases carry NS_SWIFT_NAME overrides (their C names can't be
+        // prefix-stripped — the remainder starts with a digit).
+        switch self {
+        case .p50:
+            return .hd1080p50
+        case .p5994:
+            return .hd1080p5994
+        case .p60:
+            return .hd1080p6000
+        }
+    }
+}
+
 @MainActor
 private final class BlackmagicOutputSink: ProgramOutputSink {
     let route: ProgramOutputManager.Route = .blackmagicSDI
@@ -1759,6 +1786,13 @@ private final class BlackmagicOutputSink: ProgramOutputSink {
     private static let logger = Logger(subsystem: "com.alfie", category: "BlackmagicOutput")
     private static let signposter = OSSignposter(logger: logger)
     private var hasLoggedFirstFrameSend = false
+
+    /// The standard the bridge was last connected with. Read from the persisted
+    /// selection at connect() time so a settings change applies on the next
+    /// capture start without rewiring this object. `playoutFrameRate` reports
+    /// this so the HUD/bring-up checks match what the hardware is actually
+    /// playing out.
+    private var connectedStandard: ShowStandard = .current
 
     var onStateChange: (() -> Void)?
 
@@ -1787,6 +1821,10 @@ private final class BlackmagicOutputSink: ProgramOutputSink {
         bridge.lastErrorDescription
     }
 
+    /// The DeckLink playout clock, taken from the standard the bridge was
+    /// connected with (the bridge configures the matching display mode).
+    var playoutFrameRate: Double? { connectedStandard.frameRate }
+
     var bringUpChecks: [OutputBringUpCheck] {
         var checks = [
             OutputBringUpCheck(
@@ -1799,19 +1837,20 @@ private final class BlackmagicOutputSink: ProgramOutputSink {
         ]
         if bridge.isConnected {
             // Output-side health: the hardware queue depth is the real playout
-            // latency (buffered × 20 ms at 1080p50) — the in-app stage timings
-            // can't see it. Sustained backpressure or late frames here mean the
-            // pipeline is mismatched with the 50 fps playout clock.
+            // latency (buffered × the per-frame duration) — the in-app stage
+            // timings can't see it. Sustained backpressure or late frames here
+            // mean the pipeline is mismatched with the playout clock.
             let buffered = bridge.bufferedFrameCount
             let backpressureDrops = bridge.backpressureDropCount
             let late = bridge.displayedLateCount
             let hwDropped = bridge.playoutDroppedCount
+            let latencyMs = Double(buffered) * bridge.frameDurationSeconds * 1000.0
             let healthy = backpressureDrops == 0 && late == 0 && hwDropped == 0
             checks.append(
                 OutputBringUpCheck(
                     id: "blackmagic.playout",
                     title: "Blackmagic SDI · Playout",
-                    status: String(format: "%u buffered (~%.0f ms)", buffered, Double(buffered) * 20.0),
+                    status: String(format: "%u buffered (~%.0f ms)", buffered, latencyMs),
                     detail: "Backpressure drops: \(backpressureDrops) · displayed late: \(late) · hardware drops: \(hwDropped).",
                     level: healthy ? .ok : .warning
                 )
@@ -1821,8 +1860,27 @@ private final class BlackmagicOutputSink: ProgramOutputSink {
     }
 
     func connect() {
-        Self.logger.notice("Initializing Blackmagic SDI Output...")
-        bridge.connect()
+        // Read the persisted standard now so a settings change applies on the
+        // next capture start without rewiring this sink.
+        let standard = ShowStandard.current
+        connectedStandard = standard
+
+        // Operator escape hatch: production can tune the DeckLink buffer depths
+        // via `defaults write` without a rebuild (no UI — defaults stay 3/4
+        // pending a rehearsal gate). Only apply overrides when set (> 0); the
+        // bridge clamps them to sane bounds at connect.
+        let defaults = UserDefaults.standard
+        let prerollOverride = defaults.integer(forKey: "deckLinkPrerollFrames")
+        if prerollOverride > 0 {
+            bridge.prerollFrames = Int32(prerollOverride)
+        }
+        let maxBufferedOverride = defaults.integer(forKey: "deckLinkMaxBufferedFrames")
+        if maxBufferedOverride > 0 {
+            bridge.maxBufferedFrames = UInt32(maxBufferedOverride)
+        }
+
+        Self.logger.notice("Initializing Blackmagic SDI Output (\(standard.title, privacy: .public))...")
+        bridge.connect(with: standard.deckLinkStandard)
         onStateChange?()
     }
 
