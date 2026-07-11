@@ -219,6 +219,10 @@ final class CameraManager: NSObject, ObservableObject {
             if DeveloperFlags.exposeBlackmagicOutputRoute {
                 sinks.append(BlackmagicOutputSink())
             }
+            // Program Display route is generally available (no DeveloperFlags
+            // gate): fullscreen clean feed on a selected display for the
+            // HDMI→SDI path into an ATEM.
+            sinks.append(DisplayOutputSink())
             return sinks
         }()
     )

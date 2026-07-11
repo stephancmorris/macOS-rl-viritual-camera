@@ -42,7 +42,11 @@ struct PixelBufferPreviewView: NSViewRepresentable {
 }
 
 /// Layer-backed host whose layer displays a pixel buffer's IOSurface.
-final class PixelBufferLayerView: NSView {
+///
+/// Not `final`: the Program Display route subclasses this in
+/// `DisplayOutputSink.swift` (`ProgramDisplayContentView`) to add cursor
+/// hygiene while reusing the exact same zero-copy display path.
+class PixelBufferLayerView: NSView {
     var aspectFill: Bool = false {
         didSet {
             guard aspectFill != oldValue else { return }

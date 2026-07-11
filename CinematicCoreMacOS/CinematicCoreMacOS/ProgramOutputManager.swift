@@ -5,6 +5,7 @@
 //  Created by Stephan Morris on 4/20/2026.
 //
 
+import AppKit
 import Combine
 import CoreGraphics
 import CoreVideo
@@ -187,6 +188,7 @@ final class ProgramOutputManager: ObservableObject {
     enum Route: String, CaseIterable, Identifiable {
         case virtualCamera
         case blackmagicSDI
+        case display
 
         var id: String { rawValue }
 
@@ -196,6 +198,8 @@ final class ProgramOutputManager: ObservableObject {
                 return "Virtual Camera"
             case .blackmagicSDI:
                 return "Blackmagic SDI"
+            case .display:
+                return "Program Display"
             }
         }
 
@@ -205,6 +209,8 @@ final class ProgramOutputManager: ObservableObject {
                 return "video.badge.waveform"
             case .blackmagicSDI:
                 return "cable.connector"
+            case .display:
+                return "tv"
             }
         }
     }
@@ -605,6 +611,86 @@ final class ProgramOutputManager: ObservableObject {
     }
 }
 
+/// Shared display-selection helpers for the Program Display route. Lives in this
+/// file (which is a member of both the app and the CMIO-extension targets) so the
+/// settings picker can resolve displays without depending on `DisplayOutputSink`,
+/// which is app-only. The sink reuses the same namespace so the persisted key and
+/// the default-display rule stay in one place.
+@MainActor
+enum ProgramDisplaySelection {
+    /// UserDefaults key the target display's `CGDirectDisplayID` is persisted
+    /// under (0 = "use default"). Stored as an Int because @AppStorage has no
+    /// UInt32 binding; call sites cast to `CGDirectDisplayID`.
+    static let userDefaultsKey = "programDisplayID"
+
+    /// The `CGDirectDisplayID` for a given `NSScreen`, from its device
+    /// description. Returns 0 if unavailable.
+    static func displayID(for screen: NSScreen) -> CGDirectDisplayID {
+        let key = NSDeviceDescriptionKey("NSScreenNumber")
+        return (screen.deviceDescription[key] as? NSNumber)?.uint32Value ?? 0
+    }
+
+    /// The `NSScreen` currently backing a given display ID, if any.
+    static func screen(for id: CGDirectDisplayID) -> NSScreen? {
+        NSScreen.screens.first { displayID(for: $0) == id }
+    }
+
+    /// The display ID that hosts the Alfie UI — the key/main window's screen, or
+    /// `NSScreen.main` as a fallback. The picker marks this so an operator does
+    /// not take over their own control surface.
+    static func alfieUIDisplayID() -> CGDirectDisplayID? {
+        if let screen = NSApp.keyWindow?.screen ?? NSApp.mainWindow?.screen ?? NSScreen.main {
+            return displayID(for: screen)
+        }
+        return nil
+    }
+
+    /// First screen that is not the Alfie-UI screen, if one exists.
+    static func defaultTargetDisplayID() -> CGDirectDisplayID? {
+        let uiID = alfieUIDisplayID()
+        guard let candidate = NSScreen.screens.first(where: { displayID(for: $0) != uiID }) else {
+            return nil
+        }
+        return displayID(for: candidate)
+    }
+
+    /// Resolves the effective target display ID: the persisted selection if that
+    /// display is still present, else the default, else nil.
+    static func resolvedTargetDisplayID() -> CGDirectDisplayID? {
+        let stored = UserDefaults.standard.integer(forKey: userDefaultsKey)
+        if stored != 0, screen(for: CGDirectDisplayID(stored)) != nil {
+            return CGDirectDisplayID(stored)
+        }
+        return defaultTargetDisplayID()
+    }
+}
+
+/// A selectable entry in the Program Display picker. `id` is the display's
+/// `CGDirectDisplayID` as an `Int` to match the persisted @AppStorage binding
+/// (0 = the "Automatic" entry that lets the sink pick the default).
+@MainActor
+struct ProgramDisplayOption: Identifiable {
+    let id: Int
+    let label: String
+
+    /// Current displays, with an "Automatic" entry first. The screen hosting
+    /// the Alfie UI is suffixed "(Alfie UI)" so the operator doesn't take over
+    /// their own control surface.
+    static func current() -> [ProgramDisplayOption] {
+        let uiID = ProgramDisplaySelection.alfieUIDisplayID()
+        var options: [ProgramDisplayOption] = [
+            ProgramDisplayOption(id: 0, label: "Automatic (first external)")
+        ]
+        for screen in NSScreen.screens {
+            let displayID = ProgramDisplaySelection.displayID(for: screen)
+            let isUI = displayID == uiID
+            let label = isUI ? "\(screen.localizedName) (Alfie UI)" : screen.localizedName
+            options.append(ProgramDisplayOption(id: Int(displayID), label: label))
+        }
+        return options
+    }
+}
+
 struct ProgramOutputSettingsView<SystemExtensionManager: SystemExtensionStatusProviding>: View {
     @ObservedObject var programOutput: ProgramOutputManager
     @ObservedObject var systemExtensionManager: SystemExtensionManager
@@ -612,6 +698,16 @@ struct ProgramOutputSettingsView<SystemExtensionManager: SystemExtensionStatusPr
     /// Persisted show standard, as a raw string so it survives relaunch and is
     /// read back by CameraManager/BlackmagicOutputSink at capture start.
     @AppStorage(ShowStandard.userDefaultsKey) private var showStandardRaw = ShowStandard.p50.rawValue
+
+    /// Persisted Program Display target, as a `CGDirectDisplayID` stored as an
+    /// Int (0 = "use default"). Read back live by `DisplayOutputSink`. `Int`
+    /// because @AppStorage has no UInt32 binding; the sink casts to
+    /// `CGDirectDisplayID`.
+    @AppStorage(ProgramDisplaySelection.userDefaultsKey) private var programDisplayID = 0
+
+    /// Snapshot of currently attached displays, refreshed whenever the display
+    /// arrangement changes so the picker stays in sync with hot-plug events.
+    @State private var availableDisplays: [ProgramDisplayOption] = ProgramDisplayOption.current()
 
     var body: some View {
         Form {
@@ -638,6 +734,28 @@ struct ProgramOutputSettingsView<SystemExtensionManager: SystemExtensionStatusPr
                 Text(programOutput.routingSummary)
                     .font(.caption)
                     .foregroundStyle(.secondary)
+            }
+
+            if programOutput.configuredRoutes.contains(.display) {
+                Section("Program Display") {
+                    Picker("Display", selection: $programDisplayID) {
+                        ForEach(availableDisplays) { option in
+                            Text(option.label).tag(option.id)
+                        }
+                    }
+
+                    Text("Enable Focus / Do Not Disturb so notifications can't bleed onto the program feed. Set this display's resolution and refresh to the show standard (e.g. 1080p50) in System Settings → Displays.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                .onReceive(
+                    NotificationCenter.default.publisher(
+                        for: NSApplication.didChangeScreenParametersNotification
+                    )
+                ) { _ in
+                    availableDisplays = ProgramDisplayOption.current()
+                }
             }
 
             Section("Program Feed") {
