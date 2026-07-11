@@ -43,8 +43,8 @@ struct ContentView: View {
             // Layer 1: dual feed (or stopped screen) fills the window
             if cameraManager.isRunning {
                 CropPreviewView(
-                    originalFrame: cameraManager.currentFrame,
-                    croppedFrame: cameraManager.croppedFrame,
+                    originalFrame: cameraManager.currentFrameBuffer,
+                    croppedFrame: cameraManager.croppedFrameBuffer,
                     detectedPersons: cameraManager.personDetector.detectedPersons,
                     showDetections: true,
                     cropRect: cameraManager.activeMode != .wide ? cameraManager.cropEngine?.currentCrop : nil,

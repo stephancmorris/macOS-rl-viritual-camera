@@ -8,10 +8,15 @@
 import SwiftUI
 import CoreImage
 import AppKit
+import CoreVideo
+import CoreGraphics
 
 /// SwiftUI view that displays the live camera feed with detection overlay
 struct CameraPreviewView: View {
-    let image: CIImage?
+    /// Backing pixel buffer for the wide pane, displayed via a zero-copy
+    /// IOSurface layer (see `PixelBufferPreviewView`). Overlay/tap math reads
+    /// the frame's pixel dimensions straight off this buffer.
+    let pixelBuffer: CVPixelBuffer?
     let detectedPersons: [PersonDetector.DetectedPerson]
     let showDetections: Bool
     let activeTargetID: UUID?
@@ -27,20 +32,23 @@ struct CameraPreviewView: View {
 
     var body: some View {
         GeometryReader { geometry in
-            if let image = image {
+            if let pixelBuffer = pixelBuffer {
+                // Pixel dimensions of the source frame; drives all overlay and
+                // tap-to-select coordinate math (formerly `image.extent.size`).
+                let imageSize = CGSize(
+                    width: CVPixelBufferGetWidth(pixelBuffer),
+                    height: CVPixelBufferGetHeight(pixelBuffer)
+                )
                 ZStack {
-                    Color.black
-
-                    Image(decorative: image, scale: 1.0, orientation: .up)
-                        .resizable()
-                        .aspectRatio(contentMode: aspectFill ? .fill : .fit)
+                    // Zero-copy IOSurface display (already black-backed).
+                    PixelBufferPreviewView(pixelBuffer: pixelBuffer, aspectFill: aspectFill)
                         .frame(width: geometry.size.width, height: geometry.size.height)
                         .clipped()
 
                     if showDetections {
                         DetectionOverlayView(
                             detectedPersons: detectedPersons,
-                            imageSize: image.extent.size,
+                            imageSize: imageSize,
                             activeTargetID: activeTargetID,
                             manualLockedTargetID: manualLockedTargetID,
                             acquiringTargetID: acquiringTargetID,
@@ -54,7 +62,7 @@ struct CameraPreviewView: View {
                     if let cropRect = cropIndicator {
                         CropIndicatorView(
                             cropRect: cropRect,
-                            imageSize: image.extent.size,
+                            imageSize: imageSize,
                             framingTitle: framingTitle,
                             isRecovering: isRecovering
                         )
@@ -66,8 +74,7 @@ struct CameraPreviewView: View {
                             .contentShape(Rectangle())
                             .onTapGesture { location in
                                 let viewSize = geometry.size
-                                let imageSize = image.extent.size
-                                let scale = aspectFill 
+                                let scale = aspectFill
                                     ? max(viewSize.width / imageSize.width, viewSize.height / imageSize.height)
                                     : min(viewSize.width / imageSize.width, viewSize.height / imageSize.height)
                                 let displayWidth = imageSize.width * scale
@@ -92,11 +99,17 @@ struct CameraPreviewView: View {
 }
 
 extension Image {
+    /// Single shared CIContext for the CIImage display path. Hoisted to a
+    /// `static let` so it is created once, not per SwiftUI render — the old
+    /// per-call `CIContext()` was a major cost on the frame thread. Retained
+    /// only for lower-priority callers that still render a CIImage; the two
+    /// main panes now use the zero-copy `PixelBufferPreviewView` instead.
+    private static let sharedDisplayContext = CIContext(options: [.useSoftwareRenderer: false])
+
     /// Helper initializer for CIImage
     init(decorative ciImage: CIImage, scale: CGFloat, orientation: Image.Orientation = .up) {
         // Convert CIImage to CGImage for SwiftUI display
-        let context = CIContext(options: [.useSoftwareRenderer: false])
-        if let cgImage = context.createCGImage(ciImage, from: ciImage.extent) {
+        if let cgImage = Image.sharedDisplayContext.createCGImage(ciImage, from: ciImage.extent) {
             self.init(decorative: cgImage, scale: scale, orientation: orientation)
         } else {
             // Fallback to a system image if conversion fails
@@ -107,7 +120,7 @@ extension Image {
 
 #Preview {
     CameraPreviewView(
-        image: nil,
+        pixelBuffer: nil,
         detectedPersons: [],
         showDetections: true,
         activeTargetID: nil,

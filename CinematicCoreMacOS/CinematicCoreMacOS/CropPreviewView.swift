@@ -7,11 +7,14 @@
 //
 
 import SwiftUI
+import CoreVideo
 
 /// Edge-to-edge dual-feed pane: wide stage on the left, broadcast crop on the right.
 struct CropPreviewView: View {
-    let originalFrame: CIImage?
-    let croppedFrame: CIImage?
+    /// Both panes display their frame's backing IOSurface directly (zero-copy),
+    /// so they take `CVPixelBuffer`s rather than CIImages.
+    let originalFrame: CVPixelBuffer?
+    let croppedFrame: CVPixelBuffer?
     let detectedPersons: [PersonDetector.DetectedPerson]
     let showDetections: Bool
     let cropRect: CropEngine.CropRect?
@@ -27,7 +30,7 @@ struct CropPreviewView: View {
     var body: some View {
         HStack(spacing: 0) {
             CameraPreviewView(
-                image: originalFrame,
+                pixelBuffer: originalFrame,
                 detectedPersons: detectedPersons,
                 showDetections: showDetections,
                 activeTargetID: activeTargetID,
@@ -48,16 +51,9 @@ struct CropPreviewView: View {
                 .frame(width: 1)
                 .frame(maxHeight: .infinity)
 
-            ZStack {
-                Color.black
-
-                if let cropped = croppedFrame {
-                    Image(decorative: cropped, scale: 1.0)
-                        .resizable()
-                        .aspectRatio(contentMode: .fit)
-                }
-            }
-            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            // Program pane: zero-copy IOSurface display of the crop output.
+            PixelBufferPreviewView(pixelBuffer: croppedFrame, aspectFill: false)
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
     }
 }

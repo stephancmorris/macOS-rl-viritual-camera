@@ -150,8 +150,12 @@ final class CameraManager: NSObject, ObservableObject {
     
     // MARK: - Published Properties
     
-    /// Current camera frame as a CIImage for display
-    @Published private(set) var currentFrame: CIImage?
+    /// Raw camera frame for the wide (left) operator pane, published as its
+    /// backing `CVPixelBuffer` so the display path can be a zero-copy IOSurface
+    /// layer assignment (see `PixelBufferPreviewView`). Retaining this property
+    /// retains the buffer's IOSurface, which the capture side owns for its
+    /// lifetime; that is what keeps it on screen safely.
+    @Published private(set) var currentFrameBuffer: CVPixelBuffer?
     
     /// Capture session status
     @Published private(set) var isRunning: Bool = false
@@ -219,12 +223,13 @@ final class CameraManager: NSObject, ObservableObject {
         }()
     )
 
-    /// Cropped output frame (for ATEM output)
-    @Published private(set) var croppedFrame: CIImage?
-
-    /// Counts processed frames so the preview publishes (`currentFrame`/
-    /// `croppedFrame`) can run at half frame rate; see `processFrame`.
-    private var previewPublishTick: UInt64 = 0
+    /// Processed program frame for the program (right) operator pane, published
+    /// as the crop pool's output `CVPixelBuffer`. Same zero-copy IOSurface
+    /// display path as `currentFrameBuffer`. Retaining this property retains the
+    /// pool surface so the CropEngine's `CVPixelBufferPool` will not re-vend it
+    /// while it is still on screen (this codebase has been bitten by exactly
+    /// that surface-recycling bug before).
+    @Published private(set) var croppedFrameBuffer: CVPixelBuffer?
 
     /// Raw camera frame cropped to the detection bounding box (no padding, no aspect enforcement)
     @Published private(set) var detectionCroppedFrame: CIImage?
@@ -873,8 +878,8 @@ final class CameraManager: NSObject, ObservableObject {
         activeMode = .wide
         shotComposer.reset(clearManualLock: true)
         cinematicAgent.reset()
-        currentFrame = nil
-        croppedFrame = nil
+        currentFrameBuffer = nil
+        croppedFrameBuffer = nil
         detectionCroppedFrame = nil
         validationClipStatus = "Preparing \(validationClipURL.lastPathComponent)…"
         programOutput.updateCaptureStatus(isRunning: true)
@@ -920,6 +925,16 @@ final class CameraManager: NSObject, ObservableObject {
         let captureStart = CACurrentMediaTime()
 
         programOutput.recordInputFrame(timestamp: timestampSeconds)
+
+        // Publish the wide (left) pane's raw pixels *before* any processing so
+        // the operator sees the live frame at the earliest possible instant,
+        // rather than inheriting the full detection→compose→crop latency. This
+        // is a zero-copy IOSurface handoff (see PixelBufferPreviewView), so it
+        // costs a pointer assignment. Detection overlays are still published
+        // post-detection below, so during fast motion the boxes may trail the
+        // raw pixels by a frame — that is accepted for a monitoring pane. The
+        // program (right) pane still publishes post-crop; it must show output.
+        currentFrameBuffer = pixelBuffer
 
         if bufferHeight > 0 {
             let bufferAspect = bufferWidth / bufferHeight
@@ -1075,7 +1090,6 @@ final class CameraManager: NSObject, ObservableObject {
             ).clamped()
         }
 
-        var programImage = ciImage
         var outputPixelBuffer = pixelBuffer
         var composeDuration: TimeInterval = 0
         var cropDuration: TimeInterval = 0
@@ -1194,7 +1208,6 @@ final class CameraManager: NSObject, ObservableObject {
                 programOutput.recordLatency(stage: .cropRender, duration: cropDuration)
                 cropEngine.publishRenderStats(renderTime: cropDuration)
                 frameLog("🔍 DEBUG: processCrop returned successfully")
-                programImage = CIImage(cvPixelBuffer: croppedBuffer)
                 outputPixelBuffer = croppedBuffer
             } catch {
                 Self.logger.error("Crop processing failed: \(error.localizedDescription, privacy: .public)")
@@ -1222,16 +1235,16 @@ final class CameraManager: NSObject, ObservableObject {
             )
         }
 
-        // Publish the dual-pane preview at half frame rate. Each assignment
-        // forces a SwiftUI re-render of the full 4K source + crop preview on
-        // the MainActor — the same thread that owns the 20 ms frame budget.
-        // 25 fps is indistinguishable for monitoring; the program feed below
-        // still sends every frame.
-        previewPublishTick &+= 1
-        if previewPublishTick.isMultiple(of: 2) {
-            currentFrame = ciImage
-            croppedFrame = programImage
-        }
+        // Publish the program (right) pane every frame. This is now a zero-copy
+        // IOSurface layer assignment (PixelBufferPreviewView) rather than the
+        // old per-render CIContext + full-frame createCGImage, so full-rate
+        // (50 Hz) publishing is affordable on the MainActor — the earlier
+        // half-rate gate (`previewPublishTick`) existed only to amortise that
+        // expensive display path, which no longer exists. `outputPixelBuffer`
+        // is the crop pool's output surface (or the raw buffer in wide mode);
+        // holding it in the published property keeps the pool from re-vending it
+        // while on screen. The wide pane was already published above, pre-crop.
+        croppedFrameBuffer = outputPixelBuffer
         programOutput.sendFrame(outputPixelBuffer, timestamp: timestampSeconds)
 
         let totalDuration = CACurrentMediaTime() - captureStart
