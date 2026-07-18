@@ -120,7 +120,10 @@ final class ShotComposer: ObservableObject {
             
             var subjectHeightFraction: CGFloat {
                 switch self {
-                case .wide: return 1.80      // Massive height coverage
+                // Wide never uses this: composeFromTrackedBounds early-returns
+                // the full aspect-correct frame so Wide is subject-independent
+                // and always distinct from Full Body.
+                case .wide: return 1.0
                 case .fullBody: return 1.15  // 100% of subject + 15% footroom
                 case .waistUp: return 0.60   // Exactly 60% of the target as requested
                 }
@@ -231,6 +234,7 @@ final class ShotComposer: ObservableObject {
             case balanced
             case fastFollow
             case lockedDown
+            case steadyFollow
             case custom
 
             var id: String { rawValue }
@@ -238,7 +242,7 @@ final class ShotComposer: ObservableObject {
             /// Presets the operator can choose from (excludes `custom`, which is
             /// only ever entered by editing sliders directly).
             static var selectable: [TuningPreset] {
-                [.slowPan, .balanced, .fastFollow, .lockedDown]
+                [.slowPan, .balanced, .fastFollow, .lockedDown, .steadyFollow]
             }
 
             var title: String {
@@ -247,6 +251,7 @@ final class ShotComposer: ObservableObject {
                 case .balanced: return "Balanced"
                 case .fastFollow: return "Fast Follow"
                 case .lockedDown: return "Locked Down"
+                case .steadyFollow: return "Steady Follow"
                 case .custom: return "Custom"
                 }
             }
@@ -261,6 +266,8 @@ final class ShotComposer: ObservableObject {
                     return "Snappy tracking for fast-moving presenters."
                 case .lockedDown:
                     return "Near-static framing for a fixed podium."
+                case .steadyFollow:
+                    return "Holds the shot while the speaker stays inside the yellow band; re-centers when they cross it."
                 case .custom:
                     return "Custom — adjust the sliders in Advanced."
                 }
@@ -279,14 +286,30 @@ final class ShotComposer: ObservableObject {
                 case .balanced: return (0.10, 0.02, 0.05, 0.75)
                 case .fastFollow: return (0.20, 0.03, 0.03, 0.40)
                 case .lockedDown: return (0.06, 0.01, 0.12, 2.00)
+                // Steady Follow: balanced smoothing; deadzone 0.10 maps to a
+                // 0.20 steady band via the ×2 rule in `apply(_:)`.
+                case .steadyFollow: return (0.10, 0.02, 0.10, 0.75)
                 case .custom: return nil
                 }
             }
         }
 
         /// Minimum movement (fraction of frame) before updating target crop.
-        /// Prevents jitter from small detection noise.
+        /// Prevents jitter from small detection noise. Drives the classic
+        /// velocity-adaptive gate used by every feel except Steady Follow.
         var deadzoneThreshold: CGFloat = 0.05 // 5% of frame
+
+        /// Full width (normalized) of the Steady Following band. While holding,
+        /// the subject may roam ±steadyBandWidth/2 horizontally (and 0.75× that
+        /// vertically) around the held center before the camera re-centers.
+        /// Surfaced as the yellow guide lines in the preview. Only active when
+        /// `steadyFollowingEnabled` is true (Steady Follow feel).
+        var steadyBandWidth: CGFloat = 0.10
+
+        /// True while the "Steady Follow" feel is selected. Gates the
+        /// hold/band state machine + yellow guides; when false the classic
+        /// velocity-adaptive deadzone gate runs instead.
+        var steadyFollowingEnabled: Bool = false
 
         /// Smoothing factor per frame (synced to CropEngine.transitionSmoothing)
         var smoothingFactor: Float = 0.10 // 10% per frame
@@ -349,10 +372,12 @@ final class ShotComposer: ObservableObject {
         /// preset-controlled fields. `custom` only records the selection.
         mutating func apply(_ preset: TuningPreset) {
             tuningPreset = preset
+            steadyFollowingEnabled = (preset == .steadyFollow)
             guard let bundle = preset.bundle else { return }
             smoothingFactor = bundle.smoothing
             autoPanSpeed = bundle.autoPanSpeed
             deadzoneThreshold = bundle.deadzone
+            steadyBandWidth = bundle.deadzone * 2.0
             targetHoldDuration = bundle.targetHold
         }
 
@@ -362,9 +387,13 @@ final class ShotComposer: ObservableObject {
         var matchedPreset: TuningPreset {
             for preset in TuningPreset.selectable {
                 guard let b = preset.bundle else { continue }
+                // Steady Follow is a distinct mode, not just different values:
+                // it only matches while its gate is on, and no other preset
+                // matches while the gate is on.
+                guard (preset == .steadyFollow) == steadyFollowingEnabled else { continue }
                 if abs(smoothingFactor - b.smoothing) < 0.005,
                    abs(autoPanSpeed - b.autoPanSpeed) < 0.005,
-                   abs(deadzoneThreshold - b.deadzone) < 0.005,
+                   abs(steadyBandWidth - b.deadzone * 2.0) < 0.01,
                    abs(targetHoldDuration - b.targetHold) < 0.025 {
                     return preset
                 }
@@ -446,6 +475,96 @@ final class ShotComposer: ObservableObject {
 
     /// The currently preferred speaker track, if any.
     @Published private(set) var activeTargetID: UUID?
+
+    /// Minimum crop height fraction the CropEngine quality floor allows for
+    /// the current delivered source resolution (0 = unconstrained). Pushed by
+    /// CameraManager whenever the delivered source height changes so the
+    /// composer can anchor floored crops correctly. Plain var — read on the
+    /// per-frame compose path, must not publish.
+    var qualityFloorHeightFraction: CGFloat = 0
+
+    /// True while the requested shot is tighter than the quality floor permits
+    /// (e.g. Waist Up on a 1080p source). Surfaced as a "ZOOM LIMITED" chip so
+    /// the operator knows why the shot won't tighten further.
+    @Published private(set) var isZoomLimitedByQuality: Bool = false
+
+    /// Transition-only publish: called on the per-frame compose path, so it
+    /// must not touch the @Published var unless the value actually changed.
+    private func setZoomLimited(_ limited: Bool) {
+        if isZoomLimitedByQuality != limited {
+            isZoomLimitedByQuality = limited
+        }
+    }
+
+    // MARK: - Steady Following
+
+    /// The horizontal steady band the camera is currently holding within.
+    /// `nil` ⇔ the composer is actively following (no band). Rendered as the
+    /// two yellow guide lines in the preview.
+    struct SteadyBand: Equatable {
+        let centerX: CGFloat
+        let width: CGFloat
+    }
+
+    /// Non-nil ⇔ holding. Mutated ONLY on Steady Following state transitions
+    /// (hold-enter / hold-exit / reset) — never per frame. The lines stay
+    /// static while holding precisely because this isn't re-derived per frame.
+    @Published private(set) var steadyBand: SteadyBand?
+
+    /// Two-state Steady Following machine. `following` emits targets every
+    /// frame (CropEngine spring smooths); `holding` freezes the camera while
+    /// the subject roams inside the band. Plain vars — not published.
+    private enum SteadyState { case following, holding }
+    private var steadyState: SteadyState = .following
+
+    /// Consecutive frames the subject has been beyond the band (hold → follow).
+    private var bandExitFrameCount: Int = 0
+    /// Consecutive frames the subject has stayed within `settleRadius` of
+    /// `settleAnchor` while following (follow → hold).
+    private var settleFrameCount: Int = 0
+    /// Position the settle detector is measuring dwell around. Position-based
+    /// settling (not velocity): the Vision bbox center jitters a few tenths of
+    /// a percent per frame even for a perfectly still subject, which reads as
+    /// a nonzero velocity EWMA forever — so dwell-in-a-radius is the signal.
+    private var settleAnchor: CGPoint?
+
+    /// Band exit requires this many consecutive out-of-band frames (noise
+    /// debounce) before the camera resumes following.
+    private static let bandExitConfirmFrames: Int = 2
+    /// Consecutive settled frames required to re-enter holding.
+    private static let settleConfirmFrames: Int = 12
+    /// Vertical half-band as a fraction of the horizontal half-band.
+    private static let verticalBandRatio: CGFloat = 0.75
+
+    /// Dwell radius for the settle detector: a quarter of the half-band,
+    /// floored at 2% of frame — comfortably above bbox jitter, well inside
+    /// the band.
+    private var settleRadius: CGFloat {
+        max(0.02, config.steadyBandWidth * 0.125)
+    }
+
+    /// Enter the following state and clear the band. Transition-only publish:
+    /// only writes `steadyBand` when it actually changes. Also the canonical
+    /// reset for the Steady Following machine (reset / lock-loss / mode change),
+    /// and safe to call per frame from the legacy gate (compare-before-write).
+    private func enterSteadyFollowing() {
+        steadyState = .following
+        bandExitFrameCount = 0
+        settleFrameCount = 0
+        settleAnchor = nil
+        if steadyBand != nil { steadyBand = nil }
+    }
+
+    /// Enter the holding state, re-centering the band on the settled subject.
+    /// Transition-only publish.
+    private func enterSteadyHolding(centeredOn center: CGPoint) {
+        steadyState = .holding
+        bandExitFrameCount = 0
+        settleFrameCount = 0
+        settleAnchor = nil
+        let band = SteadyBand(centerX: center.x, width: config.steadyBandWidth)
+        if steadyBand != band { steadyBand = band }
+    }
 
     // MARK: - Lock state machine
     //
@@ -799,6 +918,8 @@ final class ShotComposer: ObservableObject {
                 gallery: gallery,
                 sinceTime: timestamp
             )
+            // Lock lost the subject — drop out of holding and clear the band.
+            enterSteadyFollowing()
             return .noChange
 
         case .hold(let targetID, let gallery, let sinceTime):
@@ -816,6 +937,8 @@ final class ShotComposer: ObservableObject {
                 let heldStr = String(format: "%.2f", held)
                 Self.logger.info("LOCK-STATE old=hold new=wide_waiting reason=hold_expired held=\(heldStr, privacy: .public)s gallerySize=\(gallery.size, privacy: .public)")
                 lockState = .wideWaiting(gallery: gallery)
+                // Pulling back to wide — clear any steady band / holding state.
+                enterSteadyFollowing()
                 return .pullBackToWide
             }
             return .noChange
@@ -1207,6 +1330,9 @@ final class ShotComposer: ObservableObject {
         lastComposeTime = 0
         lastComposeTrackingCenter = nil
 
+        // Steady Following returns to following + clears the guide lines.
+        enterSteadyFollowing()
+
         if clearManualLock {
             Self.logger.info("LOCK-STATE old=\(self.lockStateName, privacy: .public) new=inactive reason=reset")
             lockState = .inactive
@@ -1236,6 +1362,7 @@ final class ShotComposer: ObservableObject {
         lockState = .inactive
         reacquisitionConsecutive.removeAll()
         latestScores.removeAll()
+        enterSteadyFollowing()
     }
 
     var isManualLockActive: Bool {
@@ -1271,6 +1398,18 @@ final class ShotComposer: ObservableObject {
         let tuning = framingTuning
         let aspect = normalizedAspect
 
+        // Stage Wide is the full aspect-correct frame, always — maximum stage
+        // context, independent of subject size. Sizing it relative to the
+        // subject made it collapse into Full Body whenever the subject filled
+        // most of the frame.
+        if config.cinematicFormat == .stage && config.shotPreset == .wide {
+            setZoomLimited(false)
+            return clampAndAccept(
+                .widest(aspect: aspect),
+                trackingCenter: trackingCenter
+            )
+        }
+
         // Anchor from the top of the full subject detection (the yellow box)
         // with a small headroom gap so the skull isn't clipped. Vision's
         // coordinate space is bottom-left origin, so the *top* of the subject
@@ -1283,8 +1422,16 @@ final class ShotComposer: ObservableObject {
 
         // Use the active format's height fraction (stage preset or webcam preset).
         let desiredHeight = subjectBounds.height * config.activeSubjectHeightFraction
-        
-        var cropHeight = max(desiredHeight, tuning.minimumCropHeight)
+
+        // Apply the CropEngine quality floor HERE, where the top anchor is
+        // known, instead of letting setTargetCrop's center-preserving clamp
+        // re-expand the crop symmetrically (which pushed the head down and
+        // pulled the feet in — a "waist up" request came out looking like full
+        // body). Flooring the height before anchoring keeps the head at the
+        // top with correct headroom; only the bottom extends. setTargetCrop's
+        // own clamp then becomes a no-op double-guard for composer crops.
+        setZoomLimited(desiredHeight < qualityFloorHeightFraction)
+        var cropHeight = max(desiredHeight, tuning.minimumCropHeight, qualityFloorHeightFraction)
         var cropWidth = cropHeight * aspect
 
         // Frame-fit while preserving 16:9. If either dimension overflows, shrink
@@ -1300,14 +1447,7 @@ final class ShotComposer: ObservableObject {
 
         let centerX = subjectBounds.midX
         let originX = centerX - cropWidth / 2.0
-        
-        let originY: CGFloat
-        if config.cinematicFormat == .stage && config.shotPreset == .wide {
-            let intendedCropCenterY = cropTop - (desiredHeight / 2.0)
-            originY = intendedCropCenterY - (cropHeight / 2.0)
-        } else {
-            originY = cropTop - cropHeight
-        }
+        let originY = cropTop - cropHeight
 
         return clampAndAccept(
             CropEngine.CropRect(
@@ -1425,28 +1565,112 @@ final class ShotComposer: ObservableObject {
         lastComposeTrackingCenter = trackingCenter
         lastComposeTime = now
 
-        // Dynamic deadzone: if subject is moving fast (e.g. > 2% of screen per second),
-        // shrink deadzone to allow continuous tracking for the spring physics.
-        // If they are slow, use the configured deadzone to lock down.
-        let isMoving = subjectVelocity > 0.02 
-        let effectiveDeadzone = isMoving ? 0.005 : config.deadzoneThreshold
+        // Every feel except Steady Follow uses the classic velocity-adaptive
+        // deadzone gate. `enterSteadyFollowing()` is compare-before-write, so
+        // calling it per frame is safe — it guarantees a stale band / yellow
+        // guides clear when the operator switches feel away from Steady Follow.
+        guard config.steadyFollowingEnabled else {
+            enterSteadyFollowing()
 
-        // Deadzone: skip updates when the tracked subject anchor hasn't moved
-        // enough to matter, so we don't chase detection noise. Bypass the gate
-        // once whenever framing inputs change so a new preset/anchor takes
-        // effect even with a stationary speaker.
-        if !framingChanged, let lastCenter = lastAcceptedCenter {
-            let dx = abs(trackingCenter.x - lastCenter.x)
-            let dy = abs(trackingCenter.y - lastCenter.y)
-            if dx < effectiveDeadzone && dy < effectiveDeadzone {
-                return nil
+            // Dynamic deadzone: if subject is moving fast (e.g. > 2% of screen
+            // per second), shrink deadzone to allow continuous tracking for the
+            // spring physics. If they are slow, use the configured deadzone to
+            // lock down.
+            let isMoving = subjectVelocity > 0.02
+            let effectiveDeadzone = isMoving ? 0.005 : config.deadzoneThreshold
+
+            // Deadzone: skip updates when the tracked subject anchor hasn't
+            // moved enough to matter, so we don't chase detection noise. Bypass
+            // the gate once whenever framing inputs change so a new
+            // preset/anchor takes effect even with a stationary speaker.
+            if !framingChanged, let lastCenter = lastAcceptedCenter {
+                let dx = abs(trackingCenter.x - lastCenter.x)
+                let dy = abs(trackingCenter.y - lastCenter.y)
+                if dx < effectiveDeadzone && dy < effectiveDeadzone {
+                    return nil
+                }
             }
+
+            lastAcceptedCenter = trackingCenter
+            lastAppliedFramingFingerprint = fingerprint
+            hasActiveTarget = true
+            return clampedCrop
         }
 
-        lastAcceptedCenter = trackingCenter
-        lastAppliedFramingFingerprint = fingerprint
-        hasActiveTarget = true
-        return clampedCrop
+        // Steady Following: a two-state machine, active only for the Steady
+        // Follow feel. While `holding`, the subject may roam within the steady
+        // band and no new target is emitted (the camera stays put); while
+        // `following`, targets are emitted every frame and the CropEngine
+        // spring smooths them. Transitions publish `steadyBand`.
+        let halfWidth = config.steadyBandWidth / 2.0
+        let verticalHalf = halfWidth * Self.verticalBandRatio
+
+        // Framing inputs changed (new preset/anchor): force back to following,
+        // clear the band, and accept one centering target immediately so the
+        // new framing takes effect even with a stationary speaker.
+        if framingChanged {
+            enterSteadyFollowing()
+            lastAcceptedCenter = trackingCenter
+            lastAppliedFramingFingerprint = fingerprint
+            hasActiveTarget = true
+            return clampedCrop
+        }
+
+        switch steadyState {
+        case .holding:
+            guard let bandCenter = lastAcceptedCenter else {
+                // No band center recorded (shouldn't happen while holding) —
+                // recover by resuming following and accepting.
+                enterSteadyFollowing()
+                lastAcceptedCenter = trackingCenter
+                hasActiveTarget = true
+                return clampedCrop
+            }
+            let dx = abs(trackingCenter.x - bandCenter.x)
+            let dy = abs(trackingCenter.y - bandCenter.y)
+            if dx > halfWidth || dy > verticalHalf {
+                bandExitFrameCount += 1
+                if bandExitFrameCount >= Self.bandExitConfirmFrames {
+                    // Confirmed band exit — resume following and accept.
+                    enterSteadyFollowing()
+                    lastAcceptedCenter = trackingCenter
+                    hasActiveTarget = true
+                    return clampedCrop
+                }
+            } else {
+                bandExitFrameCount = 0
+            }
+            // Still holding — emit no new target; the camera stays parked.
+            return nil
+
+        case .following:
+            // Position-based settle detection: velocity EWMA never reads as
+            // zero (Vision bbox jitter alone registers ~0.1–0.3 frame-widths/s
+            // for a still subject), so settling is dwell-in-a-radius instead.
+            // Once the subject stays within `settleRadius` of the anchor for
+            // `settleConfirmFrames` consecutive frames, re-enter holding,
+            // centered on the ANCHOR (not the instantaneous jittered center),
+            // and accept one final centering target.
+            if let anchor = settleAnchor,
+               hypot(trackingCenter.x - anchor.x, trackingCenter.y - anchor.y) <= settleRadius {
+                settleFrameCount += 1
+            } else {
+                settleAnchor = trackingCenter
+                settleFrameCount = 1
+            }
+            if settleFrameCount >= Self.settleConfirmFrames, let anchor = settleAnchor {
+                enterSteadyHolding(centeredOn: anchor)
+                lastAcceptedCenter = anchor
+                lastAppliedFramingFingerprint = fingerprint
+                hasActiveTarget = true
+                return clampedCrop
+            }
+            // Keep following — emit a target every frame.
+            lastAcceptedCenter = trackingCenter
+            lastAppliedFramingFingerprint = fingerprint
+            hasActiveTarget = true
+            return clampedCrop
+        }
     }
 
     private func finalizeSelection(

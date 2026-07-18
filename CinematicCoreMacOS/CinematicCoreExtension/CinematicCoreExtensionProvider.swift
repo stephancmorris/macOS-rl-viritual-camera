@@ -148,21 +148,36 @@ class CinematicCoreExtensionDeviceSource: NSObject, CMIOExtensionDeviceSource {
 	private var hasLoggedFirstEnqueuedFrame = false
 	private var hasLoggedFirstDequeuedFrame = false
 	
+	/// Every resolution the host can emit, in preference order. The first entry
+	/// is the default (church MVP program output is HD). Alfie sends whatever
+	/// the active frame profile produces — 1080p livestream, 4K wide capture,
+	/// or portrait — and the stream switches its active format to match rather
+	/// than forcing the host to downscale.
+	static let advertisedDimensions: [CMVideoDimensions] = [
+		CMVideoDimensions(width: 1920, height: 1080),
+		CMVideoDimensions(width: 3840, height: 2160),
+		CMVideoDimensions(width: 1080, height: 1920),
+	]
+
 	init(localizedName: String) {
-		
+
 		super.init()
 		os_log(.info, "Initializing CMIO extension device source %{public}@", localizedName)
 		let deviceID = UUID() // replace this with your device UUID
 		self.device = CMIOExtensionDevice(localizedName: localizedName, deviceID: deviceID, legacyDeviceID: nil, source: self)
-		
-		// Advertise HD by default because the church MVP program output target is HD.
+
 		let dims = currentFrameDimensions
 		CMVideoFormatDescriptionCreate(allocator: kCFAllocatorDefault, codecType: kCVPixelFormatType_32BGRA, width: dims.width, height: dims.height, extensions: nil, formatDescriptionOut: &_videoDescription)
-		
-		let videoStreamFormat = CMIOExtensionStreamFormat.init(formatDescription: _videoDescription, maxFrameDuration: CMTime(value: 1, timescale: Int32(kFrameRate)), minFrameDuration: CMTime(value: 1, timescale: Int32(kFrameRate)), validFrameDurations: nil)
-		
+
+		let frameDuration = CMTime(value: 1, timescale: Int32(kFrameRate))
+		let videoStreamFormats: [CMIOExtensionStreamFormat] = Self.advertisedDimensions.map { dims in
+			var description: CMFormatDescription?
+			CMVideoFormatDescriptionCreate(allocator: kCFAllocatorDefault, codecType: kCVPixelFormatType_32BGRA, width: dims.width, height: dims.height, extensions: nil, formatDescriptionOut: &description)
+			return CMIOExtensionStreamFormat(formatDescription: description!, maxFrameDuration: frameDuration, minFrameDuration: frameDuration, validFrameDurations: nil)
+		}
+
 		let videoID = UUID() // replace this with your video UUID
-		_streamSource = CinematicCoreExtensionStreamSource(localizedName: "Alfie.Video", streamID: videoID, streamFormat: videoStreamFormat, device: device)
+		_streamSource = CinematicCoreExtensionStreamSource(localizedName: "Alfie.Video", streamID: videoID, streamFormats: videoStreamFormats, device: device)
 		do {
 			try device.addStream(_streamSource.stream)
 		} catch let error {
@@ -436,6 +451,14 @@ class CinematicCoreExtensionDeviceSource: NSObject, CMIOExtensionDeviceSource {
 			return _videoDescription
 		}
 
+		os_log(
+			.info,
+			"Incoming frame size changed %{public}dx%{public}d -> %{public}dx%{public}d",
+			currentFrameDimensions.width,
+			currentFrameDimensions.height,
+			width,
+			height
+		)
 		currentFrameDimensions = CMVideoDimensions(width: width, height: height)
 		var formatDescription: CMFormatDescription?
 		CMVideoFormatDescriptionCreate(
@@ -450,6 +473,16 @@ class CinematicCoreExtensionDeviceSource: NSObject, CMIOExtensionDeviceSource {
 		if let formatDescription {
 			_videoDescription = formatDescription
 		}
+
+		// Point the stream's active format at the matching advertised entry so
+		// consumers renegotiate instead of dropping off-format sample buffers.
+		// Sizes outside the advertised list still stream with a per-frame
+		// format description; behavior is then up to the consumer.
+		if let index = Self.advertisedDimensions.firstIndex(where: { $0.width == width && $0.height == height }) {
+			_streamSource.selectActiveFormat(index: index)
+		} else {
+			os_log(.error, "Frame size %{public}dx%{public}d is not an advertised stream format", width, height)
+		}
 		return _videoDescription
 	}
 }
@@ -457,51 +490,62 @@ class CinematicCoreExtensionDeviceSource: NSObject, CMIOExtensionDeviceSource {
 // MARK: -
 
 class CinematicCoreExtensionStreamSource: NSObject, CMIOExtensionStreamSource {
-	
+
 	private(set) var stream: CMIOExtensionStream!
-	
+
 	let device: CMIOExtensionDevice
-	
-	private let _streamFormat: CMIOExtensionStreamFormat
-	
-	init(localizedName: String, streamID: UUID, streamFormat: CMIOExtensionStreamFormat, device: CMIOExtensionDevice) {
-		
+
+	private let _streamFormats: [CMIOExtensionStreamFormat]
+
+	init(localizedName: String, streamID: UUID, streamFormats: [CMIOExtensionStreamFormat], device: CMIOExtensionDevice) {
+
 		self.device = device
-		self._streamFormat = streamFormat
+		self._streamFormats = streamFormats
 		super.init()
 		self.stream = CMIOExtensionStream(localizedName: localizedName, streamID: streamID, direction: .source, clockType: .hostTime, source: self)
 	}
-	
+
 	var formats: [CMIOExtensionStreamFormat] {
-		
-		return [_streamFormat]
+
+		return _streamFormats
 	}
-	
+
 	var activeFormatIndex: Int = 0 {
-		
+
 		didSet {
-			if activeFormatIndex >= 1 {
+			if activeFormatIndex >= _streamFormats.count {
 				os_log(.error, "Invalid index")
 			}
 		}
 	}
-	
+
+	/// Switch the active format to the advertised entry at `index` and notify
+	/// consumers so they renegotiate. Called by the device source when the
+	/// incoming frame size changes (profile switches — rare, operator-driven).
+	func selectActiveFormat(index: Int) {
+		guard index >= 0, index < _streamFormats.count, index != activeFormatIndex else { return }
+		activeFormatIndex = index
+		let state = CMIOExtensionPropertyState<AnyObject>(value: NSNumber(value: index))
+		stream.notifyPropertiesChanged([.streamActiveFormatIndex: state])
+		os_log(.info, "Stream active format switched to index %{public}d", index)
+	}
+
 	var availableProperties: Set<CMIOExtensionProperty> {
-		
+
 		return [.streamActiveFormatIndex, .streamFrameDuration]
 	}
-	
+
 	func streamProperties(forProperties properties: Set<CMIOExtensionProperty>) throws -> CMIOExtensionStreamProperties {
-		
+
 		let streamProperties = CMIOExtensionStreamProperties(dictionary: [:])
 		if properties.contains(.streamActiveFormatIndex) {
-			streamProperties.activeFormatIndex = 0
+			streamProperties.activeFormatIndex = activeFormatIndex
 		}
 		if properties.contains(.streamFrameDuration) {
 			let frameDuration = CMTime(value: 1, timescale: Int32(kFrameRate))
 			streamProperties.frameDuration = frameDuration
 		}
-		
+
 		return streamProperties
 	}
 	

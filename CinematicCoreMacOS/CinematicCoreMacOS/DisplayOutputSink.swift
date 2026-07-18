@@ -2,11 +2,10 @@
 //  DisplayOutputSink.swift
 //  CinematicCoreMacOS
 //
-//  Third program-output route: a borderless, fullscreen, clean-feed window on a
+//  Program-output route: a borderless, fullscreen, clean-feed window on a
 //  selected display. Feeds an ATEM switcher via the Mac's HDMI port →
-//  HDMI-to-SDI converter, sidestepping the Thunderbolt bus-power problems of the
-//  DeckLink hardware. No genlock — the window free-runs at the compositor's
-//  refresh; the downstream ATEM frame-syncs.
+//  HDMI-to-SDI converter. No genlock — the window free-runs at the
+//  compositor's refresh; the downstream ATEM frame-syncs.
 //
 
 import AppKit

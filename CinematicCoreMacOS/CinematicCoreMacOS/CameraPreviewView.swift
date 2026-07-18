@@ -27,6 +27,10 @@ struct CameraPreviewView: View {
     var onTapPoint: ((CGPoint) -> Void)? = nil
     var cropIndicator: CropEngine.CropRect? = nil
     var isRecovering: Bool = false
+    var isZoomLimited: Bool = false
+    /// Steady Following guide band. Non-nil ⇔ the composer is holding; drives
+    /// the two yellow guide lines. Nil hides them.
+    var steadyBand: ShotComposer.SteadyBand? = nil
     var framingTitle: String = "Wide"
     var aspectFill: Bool = false
 
@@ -59,12 +63,16 @@ struct CameraPreviewView: View {
                         )
                     }
 
+                    SteadyBandOverlayView(steadyBand: steadyBand, imageSize: imageSize)
+                        .allowsHitTesting(false)
+
                     if let cropRect = cropIndicator {
                         CropIndicatorView(
                             cropRect: cropRect,
                             imageSize: imageSize,
                             framingTitle: framingTitle,
-                            isRecovering: isRecovering
+                            isRecovering: isRecovering,
+                            isZoomLimited: isZoomLimited
                         )
                         .allowsHitTesting(false)
                     }
@@ -138,6 +146,7 @@ struct CropIndicatorView: View {
     let imageSize: CGSize
     let framingTitle: String
     let isRecovering: Bool
+    var isZoomLimited: Bool = false
 
     var body: some View {
         GeometryReader { geometry in
@@ -170,7 +179,7 @@ struct CropIndicatorView: View {
                     .frame(width: cropWidth, height: cropHeight)
                     .position(x: cropX + cropWidth / 2, y: cropY + cropHeight / 2)
 
-                Text("PROGRAM CROP · \(framingTitle.uppercased()) · \(percentLabel)")
+                Text(chipLabel)
                     .font(.system(size: 9.5, weight: .semibold, design: .monospaced))
                     .tracking(1.3)
                     .foregroundStyle(.black.opacity(0.85))
@@ -190,9 +199,89 @@ struct CropIndicatorView: View {
         return "\(p)%"
     }
 
+    /// "ZOOM LIMITED" tells the operator the requested preset is tighter than
+    /// the source resolution allows (CropEngine quality floor).
+    private var chipLabel: String {
+        var label = "PROGRAM CROP · \(framingTitle.uppercased()) · \(percentLabel)"
+        if isZoomLimited {
+            label += " · ZOOM LIMITED"
+        }
+        return label
+    }
+
     private func chipPosition(width: CGFloat) -> CGFloat {
         // Best-effort approximation matching the detection chip
-        let label = "PROGRAM CROP · \(framingTitle.uppercased()) · \(percentLabel)"
-        return CGFloat(label.count) * 6.5 + 16
+        return CGFloat(chipLabel.count) * 6.5 + 16
+    }
+}
+
+// MARK: - Steady Following Overlay (Issue 4)
+
+/// Draws the two yellow "Steady Following" guide lines. The speaker can move
+/// between the lines before the camera re-centers. Rendered only while the
+/// composer is holding (`steadyBand != nil`); fades in/out on that transition.
+///
+/// Uses the same X-only aspect-fit transform as `CropIndicatorView` (scale +
+/// centering offset). The lines are vertical and span the displayed image
+/// height, so there is no Y-flip — only the horizontal position matters.
+struct SteadyBandOverlayView: View {
+    let steadyBand: ShotComposer.SteadyBand?
+    let imageSize: CGSize
+
+    var body: some View {
+        GeometryReader { geometry in
+            let viewSize = geometry.size
+            let imageAspect = imageSize.width / imageSize.height
+            let viewAspect = viewSize.width / viewSize.height
+
+            let (scale, offset): (CGFloat, CGSize) = {
+                if imageAspect > viewAspect {
+                    let s = viewSize.width / imageSize.width
+                    return (s, CGSize(width: 0, height: (viewSize.height - imageSize.height * s) / 2))
+                } else {
+                    let s = viewSize.height / imageSize.height
+                    return (s, CGSize(width: (viewSize.width - imageSize.width * s) / 2, height: 0))
+                }
+            }()
+
+            // Displayed image bounds (the lines span the full image height).
+            let displayedHeight = imageSize.height * scale
+            let lineTop = offset.height
+            let lineHeight = displayedHeight
+
+            ZStack(alignment: .topLeading) {
+                if let band = steadyBand {
+                    let halfWidth = band.width / 2.0
+                    let leftEdge = band.centerX - halfWidth
+                    let rightEdge = band.centerX + halfWidth
+
+                    // Skip an edge that falls off the frame.
+                    if leftEdge >= 0 && leftEdge <= 1 {
+                        guideLine(atNormalizedX: leftEdge, scale: scale, offset: offset,
+                                  top: lineTop, height: lineHeight)
+                    }
+                    if rightEdge >= 0 && rightEdge <= 1 {
+                        guideLine(atNormalizedX: rightEdge, scale: scale, offset: offset,
+                                  top: lineTop, height: lineHeight)
+                    }
+                }
+            }
+            .animation(.easeInOut(duration: 0.35), value: steadyBand)
+        }
+    }
+
+    @ViewBuilder
+    private func guideLine(
+        atNormalizedX normalizedX: CGFloat,
+        scale: CGFloat,
+        offset: CGSize,
+        top: CGFloat,
+        height: CGFloat
+    ) -> some View {
+        let x = normalizedX * imageSize.width * scale + offset.width
+        Rectangle()
+            .fill(Color.yellow.opacity(0.8))
+            .frame(width: 1.5, height: height)
+            .position(x: x, y: top + height / 2)
     }
 }

@@ -90,6 +90,27 @@ struct ShotComposerSettingsView: View {
             Text(shotComposer.config.tuningPreset.detail)
                 .font(.caption)
                 .foregroundStyle(.secondary)
+
+            if shotComposer.config.steadyFollowingEnabled {
+                HStack {
+                    Text("Steady Band Width")
+                    Spacer()
+                    Text(String(format: "%.0f%%", shotComposer.config.steadyBandWidth * 100))
+                        .foregroundStyle(.secondary)
+                        .monospacedDigit()
+                }
+
+                Slider(
+                    value: $shotComposer.config.steadyBandWidth,
+                    in: 0.04...0.30,
+                    step: 0.01
+                )
+                .disabled(!shotComposer.config.isEnabled)
+
+                Text("The speaker can move within this band before the camera re-centers. Shown as yellow guides in the preview.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
         }
     }
 
@@ -97,21 +118,6 @@ struct ShotComposerSettingsView: View {
     @ViewBuilder
     var advancedSection: some View {
         Section("Tuning") {
-            HStack {
-                Text("Deadzone")
-                Spacer()
-                Text(String(format: "%.0f%%", shotComposer.config.deadzoneThreshold * 100))
-                    .foregroundStyle(.secondary)
-                    .monospacedDigit()
-            }
-
-            Slider(
-                value: $shotComposer.config.deadzoneThreshold,
-                in: 0.01...0.15,
-                step: 0.01
-            )
-            .disabled(!shotComposer.config.isEnabled)
-
             HStack {
                 Text("Responsiveness (Spring)")
                 Spacer()
@@ -203,7 +209,7 @@ struct ShotComposerSettingsView: View {
         }
         // Editing any of the four preset-controlled sliders flips the Basic
         // selection to Custom (or back to a preset if the values happen to match).
-        .onChange(of: shotComposer.config.deadzoneThreshold) { syncTuningPreset() }
+        .onChange(of: shotComposer.config.steadyBandWidth) { syncTuningPreset() }
         .onChange(of: shotComposer.config.smoothingFactor) { syncTuningPreset() }
         .onChange(of: shotComposer.config.targetHoldDuration) { syncTuningPreset() }
         .onChange(of: shotComposer.config.autoPanSpeed) { syncTuningPreset() }

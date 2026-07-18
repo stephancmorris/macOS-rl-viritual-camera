@@ -93,22 +93,6 @@ struct TelemetryOverlay: View {
                     valueColor: inputRateColor
                 )
             }
-            if let output = cameraManager.programOutputLabel {
-                telemetryBlock(
-                    label: "CROP RES",
-                    value: output,
-                    monospaced: true,
-                    valueColor: Color(red: 0.22, green: 1.0, blue: 0.42)
-                )
-            }
-            if let frameSize = programOutput.lastFrameSize {
-                telemetryBlock(
-                    label: "OUTPUT",
-                    value: CameraManager.resolutionTierLabel(forHeight: Int(frameSize.height)),
-                    monospaced: true,
-                    valueColor: Color(red: 0.22, green: 1.0, blue: 0.42)
-                )
-            }
             telemetryBlock(
                 label: "DETECTION",
                 value: detectionValue,

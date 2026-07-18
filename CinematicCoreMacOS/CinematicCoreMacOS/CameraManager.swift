@@ -26,10 +26,10 @@ private nonisolated final class CaptureFrameProcessingGate: @unchecked Sendable 
     private var isProcessing = false
     private var droppedFrames: UInt64 = 0
 
-    // Windowed throughput diagnostics. The DeckLink output is hard 1080p50, so the
-    // delivered rate here is the ceiling on what reaches the SDI feed: if it sags
-    // below 50fps the hardware underflows and the picture goes choppy. Logged once
-    // per second under the existing lock so it stays thread-safe and cheap.
+    // Windowed throughput diagnostics. The delivered rate here is the ceiling on
+    // what reaches the program output: if it sags below the show standard the
+    // picture goes choppy. Logged once per second under the existing lock so it
+    // stays thread-safe and cheap.
     private static let logger = Logger(subsystem: "com.alfie", category: "CaptureThroughput")
     private var windowStart: CFTimeInterval = CACurrentMediaTime()
     private var windowDelivered: UInt64 = 0
@@ -213,18 +213,10 @@ final class CameraManager: NSObject, ObservableObject {
     let trainingDataRecorder = TrainingDataRecorder()
 
     /// Routes the processed program feed to the currently active output sink.
+    /// Program Display is a fullscreen clean feed on a selected display (e.g.
+    /// for an HDMI→SDI converter into an ATEM).
     let programOutput = ProgramOutputManager(
-        sinks: {
-            var sinks: [any ProgramOutputSink] = [VirtualCameraOutputSink()]
-            if DeveloperFlags.exposeBlackmagicOutputRoute {
-                sinks.append(BlackmagicOutputSink())
-            }
-            // Program Display route is generally available (no DeveloperFlags
-            // gate): fullscreen clean feed on a selected display for the
-            // HDMI→SDI path into an ATEM.
-            sinks.append(DisplayOutputSink())
-            return sinks
-        }()
+        sinks: [VirtualCameraOutputSink(), DisplayOutputSink()]
     )
 
     /// Processed program frame for the program (right) operator pane, published
@@ -254,32 +246,6 @@ final class CameraManager: NSObject, ObservableObject {
     /// Vertical pixel height of the most recent delivered source frame. Drives
     /// the operator-facing output-resolution readout. 0 until the first frame.
     @Published private(set) var sourcePixelHeight: Int = 0
-
-    /// Crop-quality readout shown as "CROP RES" in the HUD: the effective number
-    /// of source pixels feeding the crop before any upscale (e.g. "540p" when
-    /// punched into a 1080p source at 50% zoom). This is NOT the routed output
-    /// signal — the program feed is always rendered to 1920×1080 regardless.
-    /// `nil` when in wide (no crop) or before the first frame.
-    var programOutputLabel: String? {
-        guard activeMode != .wide,
-              sourcePixelHeight > 0,
-              let crop = cropEngine?.currentCrop else { return nil }
-        let effectiveHeight = Int((crop.size.height * CGFloat(sourcePixelHeight)).rounded())
-        return Self.resolutionTierLabel(forHeight: effectiveHeight)
-    }
-
-    /// Snap a pixel height to a friendly resolution-tier label.
-    nonisolated static func resolutionTierLabel(forHeight height: Int) -> String {
-        switch height {
-        case 4320...:     return "8K"
-        case 2880..<4320: return "4K"
-        case 1800..<2880: return "2.2K"
-        case 1260..<1800: return "1080p"
-        case 990..<1260:  return "720p"
-        case 630..<990:   return "540p"
-        default:          return "\(height)p"
-        }
-    }
 
     /// The center point for the manual crop (normalized 0-1)
     @Published var manualCropPoint: CGPoint = CGPoint(x: 0.5, y: 0.5)
@@ -957,7 +923,12 @@ final class CameraManager: NSObject, ObservableObject {
             if sourceHeight != lastFloorSourceHeight {
                 lastFloorSourceHeight = sourceHeight
                 sourcePixelHeight = sourceHeight
-                cropEngine?.qualityFloor = .forSource(height: sourceHeight)
+                let floor = CropEngine.QualityFloor.forSource(height: sourceHeight)
+                cropEngine?.qualityFloor = floor
+                // The composer needs the same number so it can floor the crop
+                // at the top anchor instead of letting setTargetCrop's
+                // center-preserving clamp re-expand tight presets symmetrically.
+                shotComposer.qualityFloorHeightFraction = floor.minCropHeightFraction
                 cinematicAgent.updateSourceResolution(
                     width: Int(bufferWidth),
                     height: sourceHeight
@@ -1245,7 +1216,9 @@ final class CameraManager: NSObject, ObservableObject {
         // (50 Hz) publishing is affordable on the MainActor — the earlier
         // half-rate gate (`previewPublishTick`) existed only to amortise that
         // expensive display path, which no longer exists. `outputPixelBuffer`
-        // is the crop pool's output surface (or the raw buffer in wide mode);
+        // is the crop pool's output surface (every mode renders through
+        // processCrop; the raw capture buffer passes through only when no
+        // CropEngine exists);
         // holding it in the published property keeps the pool from re-vending it
         // while on screen. The wide pane was already published above, pre-crop.
         croppedFrameBuffer = outputPixelBuffer
@@ -1778,160 +1751,6 @@ private final class VirtualCameraOutputSink: ProgramOutputSink {
     }
 }
 
-private extension ShowStandard {
-    /// The matching ObjC-visible DeckLink standard. Lives here (app target) rather
-    /// than in ShowStandard.swift because it references the DeckLink bridge type,
-    /// which the shared system-extension target does not link.
-    var deckLinkStandard: DeckLinkOutputStandard {
-        // The NS_ENUM cases carry NS_SWIFT_NAME overrides (their C names can't be
-        // prefix-stripped — the remainder starts with a digit).
-        switch self {
-        case .p50:
-            return .hd1080p50
-        case .p5994:
-            return .hd1080p5994
-        case .p60:
-            return .hd1080p6000
-        }
-    }
-}
-
-@MainActor
-private final class BlackmagicOutputSink: ProgramOutputSink {
-    let route: ProgramOutputManager.Route = .blackmagicSDI
-    private let bridge = DeckLinkOutputBridge()
-    private static let logger = Logger(subsystem: "com.alfie", category: "BlackmagicOutput")
-    private static let signposter = OSSignposter(logger: logger)
-    private var hasLoggedFirstFrameSend = false
-
-    /// The standard the bridge was last connected with. Read from the persisted
-    /// selection at connect() time so a settings change applies on the next
-    /// capture start without rewiring this object. `playoutFrameRate` reports
-    /// this so the HUD/bring-up checks match what the hardware is actually
-    /// playing out.
-    private var connectedStandard: ShowStandard = .current
-
-    var onStateChange: (() -> Void)?
-
-    var isAvailable: Bool {
-        bridge.isConnected
-    }
-
-    var summary: String {
-        if bridge.isConnected {
-            return "Blackmagic SDI output is connected and active."
-        }
-        return "Blackmagic SDI output is disconnected."
-    }
-
-    var detail: String {
-        if bridge.isConnected {
-            return "Sending video frames to the connected UltraStudio device."
-        }
-        if let error = bridge.lastErrorDescription {
-            return "Connection failed: \(error)"
-        }
-        return "Start capture to initialize the Blackmagic SDI output."
-    }
-
-    var lastErrorDescription: String? {
-        bridge.lastErrorDescription
-    }
-
-    /// The DeckLink playout clock, taken from the standard the bridge was
-    /// connected with (the bridge configures the matching display mode).
-    var playoutFrameRate: Double? { connectedStandard.frameRate }
-
-    var bringUpChecks: [OutputBringUpCheck] {
-        var checks = [
-            OutputBringUpCheck(
-                id: "blackmagic.connection",
-                title: "Blackmagic SDI · Hardware",
-                status: bridge.isConnected ? "Connected" : "Disconnected",
-                detail: bridge.isConnected ? "UltraStudio HD is connected." : (bridge.lastErrorDescription ?? "Waiting for connection."),
-                level: bridge.isConnected ? .ok : (bridge.lastErrorDescription != nil ? .error : .warning)
-            )
-        ]
-        if bridge.isConnected {
-            // Output-side health: the hardware queue depth is the real playout
-            // latency (buffered × the per-frame duration) — the in-app stage
-            // timings can't see it. Sustained backpressure or late frames here
-            // mean the pipeline is mismatched with the playout clock.
-            let buffered = bridge.bufferedFrameCount
-            let backpressureDrops = bridge.backpressureDropCount
-            let late = bridge.displayedLateCount
-            let hwDropped = bridge.playoutDroppedCount
-            let latencyMs = Double(buffered) * bridge.frameDurationSeconds * 1000.0
-            let healthy = backpressureDrops == 0 && late == 0 && hwDropped == 0
-            checks.append(
-                OutputBringUpCheck(
-                    id: "blackmagic.playout",
-                    title: "Blackmagic SDI · Playout",
-                    status: String(format: "%u buffered (~%.0f ms)", buffered, latencyMs),
-                    detail: "Backpressure drops: \(backpressureDrops) · displayed late: \(late) · hardware drops: \(hwDropped).",
-                    level: healthy ? .ok : .warning
-                )
-            )
-        }
-        return checks
-    }
-
-    func connect() {
-        // Read the persisted standard now so a settings change applies on the
-        // next capture start without rewiring this sink.
-        let standard = ShowStandard.current
-        connectedStandard = standard
-
-        // Operator escape hatch: production can tune the DeckLink buffer depths
-        // via `defaults write` without a rebuild (no UI — defaults stay 3/4
-        // pending a rehearsal gate). Only apply overrides when set (> 0); the
-        // bridge clamps them to sane bounds at connect.
-        let defaults = UserDefaults.standard
-        let prerollOverride = defaults.integer(forKey: "deckLinkPrerollFrames")
-        if prerollOverride > 0 {
-            bridge.prerollFrames = Int32(prerollOverride)
-        }
-        let maxBufferedOverride = defaults.integer(forKey: "deckLinkMaxBufferedFrames")
-        if maxBufferedOverride > 0 {
-            bridge.maxBufferedFrames = UInt32(maxBufferedOverride)
-        }
-
-        Self.logger.notice("Initializing Blackmagic SDI Output (\(standard.title, privacy: .public))...")
-        bridge.connect(with: standard.deckLinkStandard)
-        onStateChange?()
-    }
-
-    func disconnect() {
-        bridge.disconnect()
-        onStateChange?()
-    }
-
-    func reconnect() {
-        bridge.reconnect()
-        onStateChange?()
-    }
-
-    func updateCaptureStatus(isRunning: Bool) {
-        if isRunning && !bridge.isConnected {
-            connect()
-        } else if !isRunning && bridge.isConnected {
-            disconnect()
-        }
-    }
-
-    func sendFrame(pixelBuffer: CVPixelBuffer, timestamp: Double) -> Bool {
-        let sendInterval = Self.signposter.beginInterval("sdiSend")
-        let result = bridge.sendFrame(with: pixelBuffer, timestamp: timestamp)
-        
-        if result && !hasLoggedFirstFrameSend {
-            hasLoggedFirstFrameSend = true
-            Self.logger.notice("First frame handed to DeckLink output bridge at \(timestamp, privacy: .public)s")
-        }
-        
-        Self.signposter.endInterval("sdiSend", sendInterval)
-        return result
-    }
-}
 // MARK: - AVCaptureVideoDataOutputSampleBufferDelegate
 
 extension CameraManager: AVCaptureVideoDataOutputSampleBufferDelegate {

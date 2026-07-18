@@ -23,7 +23,7 @@
 		<key>NSExtensionAttributes</key>
 		<dict>
 			<key>CMIOExtensionMachServiceName</key>
-			<string>com.cinematiccore.extension</string>
+			<string>EPZDEPSV69.Morris.CinematicCoreMacOS.extension</string>
 		</dict>
 		<key>NSExtensionPointIdentifier</key>
 		<string>com.apple.cmio-extension</string>
@@ -33,7 +33,7 @@
 	<key>CMIOExtension</key>
 	<dict>
 		<key>CMIOExtensionMachServiceName</key>
-		<string>com.cinematiccore.extension</string>
+		<string>EPZDEPSV69.Morris.CinematicCoreMacOS.extension</string>
 	</dict>
 	<key>NSSystemExtensionUsageDescription</key>
 	<string>Alfie uses a system extension to provide a virtual camera that can be used by other applications.</string>

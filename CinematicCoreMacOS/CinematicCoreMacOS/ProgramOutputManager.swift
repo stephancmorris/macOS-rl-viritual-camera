@@ -187,7 +187,6 @@ final class ProgramOutputManager: ObservableObject {
 
     enum Route: String, CaseIterable, Identifiable {
         case virtualCamera
-        case blackmagicSDI
         case display
 
         var id: String { rawValue }
@@ -196,8 +195,6 @@ final class ProgramOutputManager: ObservableObject {
             switch self {
             case .virtualCamera:
                 return "Virtual Camera"
-            case .blackmagicSDI:
-                return "Blackmagic SDI"
             case .display:
                 return "Program Display"
             }
@@ -207,8 +204,6 @@ final class ProgramOutputManager: ObservableObject {
             switch self {
             case .virtualCamera:
                 return "video.badge.waveform"
-            case .blackmagicSDI:
-                return "cable.connector"
             case .display:
                 return "tv"
             }
@@ -257,7 +252,7 @@ final class ProgramOutputManager: ObservableObject {
         var id: Route { route }
     }
 
-    @Published var preferredRoute: Route = .blackmagicSDI {
+    @Published var preferredRoute: Route = .virtualCamera {
         didSet {
             refreshRoutingDecision()
         }
@@ -281,8 +276,8 @@ final class ProgramOutputManager: ObservableObject {
     /// device's advertised format is not trustworthy here.
     @Published private(set) var measuredInputFPS: Double = 0
 
-    /// Playout clock of the active route, if it has one (the DeckLink runs a
-    /// fixed hardware clock; the virtual camera has none). Drives the HUD
+    /// Playout clock of the active route, if it has one (the program display
+    /// runs at its refresh rate; the virtual camera has none). Drives the HUD
     /// mismatch tint and the frame-rate bring-up check.
     var activePlayoutFrameRate: Double? {
         activeSink?.playoutFrameRate
@@ -696,7 +691,7 @@ struct ProgramOutputSettingsView<SystemExtensionManager: SystemExtensionStatusPr
     @ObservedObject var systemExtensionManager: SystemExtensionManager
 
     /// Persisted show standard, as a raw string so it survives relaunch and is
-    /// read back by CameraManager/BlackmagicOutputSink at capture start.
+    /// read back by CameraManager at capture start.
     @AppStorage(ShowStandard.userDefaultsKey) private var showStandardRaw = ShowStandard.p50.rawValue
 
     /// Persisted Program Display target, as a `CGDirectDisplayID` stored as an

@@ -30,9 +30,18 @@ import Foundation
 
 /// Constants for XPC service configuration
 enum CinematicCoreXPC {
-    /// Mach service name for XPC communication
-    /// Must match the extension's Info.plist NSExtension > NSExtensionAttributes > NSExtensionMachServiceName
-    static let machServiceName = "com.cinematiccore.extension"
+    /// Mach service name for XPC communication.
+    /// Must match CMIOExtensionMachServiceName in the extension's Info.plist
+    /// (both the NSExtensionAttributes and top-level CMIOExtension entries).
+    ///
+    /// MUST be prefixed by the shared app group
+    /// "EPZDEPSV69.Morris.CinematicCoreMacOS" (i.e.
+    /// $(TeamIdentifierPrefix)Morris.CinematicCoreMacOS in the entitlements):
+    /// both processes are sandboxed, and the sandbox only allows mach-lookup /
+    /// registration of names prefixed by one of the process's application
+    /// groups. The previous un-prefixed name was denied by the sandbox, so the
+    /// host's connection never verified and no frames crossed XPC.
+    static let machServiceName = "EPZDEPSV69.Morris.CinematicCoreMacOS.extension"
     
     /// XPC connection configuration
     static let initialConnectionRetryDelay: TimeInterval = 1.0

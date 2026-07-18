@@ -192,7 +192,7 @@ struct InspectorDrawer: View {
                 .fixedSize()
             }
 
-            row("Resolution") {
+            row("Source Resolution") {
                 valueText(cameraManager.selectedCamera?.maxResolution ?? "—", monospaced: true)
             }
 
@@ -284,13 +284,6 @@ struct InspectorDrawer: View {
                     statusPill("Idle", color: Color.white.opacity(0.4))
                 }
             }
-            row("Blackmagic SDI") {
-                statusPill("Deferred", color: Color.white.opacity(0.4))
-            }
-            row("NDI") {
-                statusPill("Deferred", color: Color.white.opacity(0.4))
-            }
-
             HStack(spacing: 8) {
                 smallButton("Output settings…", systemImage: "dot.radiowaves.left.and.right") {
                     openSettingsWindow(.output)

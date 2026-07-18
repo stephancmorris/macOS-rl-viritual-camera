@@ -2,10 +2,10 @@
 //  ShowStandard.swift
 //  CinematicCoreMacOS
 //
-//  The output video standard the show runs at. This drives three things that
-//  must always agree: the DeckLink playout mode, the capture-side target frame
-//  rate, and the frame-rate-match bring-up check. Persisted so the operator's
-//  choice survives relaunch.
+//  The output video standard the show runs at. This drives two things that
+//  must always agree: the capture-side target frame rate and the
+//  frame-rate-match bring-up check. Persisted so the operator's choice
+//  survives relaunch.
 //
 
 import Foundation

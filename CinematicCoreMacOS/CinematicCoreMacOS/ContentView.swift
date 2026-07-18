@@ -53,6 +53,8 @@ struct ContentView: View {
                     acquiringTargetID: cameraManager.shotComposer.acquiringTargetID,
                     trackedSubjectRect: cameraManager.shotComposer.lastTrackedBounds,
                     isRecovering: false,
+                    isZoomLimited: cameraManager.shotComposer.isZoomLimitedByQuality,
+                    steadyBand: cameraManager.shotComposer.steadyBand,
                     framingTitle: cameraManager.shotComposer.config.shotFraming.title,
                     onSelectPerson: cameraManager.lockTarget,
                     onTapPoint: tapPointHandler

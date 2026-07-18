@@ -23,6 +23,8 @@ struct CropPreviewView: View {
     let acquiringTargetID: UUID?
     let trackedSubjectRect: CGRect?
     let isRecovering: Bool
+    var isZoomLimited: Bool = false
+    var steadyBand: ShotComposer.SteadyBand? = nil
     let framingTitle: String
     var onSelectPerson: ((UUID) -> Void)? = nil
     var onTapPoint: ((CGPoint) -> Void)? = nil
@@ -41,6 +43,8 @@ struct CropPreviewView: View {
                 onTapPoint: onTapPoint,
                 cropIndicator: cropRect,
                 isRecovering: isRecovering,
+                isZoomLimited: isZoomLimited,
+                steadyBand: steadyBand,
                 framingTitle: framingTitle,
                 aspectFill: false
             )
