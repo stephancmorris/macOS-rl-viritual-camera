@@ -110,37 +110,33 @@ final class CropEngine: ObservableObject {
 
     // MARK: - Quality Floor
 
-    /// Resolution-derived lower bound on how small a crop may be before the
-    /// upscale to the output buffer starts visibly softening the picture.
+    /// Resolution-derived lower bound on how small a crop may be — a safety
+    /// net against degenerate zooms, NOT a sharpness guarantee.
     ///
-    /// The rule of thumb: a crop never pulls in tighter than one resolution
-    /// tier below the source (8K→4K, 4K→1080p, 1080p→720p, 720p→540p). Since
-    /// the output buffer's vertical scale is `outputSize.height / cropHeight`,
-    /// flooring the crop *height* caps the upscale factor at ~2×.
+    /// Subject-relative framing wins over resolution purity: on a real stage a
+    /// distant speaker's Waist Up shot needs a crop far tighter than one
+    /// resolution tier down, and the old one-tier rule (4K→1080p, 1080p→720p)
+    /// forced every tight preset to balloon into the same ~⅔-frame crop. The
+    /// floor now allows up to ~4× linear zoom (crop height ≥ source/4, never
+    /// below 240 px); anything tighter than the *old* comfort tier is surfaced
+    /// to the operator as "ZOOM LIMITED"/soft-zoom territory by the composer.
     ///
-    /// This is the single source of truth for the tier table; `CinematicAgent`
+    /// This is the single source of truth for the floor; `CinematicAgent`
     /// delegates to it.
     struct QualityFloor: Sendable, Equatable {
         /// Smallest allowed normalized crop *height* (0–1).
-        /// `minCropHeightFraction = nextTierDownPixels / sourcePixels`.
         var minCropHeightFraction: CGFloat
 
         /// No source info yet (or no constraint): allow the full zoom range.
         static let unconstrained = QualityFloor(minCropHeightFraction: 0.0)
 
-        /// Map source pixel height to the quality floor.
+        /// Map source pixel height to the quality floor: max ~4× linear zoom,
+        /// with an absolute 240 px minimum crop height.
         static func forSource(height: Int) -> QualityFloor {
             guard height > 0 else { return .unconstrained }
-            let minCropHeight: Int
-            switch height {
-            case 4320...:     minCropHeight = 2160   // 8K+  → 4K
-            case 2160..<4320: minCropHeight = 1080   // 4K   → 1080p
-            case 1080..<2160: minCropHeight = 720    // 1080 → 720p
-            case 720..<1080:  minCropHeight = 540    // 720  → 540p
-            default:          minCropHeight = max(height / 2, 360)
-            }
+            let minCropHeight = max(height / 4, 240)
             return QualityFloor(
-                minCropHeightFraction: CGFloat(minCropHeight) / CGFloat(height)
+                minCropHeightFraction: min(1.0, CGFloat(minCropHeight) / CGFloat(height))
             )
         }
     }

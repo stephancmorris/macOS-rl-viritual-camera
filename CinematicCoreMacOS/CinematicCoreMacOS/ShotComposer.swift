@@ -112,20 +112,22 @@ final class ShotComposer: ObservableObject {
 
             var detail: String {
                 switch self {
-                case .wide: return "Extremely wide shot with maximum stage context."
-                case .fullBody: return "Frames the speaker from above head to below feet."
-                case .waistUp: return "Wide crop capturing 60% of target."
+                case .wide: return "Widest stage view around the speaker."
+                case .fullBody: return "Wide shot with ~2–3 people of context."
+                case .waistUp: return "Tightest shot: the speaker with a little context."
                 }
             }
-            
+
             var subjectHeightFraction: CGFloat {
                 switch self {
-                // Wide never uses this: composeFromTrackedBounds early-returns
-                // the full aspect-correct frame so Wide is subject-independent
-                // and always distinct from Full Body.
-                case .wide: return 1.0
-                case .fullBody: return 1.15  // 100% of subject + 15% footroom
-                case .waistUp: return 0.60   // Exactly 60% of the target as requested
+                // Subject-relative so all three presets stay distinct at stage
+                // distance, tuned on real church-stage footage (July 2026):
+                // each preset sits one "notch" apart — on a typical stage they
+                // land at roughly 70% / 55% / 35% of the frame. Frame-fits to
+                // the full frame only when the subject is close/large.
+                case .wide: return 4.0
+                case .fullBody: return 3.0
+                case .waistUp: return 1.15
                 }
             }
         }
@@ -1398,18 +1400,6 @@ final class ShotComposer: ObservableObject {
         let tuning = framingTuning
         let aspect = normalizedAspect
 
-        // Stage Wide is the full aspect-correct frame, always — maximum stage
-        // context, independent of subject size. Sizing it relative to the
-        // subject made it collapse into Full Body whenever the subject filled
-        // most of the frame.
-        if config.cinematicFormat == .stage && config.shotPreset == .wide {
-            setZoomLimited(false)
-            return clampAndAccept(
-                .widest(aspect: aspect),
-                trackingCenter: trackingCenter
-            )
-        }
-
         // Anchor from the top of the full subject detection (the yellow box)
         // with a small headroom gap so the skull isn't clipped. Vision's
         // coordinate space is bottom-left origin, so the *top* of the subject
@@ -1423,13 +1413,9 @@ final class ShotComposer: ObservableObject {
         // Use the active format's height fraction (stage preset or webcam preset).
         let desiredHeight = subjectBounds.height * config.activeSubjectHeightFraction
 
-        // Apply the CropEngine quality floor HERE, where the top anchor is
-        // known, instead of letting setTargetCrop's center-preserving clamp
-        // re-expand the crop symmetrically (which pushed the head down and
-        // pulled the feet in — a "waist up" request came out looking like full
-        // body). Flooring the height before anchoring keeps the head at the
-        // top with correct headroom; only the bottom extends. setTargetCrop's
-        // own clamp then becomes a no-op double-guard for composer crops.
+        // Apply the CropEngine quality floor HERE, where the desired framing is
+        // known, so setTargetCrop's own clamp becomes a no-op double-guard for
+        // composer crops instead of silently re-shaping them.
         setZoomLimited(desiredHeight < qualityFloorHeightFraction)
         var cropHeight = max(desiredHeight, tuning.minimumCropHeight, qualityFloorHeightFraction)
         var cropWidth = cropHeight * aspect
@@ -1447,7 +1433,24 @@ final class ShotComposer: ObservableObject {
 
         let centerX = subjectBounds.midX
         let originX = centerX - cropWidth / 2.0
-        let originY = cropTop - cropHeight
+
+        let originY: CGFloat
+        if config.cinematicFormat == .stage,
+           config.shotPreset == .wide || config.shotPreset == .fullBody {
+            // Context shots (crop is several times the subject's height):
+            // center vertically on the subject. Head-down anchoring here hangs
+            // the subject at the top of the frame and fills the bottom with
+            // audience/stage floor.
+            originY = subjectBounds.midY - (cropHeight / 2.0)
+        } else {
+            // Tight shots: center the final crop on the *desired* region's
+            // vertical center. When cropHeight == desiredHeight this is
+            // exactly the top-anchored head-with-headroom framing; when a
+            // floor expanded the crop (or the frame-fit shrank it) the
+            // difference is distributed symmetrically, so the subject stays
+            // centered instead of pinned to the top.
+            originY = cropTop - (desiredHeight / 2.0) - (cropHeight / 2.0)
+        }
 
         return clampAndAccept(
             CropEngine.CropRect(
@@ -1770,7 +1773,7 @@ final class ShotComposer: ObservableObject {
         switch (config.frameProfile, config.shotPreset) {
         case (.livestream, .wide):
             return FramingTuning(
-                minimumCropHeight: 0.55,
+                minimumCropHeight: 0.70,
                 horizontalPaddingMultiplier: 0.50,
                 trackedWidthMultiplier: 1.00,
                 trackedAspectFloor: 0.80,
@@ -1782,7 +1785,7 @@ final class ShotComposer: ObservableObject {
             )
         case (.livestream, .fullBody):
             return FramingTuning(
-                minimumCropHeight: 0.35,
+                minimumCropHeight: 0.55,
                 horizontalPaddingMultiplier: 0.32,
                 trackedWidthMultiplier: 0.90,
                 trackedAspectFloor: 0.68,
@@ -1794,7 +1797,7 @@ final class ShotComposer: ObservableObject {
             )
         case (.livestream, .waistUp):
             return FramingTuning(
-                minimumCropHeight: 0.22,
+                minimumCropHeight: 0.35,
                 horizontalPaddingMultiplier: 0.15,
                 trackedWidthMultiplier: 0.76,
                 trackedAspectFloor: 0.60,

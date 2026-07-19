@@ -541,6 +541,13 @@ final class CameraManager: NSObject, ObservableObject {
         // Start running
         await MainActor.run {
             captureSession.startRunning()
+            // macOS has no .inputPriority preset, and the session's default
+            // .high preset re-configures the device's activeFormat (4K →
+            // 1080p) DURING startRunning(), silently discarding the format
+            // configureCameraDevice() chose — verified empirically with the
+            // Elgato 4K X. Re-asserting the format after start is the
+            // supported macOS pattern; the session honors it while running.
+            reassertConfiguredFormatIfNeeded()
             isRunning = captureSession.isRunning
             activeInputSource = .liveCamera
             if isRunning {
@@ -1429,6 +1436,14 @@ final class CameraManager: NSObject, ObservableObject {
         }
     }
     
+    /// Format explicitly chosen in configureCameraDevice(), re-asserted after
+    /// startRunning() because the macOS .high session preset clobbers it
+    /// (see reassertConfiguredFormatIfNeeded).
+    private var configuredCaptureDevice: AVCaptureDevice?
+    private var configuredCaptureFormat: AVCaptureDevice.Format?
+    private var configuredMinFrameDuration: CMTime?
+    private var configuredMaxFrameDuration: CMTime?
+
     private func configureCameraDevice(_ device: AVCaptureDevice) throws {
         Self.logger.notice("Configuring device: \(device.localizedName, privacy: .public)")
         
@@ -1442,10 +1457,16 @@ final class CameraManager: NSObject, ObservableObject {
         }
         
         device.activeFormat = format
-        
+
         // DEBUG: Print supported frame rates
         let dims = CMVideoFormatDescriptionGetDimensions(format.formatDescription)
         Self.logger.notice("Active format: \(dims.width)x\(dims.height)")
+
+        // Remember the choice so startCapture() can re-assert it after
+        // startRunning() — the .high session preset overwrites activeFormat
+        // when the session starts (see reassertConfiguredFormatIfNeeded).
+        configuredCaptureDevice = device
+        configuredCaptureFormat = format
 
         if dims.height > 0 {
             let sourceAspect = CGFloat(dims.width) / CGFloat(dims.height)
@@ -1478,6 +1499,36 @@ final class CameraManager: NSObject, ObservableObject {
                 device.activeVideoMinFrameDuration = firstRange.minFrameDuration
                 device.activeVideoMaxFrameDuration = firstRange.maxFrameDuration
             }
+        }
+
+        configuredMinFrameDuration = device.activeVideoMinFrameDuration
+        configuredMaxFrameDuration = device.activeVideoMaxFrameDuration
+    }
+
+    /// The .high session preset (macOS default; .inputPriority is iOS-only)
+    /// re-configures the capture device's activeFormat during startRunning(),
+    /// silently replacing the 4K format chosen in configureCameraDevice with
+    /// 1080p. Verified empirically with the Elgato 4K X: activeFormat reads
+    /// 3840×2160 after commitConfiguration and 1920×1080 immediately after
+    /// startRunning. Re-asserting the stored format after start sticks — the
+    /// session only performs its preset-driven reconfiguration at start time.
+    private func reassertConfiguredFormatIfNeeded() {
+        guard let device = configuredCaptureDevice,
+              let format = configuredCaptureFormat,
+              device.activeFormat != format else { return }
+        let clobbered = CMVideoFormatDescriptionGetDimensions(device.activeFormat.formatDescription)
+        let wanted = CMVideoFormatDescriptionGetDimensions(format.formatDescription)
+        Self.logger.warning(
+            "Session preset clobbered activeFormat to \(clobbered.width)x\(clobbered.height); re-asserting \(wanted.width)x\(wanted.height)"
+        )
+        do {
+            try device.lockForConfiguration()
+            device.activeFormat = format
+            if let min = configuredMinFrameDuration { device.activeVideoMinFrameDuration = min }
+            if let max = configuredMaxFrameDuration { device.activeVideoMaxFrameDuration = max }
+            device.unlockForConfiguration()
+        } catch {
+            Self.logger.error("Failed to re-assert capture format: \(error.localizedDescription, privacy: .public)")
         }
     }
     
