@@ -15,7 +15,18 @@ import SwiftUI
 struct IdentityStackOverlay: View {
     @ObservedObject var cameraManager: CameraManager
     let elapsedSeconds: Int
-    @State private var pulse = false
+
+    /// Wall-clock 1.0 s ease pulse for the live dot. Time-derived via
+    /// TimelineView instead of a repeatForever animation so it stops dead
+    /// when the view leaves the hierarchy and can't stack on re-entry.
+    static func statusPulseOpacity(at date: Date, low: Double) -> Double {
+        let period = 2.0 // 1.0 s down + 1.0 s back
+        let phase = date.timeIntervalSinceReferenceDate
+            .truncatingRemainder(dividingBy: period) / (period / 2) // 0..<2
+        let triangle = phase < 1 ? phase : 2 - phase
+        let eased = triangle * triangle * (3 - 2 * triangle) // smoothstep
+        return 1.0 - (1.0 - low) * eased
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
@@ -30,14 +41,12 @@ struct IdentityStackOverlay: View {
                 .foregroundStyle(.white.opacity(0.96))
 
             HStack(spacing: 8) {
-                Circle()
-                    .fill(Color(red: 0.19, green: 0.82, blue: 0.35))
-                    .frame(width: 6, height: 6)
-                    .opacity(pulse ? 0.55 : 1.0)
-                    .animation(
-                        .easeInOut(duration: 1.0).repeatForever(autoreverses: true),
-                        value: pulse
-                    )
+                TimelineView(.animation) { timeline in
+                    Circle()
+                        .fill(Color(red: 0.19, green: 0.82, blue: 0.35))
+                        .frame(width: 6, height: 6)
+                        .opacity(Self.statusPulseOpacity(at: timeline.date, low: 0.55))
+                }
 
                 Text(liveLine)
                     .font(.system(size: 10, weight: .medium, design: .monospaced))
@@ -46,7 +55,6 @@ struct IdentityStackOverlay: View {
             }
         }
         .shadow(color: .black.opacity(0.7), radius: 8, x: 0, y: 1)
-        .onAppear { pulse = true }
     }
 
     private var liveLine: String {
@@ -100,7 +108,7 @@ struct TelemetryOverlay: View {
             )
             telemetryBlock(
                 label: "PERSONS",
-                value: "\(cameraManager.personDetector.detectedPersons.count)",
+                value: "\(cameraManager.personDetector.displayedPersons.count)",
                 monospaced: true
             )
             telemetryBlock(
@@ -113,7 +121,7 @@ struct TelemetryOverlay: View {
     }
 
     private var detectionValue: String {
-        let ms = cameraManager.personDetector.stats.lastDetectionTime * 1000
+        let ms = cameraManager.personDetector.displayedStats.lastDetectionTime * 1000
         if ms <= 0 { return "—" }
         return String(format: "%.1fms", ms)
     }
@@ -173,18 +181,16 @@ struct ProgramOnAirBadgeAnchor: View {
 }
 
 struct ProgramOnAirBadge: View {
-    @State private var pulse = false
-
     var body: some View {
         HStack(spacing: 7) {
-            Circle()
-                .fill(Color(red: 1.0, green: 0.27, blue: 0.23))
-                .frame(width: 7, height: 7)
-                .opacity(pulse ? 0.5 : 1.0)
-                .animation(
-                    .easeInOut(duration: 1.0).repeatForever(autoreverses: true),
-                    value: pulse
-                )
+            // Time-derived pulse (see IdentityStackOverlay.statusPulseOpacity):
+            // stops with the view, nothing to arm or stack.
+            TimelineView(.animation) { timeline in
+                Circle()
+                    .fill(Color(red: 1.0, green: 0.27, blue: 0.23))
+                    .frame(width: 7, height: 7)
+                    .opacity(IdentityStackOverlay.statusPulseOpacity(at: timeline.date, low: 0.5))
+            }
 
             Text("PROGRAM · ON AIR")
                 .font(.system(size: 10, weight: .semibold, design: .monospaced))
@@ -192,6 +198,5 @@ struct ProgramOnAirBadge: View {
                 .foregroundStyle(.white.opacity(0.9))
         }
         .shadow(color: .black.opacity(0.7), radius: 8, x: 0, y: 1)
-        .onAppear { pulse = true }
     }
 }

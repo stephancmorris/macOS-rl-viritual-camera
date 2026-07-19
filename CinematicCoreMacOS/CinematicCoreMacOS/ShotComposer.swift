@@ -463,19 +463,67 @@ final class ShotComposer: ObservableObject {
         )
     }
 
-    /// Whether a valid target has been computed at least once
+    /// Whether a valid target has been computed at least once.
+    /// @Published but written compare-before-write only (transition publish).
     @Published private(set) var hasActiveTarget: Bool = false
 
-    /// The most recently computed crop (used by training recorder)
-    @Published private(set) var lastComputedCrop: CropEngine.CropRect?
+    /// The most recently computed crop. Plain per-frame storage — logic
+    /// readers (training recorder) read this synchronously; UI reads the
+    /// 15 Hz `displayedComputedCrop` mirror instead.
+    private(set) var currentComputedCrop: CropEngine.CropRect?
 
     /// The tighter subject box used to derive the visible program crop.
-    @Published private(set) var lastTrackedBounds: CGRect?
+    /// Plain per-frame storage; UI reads `displayedTrackedBounds`.
+    private(set) var currentTrackedBounds: CGRect?
 
-    /// The latest deterministic tracked-subject/program-crop pair.
-    @Published private(set) var lastGeometrySnapshot: GeometrySnapshot?
+    /// The latest deterministic tracked-subject/program-crop pair. No
+    /// producers currently write it; kept plain (non-published) so a future
+    /// per-frame writer can't reintroduce per-frame SwiftUI invalidations.
+    private(set) var currentGeometrySnapshot: GeometrySnapshot?
+
+    /// 15 Hz UI mirror of `currentComputedCrop` (see `publishDisplayMirrors`).
+    @Published private(set) var displayedComputedCrop: CropEngine.CropRect?
+
+    /// 15 Hz UI mirror of `currentTrackedBounds`.
+    @Published private(set) var displayedTrackedBounds: CGRect?
+
+    /// Bumped on every per-frame write to the `current*` frame state above.
+    /// The 15 Hz coalescer compares it against `publishedFrameStateRevision`
+    /// and republishes the mirrors only when something actually changed.
+    private var frameStateRevision: UInt64 = 0
+    private var publishedFrameStateRevision: UInt64 = 0
+    private var displayMirrorTimer: Timer?
+
+    init() {
+        // 15 Hz coalescer: the frame path writes plain vars + bumps
+        // `frameStateRevision`; this timer republishes the @Published UI
+        // mirrors at most 15×/s, and only when the revision moved. The timer
+        // fires on the main runloop (scheduled from MainActor init), so
+        // `assumeIsolated` is sound.
+        displayMirrorTimer = Timer.scheduledTimer(withTimeInterval: 1.0 / 15.0, repeats: true) { [weak self] _ in
+            MainActor.assumeIsolated {
+                self?.publishDisplayMirrors()
+            }
+        }
+    }
+
+    deinit {
+        displayMirrorTimer?.invalidate()
+    }
+
+    private func publishDisplayMirrors() {
+        guard publishedFrameStateRevision != frameStateRevision else { return }
+        publishedFrameStateRevision = frameStateRevision
+        if displayedComputedCrop != currentComputedCrop {
+            displayedComputedCrop = currentComputedCrop
+        }
+        if displayedTrackedBounds != currentTrackedBounds {
+            displayedTrackedBounds = currentTrackedBounds
+        }
+    }
 
     /// The currently preferred speaker track, if any.
+    /// @Published but written compare-before-write only.
     @Published private(set) var activeTargetID: UUID?
 
     /// Minimum crop height fraction the CropEngine quality floor allows for
@@ -1293,7 +1341,8 @@ final class ShotComposer: ObservableObject {
         if let keypoints = person.poseKeypoints,
            keypoints.head.y > keypoints.waist.y {
             let trackedBounds = trackedSubjectBounds(for: person, keypoints: keypoints)
-            lastTrackedBounds = trackedBounds
+            currentTrackedBounds = trackedBounds
+            frameStateRevision &+= 1
             return composeFromTrackedBounds(
                 trackedBounds,
                 subjectBounds: subjectBounds,
@@ -1302,7 +1351,8 @@ final class ShotComposer: ObservableObject {
         }
 
         let trackedBounds = trackedSubjectBounds(for: person, keypoints: nil)
-        lastTrackedBounds = trackedBounds
+        currentTrackedBounds = trackedBounds
+        frameStateRevision &+= 1
         return composeFromTrackedBounds(
             trackedBounds,
             subjectBounds: subjectBounds,
@@ -1322,10 +1372,13 @@ final class ShotComposer: ObservableObject {
     func reset(clearManualLock: Bool = false) {
         lastAcceptedCenter = nil
         lastAppliedFramingFingerprint = nil
-        hasActiveTarget = false
-        lastComputedCrop = nil
-        lastTrackedBounds = nil
-        activeTargetID = nil
+        // @Published transition state: compare-before-write (reset can run
+        // repeatedly on the frame path when detections drop).
+        if hasActiveTarget { hasActiveTarget = false }
+        if activeTargetID != nil { activeTargetID = nil }
+        currentComputedCrop = nil
+        currentTrackedBounds = nil
+        frameStateRevision &+= 1
         lastTrackingPoint = nil
 
         subjectVelocity = 0.0
@@ -1551,7 +1604,8 @@ final class ShotComposer: ObservableObject {
         trackingCenter: CGPoint
     ) -> CropEngine.CropRect? {
         let clampedCrop = clampCropToFrame(crop)
-        lastComputedCrop = clampedCrop
+        currentComputedCrop = clampedCrop
+        frameStateRevision &+= 1
 
         let fingerprint = currentFramingFingerprint
         let framingChanged = lastAppliedFramingFingerprint != fingerprint
@@ -1596,7 +1650,7 @@ final class ShotComposer: ObservableObject {
 
             lastAcceptedCenter = trackingCenter
             lastAppliedFramingFingerprint = fingerprint
-            hasActiveTarget = true
+            if !hasActiveTarget { hasActiveTarget = true }
             return clampedCrop
         }
 
@@ -1615,7 +1669,7 @@ final class ShotComposer: ObservableObject {
             enterSteadyFollowing()
             lastAcceptedCenter = trackingCenter
             lastAppliedFramingFingerprint = fingerprint
-            hasActiveTarget = true
+            if !hasActiveTarget { hasActiveTarget = true }
             return clampedCrop
         }
 
@@ -1626,7 +1680,7 @@ final class ShotComposer: ObservableObject {
                 // recover by resuming following and accepting.
                 enterSteadyFollowing()
                 lastAcceptedCenter = trackingCenter
-                hasActiveTarget = true
+                if !hasActiveTarget { hasActiveTarget = true }
                 return clampedCrop
             }
             let dx = abs(trackingCenter.x - bandCenter.x)
@@ -1637,7 +1691,7 @@ final class ShotComposer: ObservableObject {
                     // Confirmed band exit — resume following and accept.
                     enterSteadyFollowing()
                     lastAcceptedCenter = trackingCenter
-                    hasActiveTarget = true
+                    if !hasActiveTarget { hasActiveTarget = true }
                     return clampedCrop
                 }
             } else {
@@ -1665,13 +1719,13 @@ final class ShotComposer: ObservableObject {
                 enterSteadyHolding(centeredOn: anchor)
                 lastAcceptedCenter = anchor
                 lastAppliedFramingFingerprint = fingerprint
-                hasActiveTarget = true
+                if !hasActiveTarget { hasActiveTarget = true }
                 return clampedCrop
             }
             // Keep following — emit a target every frame.
             lastAcceptedCenter = trackingCenter
             lastAppliedFramingFingerprint = fingerprint
-            hasActiveTarget = true
+            if !hasActiveTarget { hasActiveTarget = true }
             return clampedCrop
         }
     }
@@ -1680,8 +1734,10 @@ final class ShotComposer: ObservableObject {
         _ selected: PersonDetector.DetectedPerson,
         now: TimeInterval
     ) -> PersonDetector.DetectedPerson {
-        activeTargetID = selected.id
-        hasActiveTarget = true
+        // Runs once per accepted frame — compare-before-write so a steady
+        // subject doesn't fire objectWillChange 30-50×/s.
+        if activeTargetID != selected.id { activeTargetID = selected.id }
+        if !hasActiveTarget { hasActiveTarget = true }
         lastTrackingPoint = trackingPoint(for: selected)
         return selected
     }

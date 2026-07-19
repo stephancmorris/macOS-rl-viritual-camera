@@ -42,19 +42,19 @@ struct DetectionSettingsView: View {
             }
             
             Section("Statistics") {
-                LabeledContent("Persons Detected", value: "\(personDetector.stats.personsDetectedCount)")
-                
+                LabeledContent("Persons Detected", value: "\(personDetector.displayedStats.personsDetectedCount)")
+
                 LabeledContent(
                     "Detection Time",
-                    value: String(format: "%.1fms", personDetector.stats.lastDetectionTime * 1000)
+                    value: String(format: "%.1fms", personDetector.displayedStats.lastDetectionTime * 1000)
                 )
-                
+
                 LabeledContent(
                     "Average Time",
-                    value: String(format: "%.1fms", personDetector.stats.averageDetectionTime * 1000)
+                    value: String(format: "%.1fms", personDetector.displayedStats.averageDetectionTime * 1000)
                 )
-                
-                LabeledContent("Frames Processed", value: "\(personDetector.stats.totalFramesProcessed)")
+
+                LabeledContent("Frames Processed", value: "\(personDetector.displayedStats.totalFramesProcessed)")
             }
         }
         .formStyle(.grouped)

@@ -227,9 +227,6 @@ final class CameraManager: NSObject, ObservableObject {
     /// that surface-recycling bug before).
     @Published private(set) var croppedFrameBuffer: CVPixelBuffer?
 
-    /// Raw camera frame cropped to the detection bounding box (no padding, no aspect enforcement)
-    @Published private(set) var detectionCroppedFrame: CIImage?
-    
 
 
     /// Operation modes for crop control
@@ -281,8 +278,8 @@ final class CameraManager: NSObject, ObservableObject {
 
     /// Last detected bounding box of the acquiring/locked subject. Updated
     /// every frame from detections and used to seed the next frame's ROI. This
-    /// works even during `.acquiring` (before `lastTrackedBounds` is set by the
-    /// composer) so ROI scanning stays tight throughout acquisition.
+    /// works even during `.acquiring` (before `currentTrackedBounds` is set by
+    /// the composer) so ROI scanning stays tight throughout acquisition.
     private var lastSubjectROIBox: CGRect?
 
     // State for Auto Pan
@@ -714,7 +711,7 @@ final class CameraManager: NSObject, ObservableObject {
         let unit = CGRect(x: 0, y: 0, width: 1, height: 1)
         // Prefer the subject's last raw detected box (available during
         // acquiring too); fall back to the composer's tracked bounds.
-        guard let box = lastSubjectROIBox ?? shotComposer.lastTrackedBounds,
+        guard let box = lastSubjectROIBox ?? shotComposer.currentTrackedBounds,
               !box.isEmpty else {
             return unit
         }
@@ -857,7 +854,6 @@ final class CameraManager: NSObject, ObservableObject {
         cinematicAgent.reset()
         currentFrameBuffer = nil
         croppedFrameBuffer = nil
-        detectionCroppedFrame = nil
         validationClipStatus = "Preparing \(validationClipURL.lastPathComponent)…"
         programOutput.updateCaptureStatus(isRunning: true)
 
@@ -988,6 +984,10 @@ final class CameraManager: NSObject, ObservableObject {
         }
         let detectionDuration = CACurrentMediaTime() - detectionStart
         Self.signposter.endInterval("detection", detectionInterval)
+        programOutput.recordDetectionTiming(
+            queueWait: personDetector.stats.lastQueueWait,
+            visionWall: personDetector.stats.lastDetectionTime
+        )
         programOutput.recordLatency(stage: .detection, duration: detectionDuration)
 
         let composeInterval = Self.signposter.beginInterval("compose")
@@ -1023,20 +1023,6 @@ final class CameraManager: NSObject, ObservableObject {
         let primaryPerson = activeMode != .autoTracking
             ? nil
             : shotComposer.primaryPerson(from: detectedPersons)
-
-        if let person = primaryPerson {
-            let bbox = person.boundingBox
-            let extent = ciImage.extent
-            let cropRect = CGRect(
-                x: bbox.origin.x * extent.width,
-                y: bbox.origin.y * extent.height,
-                width: bbox.width * extent.width,
-                height: bbox.height * extent.height
-            )
-            detectionCroppedFrame = ciImage.cropped(to: cropRect)
-        } else {
-            detectionCroppedFrame = nil
-        }
 
         // Crop dimensions in normalized [0,1] space for the active preset+aspect.
         // Single source of truth for both manualCropRect and the auto-pan range.
@@ -1212,7 +1198,7 @@ final class CameraManager: NSObject, ObservableObject {
                 currentCrop: cropEngine?.currentCrop ?? .fullFrame,
                 idealCrop: useMLAgent
                     ? cinematicAgent.lastPredictedCrop
-                    : shotComposer.lastComputedCrop,
+                    : shotComposer.currentComputedCrop,
                 isInterpolating: cropEngine?.isInterpolating ?? false
             )
         }
@@ -1833,8 +1819,14 @@ extension CameraManager: AVCaptureVideoDataOutputSampleBufferDelegate {
 
         let sendableBuffer = SendablePixelBufferBox(pixelBuffer)
 
+        // Soak diagnostic: how long the frame Task waits for the MainActor.
+        // A growing hopLag with flat Vision wall time is the signature of
+        // MainActor/SwiftUI accumulation (see the [SOAK] line).
+        let enqueueTime = CACurrentMediaTime()
+
         Task(priority: .userInitiated) { @MainActor in
             defer { self.frameProcessingGate.finish() }
+            self.programOutput.recordMainActorHop(CACurrentMediaTime() - enqueueTime)
             await self.processFrame(
                 pixelBuffer: sendableBuffer.pixelBuffer,
                 timestampSeconds: timestampSeconds

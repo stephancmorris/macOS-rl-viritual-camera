@@ -1,0 +1,34 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<key>ApplicationProperties</key>
+	<dict>
+		<key>ApplicationPath</key>
+		<string>Applications/Alfie.app</string>
+		<key>Architectures</key>
+		<array>
+			<string>x86_64</string>
+			<string>arm64</string>
+		</array>
+		<key>CFBundleIdentifier</key>
+		<string>Morris.CinematicCoreMacOS</string>
+		<key>CFBundleShortVersionString</key>
+		<string>1.0</string>
+		<key>CFBundleVersion</key>
+		<string>2</string>
+		<key>SigningIdentity</key>
+		<string>Apple Development: Stephan Morris (23SJ5KAP4M)</string>
+		<key>Team</key>
+		<string>EPZDEPSV69</string>
+	</dict>
+	<key>ArchiveVersion</key>
+	<integer>2</integer>
+	<key>CreationDate</key>
+	<date>2026-07-19T00:49:54Z</date>
+	<key>Name</key>
+	<string>CinematicCoreMacOS</string>
+	<key>SchemeName</key>
+	<string>CinematicCoreMacOS</string>
+</dict>
+</plist>

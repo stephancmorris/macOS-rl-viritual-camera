@@ -274,7 +274,7 @@ struct ShotComposerSettingsView: View {
                 )
             )
 
-            if let crop = shotComposer.lastComputedCrop {
+            if let crop = shotComposer.displayedComputedCrop {
                 LabeledContent("Crop Origin",
                                value: String(format: "(%.2f, %.2f)",
                                              crop.origin.x, crop.origin.y))

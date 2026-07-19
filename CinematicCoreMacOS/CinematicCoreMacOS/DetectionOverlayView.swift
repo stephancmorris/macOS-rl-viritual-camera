@@ -65,18 +65,34 @@ struct BoundingBoxView: View {
     let framingTitle: String
     var onSelect: ((UUID) -> Void)?
 
-    @State private var pulseOpacity: Double = 1.0
-
     var body: some View {
         let rect = calculateDisplayRect()
         let style = currentStyle
 
         ZStack(alignment: .topLeading) {
-            // Hairline rectangle
-            Rectangle()
-                .stroke(style.color.opacity(style.isPulsing ? pulseOpacity : 1.0), lineWidth: 1.5)
-                .frame(width: rect.width, height: rect.height)
-                .position(x: rect.midX, y: rect.midY)
+            // Hairline rectangle. The acquiring/recovering pulse is driven by
+            // TimelineView(.animation) rather than a repeatForever animation:
+            // the timeline exists ONLY while `style.isPulsing` is true and the
+            // view is on screen, so it stops dead (removed, not hidden) when
+            // the state exits or the view disappears, and repeated state
+            // entries can't stack animations — there is no imperative
+            // animation to arm.
+            if style.isPulsing {
+                TimelineView(.animation) { timeline in
+                    Rectangle()
+                        .stroke(
+                            style.color.opacity(Self.pulseOpacity(at: timeline.date)),
+                            lineWidth: 1.5
+                        )
+                        .frame(width: rect.width, height: rect.height)
+                        .position(x: rect.midX, y: rect.midY)
+                }
+            } else {
+                Rectangle()
+                    .stroke(style.color, lineWidth: 1.5)
+                    .frame(width: rect.width, height: rect.height)
+                    .position(x: rect.midX, y: rect.midY)
+            }
 
             // Corner ticks (8pt L-shapes)
             ForEach(Corner.allCases, id: \.self) { corner in
@@ -102,25 +118,18 @@ struct BoundingBoxView: View {
                     onSelect?(person.id)
                 }
         }
-        .onAppear {
-            if style.isPulsing {
-                withAnimation(.easeInOut(duration: 0.6).repeatForever(autoreverses: true)) {
-                    pulseOpacity = 0.45
-                }
-            }
-        }
-        .onChange(of: isRecovering) { _, recovering in
-            if recovering {
-                pulseOpacity = 1.0
-                withAnimation(.easeInOut(duration: 0.6).repeatForever(autoreverses: true)) {
-                    pulseOpacity = 0.45
-                }
-            } else {
-                withAnimation(.easeInOut(duration: 0.2)) {
-                    pulseOpacity = 1.0
-                }
-            }
-        }
+    }
+
+    /// Time-derived pulse matching the old look: a 0.6 s ease-in-out sweep
+    /// from 1.0 down to 0.45 and back (1.2 s full period), computed from the
+    /// wall clock so it needs no stored animation state.
+    private static func pulseOpacity(at date: Date) -> Double {
+        let period = 1.2
+        let phase = date.timeIntervalSinceReferenceDate
+            .truncatingRemainder(dividingBy: period) / (period / 2) // 0..<2
+        let triangle = phase < 1 ? phase : 2 - phase                // 0...1...0
+        let eased = triangle * triangle * (3 - 2 * triangle)        // smoothstep ≈ easeInOut
+        return 1.0 - 0.55 * eased                                   // 1.0 → 0.45 → 1.0
     }
 
     private func label(style: BoxStyle) -> some View {

@@ -42,20 +42,45 @@ final class CropEngine: ObservableObject {
 
     // MARK: - State
 
-    /// Current crop rectangle (normalized 0-1 coordinates)
-    @Published private(set) var currentCrop: CropRect = .fullFrame
+    /// Current crop rectangle (normalized 0-1 coordinates). Plain per-frame
+    /// storage — written every interpolation tick; logic readers (CameraManager,
+    /// training recorder, ML agent) read this. UI reads the 15 Hz
+    /// `displayedCrop` mirror.
+    private(set) var currentCrop: CropRect = .fullFrame {
+        didSet { cropStateRevision &+= 1 }
+    }
 
     /// Target crop rectangle (where we're smoothly transitioning to).
     ///
     /// Every assignment is clamped against `qualityFloor` so no caller — ML
     /// agent, rule-based composer, manual crop, or auto-pan — can request a
-    /// crop tighter than one resolution tier below the source. This is the
-    /// single chokepoint all four modes pass through.
-    @Published var targetCrop: CropRect = .fullFrame {
+    /// crop tighter than the floor. This is the single chokepoint all four
+    /// modes pass through. Plain per-frame storage (reassigned on every
+    /// accepted compose frame) — never published.
+    var targetCrop: CropRect = .fullFrame {
         didSet {
-            // Automatically start interpolating
-            isInterpolating = true
+            cropStateRevision &+= 1
+            // Automatically start interpolating. Compare-before-write:
+            // an unguarded write here would fire an extra objectWillChange
+            // per frame even though the value is already true.
+            if !isInterpolating { isInterpolating = true }
         }
+    }
+
+    /// 15 Hz UI mirror of `currentCrop` for the crop-indicator overlay
+    /// (see `publishDisplayMirror`).
+    @Published private(set) var displayedCrop: CropRect?
+
+    /// Bumped on every per-frame crop write; the 15 Hz coalescer republishes
+    /// the mirror only when it moved.
+    private var cropStateRevision: UInt64 = 0
+    private var publishedCropStateRevision: UInt64 = 0
+    private var displayMirrorTimer: Timer?
+
+    private func publishDisplayMirror() {
+        guard publishedCropStateRevision != cropStateRevision else { return }
+        publishedCropStateRevision = cropStateRevision
+        displayedCrop = currentCrop
     }
 
     /// Resolution-derived quality floor. Updated from the *actual delivered*
@@ -301,8 +326,18 @@ final class CropEngine: ObservableObject {
         )
 
         Self.logger.notice("CropEngine initialized with Metal device: \(device.name, privacy: .public)")
+
+        displayMirrorTimer = Timer.scheduledTimer(withTimeInterval: 1.0 / 15.0, repeats: true) { [weak self] _ in
+            MainActor.assumeIsolated {
+                self?.publishDisplayMirror()
+            }
+        }
     }
-    
+
+    deinit {
+        displayMirrorTimer?.invalidate()
+    }
+
     // MARK: - Public Methods
 
     /// MainActor-only: advance interpolation toward `targetCrop`, then snapshot
@@ -436,7 +471,7 @@ final class CropEngine: ObservableObject {
         currentCrop = targetCrop
         velocityOrigin = .zero
         velocitySize = .zero
-        isInterpolating = false
+        if isInterpolating { isInterpolating = false }
         lastInterpolationTime = 0
     }
     

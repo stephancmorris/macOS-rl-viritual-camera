@@ -20,12 +20,35 @@ final class PersonDetector: ObservableObject {
     private nonisolated static let signposter = OSSignposter(logger: logger)
     
     // MARK: - Published Properties
-    
-    /// Currently detected persons with bounding boxes
-    @Published private(set) var detectedPersons: [DetectedPerson] = []
-    
-    /// Detection statistics
-    @Published private(set) var stats: DetectionStats = .init()
+
+    /// Currently detected persons with bounding boxes. Plain per-frame
+    /// storage — every synchronous logic reader (CameraManager, composer)
+    /// reads this; UI reads the 15 Hz `displayedPersons` mirror.
+    private(set) var detectedPersons: [DetectedPerson] = []
+
+    /// Detection statistics. Plain per-frame storage — logic readers
+    /// (CameraManager.recordDetectionTiming) read this; UI reads
+    /// `displayedStats`.
+    private(set) var stats: DetectionStats = .init()
+
+    /// 15 Hz UI mirror of `detectedPersons` (see `publishDisplayMirrors`).
+    @Published private(set) var displayedPersons: [DetectedPerson] = []
+
+    /// 15 Hz UI mirror of `stats`.
+    @Published private(set) var displayedStats: DetectionStats = .init()
+
+    /// Bumped on every per-frame write of `detectedPersons` / `stats`; the
+    /// 15 Hz coalescer republishes the mirrors only when it moved.
+    private var frameStateRevision: UInt64 = 0
+    private var publishedFrameStateRevision: UInt64 = 0
+    private var displayMirrorTimer: Timer?
+
+    private func publishDisplayMirrors() {
+        guard publishedFrameStateRevision != frameStateRevision else { return }
+        publishedFrameStateRevision = frameStateRevision
+        displayedPersons = detectedPersons
+        displayedStats = stats
+    }
 
     // MARK: - Models
 
@@ -73,6 +96,10 @@ final class PersonDetector: ObservableObject {
         var totalFramesProcessed: Int = 0
         var averageDetectionTime: TimeInterval = 0
         var lastDetectionTime: TimeInterval = 0
+        /// How long the detection block waited on `processingQueue` before it
+        /// started running — soak diagnostic separating "Vision got slower"
+        /// from "the queue upstream got congested".
+        var lastQueueWait: TimeInterval = 0
         var personsDetectedCount: Int = 0
     }
 
@@ -131,6 +158,92 @@ final class PersonDetector: ObservableObject {
         label: "com.cinematiccore.personDetection",
         qos: .userInitiated
     )
+
+    // MARK: - Vision input downscale
+    //
+    // Vision's person/pose/face models run on an internally normalized input;
+    // feeding them the full 4K capture buffer wastes decode/resample work and
+    // memory bandwidth every frame. Buffers taller than 1440 px are GPU-scaled
+    // to 1080 px height (aspect-preserving) before the VNImageRequestHandler.
+    // Results are normalized (0-1), so NOTHING downstream changes — the
+    // full-res buffer still flows to crop/output and face-signature capture.
+    //
+    // All of this state is touched ONLY from `processingQueue` (a serial
+    // queue), hence the `nonisolated(unsafe)` — the class is MainActor by
+    // default and the detection closure is nonisolated.
+
+    /// Metal-backed context for the downscale render. Working color space nil:
+    /// detection doesn't care about color accuracy, skip the conversion.
+    nonisolated(unsafe) private static let downscaleContext = CIContext(options: [
+        .useSoftwareRenderer: false,
+        .workingColorSpace: NSNull()
+    ])
+
+    /// Source height above which detection input is downscaled to 1080 px.
+    nonisolated static let downscaleTriggerHeight = 1440
+    /// Target height for downscaled detection input.
+    nonisolated static let downscaleTargetHeight = 1080
+
+    /// Pool of BGRA, IOSurface-backed, Metal-compatible target buffers.
+    /// Rebuilt lazily whenever the target dimensions change.
+    nonisolated(unsafe) private var downscalePool: CVPixelBufferPool?
+    nonisolated(unsafe) private var downscalePoolWidth = 0
+    nonisolated(unsafe) private var downscalePoolHeight = 0
+    nonisolated(unsafe) private var loggedDownscaleFailure = false
+
+    /// Returns a ≤1080p buffer for Vision, or the original buffer when it is
+    /// already small enough or the downscale fails (logged once). Runs on
+    /// `processingQueue` inside the existing detection timing, so the [SOAK]
+    /// visionWall metric includes the scale cost.
+    private nonisolated func downscaledForDetection(_ buffer: CVPixelBuffer) -> CVPixelBuffer {
+        let srcHeight = CVPixelBufferGetHeight(buffer)
+        guard srcHeight > Self.downscaleTriggerHeight else { return buffer }
+        let srcWidth = CVPixelBufferGetWidth(buffer)
+
+        let targetHeight = Self.downscaleTargetHeight
+        let scale = CGFloat(targetHeight) / CGFloat(srcHeight)
+        var targetWidth = Int((CGFloat(srcWidth) * scale).rounded())
+        if targetWidth % 2 != 0 { targetWidth += 1 } // even width
+
+        if downscalePool == nil
+            || downscalePoolWidth != targetWidth
+            || downscalePoolHeight != targetHeight {
+            let attrs: [String: Any] = [
+                kCVPixelBufferPixelFormatTypeKey as String: kCVPixelFormatType_32BGRA,
+                kCVPixelBufferWidthKey as String: targetWidth,
+                kCVPixelBufferHeightKey as String: targetHeight,
+                kCVPixelBufferIOSurfacePropertiesKey as String: [:],
+                kCVPixelBufferMetalCompatibilityKey as String: true
+            ]
+            var pool: CVPixelBufferPool?
+            CVPixelBufferPoolCreate(nil, nil, attrs as CFDictionary, &pool)
+            downscalePool = pool
+            downscalePoolWidth = targetWidth
+            downscalePoolHeight = targetHeight
+        }
+
+        guard let pool = downscalePool else {
+            logDownscaleFailureOnce("pool creation failed")
+            return buffer
+        }
+        var scaled: CVPixelBuffer?
+        CVPixelBufferPoolCreatePixelBuffer(nil, pool, &scaled)
+        guard let scaledBuffer = scaled else {
+            logDownscaleFailureOnce("pooled buffer allocation failed")
+            return buffer
+        }
+
+        let image = CIImage(cvPixelBuffer: buffer)
+            .transformed(by: CGAffineTransform(scaleX: scale, y: scale))
+        Self.downscaleContext.render(image, to: scaledBuffer)
+        return scaledBuffer
+    }
+
+    private nonisolated func logDownscaleFailureOnce(_ reason: String) {
+        guard !loggedDownscaleFailure else { return }
+        loggedDownscaleFailure = true
+        Self.logger.error("Vision downscale disabled (\(reason, privacy: .public)); detecting on full-resolution frames")
+    }
     
     // Person tracking state
     private var trackedPersons: [UUID: TrackedPerson] = [:]
@@ -220,7 +333,21 @@ final class PersonDetector: ObservableObject {
     
     // MARK: - Initialization
 
-    init() {}
+    init() {
+        // 15 Hz coalescer for the UI mirrors. The detection path writes plain
+        // vars + bumps `frameStateRevision`; this timer republishes at most
+        // 15×/s and only when the revision moved. Fires on the main runloop
+        // (scheduled from MainActor init), so `assumeIsolated` is sound.
+        displayMirrorTimer = Timer.scheduledTimer(withTimeInterval: 1.0 / 15.0, repeats: true) { [weak self] _ in
+            MainActor.assumeIsolated {
+                self?.publishDisplayMirrors()
+            }
+        }
+    }
+
+    deinit {
+        displayMirrorTimer?.invalidate()
+    }
     
     // MARK: - Public Methods
     
@@ -235,7 +362,10 @@ final class PersonDetector: ObservableObject {
         // Off / awaitingTap: no Vision at all. Clear detections so the overlay
         // shows nothing and the crop holds wide — the passive default.
         if plan.mode == .off || plan.mode == .awaitingTap {
-            if !detectedPersons.isEmpty { detectedPersons = [] }
+            if !detectedPersons.isEmpty {
+                detectedPersons = []
+                frameStateRevision &+= 1
+            }
             trackedPersons.removeAll()
             return []
         }
@@ -245,7 +375,7 @@ final class PersonDetector: ObservableObject {
         let configSnapshot = config
 
         // Perform detection on background queue (rect + pose + face together).
-        let (rectObservations, poseObservations, faceObservations) = await performDetection(
+        let (rectObservations, poseObservations, faceObservations, queueWait) = await performDetection(
             pixelBuffer: pixelBuffer,
             config: configSnapshot,
             plan: plan
@@ -262,7 +392,7 @@ final class PersonDetector: ObservableObject {
                 faceObservations: faceObservations,
                 timestamp: startTime
             )
-            updateStats(detectionTime: detectionTime)
+            updateStats(detectionTime: detectionTime, queueWait: queueWait)
         }
 
         return detectedPersons
@@ -290,11 +420,13 @@ final class PersonDetector: ObservableObject {
         pixelBuffer: CVPixelBuffer,
         config: Config,
         plan: DetectionRequestPlan
-    ) async -> ([VNHumanObservation], [VNHumanBodyPoseObservation], [VNFaceObservation]) {
+    ) async -> ([VNHumanObservation], [VNHumanBodyPoseObservation], [VNFaceObservation], TimeInterval) {
         let sendablePixelBuffer = SendablePixelBuffer(value: pixelBuffer)
+        let enqueueTime = CACurrentMediaTime()
 
         return await withCheckedContinuation { continuation in
             processingQueue.async { [self] in
+                let queueWait = CACurrentMediaTime() - enqueueTime
                 if config.useHighAccuracy {
                     self.cachedRectRequest.revision = VNDetectHumanRectanglesRequestRevision2
                 } else {
@@ -338,8 +470,14 @@ final class PersonDetector: ObservableObject {
                     requests.append(self.cachedFaceRequest)
                 }
 
+                // Detect on a ≤1080p proxy of tall (4K) buffers. Vision results
+                // are normalized, so downstream consumers are unaffected; the
+                // original full-res buffer is untouched and continues to feed
+                // crop/output and face-signature capture.
+                let detectionBuffer = self.downscaledForDetection(sendablePixelBuffer.value)
+
                 let handler = VNImageRequestHandler(
-                    cvPixelBuffer: sendablePixelBuffer.value,
+                    cvPixelBuffer: detectionBuffer,
                     orientation: .up,
                     options: [:]
                 )
@@ -358,10 +496,10 @@ final class PersonDetector: ObservableObject {
                     // the locked subject and trigger spurious gallery captures.
                     let faceResults = isLockedROI ? [] : (self.cachedFaceRequest.results ?? [])
 
-                    continuation.resume(returning: (limited, poseResults, faceResults))
+                    continuation.resume(returning: (limited, poseResults, faceResults, queueWait))
                 } catch {
                     Self.logger.error("Person detection error: \(error.localizedDescription, privacy: .public)")
-                    continuation.resume(returning: ([], [], []))
+                    continuation.resume(returning: ([], [], [], queueWait))
                 }
             }
         }
@@ -556,6 +694,7 @@ final class PersonDetector: ObservableObject {
         }
 
         detectedPersons = updatedPersons
+        frameStateRevision &+= 1
     }
 
     private func clamp(_ value: CGFloat, to absLimit: CGFloat) -> CGFloat {
@@ -949,14 +1088,16 @@ final class PersonDetector: ObservableObject {
         return intersectionArea / union
     }
     
-    private func updateStats(detectionTime: TimeInterval) {
+    private func updateStats(detectionTime: TimeInterval, queueWait: TimeInterval = 0) {
         stats.totalFramesProcessed += 1
         stats.lastDetectionTime = detectionTime
+        stats.lastQueueWait = queueWait
         stats.personsDetectedCount = detectedPersons.count
         
         // Running average of detection time
         let alpha: TimeInterval = 0.1 // Smoothing factor
         stats.averageDetectionTime = (alpha * detectionTime) + ((1 - alpha) * stats.averageDetectionTime)
+        frameStateRevision &+= 1
     }
 }
 

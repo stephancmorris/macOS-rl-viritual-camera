@@ -308,6 +308,78 @@ final class ProgramOutputManager: ObservableObject {
     private var lastStatsRefresh: TimeInterval = 0
     private let statsRefreshInterval: TimeInterval = 0.5
 
+    // MARK: Soak diagnostics (progressive-lag localization)
+    //
+    // Raw accumulators for the [SOAK] line, written per frame (plain vars,
+    // never published) and emitted every `soakEmitEveryNRefreshes` stats
+    // refreshes (~5 s). The three curves separate the progressive-lag
+    // hypotheses: growing hopLag with flat visionWall → MainActor/SwiftUI
+    // accumulation; growing footprint with flat lags → memory-pressure leak;
+    // all flat in a clip soak but lag on the live rig → hardware path.
+    private var rawHopLagSum: Double = 0
+    private var rawHopLagMax: Double = 0
+    private var rawHopLagCount: Int = 0
+    private var rawQueueWaitSum: Double = 0
+    private var rawQueueWaitMax: Double = 0
+    private var rawVisionWallSum: Double = 0
+    private var rawVisionWallMax: Double = 0
+    private var rawDetectionCount: Int = 0
+    private var statsRefreshCounter: Int = 0
+    private let soakEmitEveryNRefreshes = 10
+
+    /// Delay between the capture callback enqueueing the frame Task and the
+    /// MainActor actually starting it. Raw-var writes only.
+    func recordMainActorHop(_ seconds: TimeInterval) {
+        rawHopLagSum += seconds
+        rawHopLagMax = max(rawHopLagMax, seconds)
+        rawHopLagCount += 1
+    }
+
+    /// Detection dispatch-queue wait vs. Vision wall time for one frame.
+    func recordDetectionTiming(queueWait: TimeInterval, visionWall: TimeInterval) {
+        rawQueueWaitSum += queueWait
+        rawQueueWaitMax = max(rawQueueWaitMax, queueWait)
+        rawVisionWallSum += visionWall
+        rawVisionWallMax = max(rawVisionWallMax, visionWall)
+        rawDetectionCount += 1
+    }
+
+    /// Resident memory footprint (the number Activity Monitor calls "Memory").
+    nonisolated static func currentFootprintMB() -> Double {
+        var info = task_vm_info_data_t()
+        var count = mach_msg_type_number_t(
+            MemoryLayout<task_vm_info_data_t>.size / MemoryLayout<natural_t>.size
+        )
+        let result = withUnsafeMutablePointer(to: &info) { infoPtr in
+            infoPtr.withMemoryRebound(to: integer_t.self, capacity: Int(count)) { intPtr in
+                task_info(mach_task_self_, task_flavor_t(TASK_VM_INFO), intPtr, &count)
+            }
+        }
+        guard result == KERN_SUCCESS else { return 0 }
+        return Double(info.phys_footprint) / (1024 * 1024)
+    }
+
+    private func emitSoakLineIfDue() {
+        statsRefreshCounter += 1
+        guard statsRefreshCounter % soakEmitEveryNRefreshes == 0 else { return }
+        let hopMean = rawHopLagCount > 0 ? rawHopLagSum / Double(rawHopLagCount) : 0
+        let qwMean = rawDetectionCount > 0 ? rawQueueWaitSum / Double(rawDetectionCount) : 0
+        let vwMean = rawDetectionCount > 0 ? rawVisionWallSum / Double(rawDetectionCount) : 0
+        let line = String(
+            format: "[SOAK] footprint=%.0fMB hopLag=%.1f/%.1fms queueWait=%.1f/%.1fms visionWall=%.1f/%.1fms frames=%d drops=%d",
+            Self.currentFootprintMB(),
+            hopMean * 1000, rawHopLagMax * 1000,
+            qwMean * 1000, rawQueueWaitMax * 1000,
+            vwMean * 1000, rawVisionWallMax * 1000,
+            rawFramesSent, rawDroppedFrames
+        )
+        logger.notice("\(line, privacy: .public)")
+        rawHopLagSum = 0; rawHopLagMax = 0; rawHopLagCount = 0
+        rawQueueWaitSum = 0; rawQueueWaitMax = 0
+        rawVisionWallSum = 0; rawVisionWallMax = 0
+        rawDetectionCount = 0
+    }
+
     init(sinks: [any ProgramOutputSink] = []) {
         self.sinks = sinks
         self.sinks.forEach { sink in
@@ -460,6 +532,7 @@ final class ProgramOutputManager: ObservableObject {
         refreshLatencySnapshot()
         refreshStatuses()
         refreshBringUpChecks()
+        emitSoakLineIfDue()
     }
 
     var activeRouteTitle: String {
