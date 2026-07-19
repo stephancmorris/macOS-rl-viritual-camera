@@ -252,7 +252,7 @@ final class ProgramOutputManager: ObservableObject {
         var id: Route { route }
     }
 
-    @Published var preferredRoute: Route = .virtualCamera {
+    @Published var preferredRoute: Route = .display {
         didSet {
             refreshRoutingDecision()
         }
