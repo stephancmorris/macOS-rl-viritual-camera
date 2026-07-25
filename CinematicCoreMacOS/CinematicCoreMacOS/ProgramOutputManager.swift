@@ -327,6 +327,50 @@ final class ProgramOutputManager: ObservableObject {
     private var statsRefreshCounter: Int = 0
     private let soakEmitEveryNRefreshes = 10
 
+    /// Cumulative capture-gate drop count, pushed in from CameraManager. This is
+    /// the metric that actually tracks progressive lag: because the gate admits
+    /// a frame only when the MainActor is idle, a slowing pipeline shows up as
+    /// *skipped* frames, not as growing hop lag on the ones that got through.
+    private var rawGateDropTotal: UInt64 = 0
+    private var lastEmittedGateDropTotal: UInt64 = 0
+    private var lastEmittedFramesSent: Int = 0
+    private var lastEmittedDroppedFrames: Int = 0
+
+    /// Per-session CSV of the same numbers as the `[SOAK]` line, for after-the-
+    /// fact analysis in a spreadsheet. Written off-MainActor, one row per soak
+    /// window — never per frame.
+    let diagnosticsLog = DiagnosticsLog()
+
+    /// Filename of the diagnostics CSV in progress, surfaced in Settings. Set
+    /// once per session start/stop, so publishing it is not a frame-path cost.
+    @Published private(set) var diagnosticsFileName: String?
+
+    /// Last time a dropped-frame reason was logged. Drop logging is throttled to
+    /// once per second: under overload this path fires at frame rate, and the
+    /// logging then compounds the overload it is reporting.
+    private var lastDropLogAt: TimeInterval = 0
+    private let dropLogInterval: TimeInterval = 1.0
+    private var suppressedDropLogCount: Int = 0
+
+    /// Baseline for the incoming gate counter. `CaptureFrameProcessingGate`
+    /// lives as long as `CameraManager` and never resets, so a second capture
+    /// session in the same app run would otherwise open with a window drop
+    /// count equal to every drop since launch. Rebasing on the first push after
+    /// `start()` makes both reported figures session-relative.
+    private var gateDropBaseline: UInt64?
+
+    /// Running total of frames the capture gate skipped because the MainActor
+    /// was still busy with the previous frame.
+    func recordGateDropTotal(_ total: UInt64) {
+        guard let baseline = gateDropBaseline else {
+            gateDropBaseline = total
+            rawGateDropTotal = 0
+            lastEmittedGateDropTotal = 0
+            return
+        }
+        rawGateDropTotal = total &- baseline
+    }
+
     /// Delay between the capture callback enqueueing the frame Task and the
     /// MainActor actually starting it. Raw-var writes only.
     func recordMainActorHop(_ seconds: TimeInterval) {
@@ -365,13 +409,43 @@ final class ProgramOutputManager: ObservableObject {
         let hopMean = rawHopLagCount > 0 ? rawHopLagSum / Double(rawHopLagCount) : 0
         let qwMean = rawDetectionCount > 0 ? rawQueueWaitSum / Double(rawDetectionCount) : 0
         let vwMean = rawDetectionCount > 0 ? rawVisionWallSum / Double(rawDetectionCount) : 0
+        // Gate drops are reported as "this window / cumulative" — the per-window
+        // number is what climbs as the pipeline degrades.
+        let gateDropsWindow = rawGateDropTotal &- lastEmittedGateDropTotal
+        lastEmittedGateDropTotal = rawGateDropTotal
+        let framesWindow = rawFramesSent - lastEmittedFramesSent
+        lastEmittedFramesSent = rawFramesSent
+        let outDropsWindow = rawDroppedFrames - lastEmittedDroppedFrames
+        lastEmittedDroppedFrames = rawDroppedFrames
+
+        // Same numbers, two destinations: Console for watching live, CSV for
+        // charting afterwards. The CSV row is built here so both come from one
+        // set of accumulators and can never disagree.
+        diagnosticsLog.appendRow(
+            footprintMB: Self.currentFootprintMB(),
+            hopMeanMS: hopMean * 1000,
+            hopMaxMS: rawHopLagMax * 1000,
+            queueMeanMS: qwMean * 1000,
+            queueMaxMS: rawQueueWaitMax * 1000,
+            visionMeanMS: vwMean * 1000,
+            visionMaxMS: rawVisionWallMax * 1000,
+            detections: rawDetectionCount,
+            framesWindow: framesWindow,
+            framesTotal: rawFramesSent,
+            outDropsWindow: outDropsWindow,
+            outDropsTotal: rawDroppedFrames,
+            gateDropsWindow: gateDropsWindow,
+            gateDropsTotal: rawGateDropTotal
+        )
+
         let line = String(
-            format: "[SOAK] footprint=%.0fMB hopLag=%.1f/%.1fms queueWait=%.1f/%.1fms visionWall=%.1f/%.1fms frames=%d drops=%d",
+            format: "[SOAK] footprint=%.0fMB hopLag=%.1f/%.1fms queueWait=%.1f/%.1fms visionWall=%.1f/%.1fms frames=%d outDrops=%d gateDrops=%llu/%llu",
             Self.currentFootprintMB(),
             hopMean * 1000, rawHopLagMax * 1000,
             qwMean * 1000, rawQueueWaitMax * 1000,
             vwMean * 1000, rawVisionWallMax * 1000,
-            rawFramesSent, rawDroppedFrames
+            rawFramesSent, rawDroppedFrames,
+            gateDropsWindow, rawGateDropTotal
         )
         logger.notice("\(line, privacy: .public)")
         rawHopLagSum = 0; rawHopLagMax = 0; rawHopLagCount = 0
@@ -410,8 +484,23 @@ final class ProgramOutputManager: ObservableObject {
         stageLatencies = []
         inputFrameTimestamps = []
         measuredInputFPS = 0
+        lastEmittedGateDropTotal = 0
+        lastEmittedFramesSent = 0
+        lastEmittedDroppedFrames = 0
+        statsRefreshCounter = 0
+        rawGateDropTotal = 0
+        gateDropBaseline = nil
         sinks.forEach { $0.connect() }
         refreshRoutingDecision()
+
+        // One CSV per capture session, so a run's rows are never interleaved
+        // with the previous run's. `elapsed_s` therefore starts at 0 for the
+        // run being investigated.
+        diagnosticsLog.beginSession(
+            note: "capture start; thermal="
+                + DiagnosticsLog.thermalStateName(ProcessInfo.processInfo.thermalState)
+        )
+        diagnosticsFileName = diagnosticsLog.currentFileName
     }
 
     func stop() {
@@ -424,6 +513,16 @@ final class ProgramOutputManager: ObservableObject {
         // Final flush so the HUD shows the session's closing numbers rather
         // than whatever the last coalesced refresh happened to capture.
         refreshPublishedStatsIfDue(force: true)
+        diagnosticsLog.endSession(note: "capture stop")
+        diagnosticsFileName = nil
+    }
+
+    /// Record an operator- or pipeline-level marker in the diagnostics CSV. It
+    /// lands in the `note` column of the next row, so a run can be read back
+    /// against what was actually happening on stage. Call sparingly — this is
+    /// for events, not per-frame state.
+    func noteDiagnostics(_ text: String) {
+        diagnosticsLog.note(text)
     }
 
     func updateCaptureStatus(isRunning: Bool) {
@@ -472,7 +571,22 @@ final class ProgramOutputManager: ObservableObject {
         rawLastDropReason = reason
         dropTimestamps.append(timestamp)
         trimDropTimestamps(relativeTo: timestamp)
-        logger.warning("Dropped frame: \(reason, privacy: .public)")
+        // Throttled: an output route that starts refusing frames refuses them at
+        // frame rate, and logging each one adds MainActor work to a pipeline
+        // that is already behind. One line per second, carrying the count of
+        // what it stood in for.
+        let now = CACurrentMediaTime()
+        if now - lastDropLogAt >= dropLogInterval {
+            lastDropLogAt = now
+            if suppressedDropLogCount > 0 {
+                logger.warning("Dropped frame: \(reason, privacy: .public) (+\(self.suppressedDropLogCount, privacy: .public) more in the last second)")
+                suppressedDropLogCount = 0
+            } else {
+                logger.warning("Dropped frame: \(reason, privacy: .public)")
+            }
+        } else {
+            suppressedDropLogCount += 1
+        }
         refreshPublishedStatsIfDue()
     }
 
@@ -824,6 +938,31 @@ struct ProgramOutputSettingsView<SystemExtensionManager: SystemExtensionStatusPr
                 ) { _ in
                     availableDisplays = ProgramDisplayOption.current()
                 }
+            }
+
+            Section("Diagnostics") {
+                LabeledContent("Session Log") {
+                    Button("Open in Finder") {
+                        DiagnosticsLog.openInFinder()
+                    }
+                    .buttonStyle(.borderless)
+                }
+
+                LabeledContent(
+                    "Recording To",
+                    value: programOutput.diagnosticsFileName ?? "Not Capturing"
+                )
+
+                LabeledContent(
+                    "Thermal State",
+                    value: DiagnosticsLog.thermalStateName(ProcessInfo.processInfo.thermalState)
+                        .capitalized
+                )
+
+                Text("A CSV row is written every ~5 s while capture is running: memory, frame timings, dropped frames, and the system thermal state. Open the folder after a session and chart the columns against elapsed_s to see where and why throughput fell off.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
             }
 
             Section("Program Feed") {

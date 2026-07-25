@@ -69,6 +69,7 @@
 			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
 			membershipExceptions = (
 				CropRenderer.metal,
+				DiagnosticsLog.swift,
 				ProgramOutputManager.swift,
 				ShowStandard.swift,
 			);

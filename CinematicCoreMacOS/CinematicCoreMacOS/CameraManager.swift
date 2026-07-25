@@ -1010,14 +1010,17 @@ final class CameraManager: NSObject, ObservableObject {
         case .pullBackToWide:
             activeMode = .wide
             boostFramingTransition()
+            programOutput.noteDiagnostics("lock lost, pulled back to wide")
         case .resumeTracking:
             activeMode = .autoTracking
             boostFramingTransition()
+            programOutput.noteDiagnostics("subject re-acquired")
         case .acquired:
             // Gallery ready → lock promoted to tracking (green box). Start
             // framing the subject and snap toward them quickly.
             activeMode = .autoTracking
             boostFramingTransition()
+            programOutput.noteDiagnostics("subject locked, tracking")
         }
 
         let primaryPerson = activeMode != .autoTracking
@@ -1222,6 +1225,7 @@ final class CameraManager: NSObject, ObservableObject {
         Self.signposter.endInterval("captureFrame", captureInterval)
 
         let gateDrops = frameProcessingGate.droppedFrameCount
+        programOutput.recordGateDropTotal(gateDrops)
         latencyLog(
             "total=\(String(format: "%.1f", totalDuration * 1000))ms " +
             "detect=\(String(format: "%.1f", detectionDuration * 1000))ms " +
@@ -1812,10 +1816,12 @@ extension CameraManager: AVCaptureVideoDataOutputSampleBufferDelegate {
 
         let timestampSeconds = CMSampleBufferGetPresentationTimeStamp(sampleBuffer).seconds
 
-        guard frameProcessingGate.begin() else {
-            Self.logger.warning("Dropped frame: processing gate busy")
-            return
-        }
+        // No per-drop logging here. Under overload this fires at frame rate on
+        // the capture delegate queue, and the logging itself then contributes to
+        // the overload. The gate already emits a delivered/dropped summary once
+        // per second (`CaptureThroughput`), and the [SOAK] line carries the
+        // running total.
+        guard frameProcessingGate.begin() else { return }
 
         let sendableBuffer = SendablePixelBufferBox(pixelBuffer)
 

@@ -34,5 +34,13 @@ enum DeveloperFlags {
     /// total, detection, crop, and compose timings plus accumulated gate-drop
     /// counts. Use this when diagnosing choppy output — see the
     /// "as-a-senior-software-stateful-penguin" plan for expected baselines.
-    nonisolated static let latencyConsoleLogging = true
+    ///
+    /// MUST stay `false` in operator builds. This emits an `os_log` `.notice`
+    /// with a `.public` string on **every processed frame** — 50 persisted log
+    /// entries per second from the MainActor. Sustained logging at that rate
+    /// backs up `logd` ingestion and progressively slows the emitting process,
+    /// and it feeds back on itself: as frames start dropping, the drop paths
+    /// log too. The throttled `[SOAK]` line (ProgramOutputManager, ~5 s) and the
+    /// 1 Hz `CaptureThroughput` summary carry the same signal at a sane rate.
+    nonisolated static let latencyConsoleLogging = false
 }
