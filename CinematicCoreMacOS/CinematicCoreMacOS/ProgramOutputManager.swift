@@ -493,11 +493,28 @@ final class ProgramOutputManager: ObservableObject {
         sinks.forEach { $0.connect() }
         refreshRoutingDecision()
 
-        // One CSV per capture session, so a run's rows are never interleaved
-        // with the previous run's. `elapsed_s` therefore starts at 0 for the
-        // run being investigated.
+        // NOTE: the diagnostics CSV deliberately does NOT start here. It starts
+        // on the first frame that actually runs Vision — see
+        // `beginDiagnosticsSessionIfNeeded`.
+        diagnosticsFileName = nil
+    }
+
+    /// Open the diagnostics CSV if it isn't already open. Called from the frame
+    /// path once detection actually starts running.
+    ///
+    /// Detection start, not capture start, is the zero point: the progressive
+    /// lag only appears under detection load, so measuring elapsed time from
+    /// here means `elapsed_s` reads directly as "time under load" and the ~4:35
+    /// onset can be compared across runs without subtracting however long the
+    /// operator spent lining up the shot first.
+    ///
+    /// Idempotent — `DiagnosticsLog.beginSession` ignores repeat calls, so this
+    /// is safe to call per frame. Once open it stays open for the rest of the
+    /// capture session, including any stretch where detection is switched off.
+    func beginDiagnosticsSessionIfNeeded(note: String) {
+        guard diagnosticsFileName == nil else { return }
         diagnosticsLog.beginSession(
-            note: "capture start; thermal="
+            note: note + "; thermal="
                 + DiagnosticsLog.thermalStateName(ProcessInfo.processInfo.thermalState)
         )
         diagnosticsFileName = diagnosticsLog.currentFileName
@@ -820,16 +837,27 @@ enum ProgramDisplaySelection {
     /// The display ID that hosts the Alfie UI — the key/main window's screen, or
     /// `NSScreen.main` as a fallback. The picker marks this so an operator does
     /// not take over their own control surface.
+    /// Falls back all the way to `NSScreen.screens.first` (the menu-bar display)
+    /// rather than returning nil when the app has no key/main window yet. Every
+    /// caller uses this to decide which display to *avoid*, so the conservative
+    /// answer in the ambiguous case is "assume the operator is looking at the
+    /// main display" — never "we don't know, so anything goes".
     static func alfieUIDisplayID() -> CGDirectDisplayID? {
-        if let screen = NSApp.keyWindow?.screen ?? NSApp.mainWindow?.screen ?? NSScreen.main {
-            return displayID(for: screen)
-        }
-        return nil
+        let screen = NSApp.keyWindow?.screen
+            ?? NSApp.mainWindow?.screen
+            ?? NSScreen.main
+            ?? NSScreen.screens.first
+        guard let screen else { return nil }
+        return displayID(for: screen)
     }
 
     /// First screen that is not the Alfie-UI screen, if one exists.
     static func defaultTargetDisplayID() -> CGDirectDisplayID? {
-        let uiID = alfieUIDisplayID()
+        // If the UI display genuinely cannot be established (no screens at all),
+        // do NOT guess. The previous `displayID(for:) != uiID` comparison against
+        // a nil `uiID` was always true, so it selected `screens.first` — the
+        // menu-bar display, which is almost always the operator's dashboard.
+        guard let uiID = alfieUIDisplayID() else { return nil }
         guard let candidate = NSScreen.screens.first(where: { displayID(for: $0) != uiID }) else {
             return nil
         }
@@ -837,10 +865,23 @@ enum ProgramDisplaySelection {
     }
 
     /// Resolves the effective target display ID: the persisted selection if that
-    /// display is still present, else the default, else nil.
+    /// display is still present *and is not the display hosting the Alfie UI*,
+    /// else the default, else nil.
+    ///
+    /// The UI-display guard is the important part. `CGDirectDisplayID`s are
+    /// reassigned when monitors are reconnected or rearranged, so a stored
+    /// selection that once meant "the HDMI feed to the ATEM" can come to mean
+    /// "the laptop screen". Because the program window sits at
+    /// `CGShieldingWindowLevel` it would then cover the dashboard, the menu bar
+    /// and the Dock on every single launch, with nothing visible to click to get
+    /// out of it. Refusing the selection and falling back costs an operator one
+    /// trip to Settings; honouring it locks them out of the app.
     static func resolvedTargetDisplayID() -> CGDirectDisplayID? {
         let stored = UserDefaults.standard.integer(forKey: userDefaultsKey)
-        if stored != 0, screen(for: CGDirectDisplayID(stored)) != nil {
+        if stored != 0,
+           let storedScreen = screen(for: CGDirectDisplayID(stored)),
+           let uiID = alfieUIDisplayID(),
+           displayID(for: storedScreen) != uiID {
             return CGDirectDisplayID(stored)
         }
         return defaultTargetDisplayID()
@@ -866,7 +907,12 @@ struct ProgramDisplayOption: Identifiable {
         for screen in NSScreen.screens {
             let displayID = ProgramDisplaySelection.displayID(for: screen)
             let isUI = displayID == uiID
-            let label = isUI ? "\(screen.localizedName) (Alfie UI)" : screen.localizedName
+            // Spelled out rather than just marked: selecting this display is
+            // refused by `resolvedTargetDisplayID()`, because the program window
+            // would cover the dashboard it is being driven from.
+            let label = isUI
+                ? "\(screen.localizedName) (Alfie UI — cannot be used)"
+                : screen.localizedName
             options.append(ProgramDisplayOption(id: Int(displayID), label: label))
         }
         return options

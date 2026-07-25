@@ -135,6 +135,17 @@ final class PersonDetector: ObservableObject {
         var roi: CGRect?
 
         static let off = DetectionRequestPlan(mode: .off, roi: nil)
+
+        /// Whether this plan actually runs Vision. `.off` and `.awaitingTap`
+        /// return early in `processFrame` without any inference, so they carry
+        /// none of the sustained load that the progressive-lag investigation is
+        /// about.
+        var runsVision: Bool {
+            switch mode {
+            case .off, .awaitingTap: return false
+            case .acquiring, .lockedROI, .reacquiring: return true
+            }
+        }
     }
     
     // MARK: - Configuration

@@ -952,6 +952,12 @@ final class CameraManager: NSObject, ObservableObject {
 
         // Decide whether/where Vision runs this frame (off by default).
         let detectionPlan = currentDetectionPlan()
+        // The diagnostics CSV starts on the first frame that actually runs
+        // Vision, not at capture start — the progressive lag only appears under
+        // detection load, so `elapsed_s` should read as time under load.
+        if detectionPlan.runsVision {
+            programOutput.beginDiagnosticsSessionIfNeeded(note: "detection start")
+        }
         // Hand the matcher the current operator lock so it can bind that track
         // first with a relaxed threshold (PersonDetector.swift assignTracks).
         personDetector.lockedTargetID = shotComposer.manualLockedTargetID
@@ -1543,26 +1549,47 @@ final class CameraManager: NSObject, ObservableObject {
         }
     }
     
+    /// Fallback format choice, used only when `findBest4KFormat` found no exact
+    /// 3840×2160 format at the show standard's rate. Cameras that satisfy that
+    /// exact match (the show rig) never reach this function.
+    ///
+    /// Preference order is shape-first, because the pipeline crops to 16:9
+    /// regardless: pixels above and below a widescreen region are captured,
+    /// carried through detection and the GPU crop, and then discarded. A
+    /// slightly smaller 16:9 format therefore delivers the same program output
+    /// for less work — and makes the operator's input pane match the program
+    /// pane instead of appearing squarer.
     private func findBestAvailableFormat(for device: AVCaptureDevice) -> AVCaptureDevice.Format? {
-        // Get all formats sorted by resolution (highest first)
+        // All formats, highest pixel count first. Every tier below picks the
+        // largest format meeting its criteria.
         let sortedFormats = device.formats.sorted { format1, format2 in
             let dims1 = CMVideoFormatDescriptionGetDimensions(format1.formatDescription)
             let dims2 = CMVideoFormatDescriptionGetDimensions(format2.formatDescription)
-            let pixels1 = dims1.width * dims1.height
-            let pixels2 = dims2.width * dims2.height
-            return pixels1 > pixels2
+            return dims1.width * dims1.height > dims2.width * dims2.height
         }
-        
-        // Prefer formats that support 30fps
-        let format30fps = sortedFormats.first { format in
+
+        // 16:9 within a tolerance tight enough to exclude DCI 4K (4096×2160 is
+        // 1.896, noticeably wider) while accepting genuine 16:9 modes.
+        func isWidescreen(_ format: AVCaptureDevice.Format) -> Bool {
+            let dims = CMVideoFormatDescriptionGetDimensions(format.formatDescription)
+            guard dims.height > 0 else { return false }
+            let aspect = Double(dims.width) / Double(dims.height)
+            return abs(aspect - 16.0 / 9.0) < 0.02
+        }
+
+        func supportsShowFrameRate(_ format: AVCaptureDevice.Format) -> Bool {
             format.videoSupportedFrameRateRanges.contains { range in
                 range.minFrameRate <= Config.targetFrameRate &&
                 range.maxFrameRate >= Config.targetFrameRate
             }
         }
-        
-        // If no 30fps format, just use highest resolution
-        return format30fps ?? sortedFormats.first
+
+        // Tiered rather than a blunt "16:9 always wins", so a camera whose only
+        // widescreen mode is tiny still ends up on something sensible.
+        return sortedFormats.first { isWidescreen($0) && supportsShowFrameRate($0) }
+            ?? sortedFormats.first { isWidescreen($0) }
+            ?? sortedFormats.first { supportsShowFrameRate($0) }
+            ?? sortedFormats.first
     }
 }
 
