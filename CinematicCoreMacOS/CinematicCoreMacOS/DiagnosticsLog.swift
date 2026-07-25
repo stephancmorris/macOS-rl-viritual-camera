@@ -117,21 +117,59 @@ final class DiagnosticsLog {
     /// onset; `thermal` is the column that confirms or kills the throttling
     /// hypothesis without needing `sudo powermetrics`.
     private static let header = """
-        elapsed_s,clock,thermal,low_power,footprint_mb,\
+        elapsed_s,clock,thermal,low_power,cpu_cores,cpu_pct,threads,\
+        source_h,crop_h_frac,upscale,footprint_mb,\
         hop_mean_ms,hop_max_ms,queue_mean_ms,queue_max_ms,vision_mean_ms,vision_max_ms,\
         detections,frames_window,frames_total,out_drops_window,out_drops_total,\
         gate_drops_window,gate_drops_total,note
 
         """
 
+    /// Columns for the memory-growth file.
+    ///
+    /// The point of this row is to answer one question: *what kind* of memory is
+    /// growing? Each group discriminates a different suspect.
+    ///
+    /// - `heap_mb` / `heap_blocks` — the app's own allocations. If `heap_blocks`
+    ///   climbs steadily, objects are accumulating and we can go find them. If it
+    ///   stays flat while `footprint_mb` climbs, the growth is NOT ours: it is
+    ///   image/GPU memory held below the allocator, which points at Core Image's
+    ///   caches in `CropEngine.processCrop`.
+    /// - `internal_mb` / `compressed_mb` / `external_mb` — the same split as
+    ///   Activity Monitor. `external` covers IOSurface-backed frame buffers, so
+    ///   growth there means frames are being retained somewhere.
+    /// - the collection counts — the Swift arrays on the frame path. Static code
+    ///   review says all four are bounded; these columns prove it in a live run
+    ///   rather than taking the review's word for it.
+    private static let memoryHeader = """
+        elapsed_s,clock,footprint_mb,internal_mb,compressed_mb,external_mb,\
+        heap_mb,heap_blocks,latency_samples,drop_timestamps,input_timestamps,\
+        detected_persons,frames_total,note
+
+        """
+
     private let writer = DiagnosticsFileWriter()
+
+    /// Second file, same folder and same 5 s cadence, dedicated to the memory
+    /// growth investigation. Kept separate from the throughput CSV so neither
+    /// chart has to carry the other's columns.
+    private let memoryWriter = DiagnosticsFileWriter()
+
     private var sessionStart: TimeInterval = 0
     private var isOpen = false
+
+    /// Previous CPU sample, so each row reports the average over that window
+    /// rather than a meaningless instantaneous reading.
+    private var lastCPUSeconds: Double = 0
+    private var lastCPUSampleAt: TimeInterval = 0
 
     /// Free-text markers recorded since the last row, emitted in that row's
     /// `note` column. Bounded: a runaway caller can't grow this unboundedly
     /// because it is cleared on every emit, and appends are capped per window.
     private var pendingNotes: [String] = []
+    /// Same markers, consumed separately so both files carry them — each file is
+    /// emitted on its own row and clears its own queue.
+    private var pendingMemoryNotes: [String] = []
     private static let maxNotesPerWindow = 8
 
     /// Filename of the session in progress, for display in Settings.
@@ -156,14 +194,19 @@ final class DiagnosticsLog {
         let stamp = Self.fileStampFormatter.string(from: Date())
         let name = "alfie_soak_\(stamp).csv"
         let url = Self.directory.appendingPathComponent(name)
+        // Same folder, same timestamp, so the pair from one run is obvious.
+        let memoryName = "alfie_memory_\(stamp).csv"
+        let memoryURL = Self.directory.appendingPathComponent(memoryName)
 
         writer.open(url: url, header: Self.header)
+        memoryWriter.open(url: memoryURL, header: Self.memoryHeader)
         writer.prune(directory: Self.directory, olderThan: 30)
 
         sessionStart = CACurrentMediaTime()
         isOpen = true
         currentFileName = name
         pendingNotes = []
+        pendingMemoryNotes = []
         // Marker row up front so the file is never empty and never undated,
         // even if the session dies before the first 5 s window closes.
         appendMarkerRow(note)
@@ -177,10 +220,12 @@ final class DiagnosticsLog {
         // from the last partial window ride along instead of being lost.
         let closing = (pendingNotes + [note]).joined(separator: "; ")
         pendingNotes = []
+        pendingMemoryNotes = []
         appendMarkerRow(closing)
         isOpen = false
         currentFileName = nil
         writer.close()
+        memoryWriter.close()
     }
 
     /// A row carrying only the timing/thermal columns and a note. Measurement
@@ -189,8 +234,8 @@ final class DiagnosticsLog {
     private func appendMarkerRow(_ text: String) {
         let elapsed = CACurrentMediaTime() - sessionStart
         let processInfo = ProcessInfo.processInfo
-        // 15 commas span the 14 empty measurement columns and land on `note`.
-        let emptyMeasurements = String(repeating: ",", count: 15)
+        // 21 commas span the 20 empty measurement columns and land on `note`.
+        let emptyMeasurements = String(repeating: ",", count: 21)
         let row = String(
             format: "%.1f,%@,%@,%@%@%@\n",
             elapsed,
@@ -208,6 +253,7 @@ final class DiagnosticsLog {
     func note(_ text: String) {
         guard isOpen, pendingNotes.count < Self.maxNotesPerWindow else { return }
         pendingNotes.append(text)
+        pendingMemoryNotes.append(text)
     }
 
     // MARK: Row emission
@@ -215,6 +261,9 @@ final class DiagnosticsLog {
     /// One row per soak window. All values are already computed by
     /// `ProgramOutputManager.emitSoakLineIfDue` — nothing is measured here.
     func appendRow(
+        sourceHeight: Int,
+        cropHeightFraction: Double,
+        upscale: Double,
         footprintMB: Double,
         hopMeanMS: Double,
         hopMaxMS: Double,
@@ -232,17 +281,31 @@ final class DiagnosticsLog {
     ) {
         guard isOpen else { return }
 
-        let elapsed = CACurrentMediaTime() - sessionStart
+        let now = CACurrentMediaTime()
+        let elapsed = now - sessionStart
         let processInfo = ProcessInfo.processInfo
         let noteField = pendingNotes.isEmpty ? "" : pendingNotes.joined(separator: "; ")
         pendingNotes = []
 
+        // Average CPU over this window. `cores` is CPU-seconds per wall second —
+        // 1.0 means one core saturated, 3.5 means three and a half cores' worth.
+        // `pct` is the same number as Activity Monitor's % CPU column.
+        let cpuNow = Self.processCPUSeconds()
+        let windowSeconds = lastCPUSampleAt > 0 ? now - lastCPUSampleAt : 0
+        let cpuCores = windowSeconds > 0 ? (cpuNow - lastCPUSeconds) / windowSeconds : 0
+        lastCPUSeconds = cpuNow
+        lastCPUSampleAt = now
+
         let row = String(
-            format: "%.1f,%@,%@,%@,%.0f,%.2f,%.2f,%.2f,%.2f,%.2f,%.2f,%d,%d,%d,%d,%d,%llu,%llu,%@\n",
+            format: "%.1f,%@,%@,%@,%.2f,%.0f,%d,%d,%.4f,%.2f,%.0f,%.2f,%.2f,%.2f,%.2f,%.2f,%.2f,%d,%d,%d,%d,%d,%llu,%llu,%@\n",
             elapsed,
             Self.clockFormatter.string(from: Date()),
             Self.thermalStateName(processInfo.thermalState),
             processInfo.isLowPowerModeEnabled ? "yes" : "no",
+            cpuCores,
+            cpuCores * 100.0,
+            Self.liveThreadCount(),
+            sourceHeight, cropHeightFraction, upscale,
             footprintMB,
             hopMeanMS, hopMaxMS,
             queueMeanMS, queueMaxMS,
@@ -254,6 +317,134 @@ final class DiagnosticsLog {
             Self.csvEscaped(noteField)
         )
         writer.append(row)
+    }
+
+    /// One row per soak window in the memory file. Counts are pushed in by the
+    /// callers that own those collections; nothing is measured on the frame path.
+    func appendMemoryRow(
+        latencySamples: Int,
+        dropTimestamps: Int,
+        inputTimestamps: Int,
+        detectedPersons: Int,
+        framesTotal: Int
+    ) {
+        guard isOpen else { return }
+
+        let elapsed = CACurrentMediaTime() - sessionStart
+        let vm = Self.vmBreakdown()
+        let heap = Self.heapStats()
+        let noteField = pendingMemoryNotes.isEmpty ? "" : pendingMemoryNotes.joined(separator: "; ")
+        pendingMemoryNotes = []
+
+        let row = String(
+            format: "%.1f,%@,%.0f,%.0f,%.0f,%.0f,%.1f,%llu,%d,%d,%d,%d,%d,%@\n",
+            elapsed,
+            Self.clockFormatter.string(from: Date()),
+            vm.footprintMB, vm.internalMB, vm.compressedMB, vm.externalMB,
+            heap.megabytes, heap.blocks,
+            latencySamples, dropTimestamps, inputTimestamps,
+            detectedPersons, framesTotal,
+            Self.csvEscaped(noteField)
+        )
+        memoryWriter.append(row)
+    }
+
+    /// Memory split the same way Activity Monitor splits it.
+    nonisolated static func vmBreakdown() -> (
+        footprintMB: Double, internalMB: Double, compressedMB: Double, externalMB: Double
+    ) {
+        var info = task_vm_info_data_t()
+        var count = mach_msg_type_number_t(
+            MemoryLayout<task_vm_info_data_t>.size / MemoryLayout<natural_t>.size
+        )
+        let result = withUnsafeMutablePointer(to: &info) { infoPtr in
+            infoPtr.withMemoryRebound(to: integer_t.self, capacity: Int(count)) { intPtr in
+                task_info(mach_task_self_, task_flavor_t(TASK_VM_INFO), intPtr, &count)
+            }
+        }
+        guard result == KERN_SUCCESS else { return (0, 0, 0, 0) }
+        let mb = 1024.0 * 1024.0
+        return (
+            Double(info.phys_footprint) / mb,
+            Double(info.internal) / mb,
+            Double(info.compressed) / mb,
+            Double(info.external) / mb
+        )
+    }
+
+    /// Allocator totals for the default malloc zone. `blocks` is the count of
+    /// live allocations — the single most useful number here, because a steady
+    /// climb means objects are accumulating rather than image memory growing.
+    nonisolated static func heapStats() -> (megabytes: Double, blocks: UInt64) {
+        var stats = malloc_statistics_t()
+        malloc_zone_statistics(malloc_default_zone(), &stats)
+        return (Double(stats.size_in_use) / (1024.0 * 1024.0), UInt64(stats.blocks_in_use))
+    }
+
+    /// Cumulative CPU time consumed by the whole process, live threads plus
+    /// already-exited ones. Differenced across a window it gives true average
+    /// load, which is far more useful than an instantaneous sample: a pipeline
+    /// that pins a core in bursts and a pipeline that sits at half a core look
+    /// identical in a snapshot and completely different here.
+    nonisolated static func processCPUSeconds() -> Double {
+        func seconds(_ value: time_value_t) -> Double {
+            Double(value.seconds) + Double(value.microseconds) / 1_000_000.0
+        }
+
+        var total: Double = 0
+
+        // Live threads.
+        var threadTimes = task_thread_times_info_data_t()
+        var threadCount = mach_msg_type_number_t(
+            MemoryLayout<task_thread_times_info_data_t>.size / MemoryLayout<natural_t>.size
+        )
+        let threadResult = withUnsafeMutablePointer(to: &threadTimes) { infoPtr in
+            infoPtr.withMemoryRebound(to: integer_t.self, capacity: Int(threadCount)) { intPtr in
+                task_info(mach_task_self_, task_flavor_t(TASK_THREAD_TIMES_INFO), intPtr, &threadCount)
+            }
+        }
+        if threadResult == KERN_SUCCESS {
+            total += seconds(threadTimes.user_time) + seconds(threadTimes.system_time)
+        }
+
+        // Threads that have already exited — without this, work done on
+        // short-lived Dispatch threads simply vanishes from the total.
+        var basic = task_basic_info_64_data_t()
+        var basicCount = mach_msg_type_number_t(
+            MemoryLayout<task_basic_info_64_data_t>.size / MemoryLayout<natural_t>.size
+        )
+        let basicResult = withUnsafeMutablePointer(to: &basic) { infoPtr in
+            infoPtr.withMemoryRebound(to: integer_t.self, capacity: Int(basicCount)) { intPtr in
+                task_info(mach_task_self_, task_flavor_t(TASK_BASIC_INFO_64), intPtr, &basicCount)
+            }
+        }
+        if basicResult == KERN_SUCCESS {
+            total += seconds(basic.user_time) + seconds(basic.system_time)
+        }
+
+        return total
+    }
+
+    /// Live thread count. Worth recording alongside CPU: runaway Dispatch thread
+    /// creation shows up here first, and it drives both CPU burn and latency.
+    nonisolated static func liveThreadCount() -> Int {
+        var threads: thread_act_array_t?
+        var count: mach_msg_type_number_t = 0
+        guard task_threads(mach_task_self_, &threads, &count) == KERN_SUCCESS,
+              let threads else {
+            return 0
+        }
+        // task_threads vends a send right per thread plus the array itself; both
+        // must be released or this diagnostic becomes its own leak.
+        for index in 0..<Int(count) {
+            mach_port_deallocate(mach_task_self_, threads[index])
+        }
+        vm_deallocate(
+            mach_task_self_,
+            vm_address_t(UInt(bitPattern: threads)),
+            vm_size_t(Int(count) * MemoryLayout<thread_t>.size)
+        )
+        return Int(count)
     }
 
     /// The decisive signal for the throttling hypothesis. macOS reports this

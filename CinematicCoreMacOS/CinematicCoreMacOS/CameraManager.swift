@@ -282,6 +282,59 @@ final class CameraManager: NSObject, ObservableObject {
     /// the composer) so ROI scanning stays tight throughout acquisition.
     private var lastSubjectROIBox: CGRect?
 
+    // MARK: - Off-critical-path detection
+    //
+    // Detection used to be awaited inline, so every frame waited for Vision
+    // before the crop could run. Measured 26 July: Vision 16.4 ms + ~17 ms of
+    // crop/compose/output against a 20 ms budget at 50 Hz — the capture gate
+    // then rejected 4 frames in 10 and the program feed ran at 30 fps.
+    //
+    // Detection now runs alongside the picture. Each frame composes from the
+    // most recent completed detection (20–40 ms old at interval 2) and never
+    // waits, so the frame path costs only the ~17 ms it always did.
+
+    /// Most recent completed detection set. Read every frame; written only when
+    /// a detection finishes.
+    private var lastDetections: [PersonDetector.DetectedPerson] = []
+
+    /// One detection at a time. Without this, a pipeline that falls behind would
+    /// queue detections faster than they complete and spawn unbounded work.
+    private var detectionInFlight = false
+
+    /// Bumped whenever a detection completes. Comparing against
+    /// `consumedDetectionRevision` tells a frame whether its detections are new
+    /// or a repeat of the previous frame's — which matters because several
+    /// framing rules count *consecutive frames* and a repeat is not evidence.
+    private var detectionRevision: UInt64 = 0
+    private var consumedDetectionRevision: UInt64 = 0
+
+    /// Frame counter driving `DeveloperFlags.detectionFrameInterval`.
+    private var detectionFrameCounter: UInt64 = 0
+
+    /// Start a detection if none is running and the cadence allows it. Returns
+    /// immediately either way — the caller never awaits.
+    private func scheduleDetectionIfDue(
+        pixelBuffer: CVPixelBuffer,
+        plan: PersonDetector.DetectionRequestPlan
+    ) {
+        guard !detectionInFlight else { return }
+        detectionFrameCounter &+= 1
+        let interval = UInt64(max(1, DeveloperFlags.detectionFrameInterval))
+        guard detectionFrameCounter % interval == 0 else { return }
+
+        detectionInFlight = true
+        // Retains the capture buffer for the life of the detection. Bounded to
+        // one frame by `detectionInFlight`, so the capture pool cannot starve.
+        let box = SendablePixelBufferBox(pixelBuffer)
+        Task { [weak self] in
+            guard let self else { return }
+            let persons = await self.personDetector.processFrame(box.pixelBuffer, plan: plan)
+            self.lastDetections = persons
+            self.detectionRevision &+= 1
+            self.detectionInFlight = false
+        }
+    }
+
     // State for Auto Pan
     private var autoPanPhase: CGFloat = 0.5
     private var autoPanDirection: CGFloat = 1.0
@@ -890,7 +943,9 @@ final class CameraManager: NSObject, ObservableObject {
     }
 
     private func processFrame(pixelBuffer: CVPixelBuffer, timestampSeconds: Double) async {
-        let ciImage = CIImage(cvPixelBuffer: pixelBuffer)
+        // NOTE: a `CIImage(cvPixelBuffer:)` used to be built here and never
+        // used — one wasted image object per frame on the exact path the memory
+        // investigation is looking at. Removed so it cannot muddy attribution.
         let bufferWidth = CGFloat(CVPixelBufferGetWidth(pixelBuffer))
         let bufferHeight = CGFloat(CVPixelBufferGetHeight(pixelBuffer))
 
@@ -961,7 +1016,32 @@ final class CameraManager: NSObject, ObservableObject {
         // Hand the matcher the current operator lock so it can bind that track
         // first with a relaxed threshold (PersonDetector.swift assignTracks).
         personDetector.lockedTargetID = shotComposer.manualLockedTargetID
-        let detectedPersons = await personDetector.processFrame(pixelBuffer, plan: detectionPlan)
+
+        let detectedPersons: [PersonDetector.DetectedPerson]
+        if !detectionPlan.runsVision {
+            // No Vision in these modes. Clear synchronously rather than
+            // suspending on the detector just to be told there is nothing to do.
+            personDetector.clearForInactiveMode()
+            lastDetections = []
+            detectedPersons = []
+        } else if pendingTapPoint != nil {
+            // The operator's tap drives exactly one scan and they are waiting on
+            // the result, so this single frame still runs detection inline. It
+            // happens once per acquisition, not per frame.
+            detectedPersons = await personDetector.processFrame(pixelBuffer, plan: detectionPlan)
+            lastDetections = detectedPersons
+            detectionRevision &+= 1
+        } else {
+            scheduleDetectionIfDue(pixelBuffer: pixelBuffer, plan: detectionPlan)
+            detectedPersons = lastDetections
+        }
+
+        // True only on frames carrying a detection result not seen before. The
+        // framing rules that count consecutive frames must advance on these
+        // only — a repeated detection shows exactly zero movement, which would
+        // otherwise read as proof the subject has stopped.
+        let detectionIsFresh = detectionRevision != consumedDetectionRevision
+        consumedDetectionRevision = detectionRevision
 
         // The pending tap drove exactly one ROI scan. Bind acquisition to the
         // detected person nearest the tap point. If nothing was found, keep
@@ -982,19 +1062,29 @@ final class CameraManager: NSObject, ObservableObject {
 
         // Track the acquiring/locked subject's latest box to seed the next
         // frame's ROI. Cleared when no subject is being followed.
-        if let subjectID = shotComposer.manualLockedTargetID,
-           let box = detectedPersons.first(where: { $0.id == subjectID })?.boundingBox {
-            lastSubjectROIBox = box
-        } else if shotComposer.manualLockedTargetID == nil {
-            lastSubjectROIBox = nil
+        // Only refresh the ROI seed from a real detection. On a repeat frame the
+        // box is unchanged anyway, and the `nil` branch could otherwise clear a
+        // valid seed using stale state.
+        if detectionIsFresh {
+            if let subjectID = shotComposer.manualLockedTargetID,
+               let box = detectedPersons.first(where: { $0.id == subjectID })?.boundingBox {
+                lastSubjectROIBox = box
+            } else if shotComposer.manualLockedTargetID == nil {
+                lastSubjectROIBox = nil
+            }
         }
         let detectionDuration = CACurrentMediaTime() - detectionStart
         Self.signposter.endInterval("detection", detectionInterval)
-        programOutput.recordDetectionTiming(
-            queueWait: personDetector.stats.lastQueueWait,
-            visionWall: personDetector.stats.lastDetectionTime
-        )
-        programOutput.recordLatency(stage: .detection, duration: detectionDuration)
+        // Timing is recorded only for frames that actually detected. Recording
+        // it every frame would repeat the last measurement and dilute the
+        // visionWall/queueWait means the diagnostics CSV reports.
+        if detectionIsFresh {
+            programOutput.recordDetectionTiming(
+                queueWait: personDetector.stats.lastQueueWait,
+                visionWall: personDetector.stats.lastDetectionTime
+            )
+            programOutput.recordLatency(stage: .detection, duration: detectionDuration)
+        }
 
         let composeInterval = Self.signposter.beginInterval("compose")
         let composeStart = CACurrentMediaTime()
@@ -1008,7 +1098,8 @@ final class CameraManager: NSObject, ObservableObject {
         let lockOutcome = shotComposer.tick(
             detections: detectedPersons,
             timestamp: CACurrentMediaTime(),
-            pixelBuffer: pixelBuffer
+            pixelBuffer: pixelBuffer,
+            isFresh: detectionIsFresh
         )
         switch lockOutcome {
         case .noChange:
@@ -1102,7 +1193,10 @@ final class CameraManager: NSObject, ObservableObject {
                         cropEngine.config.transitionSmoothing = smoothing
                         if let primaryPerson {
                             frameLog("🔍 DEBUG: Composing shot for person at \(primaryPerson.boundingBox)")
-                            if let idealCrop = shotComposer.compose(person: primaryPerson) {
+                            if let idealCrop = shotComposer.compose(
+                                person: primaryPerson,
+                                isFresh: detectionIsFresh
+                            ) {
                                 cropEngine.setTargetCrop(idealCrop)
                             }
                         } else {
@@ -1200,7 +1294,9 @@ final class CameraManager: NSObject, ObservableObject {
             programOutput.recordLatency(stage: .compose, duration: composeDuration)
         }
 
-        if trainingDataRecorder.isRecording {
+        // Only real detections are recorded. Logging repeats would teach the
+        // agent that an identical observation can demand a different action.
+        if trainingDataRecorder.isRecording, detectionIsFresh {
             trainingDataRecorder.recordFrame(
                 timestamp: timestampSeconds,
                 persons: detectedPersons,
@@ -1232,6 +1328,14 @@ final class CameraManager: NSObject, ObservableObject {
 
         let gateDrops = frameProcessingGate.droppedFrameCount
         programOutput.recordGateDropTotal(gateDrops)
+        programOutput.recordFramePathCounts(detectedPersons: detectedPersons.count)
+        if let cropEngine {
+            programOutput.recordPictureQuality(
+                sourceHeight: Int(bufferHeight),
+                cropHeightFraction: Double(cropEngine.currentCrop.size.height),
+                outputHeight: Int(cropEngine.config.outputSize.height)
+            )
+        }
         latencyLog(
             "total=\(String(format: "%.1f", totalDuration * 1000))ms " +
             "detect=\(String(format: "%.1f", detectionDuration * 1000))ms " +

@@ -883,10 +883,17 @@ final class ShotComposer: ObservableObject {
     static let acquireGrace: TimeInterval = 1.5
 
     @discardableResult
+    /// - Parameter isFresh: whether `detections` are new this frame. Detection
+    ///   now runs off the frame path, so the same result is presented on
+    ///   consecutive frames; anything counting *consecutive sightings* must
+    ///   advance only when this is true. The wall-clock transitions in this
+    ///   method (`acquireGrace`, `holdDuration`) are unaffected — they read the
+    ///   clock, not a frame count, so they stay correct at any tick rate.
     func tick(
         detections: [PersonDetector.DetectedPerson],
         timestamp: TimeInterval,
-        pixelBuffer: CVPixelBuffer?
+        pixelBuffer: CVPixelBuffer?,
+        isFresh: Bool = true
     ) -> TickOutcome {
         // Drain any async re-acquisition decision queued from a prior frame's
         // background task. Doing this first keeps all state transitions
@@ -999,6 +1006,11 @@ final class ShotComposer: ObservableObject {
             // For each visible person with a detectable face, compare their
             // face against every gallery entry (best-of-N). Decisions
             // arrive on a later tick via `pendingReacquisition`.
+            //
+            // Fresh detections only: re-acquisition requires N *consecutive
+            // matching sightings*, and scoring the same detection twice would
+            // let a repeat count as corroboration of itself.
+            guard isFresh else { return .noChange }
             scheduleReacquisitionScoring(
                 detections: detections,
                 pixelBuffer: pixelBuffer,
@@ -1333,7 +1345,15 @@ final class ShotComposer: ObservableObject {
 
     /// Compose a stage-friendly speaker shot.
     /// Returns a CropRect when the target should be updated, nil when within deadzone.
-    func compose(person: PersonDetector.DetectedPerson) -> CropEngine.CropRect? {
+    /// - Parameter isFresh: see `tick(detections:timestamp:pixelBuffer:isFresh:)`.
+    ///   The Steady Following detectors below count consecutive frames, and a
+    ///   repeated detection has *exactly* zero movement — which would read as
+    ///   perfect stillness and park the camera roughly twice as eagerly as it
+    ///   should, and would satisfy the band-exit debounce on a single sighting.
+    func compose(
+        person: PersonDetector.DetectedPerson,
+        isFresh: Bool = true
+    ) -> CropEngine.CropRect? {
         guard config.isEnabled else { return nil }
 
         let subjectBounds = person.boundingBox.standardized
@@ -1346,7 +1366,8 @@ final class ShotComposer: ObservableObject {
             return composeFromTrackedBounds(
                 trackedBounds,
                 subjectBounds: subjectBounds,
-                trackingCenter: CGPoint(x: trackedBounds.midX, y: trackedBounds.midY)
+                trackingCenter: CGPoint(x: trackedBounds.midX, y: trackedBounds.midY),
+                isFresh: isFresh
             )
         }
 
@@ -1356,7 +1377,8 @@ final class ShotComposer: ObservableObject {
         return composeFromTrackedBounds(
             trackedBounds,
             subjectBounds: subjectBounds,
-            trackingCenter: CGPoint(x: trackedBounds.midX, y: trackedBounds.midY)
+            trackingCenter: CGPoint(x: trackedBounds.midX, y: trackedBounds.midY),
+            isFresh: isFresh
         )
     }
 
@@ -1448,7 +1470,8 @@ final class ShotComposer: ObservableObject {
     private func composeFromTrackedBounds(
         _ trackedBounds: CGRect,
         subjectBounds: CGRect,
-        trackingCenter: CGPoint
+        trackingCenter: CGPoint,
+        isFresh: Bool
     ) -> CropEngine.CropRect? {
         let tuning = framingTuning
         let aspect = normalizedAspect
@@ -1510,7 +1533,8 @@ final class ShotComposer: ObservableObject {
                 origin: CGPoint(x: originX, y: originY),
                 size: CGSize(width: cropWidth, height: cropHeight)
             ),
-            trackingCenter: trackingCenter
+            trackingCenter: trackingCenter,
+            isFresh: isFresh
         )
     }
 
@@ -1601,7 +1625,8 @@ final class ShotComposer: ObservableObject {
 
     private func clampAndAccept(
         _ crop: CropEngine.CropRect,
-        trackingCenter: CGPoint
+        trackingCenter: CGPoint,
+        isFresh: Bool
     ) -> CropEngine.CropRect? {
         let clampedCrop = clampCropToFrame(crop)
         currentComputedCrop = clampedCrop
@@ -1686,7 +1711,10 @@ final class ShotComposer: ObservableObject {
             let dx = abs(trackingCenter.x - bandCenter.x)
             let dy = abs(trackingCenter.y - bandCenter.y)
             if dx > halfWidth || dy > verticalHalf {
-                bandExitFrameCount += 1
+                // Repeats are not evidence: this debounce exists to reject a
+                // single noisy Vision box, and counting the same box twice
+                // would defeat it entirely.
+                if isFresh { bandExitFrameCount += 1 }
                 if bandExitFrameCount >= Self.bandExitConfirmFrames {
                     // Confirmed band exit — resume following and accept.
                     enterSteadyFollowing()
@@ -1694,7 +1722,7 @@ final class ShotComposer: ObservableObject {
                     if !hasActiveTarget { hasActiveTarget = true }
                     return clampedCrop
                 }
-            } else {
+            } else if isFresh {
                 bandExitFrameCount = 0
             }
             // Still holding — emit no new target; the camera stays parked.
@@ -1708,12 +1736,20 @@ final class ShotComposer: ObservableObject {
             // `settleConfirmFrames` consecutive frames, re-enter holding,
             // centered on the ANCHOR (not the instantaneous jittered center),
             // and accept one final centering target.
-            if let anchor = settleAnchor,
-               hypot(trackingCenter.x - anchor.x, trackingCenter.y - anchor.y) <= settleRadius {
-                settleFrameCount += 1
-            } else {
-                settleAnchor = trackingCenter
-                settleFrameCount = 1
+            //
+            // Fresh detections only. A repeated detection sits at *exactly* the
+            // anchor, so every repeat would be a guaranteed increment — at
+            // interval 2 half the evidence for "they have stopped moving" would
+            // be manufactured by the detection cadence, and the camera would
+            // park about twice as readily as it does today.
+            if isFresh {
+                if let anchor = settleAnchor,
+                   hypot(trackingCenter.x - anchor.x, trackingCenter.y - anchor.y) <= settleRadius {
+                    settleFrameCount += 1
+                } else {
+                    settleAnchor = trackingCenter
+                    settleFrameCount = 1
+                }
             }
             if settleFrameCount >= Self.settleConfirmFrames, let anchor = settleAnchor {
                 enterSteadyHolding(centeredOn: anchor)

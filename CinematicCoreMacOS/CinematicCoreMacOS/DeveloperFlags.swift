@@ -43,4 +43,19 @@ enum DeveloperFlags {
     /// log too. The throttled `[SOAK]` line (ProgramOutputManager, ~5 s) and the
     /// 1 Hz `CaptureThroughput` summary carry the same signal at a sane rate.
     nonisolated static let latencyConsoleLogging = false
+
+    /// Run Vision at most every Nth captured frame. 1 = every frame.
+    ///
+    /// This is a *load* limiter, not the throughput fix. Detection no longer
+    /// blocks the frame path (see `CameraManager.scheduleDetectionIfDue`), so
+    /// the program feed runs at full rate regardless of this value; the interval
+    /// only decides how much background CPU detection is allowed to consume.
+    ///
+    /// Measured 26 July: detection costs ~16.4 ms of wall time per run. At
+    /// interval 2 that is roughly half a core's worth of sustained background
+    /// work instead of a full one, with the newest detection 20–40 ms old —
+    /// well inside the crop spring's own time constant.
+    ///
+    /// Set to 1 to restore per-frame detection for an A/B comparison.
+    nonisolated static let detectionFrameInterval = 2
 }

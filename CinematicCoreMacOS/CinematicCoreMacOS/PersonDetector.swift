@@ -409,6 +409,22 @@ final class PersonDetector: ObservableObject {
         return detectedPersons
     }
     
+    /// Synchronous equivalent of the `.off` / `.awaitingTap` early-out in
+    /// `processFrame`, for callers that no longer await detection at all.
+    ///
+    /// Without this, a frame in a non-detecting mode would still have to suspend
+    /// on `processFrame` just to be told there is nothing to do — one MainActor
+    /// hop per frame for no work.
+    func clearForInactiveMode() {
+        if !detectedPersons.isEmpty {
+            detectedPersons = []
+            frameStateRevision &+= 1
+        }
+        if !trackedPersons.isEmpty {
+            trackedPersons.removeAll()
+        }
+    }
+
     /// Process a CIImage frame
     func processFrame(
         _ ciImage: CIImage,

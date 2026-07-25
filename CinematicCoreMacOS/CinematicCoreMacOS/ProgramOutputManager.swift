@@ -359,6 +359,38 @@ final class ProgramOutputManager: ObservableObject {
     /// `start()` makes both reported figures session-relative.
     private var gateDropBaseline: UInt64?
 
+    /// Collection sizes pushed in from the frame path for the memory-growth CSV.
+    /// Plain Int stores, overwritten per frame — no accumulation, no allocation.
+    private var rawDetectedPersonCount: Int = 0
+
+    // Picture-quality inputs. Softness that appears only after minutes of
+    // tracking cannot be explained by a fixed zoom limit, so these three record
+    // what is actually being enlarged, per window, over time.
+    private var rawSourceHeight: Int = 0
+    private var rawCropHeightFraction: Double = 0
+    private var rawOutputHeight: Int = 0
+
+    /// Push what the crop is currently sampling. `cropHeightFraction` is the
+    /// crop's height as a fraction of the source frame, so
+    /// `outputHeight / (cropHeightFraction × sourceHeight)` is the enlargement
+    /// factor being applied to reach the program feed — 1.0 means no
+    /// enlargement, 2.0 means every source pixel is being doubled.
+    func recordPictureQuality(
+        sourceHeight: Int,
+        cropHeightFraction: Double,
+        outputHeight: Int
+    ) {
+        rawSourceHeight = sourceHeight
+        rawCropHeightFraction = cropHeightFraction
+        rawOutputHeight = outputHeight
+    }
+
+    /// Push the frame path's live collection sizes. Called once per processed
+    /// frame; the value is only read when a diagnostics window closes.
+    func recordFramePathCounts(detectedPersons: Int) {
+        rawDetectedPersonCount = detectedPersons
+    }
+
     /// Running total of frames the capture gate skipped because the MainActor
     /// was still busy with the previous frame.
     func recordGateDropTotal(_ total: UInt64) {
@@ -421,7 +453,13 @@ final class ProgramOutputManager: ObservableObject {
         // Same numbers, two destinations: Console for watching live, CSV for
         // charting afterwards. The CSV row is built here so both come from one
         // set of accumulators and can never disagree.
+        let sourceLines = Double(rawSourceHeight) * rawCropHeightFraction
+        let upscale = sourceLines > 0 ? Double(rawOutputHeight) / sourceLines : 0
+
         diagnosticsLog.appendRow(
+            sourceHeight: rawSourceHeight,
+            cropHeightFraction: rawCropHeightFraction,
+            upscale: upscale,
             footprintMB: Self.currentFootprintMB(),
             hopMeanMS: hopMean * 1000,
             hopMaxMS: rawHopLagMax * 1000,
@@ -436,6 +474,16 @@ final class ProgramOutputManager: ObservableObject {
             outDropsTotal: rawDroppedFrames,
             gateDropsWindow: gateDropsWindow,
             gateDropsTotal: rawGateDropTotal
+        )
+
+        // Second row, second file: the memory-growth investigation. Same window,
+        // same cadence, so the two CSVs line up row for row on `elapsed_s`.
+        diagnosticsLog.appendMemoryRow(
+            latencySamples: latencySamples.values.reduce(0) { $0 + $1.count },
+            dropTimestamps: dropTimestamps.count,
+            inputTimestamps: inputFrameTimestamps.count,
+            detectedPersons: rawDetectedPersonCount,
+            framesTotal: rawFramesSent
         )
 
         let line = String(
