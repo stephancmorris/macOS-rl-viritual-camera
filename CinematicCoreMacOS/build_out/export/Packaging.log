@@ -1,55 +1,55 @@
-2026-07-19 10:35:44 +0000 [MT] Initial pipeline context: <IDEDistributionProcessingPipelineContext: 0x872748600; archive(resolved)="<IDEArchive: 0x87253f800>", distributionTask(resolved)="2", distributionDestination(resolved)="1", distributionMethod(resolved)="<IDEDistributionMethodDeveloperID: 0x872804290>", team(resolved)="<IDEProvisioningBasicTeam: 0x8726fc120; teamID='EPZDEPSV69', teamName='(null)'>">
+2026-07-25 00:44:45 +0000 [MT] Initial pipeline context: <IDEDistributionProcessingPipelineContext: 0x8bed50600; archive(resolved)="<IDEArchive: 0x8be333800>", distributionTask(resolved)="2", distributionDestination(resolved)="1", distributionMethod(resolved)="<IDEDistributionMethodDeveloperID: 0x8bec4c3c0>", team(resolved)="<IDEProvisioningBasicTeam: 0x8bec45480; teamID='EPZDEPSV69', teamName='(null)'>">
 	Chain (12, self inclusive):
-	<IDEDistributionProcessingPipelineContext: 0x872748600; archive = "<IDEArchive: 0x87253f800>", distributionMethod="<IDEDistributionMethodDeveloperID: 0x872804290>", team="<IDEProvisioningBasicTeam: 0x8726fc120; teamID='EPZDEPSV69', teamName='(null)'>">
-	<IDEDistributionProcessingPipelineContext: 0x872748300; archive = "<IDEArchive: 0x87253f800>", distributionMethod="<IDEDistributionMethodDeveloperID: 0x872804290>", team="<IDEProvisioningBasicTeam: 0x8726fc120; teamID='EPZDEPSV69', teamName='(null)'>">
-	<IDEDistributionContext: 0x86fc4a300; archive = "<IDEArchive: 0x87253f800>", distributionMethod="<IDEDistributionMethodDeveloperID: 0x872804290>", team="<IDEProvisioningBasicTeam: 0x8726fc120; teamID='EPZDEPSV69', teamName='(null)'>">
-	<IDEDistributionContext: 0x86fc49e00; archive = "<IDEArchive: 0x87253f800>", distributionMethod="<IDEDistributionMethodDeveloperID: 0x872804290>", team="<IDEProvisioningBasicTeam: 0x8726fc120; teamID='EPZDEPSV69', teamName='(null)'>">
-	<IDEDistributionContext: 0x86fc49b80; archive = "<IDEArchive: 0x87253f800>", distributionMethod="<IDEDistributionMethodDeveloperID: 0x872804290>", team="<IDEProvisioningBasicTeam: 0x8726fc120; teamID='EPZDEPSV69', teamName='(null)'>">
-	<IDEDistributionContext: 0x86fc49900; archive = "<IDEArchive: 0x87253f800>", distributionMethod="<IDEDistributionMethodDeveloperID: 0x872804290>", team="<IDEProvisioningBasicTeam: 0x8726fc120; teamID='EPZDEPSV69', teamName='(null)'>">
-	<IDEDistributionContext: 0x86fc49180; archive = "<IDEArchive: 0x87253f800>", distributionMethod="<IDEDistributionMethodDeveloperID: 0x872804290>", team="<IDEProvisioningBasicTeam: 0x8726fc120; teamID='EPZDEPSV69', teamName='(null)'>">
-	<IDEDistributionContext: 0x86fc48c80; archive = "<IDEArchive: 0x87253f800>", distributionMethod="<IDEDistributionMethodDeveloperID: 0x872804290>", team="<IDEProvisioningBasicTeam: 0x8726fc120; teamID='EPZDEPSV69', teamName='(null)'>">
-	<IDEDistributionContext: 0x86fc48a00; archive = "<IDEArchive: 0x87253f800>", distributionMethod="<IDEDistributionMethodDeveloperID: 0x872804290>", team="<IDEProvisioningBasicTeam: 0x8726fc120; teamID='EPZDEPSV69', teamName='(null)'>">
-	<IDEDistributionContext: 0x86fc48780; archive = "<IDEArchive: 0x87253f800>", distributionMethod="<IDEDistributionMethodDeveloperID: 0x872804290>", team="(null)">
-	<IDEDistributionContext: 0x86fc48000; archive = "<IDEArchive: 0x87253f800>", distributionMethod="<IDEDistributionMethodDeveloperID: 0x872804290>", team="(null)">
-	<IDEDistributionContext: 0x102cea8b0; archive = "<IDEArchive: 0x87253f800>", distributionMethod="(null)", team="(null)">
-</IDEDistributionProcessingPipelineContext: 0x872748600>
-2026-07-19 10:35:44 +0000 [MT] Processing step: IDEDistributionCreateDestRootStep
-2026-07-19 10:35:44 +0000 [MT] Processing step: IDEDistributionCopyItemStep
-2026-07-19 10:35:44 +0000 [MT] Running /usr/bin/ditto '-V' '/Users/stephanmorris/Documents/macOS-rl-viritual-camera/CinematicCoreMacOS/build_out/Alfie.xcarchive/Products/Applications/Alfie.app' '/var/folders/58/vj_m9q91351608zhf9_p46n40000gn/T/XcodeDistPipeline.~~~ZsCoFx/Root/Applications/Alfie.app'
-2026-07-19 10:35:44 +0000  >>> Copying /Users/stephanmorris/Documents/macOS-rl-viritual-camera/CinematicCoreMacOS/build_out/Alfie.xcarchive/Products/Applications/Alfie.app 
-2026-07-19 10:35:44 +0000  copying file ./Contents/_CodeSignature/CodeResources ... 
-2026-07-19 10:35:44 +0000  5015 bytes for ./Contents/_CodeSignature/CodeResources
-2026-07-19 10:35:44 +0000  copying file ./Contents/MacOS/Alfie ... 
-2026-07-19 10:35:44 +0000  2663888 bytes for ./Contents/MacOS/Alfie
-2026-07-19 10:35:44 +0000  copying file ./Contents/Resources/default.metallib ... 
-2026-07-19 10:35:44 +0000  16764 bytes for ./Contents/Resources/default.metallib
-2026-07-19 10:35:44 +0000  copying file ./Contents/Resources/AppIcon.icns ... 
-2026-07-19 10:35:44 +0000  60885 bytes for ./Contents/Resources/AppIcon.icns
-2026-07-19 10:35:44 +0000  copying file ./Contents/Resources/CinematicFraming.mlpackage/Manifest.json ... 
-2026-07-19 10:35:44 +0000  617 bytes for ./Contents/Resources/CinematicFraming.mlpackage/Manifest.json
-2026-07-19 10:35:44 +0000  copying file ./Contents/Resources/CinematicFraming.mlpackage/Data/com.apple.CoreML/weights/weight.bin ... 
-2026-07-19 10:35:44 +0000  22656 bytes for ./Contents/Resources/CinematicFraming.mlpackage/Data/com.apple.CoreML/weights/weight.bin
-2026-07-19 10:35:44 +0000  copying file ./Contents/Resources/CinematicFraming.mlpackage/Data/com.apple.CoreML/model.mlmodel ... 
-2026-07-19 10:35:44 +0000  2560 bytes for ./Contents/Resources/CinematicFraming.mlpackage/Data/com.apple.CoreML/model.mlmodel
-2026-07-19 10:35:44 +0000  copying file ./Contents/Resources/Assets.car ... 
-2026-07-19 10:35:44 +0000  937224 bytes for ./Contents/Resources/Assets.car
-2026-07-19 10:35:44 +0000  copying file ./Contents/Library/SystemExtensions/Morris.CinematicCoreMacOS.CinematicCoreExtension.systemextension/Contents/_CodeSignature/CodeResources ... 
-2026-07-19 10:35:44 +0000  2454 bytes for ./Contents/Library/SystemExtensions/Morris.CinematicCoreMacOS.CinematicCoreExtension.systemextension/Contents/_CodeSignature/CodeResources
-2026-07-19 10:35:44 +0000  copying file ./Contents/Library/SystemExtensions/Morris.CinematicCoreMacOS.CinematicCoreExtension.systemextension/Contents/MacOS/Morris.CinematicCoreMacOS.CinematicCoreExtension ... 
-2026-07-19 10:35:44 +0000  284192 bytes for ./Contents/Library/SystemExtensions/Morris.CinematicCoreMacOS.CinematicCoreExtension.systemextension/Contents/MacOS/Morris.CinematicCoreMacOS.CinematicCoreExtension
-2026-07-19 10:35:44 +0000  copying file ./Contents/Library/SystemExtensions/Morris.CinematicCoreMacOS.CinematicCoreExtension.systemextension/Contents/Resources/default.metallib ... 
-2026-07-19 10:35:44 +0000  16764 bytes for ./Contents/Library/SystemExtensions/Morris.CinematicCoreMacOS.CinematicCoreExtension.systemextension/Contents/Resources/default.metallib
-2026-07-19 10:35:44 +0000  copying file ./Contents/Library/SystemExtensions/Morris.CinematicCoreMacOS.CinematicCoreExtension.systemextension/Contents/Info.plist ... 
-2026-07-19 10:35:44 +0000  2130 bytes for ./Contents/Library/SystemExtensions/Morris.CinematicCoreMacOS.CinematicCoreExtension.systemextension/Contents/Info.plist
-2026-07-19 10:35:44 +0000  copying file ./Contents/embedded.provisionprofile ... 
-2026-07-19 10:35:44 +0000  14940 bytes for ./Contents/embedded.provisionprofile
-2026-07-19 10:35:44 +0000  copying file ./Contents/Info.plist ... 
-2026-07-19 10:35:44 +0000  1858 bytes for ./Contents/Info.plist
-2026-07-19 10:35:44 +0000  copying file ./Contents/PkgInfo ... 
-2026-07-19 10:35:44 +0000  8 bytes for ./Contents/PkgInfo
-2026-07-19 10:35:44 +0000 [MT] /usr/bin/ditto exited with 0
-2026-07-19 10:35:44 +0000 [MT] Processing step: IDEDistributionEmbedProfileStep
-2026-07-19 10:35:44 +0000 [MT] Skipping profile for item: <IDEDistributionItem: 0x8725c33c0; bundleID='Morris.CinematicCoreMacOS.CinematicCoreExtension', path='<DVTFilePath:0x87109a760:'/Users/stephanmorris/Documents/macOS-rl-viritual-camera/CinematicCoreMacOS/build_out/Alfie.xcarchive/Products/Applications/Alfie.app/Contents/Library/SystemExtensions/Morris.CinematicCoreMacOS.CinematicCoreExtension.systemextension'>', codeSigningInfo='<_DVTCodeSigningInformation_Path: 0x8725c3420; isSigned='1', isAdHocSigned='0', signingCertificate='<DVTSigningCertificate: 0x8724c6700; name='Apple Development: Stephan Morris (23SJ5KAP4M)', hash='CD5267BF4D74D74B259012C593BA71F5D99BCF46', serialNumber='399C2EF2D89FEC3F81028D9A4FA87CF6', certificateKinds='(
+	<IDEDistributionProcessingPipelineContext: 0x8bed50600; archive = "<IDEArchive: 0x8be333800>", distributionMethod="<IDEDistributionMethodDeveloperID: 0x8bec4c3c0>", team="<IDEProvisioningBasicTeam: 0x8bec45480; teamID='EPZDEPSV69', teamName='(null)'>">
+	<IDEDistributionProcessingPipelineContext: 0x8bed50300; archive = "<IDEArchive: 0x8be333800>", distributionMethod="<IDEDistributionMethodDeveloperID: 0x8bec4c3c0>", team="<IDEProvisioningBasicTeam: 0x8bec45480; teamID='EPZDEPSV69', teamName='(null)'>">
+	<IDEDistributionContext: 0x8bc706080; archive = "<IDEArchive: 0x8be333800>", distributionMethod="<IDEDistributionMethodDeveloperID: 0x8bec4c3c0>", team="<IDEProvisioningBasicTeam: 0x8bec45480; teamID='EPZDEPSV69', teamName='(null)'>">
+	<IDEDistributionContext: 0x8bc705e00; archive = "<IDEArchive: 0x8be333800>", distributionMethod="<IDEDistributionMethodDeveloperID: 0x8bec4c3c0>", team="<IDEProvisioningBasicTeam: 0x8bec45480; teamID='EPZDEPSV69', teamName='(null)'>">
+	<IDEDistributionContext: 0x8bc705b80; archive = "<IDEArchive: 0x8be333800>", distributionMethod="<IDEDistributionMethodDeveloperID: 0x8bec4c3c0>", team="<IDEProvisioningBasicTeam: 0x8bec45480; teamID='EPZDEPSV69', teamName='(null)'>">
+	<IDEDistributionContext: 0x8bc705900; archive = "<IDEArchive: 0x8be333800>", distributionMethod="<IDEDistributionMethodDeveloperID: 0x8bec4c3c0>", team="<IDEProvisioningBasicTeam: 0x8bec45480; teamID='EPZDEPSV69', teamName='(null)'>">
+	<IDEDistributionContext: 0x8bc705180; archive = "<IDEArchive: 0x8be333800>", distributionMethod="<IDEDistributionMethodDeveloperID: 0x8bec4c3c0>", team="<IDEProvisioningBasicTeam: 0x8bec45480; teamID='EPZDEPSV69', teamName='(null)'>">
+	<IDEDistributionContext: 0x8bc704c80; archive = "<IDEArchive: 0x8be333800>", distributionMethod="<IDEDistributionMethodDeveloperID: 0x8bec4c3c0>", team="<IDEProvisioningBasicTeam: 0x8bec45480; teamID='EPZDEPSV69', teamName='(null)'>">
+	<IDEDistributionContext: 0x8bc704780; archive = "<IDEArchive: 0x8be333800>", distributionMethod="<IDEDistributionMethodDeveloperID: 0x8bec4c3c0>", team="<IDEProvisioningBasicTeam: 0x8bec45480; teamID='EPZDEPSV69', teamName='(null)'>">
+	<IDEDistributionContext: 0x8bc704a00; archive = "<IDEArchive: 0x8be333800>", distributionMethod="<IDEDistributionMethodDeveloperID: 0x8bec4c3c0>", team="(null)">
+	<IDEDistributionContext: 0x8bc704000; archive = "<IDEArchive: 0x8be333800>", distributionMethod="<IDEDistributionMethodDeveloperID: 0x8bec4c3c0>", team="(null)">
+	<IDEDistributionContext: 0x1046928b0; archive = "<IDEArchive: 0x8be333800>", distributionMethod="(null)", team="(null)">
+</IDEDistributionProcessingPipelineContext: 0x8bed50600>
+2026-07-25 00:44:45 +0000 [MT] Processing step: IDEDistributionCreateDestRootStep
+2026-07-25 00:44:45 +0000 [MT] Processing step: IDEDistributionCopyItemStep
+2026-07-25 00:44:45 +0000 [MT] Running /usr/bin/ditto '-V' '/Users/stephanmorris/Documents/macOS-rl-viritual-camera/CinematicCoreMacOS/build_out/Alfie.xcarchive/Products/Applications/Alfie.app' '/var/folders/58/vj_m9q91351608zhf9_p46n40000gn/T/XcodeDistPipeline.~~~8nl1aV/Root/Applications/Alfie.app'
+2026-07-25 00:44:45 +0000  >>> Copying /Users/stephanmorris/Documents/macOS-rl-viritual-camera/CinematicCoreMacOS/build_out/Alfie.xcarchive/Products/Applications/Alfie.app 
+2026-07-25 00:44:45 +0000  copying file ./Contents/_CodeSignature/CodeResources ... 
+2026-07-25 00:44:45 +0000  5015 bytes for ./Contents/_CodeSignature/CodeResources
+2026-07-25 00:44:45 +0000  copying file ./Contents/MacOS/Alfie ... 
+2026-07-25 00:44:45 +0000  2716064 bytes for ./Contents/MacOS/Alfie
+2026-07-25 00:44:45 +0000  copying file ./Contents/Resources/default.metallib ... 
+2026-07-25 00:44:45 +0000  16764 bytes for ./Contents/Resources/default.metallib
+2026-07-25 00:44:45 +0000  copying file ./Contents/Resources/AppIcon.icns ... 
+2026-07-25 00:44:45 +0000  60885 bytes for ./Contents/Resources/AppIcon.icns
+2026-07-25 00:44:45 +0000  copying file ./Contents/Resources/CinematicFraming.mlpackage/Manifest.json ... 
+2026-07-25 00:44:45 +0000  617 bytes for ./Contents/Resources/CinematicFraming.mlpackage/Manifest.json
+2026-07-25 00:44:45 +0000  copying file ./Contents/Resources/CinematicFraming.mlpackage/Data/com.apple.CoreML/weights/weight.bin ... 
+2026-07-25 00:44:45 +0000  22656 bytes for ./Contents/Resources/CinematicFraming.mlpackage/Data/com.apple.CoreML/weights/weight.bin
+2026-07-25 00:44:45 +0000  copying file ./Contents/Resources/CinematicFraming.mlpackage/Data/com.apple.CoreML/model.mlmodel ... 
+2026-07-25 00:44:45 +0000  2560 bytes for ./Contents/Resources/CinematicFraming.mlpackage/Data/com.apple.CoreML/model.mlmodel
+2026-07-25 00:44:45 +0000  copying file ./Contents/Resources/Assets.car ... 
+2026-07-25 00:44:45 +0000  937224 bytes for ./Contents/Resources/Assets.car
+2026-07-25 00:44:45 +0000  copying file ./Contents/Library/SystemExtensions/Morris.CinematicCoreMacOS.CinematicCoreExtension.systemextension/Contents/_CodeSignature/CodeResources ... 
+2026-07-25 00:44:45 +0000  2454 bytes for ./Contents/Library/SystemExtensions/Morris.CinematicCoreMacOS.CinematicCoreExtension.systemextension/Contents/_CodeSignature/CodeResources
+2026-07-25 00:44:45 +0000  copying file ./Contents/Library/SystemExtensions/Morris.CinematicCoreMacOS.CinematicCoreExtension.systemextension/Contents/MacOS/Morris.CinematicCoreMacOS.CinematicCoreExtension ... 
+2026-07-25 00:44:45 +0000  284224 bytes for ./Contents/Library/SystemExtensions/Morris.CinematicCoreMacOS.CinematicCoreExtension.systemextension/Contents/MacOS/Morris.CinematicCoreMacOS.CinematicCoreExtension
+2026-07-25 00:44:45 +0000  copying file ./Contents/Library/SystemExtensions/Morris.CinematicCoreMacOS.CinematicCoreExtension.systemextension/Contents/Resources/default.metallib ... 
+2026-07-25 00:44:45 +0000  16764 bytes for ./Contents/Library/SystemExtensions/Morris.CinematicCoreMacOS.CinematicCoreExtension.systemextension/Contents/Resources/default.metallib
+2026-07-25 00:44:45 +0000  copying file ./Contents/Library/SystemExtensions/Morris.CinematicCoreMacOS.CinematicCoreExtension.systemextension/Contents/Info.plist ... 
+2026-07-25 00:44:45 +0000  2130 bytes for ./Contents/Library/SystemExtensions/Morris.CinematicCoreMacOS.CinematicCoreExtension.systemextension/Contents/Info.plist
+2026-07-25 00:44:45 +0000  copying file ./Contents/embedded.provisionprofile ... 
+2026-07-25 00:44:45 +0000  14940 bytes for ./Contents/embedded.provisionprofile
+2026-07-25 00:44:45 +0000  copying file ./Contents/Info.plist ... 
+2026-07-25 00:44:45 +0000  1858 bytes for ./Contents/Info.plist
+2026-07-25 00:44:45 +0000  copying file ./Contents/PkgInfo ... 
+2026-07-25 00:44:45 +0000  8 bytes for ./Contents/PkgInfo
+2026-07-25 00:44:45 +0000 [MT] /usr/bin/ditto exited with 0
+2026-07-25 00:44:45 +0000 [MT] Processing step: IDEDistributionEmbedProfileStep
+2026-07-25 00:44:45 +0000 [MT] Skipping profile for item: <IDEDistributionItem: 0x8be3c77e0; bundleID='Morris.CinematicCoreMacOS.CinematicCoreExtension', path='<DVTFilePath:0x8bd46a6c0:'/Users/stephanmorris/Documents/macOS-rl-viritual-camera/CinematicCoreMacOS/build_out/Alfie.xcarchive/Products/Applications/Alfie.app/Contents/Library/SystemExtensions/Morris.CinematicCoreMacOS.CinematicCoreExtension.systemextension'>', codeSigningInfo='<_DVTCodeSigningInformation_Path: 0x8be3c7300; isSigned='1', isAdHocSigned='0', signingCertificate='<DVTSigningCertificate: 0x8be2c6dc0; name='Apple Development: Stephan Morris (23SJ5KAP4M)', hash='CD5267BF4D74D74B259012C593BA71F5D99BCF46', serialNumber='399C2EF2D89FEC3F81028D9A4FA87CF6', certificateKinds='(
     "1.2.840.113635.100.6.1.12",
     "1.2.840.113635.100.6.1.2"
 ), issueDate='2026-05-01 01:48:51 +0000''>', entitlements='{
@@ -58,24 +58,24 @@
         "EPZDEPSV69.Morris.CinematicCoreMacOS"
     );
     "com.apple.security.iosurface" = 1;
-}', teamID='EPZDEPSV69', identifier='Morris.CinematicCoreMacOS.CinematicCoreExtension', executablePath='<DVTFilePath:0x87109a940:'/Users/stephanmorris/Documents/macOS-rl-viritual-camera/CinematicCoreMacOS/build_out/Alfie.xcarchive/Products/Applications/Alfie.app/Contents/Library/SystemExtensions/Morris.CinematicCoreMacOS.CinematicCoreExtension.systemextension/Contents/MacOS/Morris.CinematicCoreMacOS.CinematicCoreExtension'>', hardenedRuntime='1'>'>
-2026-07-19 10:35:44 +0000 [MT] Processing step: IDEDistributionInfoPlistStep
-2026-07-19 10:35:44 +0000 [MT] Skipping step: IDEDistributionInfoPlistStep because it said so
-2026-07-19 10:35:44 +0000 [MT] Skipping step: IDEDistributionInfoPlistStep because it said so
-2026-07-19 10:35:44 +0000 [MT] Processing step: IDEDistributionAppThinningPlistStep
-2026-07-19 10:35:44 +0000 [MT] Processing step: IDEDistributionSymbolsStep
-2026-07-19 10:35:44 +0000 [MT] Skipping step: IDEDistributionSymbolsStep because it said so
-2026-07-19 10:35:44 +0000 [MT] Processing step: IDEDistributionAppThinningStep
-2026-07-19 10:35:44 +0000 [MT] Skipping step: IDEDistributionAppThinningStep because it said so
-2026-07-19 10:35:44 +0000 [MT] Processing step: IDEDistributionArchThinningStep
-2026-07-19 10:35:44 +0000 [MT] Archs to thin for item /Users/stephanmorris/Documents/macOS-rl-viritual-camera/CinematicCoreMacOS/build_out/Alfie.xcarchive/Products/Applications/Alfie.app/Contents/Library/SystemExtensions/Morris.CinematicCoreMacOS.CinematicCoreExtension.systemextension are []
-2026-07-19 10:35:44 +0000 [MT] Archs to thin for item /Users/stephanmorris/Documents/macOS-rl-viritual-camera/CinematicCoreMacOS/build_out/Alfie.xcarchive/Products/Applications/Alfie.app are []
-2026-07-19 10:35:44 +0000 [MT] Processing step: IDEDistributionODRStep
-2026-07-19 10:35:44 +0000 [MT] Processing step: IDEDistributionStripXattrsStep
-2026-07-19 10:35:44 +0000 [MT] Skipping stripping extended attributes because the codesign step will strip them.
-2026-07-19 10:35:44 +0000 [MT] Skipping stripping extended attributes because the codesign step will strip them.
-2026-07-19 10:35:44 +0000 [MT] Processing step: IDEDistributionCodesignStep
-2026-07-19 10:35:44 +0000 [MT] Entitlements for <IDEDistributionItem: 0x8725c33c0; bundleID='Morris.CinematicCoreMacOS.CinematicCoreExtension', path='<DVTFilePath:0x87109a760:'/Users/stephanmorris/Documents/macOS-rl-viritual-camera/CinematicCoreMacOS/build_out/Alfie.xcarchive/Products/Applications/Alfie.app/Contents/Library/SystemExtensions/Morris.CinematicCoreMacOS.CinematicCoreExtension.systemextension'>', codeSigningInfo='<_DVTCodeSigningInformation_Path: 0x8725c3420; isSigned='1', isAdHocSigned='0', signingCertificate='<DVTSigningCertificate: 0x8724c6700; name='Apple Development: Stephan Morris (23SJ5KAP4M)', hash='CD5267BF4D74D74B259012C593BA71F5D99BCF46', serialNumber='399C2EF2D89FEC3F81028D9A4FA87CF6', certificateKinds='(
+}', teamID='EPZDEPSV69', identifier='Morris.CinematicCoreMacOS.CinematicCoreExtension', executablePath='<DVTFilePath:0x8bd46a800:'/Users/stephanmorris/Documents/macOS-rl-viritual-camera/CinematicCoreMacOS/build_out/Alfie.xcarchive/Products/Applications/Alfie.app/Contents/Library/SystemExtensions/Morris.CinematicCoreMacOS.CinematicCoreExtension.systemextension/Contents/MacOS/Morris.CinematicCoreMacOS.CinematicCoreExtension'>', hardenedRuntime='1'>'>
+2026-07-25 00:44:45 +0000 [MT] Processing step: IDEDistributionInfoPlistStep
+2026-07-25 00:44:45 +0000 [MT] Skipping step: IDEDistributionInfoPlistStep because it said so
+2026-07-25 00:44:45 +0000 [MT] Skipping step: IDEDistributionInfoPlistStep because it said so
+2026-07-25 00:44:45 +0000 [MT] Processing step: IDEDistributionAppThinningPlistStep
+2026-07-25 00:44:45 +0000 [MT] Processing step: IDEDistributionSymbolsStep
+2026-07-25 00:44:45 +0000 [MT] Skipping step: IDEDistributionSymbolsStep because it said so
+2026-07-25 00:44:45 +0000 [MT] Processing step: IDEDistributionAppThinningStep
+2026-07-25 00:44:45 +0000 [MT] Skipping step: IDEDistributionAppThinningStep because it said so
+2026-07-25 00:44:45 +0000 [MT] Processing step: IDEDistributionArchThinningStep
+2026-07-25 00:44:45 +0000 [MT] Archs to thin for item /Users/stephanmorris/Documents/macOS-rl-viritual-camera/CinematicCoreMacOS/build_out/Alfie.xcarchive/Products/Applications/Alfie.app/Contents/Library/SystemExtensions/Morris.CinematicCoreMacOS.CinematicCoreExtension.systemextension are []
+2026-07-25 00:44:45 +0000 [MT] Archs to thin for item /Users/stephanmorris/Documents/macOS-rl-viritual-camera/CinematicCoreMacOS/build_out/Alfie.xcarchive/Products/Applications/Alfie.app are []
+2026-07-25 00:44:45 +0000 [MT] Processing step: IDEDistributionODRStep
+2026-07-25 00:44:45 +0000 [MT] Processing step: IDEDistributionStripXattrsStep
+2026-07-25 00:44:45 +0000 [MT] Skipping stripping extended attributes because the codesign step will strip them.
+2026-07-25 00:44:45 +0000 [MT] Skipping stripping extended attributes because the codesign step will strip them.
+2026-07-25 00:44:45 +0000 [MT] Processing step: IDEDistributionCodesignStep
+2026-07-25 00:44:45 +0000 [MT] Entitlements for <IDEDistributionItem: 0x8be3c77e0; bundleID='Morris.CinematicCoreMacOS.CinematicCoreExtension', path='<DVTFilePath:0x8bd46a6c0:'/Users/stephanmorris/Documents/macOS-rl-viritual-camera/CinematicCoreMacOS/build_out/Alfie.xcarchive/Products/Applications/Alfie.app/Contents/Library/SystemExtensions/Morris.CinematicCoreMacOS.CinematicCoreExtension.systemextension'>', codeSigningInfo='<_DVTCodeSigningInformation_Path: 0x8be3c7300; isSigned='1', isAdHocSigned='0', signingCertificate='<DVTSigningCertificate: 0x8be2c6dc0; name='Apple Development: Stephan Morris (23SJ5KAP4M)', hash='CD5267BF4D74D74B259012C593BA71F5D99BCF46', serialNumber='399C2EF2D89FEC3F81028D9A4FA87CF6', certificateKinds='(
     "1.2.840.113635.100.6.1.12",
     "1.2.840.113635.100.6.1.2"
 ), issueDate='2026-05-01 01:48:51 +0000''>', entitlements='{
@@ -84,15 +84,15 @@
         "EPZDEPSV69.Morris.CinematicCoreMacOS"
     );
     "com.apple.security.iosurface" = 1;
-}', teamID='EPZDEPSV69', identifier='Morris.CinematicCoreMacOS.CinematicCoreExtension', executablePath='<DVTFilePath:0x87109a940:'/Users/stephanmorris/Documents/macOS-rl-viritual-camera/CinematicCoreMacOS/build_out/Alfie.xcarchive/Products/Applications/Alfie.app/Contents/Library/SystemExtensions/Morris.CinematicCoreMacOS.CinematicCoreExtension.systemextension/Contents/MacOS/Morris.CinematicCoreMacOS.CinematicCoreExtension'>', hardenedRuntime='1'>'>: {
+}', teamID='EPZDEPSV69', identifier='Morris.CinematicCoreMacOS.CinematicCoreExtension', executablePath='<DVTFilePath:0x8bd46a800:'/Users/stephanmorris/Documents/macOS-rl-viritual-camera/CinematicCoreMacOS/build_out/Alfie.xcarchive/Products/Applications/Alfie.app/Contents/Library/SystemExtensions/Morris.CinematicCoreMacOS.CinematicCoreExtension.systemextension/Contents/MacOS/Morris.CinematicCoreMacOS.CinematicCoreExtension'>', hardenedRuntime='1'>'>: {
     "com.apple.security.app-sandbox" = 1;
     "com.apple.security.application-groups" =     (
         "EPZDEPSV69.Morris.CinematicCoreMacOS"
     );
     "com.apple.security.iosurface" = 1;
 }
-2026-07-19 10:35:44 +0000 [MT] Associated App Clip Identifiers Filter: Skipping because "com.apple.developer.associated-appclip-app-identifiers" is not present
-2026-07-19 10:35:44 +0000 [MT] Entitlements for <IDEDistributionItem: 0x8725c33c0; bundleID='Morris.CinematicCoreMacOS.CinematicCoreExtension', path='<DVTFilePath:0x87109a760:'/Users/stephanmorris/Documents/macOS-rl-viritual-camera/CinematicCoreMacOS/build_out/Alfie.xcarchive/Products/Applications/Alfie.app/Contents/Library/SystemExtensions/Morris.CinematicCoreMacOS.CinematicCoreExtension.systemextension'>', codeSigningInfo='<_DVTCodeSigningInformation_Path: 0x8725c3420; isSigned='1', isAdHocSigned='0', signingCertificate='<DVTSigningCertificate: 0x8724c6940; name='Apple Development: Stephan Morris (23SJ5KAP4M)', hash='CD5267BF4D74D74B259012C593BA71F5D99BCF46', serialNumber='399C2EF2D89FEC3F81028D9A4FA87CF6', certificateKinds='(
+2026-07-25 00:44:45 +0000 [MT] Associated App Clip Identifiers Filter: Skipping because "com.apple.developer.associated-appclip-app-identifiers" is not present
+2026-07-25 00:44:45 +0000 [MT] Entitlements for <IDEDistributionItem: 0x8be3c77e0; bundleID='Morris.CinematicCoreMacOS.CinematicCoreExtension', path='<DVTFilePath:0x8bd46a6c0:'/Users/stephanmorris/Documents/macOS-rl-viritual-camera/CinematicCoreMacOS/build_out/Alfie.xcarchive/Products/Applications/Alfie.app/Contents/Library/SystemExtensions/Morris.CinematicCoreMacOS.CinematicCoreExtension.systemextension'>', codeSigningInfo='<_DVTCodeSigningInformation_Path: 0x8be3c7300; isSigned='1', isAdHocSigned='0', signingCertificate='<DVTSigningCertificate: 0x8be2c6d00; name='Apple Development: Stephan Morris (23SJ5KAP4M)', hash='CD5267BF4D74D74B259012C593BA71F5D99BCF46', serialNumber='399C2EF2D89FEC3F81028D9A4FA87CF6', certificateKinds='(
     "1.2.840.113635.100.6.1.12",
     "1.2.840.113635.100.6.1.2"
 ), issueDate='2026-05-01 01:48:51 +0000''>', entitlements='{
@@ -101,14 +101,14 @@
         "EPZDEPSV69.Morris.CinematicCoreMacOS"
     );
     "com.apple.security.iosurface" = 1;
-}', teamID='EPZDEPSV69', identifier='Morris.CinematicCoreMacOS.CinematicCoreExtension', executablePath='<DVTFilePath:0x87109a940:'/Users/stephanmorris/Documents/macOS-rl-viritual-camera/CinematicCoreMacOS/build_out/Alfie.xcarchive/Products/Applications/Alfie.app/Contents/Library/SystemExtensions/Morris.CinematicCoreMacOS.CinematicCoreExtension.systemextension/Contents/MacOS/Morris.CinematicCoreMacOS.CinematicCoreExtension'>', hardenedRuntime='1'>'> are: {
+}', teamID='EPZDEPSV69', identifier='Morris.CinematicCoreMacOS.CinematicCoreExtension', executablePath='<DVTFilePath:0x8bd46a800:'/Users/stephanmorris/Documents/macOS-rl-viritual-camera/CinematicCoreMacOS/build_out/Alfie.xcarchive/Products/Applications/Alfie.app/Contents/Library/SystemExtensions/Morris.CinematicCoreMacOS.CinematicCoreExtension.systemextension/Contents/MacOS/Morris.CinematicCoreMacOS.CinematicCoreExtension'>', hardenedRuntime='1'>'> are: {
     "com.apple.security.app-sandbox" = 1;
     "com.apple.security.application-groups" =     (
         "EPZDEPSV69.Morris.CinematicCoreMacOS"
     );
     "com.apple.security.iosurface" = 1;
 }
-2026-07-19 10:35:44 +0000 [MT] Writing entitlements for <IDEDistributionItem: 0x8725c33c0; bundleID='Morris.CinematicCoreMacOS.CinematicCoreExtension', path='<DVTFilePath:0x87109a760:'/Users/stephanmorris/Documents/macOS-rl-viritual-camera/CinematicCoreMacOS/build_out/Alfie.xcarchive/Products/Applications/Alfie.app/Contents/Library/SystemExtensions/Morris.CinematicCoreMacOS.CinematicCoreExtension.systemextension'>', codeSigningInfo='<_DVTCodeSigningInformation_Path: 0x8725c3420; isSigned='1', isAdHocSigned='0', signingCertificate='<DVTSigningCertificate: 0x8724c6940; name='Apple Development: Stephan Morris (23SJ5KAP4M)', hash='CD5267BF4D74D74B259012C593BA71F5D99BCF46', serialNumber='399C2EF2D89FEC3F81028D9A4FA87CF6', certificateKinds='(
+2026-07-25 00:44:45 +0000 [MT] Writing entitlements for <IDEDistributionItem: 0x8be3c77e0; bundleID='Morris.CinematicCoreMacOS.CinematicCoreExtension', path='<DVTFilePath:0x8bd46a6c0:'/Users/stephanmorris/Documents/macOS-rl-viritual-camera/CinematicCoreMacOS/build_out/Alfie.xcarchive/Products/Applications/Alfie.app/Contents/Library/SystemExtensions/Morris.CinematicCoreMacOS.CinematicCoreExtension.systemextension'>', codeSigningInfo='<_DVTCodeSigningInformation_Path: 0x8be3c7300; isSigned='1', isAdHocSigned='0', signingCertificate='<DVTSigningCertificate: 0x8be2c6d00; name='Apple Development: Stephan Morris (23SJ5KAP4M)', hash='CD5267BF4D74D74B259012C593BA71F5D99BCF46', serialNumber='399C2EF2D89FEC3F81028D9A4FA87CF6', certificateKinds='(
     "1.2.840.113635.100.6.1.12",
     "1.2.840.113635.100.6.1.2"
 ), issueDate='2026-05-01 01:48:51 +0000''>', entitlements='{
@@ -117,24 +117,24 @@
         "EPZDEPSV69.Morris.CinematicCoreMacOS"
     );
     "com.apple.security.iosurface" = 1;
-}', teamID='EPZDEPSV69', identifier='Morris.CinematicCoreMacOS.CinematicCoreExtension', executablePath='<DVTFilePath:0x87109a940:'/Users/stephanmorris/Documents/macOS-rl-viritual-camera/CinematicCoreMacOS/build_out/Alfie.xcarchive/Products/Applications/Alfie.app/Contents/Library/SystemExtensions/Morris.CinematicCoreMacOS.CinematicCoreExtension.systemextension/Contents/MacOS/Morris.CinematicCoreMacOS.CinematicCoreExtension'>', hardenedRuntime='1'>'> to: /var/folders/58/vj_m9q91351608zhf9_p46n40000gn/T/XcodeDistPipeline.~~~ZsCoFx/entitlements~~~Funbt4
-2026-07-19 10:35:44 +0000 [MT] invoking codesign: <NSConcreteTask: 0x872d41b30; launchPath='/usr/bin/codesign', arguments='(
+}', teamID='EPZDEPSV69', identifier='Morris.CinematicCoreMacOS.CinematicCoreExtension', executablePath='<DVTFilePath:0x8bd46a800:'/Users/stephanmorris/Documents/macOS-rl-viritual-camera/CinematicCoreMacOS/build_out/Alfie.xcarchive/Products/Applications/Alfie.app/Contents/Library/SystemExtensions/Morris.CinematicCoreMacOS.CinematicCoreExtension.systemextension/Contents/MacOS/Morris.CinematicCoreMacOS.CinematicCoreExtension'>', hardenedRuntime='1'>'> to: /var/folders/58/vj_m9q91351608zhf9_p46n40000gn/T/XcodeDistPipeline.~~~8nl1aV/entitlements~~~mEPTOi
+2026-07-25 00:44:45 +0000 [MT] invoking codesign: <NSConcreteTask: 0x8bef10910; launchPath='/usr/bin/codesign', arguments='(
     "-f",
     "-s",
     2C30247CE8B7AD0D1D244EDADDEA98945DC1ADB6,
     "--entitlements",
-    "/var/folders/58/vj_m9q91351608zhf9_p46n40000gn/T/XcodeDistPipeline.~~~ZsCoFx/entitlements~~~Funbt4",
+    "/var/folders/58/vj_m9q91351608zhf9_p46n40000gn/T/XcodeDistPipeline.~~~8nl1aV/entitlements~~~mEPTOi",
     "--requirements",
     "=designated => anchor apple generic  and identifier \"$self.identifier\" and ((cert leaf[field.1.2.840.113635.100.6.1.9] exists) or ( certificate 1[field.1.2.840.113635.100.6.2.6] exists and certificate leaf[field.1.2.840.113635.100.6.1.13] exists  and certificate leaf[subject.OU] = \"EPZDEPSV69\" ))",
     "--preserve-metadata=identifier,flags,runtime,launch-constraints,library-constraints",
     "--generate-entitlement-der",
     "--strip-disallowed-xattrs",
     "-vvv",
-    "/var/folders/58/vj_m9q91351608zhf9_p46n40000gn/T/XcodeDistPipeline.~~~ZsCoFx/Root/Applications/Alfie.app/Contents/Library/SystemExtensions/Morris.CinematicCoreMacOS.CinematicCoreExtension.systemextension"
+    "/var/folders/58/vj_m9q91351608zhf9_p46n40000gn/T/XcodeDistPipeline.~~~8nl1aV/Root/Applications/Alfie.app/Contents/Library/SystemExtensions/Morris.CinematicCoreMacOS.CinematicCoreExtension.systemextension"
 )'>
-2026-07-19 10:35:55 +0000 [MT] codesign output: /var/folders/58/vj_m9q91351608zhf9_p46n40000gn/T/XcodeDistPipeline.~~~ZsCoFx/Root/Applications/Alfie.app/Contents/Library/SystemExtensions/Morris.CinematicCoreMacOS.CinematicCoreExtension.systemextension: replacing existing signature
-/var/folders/58/vj_m9q91351608zhf9_p46n40000gn/T/XcodeDistPipeline.~~~ZsCoFx/Root/Applications/Alfie.app/Contents/Library/SystemExtensions/Morris.CinematicCoreMacOS.CinematicCoreExtension.systemextension: signed bundle with Mach-O universal (x86_64 arm64) [Morris.CinematicCoreMacOS.CinematicCoreExtension]
-2026-07-19 10:35:55 +0000 [MT] Entitlements for <IDEDistributionItem: 0x8725c3660; bundleID='Morris.CinematicCoreMacOS', path='<DVTFilePath:0x8725c03c0:'/Users/stephanmorris/Documents/macOS-rl-viritual-camera/CinematicCoreMacOS/build_out/Alfie.xcarchive/Products/Applications/Alfie.app'>', codeSigningInfo='<_DVTCodeSigningInformation_Path: 0x8725c3300; isSigned='1', isAdHocSigned='0', signingCertificate='<DVTSigningCertificate: 0x8724c6700; name='Apple Development: Stephan Morris (23SJ5KAP4M)', hash='CD5267BF4D74D74B259012C593BA71F5D99BCF46', serialNumber='399C2EF2D89FEC3F81028D9A4FA87CF6', certificateKinds='(
+2026-07-25 00:45:02 +0000 [MT] codesign output: /var/folders/58/vj_m9q91351608zhf9_p46n40000gn/T/XcodeDistPipeline.~~~8nl1aV/Root/Applications/Alfie.app/Contents/Library/SystemExtensions/Morris.CinematicCoreMacOS.CinematicCoreExtension.systemextension: replacing existing signature
+/var/folders/58/vj_m9q91351608zhf9_p46n40000gn/T/XcodeDistPipeline.~~~8nl1aV/Root/Applications/Alfie.app/Contents/Library/SystemExtensions/Morris.CinematicCoreMacOS.CinematicCoreExtension.systemextension: signed bundle with Mach-O universal (x86_64 arm64) [Morris.CinematicCoreMacOS.CinematicCoreExtension]
+2026-07-25 00:45:02 +0000 [MT] Entitlements for <IDEDistributionItem: 0x8be3c7180; bundleID='Morris.CinematicCoreMacOS', path='<DVTFilePath:0x8be3c43c0:'/Users/stephanmorris/Documents/macOS-rl-viritual-camera/CinematicCoreMacOS/build_out/Alfie.xcarchive/Products/Applications/Alfie.app'>', codeSigningInfo='<_DVTCodeSigningInformation_Path: 0x8be3c7000; isSigned='1', isAdHocSigned='0', signingCertificate='<DVTSigningCertificate: 0x8be2c6dc0; name='Apple Development: Stephan Morris (23SJ5KAP4M)', hash='CD5267BF4D74D74B259012C593BA71F5D99BCF46', serialNumber='399C2EF2D89FEC3F81028D9A4FA87CF6', certificateKinds='(
     "1.2.840.113635.100.6.1.12",
     "1.2.840.113635.100.6.1.2"
 ), issueDate='2026-05-01 01:48:51 +0000''>', entitlements='{
@@ -150,7 +150,7 @@
     "com.apple.security.device.usb" = 1;
     "com.apple.security.files.user-selected.read-only" = 1;
     "com.apple.security.iosurface" = 1;
-}', teamID='EPZDEPSV69', identifier='Morris.CinematicCoreMacOS', executablePath='<DVTFilePath:0x8725c1b00:'/Users/stephanmorris/Documents/macOS-rl-viritual-camera/CinematicCoreMacOS/build_out/Alfie.xcarchive/Products/Applications/Alfie.app/Contents/MacOS/Alfie'>', hardenedRuntime='1'>'>: {
+}', teamID='EPZDEPSV69', identifier='Morris.CinematicCoreMacOS', executablePath='<DVTFilePath:0x8be3c5680:'/Users/stephanmorris/Documents/macOS-rl-viritual-camera/CinematicCoreMacOS/build_out/Alfie.xcarchive/Products/Applications/Alfie.app/Contents/MacOS/Alfie'>', hardenedRuntime='1'>'>: {
     "com.apple.application-identifier" = "EPZDEPSV69.Morris.CinematicCoreMacOS";
     "com.apple.developer.system-extension.install" = 1;
     "com.apple.developer.team-identifier" = EPZDEPSV69;
@@ -164,8 +164,8 @@
     "com.apple.security.files.user-selected.read-only" = 1;
     "com.apple.security.iosurface" = 1;
 }
-2026-07-19 10:35:55 +0000 [MT] Associated App Clip Identifiers Filter: Skipping because "com.apple.developer.associated-appclip-app-identifiers" is not present
-2026-07-19 10:35:55 +0000 [MT] Entitlements for <IDEDistributionItem: 0x8725c3660; bundleID='Morris.CinematicCoreMacOS', path='<DVTFilePath:0x8725c03c0:'/Users/stephanmorris/Documents/macOS-rl-viritual-camera/CinematicCoreMacOS/build_out/Alfie.xcarchive/Products/Applications/Alfie.app'>', codeSigningInfo='<_DVTCodeSigningInformation_Path: 0x8725c3300; isSigned='1', isAdHocSigned='0', signingCertificate='<DVTSigningCertificate: 0x8724c6940; name='Apple Development: Stephan Morris (23SJ5KAP4M)', hash='CD5267BF4D74D74B259012C593BA71F5D99BCF46', serialNumber='399C2EF2D89FEC3F81028D9A4FA87CF6', certificateKinds='(
+2026-07-25 00:45:02 +0000 [MT] Associated App Clip Identifiers Filter: Skipping because "com.apple.developer.associated-appclip-app-identifiers" is not present
+2026-07-25 00:45:02 +0000 [MT] Entitlements for <IDEDistributionItem: 0x8be3c7180; bundleID='Morris.CinematicCoreMacOS', path='<DVTFilePath:0x8be3c43c0:'/Users/stephanmorris/Documents/macOS-rl-viritual-camera/CinematicCoreMacOS/build_out/Alfie.xcarchive/Products/Applications/Alfie.app'>', codeSigningInfo='<_DVTCodeSigningInformation_Path: 0x8be3c7000; isSigned='1', isAdHocSigned='0', signingCertificate='<DVTSigningCertificate: 0x8be2c6d00; name='Apple Development: Stephan Morris (23SJ5KAP4M)', hash='CD5267BF4D74D74B259012C593BA71F5D99BCF46', serialNumber='399C2EF2D89FEC3F81028D9A4FA87CF6', certificateKinds='(
     "1.2.840.113635.100.6.1.12",
     "1.2.840.113635.100.6.1.2"
 ), issueDate='2026-05-01 01:48:51 +0000''>', entitlements='{
@@ -181,7 +181,7 @@
     "com.apple.security.device.usb" = 1;
     "com.apple.security.files.user-selected.read-only" = 1;
     "com.apple.security.iosurface" = 1;
-}', teamID='EPZDEPSV69', identifier='Morris.CinematicCoreMacOS', executablePath='<DVTFilePath:0x8725c1b00:'/Users/stephanmorris/Documents/macOS-rl-viritual-camera/CinematicCoreMacOS/build_out/Alfie.xcarchive/Products/Applications/Alfie.app/Contents/MacOS/Alfie'>', hardenedRuntime='1'>'> are: {
+}', teamID='EPZDEPSV69', identifier='Morris.CinematicCoreMacOS', executablePath='<DVTFilePath:0x8be3c5680:'/Users/stephanmorris/Documents/macOS-rl-viritual-camera/CinematicCoreMacOS/build_out/Alfie.xcarchive/Products/Applications/Alfie.app/Contents/MacOS/Alfie'>', hardenedRuntime='1'>'> are: {
     "com.apple.application-identifier" = "EPZDEPSV69.Morris.CinematicCoreMacOS";
     "com.apple.developer.system-extension.install" = 1;
     "com.apple.developer.team-identifier" = EPZDEPSV69;
@@ -195,7 +195,7 @@
     "com.apple.security.files.user-selected.read-only" = 1;
     "com.apple.security.iosurface" = 1;
 }
-2026-07-19 10:35:55 +0000 [MT] Writing entitlements for <IDEDistributionItem: 0x8725c3660; bundleID='Morris.CinematicCoreMacOS', path='<DVTFilePath:0x8725c03c0:'/Users/stephanmorris/Documents/macOS-rl-viritual-camera/CinematicCoreMacOS/build_out/Alfie.xcarchive/Products/Applications/Alfie.app'>', codeSigningInfo='<_DVTCodeSigningInformation_Path: 0x8725c3300; isSigned='1', isAdHocSigned='0', signingCertificate='<DVTSigningCertificate: 0x8724c6940; name='Apple Development: Stephan Morris (23SJ5KAP4M)', hash='CD5267BF4D74D74B259012C593BA71F5D99BCF46', serialNumber='399C2EF2D89FEC3F81028D9A4FA87CF6', certificateKinds='(
+2026-07-25 00:45:02 +0000 [MT] Writing entitlements for <IDEDistributionItem: 0x8be3c7180; bundleID='Morris.CinematicCoreMacOS', path='<DVTFilePath:0x8be3c43c0:'/Users/stephanmorris/Documents/macOS-rl-viritual-camera/CinematicCoreMacOS/build_out/Alfie.xcarchive/Products/Applications/Alfie.app'>', codeSigningInfo='<_DVTCodeSigningInformation_Path: 0x8be3c7000; isSigned='1', isAdHocSigned='0', signingCertificate='<DVTSigningCertificate: 0x8be2c6d00; name='Apple Development: Stephan Morris (23SJ5KAP4M)', hash='CD5267BF4D74D74B259012C593BA71F5D99BCF46', serialNumber='399C2EF2D89FEC3F81028D9A4FA87CF6', certificateKinds='(
     "1.2.840.113635.100.6.1.12",
     "1.2.840.113635.100.6.1.2"
 ), issueDate='2026-05-01 01:48:51 +0000''>', entitlements='{
@@ -211,32 +211,32 @@
     "com.apple.security.device.usb" = 1;
     "com.apple.security.files.user-selected.read-only" = 1;
     "com.apple.security.iosurface" = 1;
-}', teamID='EPZDEPSV69', identifier='Morris.CinematicCoreMacOS', executablePath='<DVTFilePath:0x8725c1b00:'/Users/stephanmorris/Documents/macOS-rl-viritual-camera/CinematicCoreMacOS/build_out/Alfie.xcarchive/Products/Applications/Alfie.app/Contents/MacOS/Alfie'>', hardenedRuntime='1'>'> to: /var/folders/58/vj_m9q91351608zhf9_p46n40000gn/T/XcodeDistPipeline.~~~ZsCoFx/entitlements~~~rTjzgH
-2026-07-19 10:35:55 +0000 [MT] invoking codesign: <NSConcreteTask: 0x872d41b30; launchPath='/usr/bin/codesign', arguments='(
+}', teamID='EPZDEPSV69', identifier='Morris.CinematicCoreMacOS', executablePath='<DVTFilePath:0x8be3c5680:'/Users/stephanmorris/Documents/macOS-rl-viritual-camera/CinematicCoreMacOS/build_out/Alfie.xcarchive/Products/Applications/Alfie.app/Contents/MacOS/Alfie'>', hardenedRuntime='1'>'> to: /var/folders/58/vj_m9q91351608zhf9_p46n40000gn/T/XcodeDistPipeline.~~~8nl1aV/entitlements~~~6EcVuZ
+2026-07-25 00:45:02 +0000 [MT] invoking codesign: <NSConcreteTask: 0x8bef10c30; launchPath='/usr/bin/codesign', arguments='(
     "-f",
     "-s",
     2C30247CE8B7AD0D1D244EDADDEA98945DC1ADB6,
     "--entitlements",
-    "/var/folders/58/vj_m9q91351608zhf9_p46n40000gn/T/XcodeDistPipeline.~~~ZsCoFx/entitlements~~~rTjzgH",
+    "/var/folders/58/vj_m9q91351608zhf9_p46n40000gn/T/XcodeDistPipeline.~~~8nl1aV/entitlements~~~6EcVuZ",
     "--requirements",
     "=designated => anchor apple generic  and identifier \"$self.identifier\" and ((cert leaf[field.1.2.840.113635.100.6.1.9] exists) or ( certificate 1[field.1.2.840.113635.100.6.2.6] exists and certificate leaf[field.1.2.840.113635.100.6.1.13] exists  and certificate leaf[subject.OU] = \"EPZDEPSV69\" ))",
     "--preserve-metadata=identifier,flags,runtime,launch-constraints,library-constraints",
     "--generate-entitlement-der",
     "--strip-disallowed-xattrs",
     "-vvv",
-    "/var/folders/58/vj_m9q91351608zhf9_p46n40000gn/T/XcodeDistPipeline.~~~ZsCoFx/Root/Applications/Alfie.app"
+    "/var/folders/58/vj_m9q91351608zhf9_p46n40000gn/T/XcodeDistPipeline.~~~8nl1aV/Root/Applications/Alfie.app"
 )'>
-2026-07-19 10:36:00 +0000 [MT] codesign output: /var/folders/58/vj_m9q91351608zhf9_p46n40000gn/T/XcodeDistPipeline.~~~ZsCoFx/Root/Applications/Alfie.app: replacing existing signature
-/var/folders/58/vj_m9q91351608zhf9_p46n40000gn/T/XcodeDistPipeline.~~~ZsCoFx/Root/Applications/Alfie.app: signed app bundle with Mach-O universal (x86_64 arm64) [Morris.CinematicCoreMacOS]
-2026-07-19 10:36:00 +0000 [MT] Processing step: IDEDistributionZipODRItemStep
-2026-07-19 10:36:00 +0000 [MT] Skipping step: IDEDistributionZipODRItemStep because it said so
-2026-07-19 10:36:00 +0000 [MT] Skipping step: IDEDistributionZipODRItemStep because it said so
-2026-07-19 10:36:00 +0000 [MT] Processing step: IDEDistributionSkipPackagingStep
-2026-07-19 10:36:00 +0000 [MT] Processing step: IDEDistributionAppStoreInformationStep
-2026-07-19 10:36:00 +0000 [MT] Skipping step: IDEDistributionAppStoreInformationStep because it said so
-2026-07-19 10:36:00 +0000 [MT] Processing step: IDEDistributionGenerateProcessedDistributionItems
-2026-07-19 10:36:00 +0000 [MT] IDEDistributionItem init <DVTFilePath:0x8710d7160:'/var/folders/58/vj_m9q91351608zhf9_p46n40000gn/T/XcodeDistPipeline.~~~ZsCoFx/Root/Applications/Alfie.app/Contents/Library/SystemExtensions/Morris.CinematicCoreMacOS.CinematicCoreExtension.systemextension'>
-2026-07-19 10:36:00 +0000 [MT] [OPTIONAL] Didn't find embedded provisioning profile for <DVTFilePath:0x8710d7160:'/var/folders/58/vj_m9q91351608zhf9_p46n40000gn/T/XcodeDistPipeline.~~~ZsCoFx/Root/Applications/Alfie.app/Contents/Library/SystemExtensions/Morris.CinematicCoreMacOS.CinematicCoreExtension.systemextension'>: Error Domain=NSCocoaErrorDomain Code=4 "No file at <DVTFilePath:0x872ccdab0:'/var/folders/58/vj_m9q91351608zhf9_p46n40000gn/T/XcodeDistPipeline.~~~ZsCoFx/Root/Applications/Alfie.app/Contents/Library/SystemExtensions/Morris.CinematicCoreMacOS.CinematicCoreExtension.systemextension/Contents/embedded.provisionprofile'>" UserInfo={NSLocalizedDescription=No file at <DVTFilePath:0x872ccdab0:'/var/folders/58/vj_m9q91351608zhf9_p46n40000gn/T/XcodeDistPipeline.~~~ZsCoFx/Root/Applications/Alfie.app/Contents/Library/SystemExtensions/Morris.CinematicCoreMacOS.CinematicCoreExtension.systemextension/Contents/embedded.provisionprofile'>}
-2026-07-19 10:36:00 +0000 [MT] IDEDistributionItem init <DVTFilePath:0x8727d2460:'/var/folders/58/vj_m9q91351608zhf9_p46n40000gn/T/XcodeDistPipeline.~~~ZsCoFx/Root/Applications/Alfie.app'>
-2026-07-19 10:36:00 +0000 [MT] Processing step: IDEDistributionCreateManifestStep
-2026-07-19 10:36:00 +0000 [MT] Skipping step: IDEDistributionCreateManifestStep because it said so
+2026-07-25 00:45:11 +0000 [MT] codesign output: /var/folders/58/vj_m9q91351608zhf9_p46n40000gn/T/XcodeDistPipeline.~~~8nl1aV/Root/Applications/Alfie.app: replacing existing signature
+/var/folders/58/vj_m9q91351608zhf9_p46n40000gn/T/XcodeDistPipeline.~~~8nl1aV/Root/Applications/Alfie.app: signed app bundle with Mach-O universal (x86_64 arm64) [Morris.CinematicCoreMacOS]
+2026-07-25 00:45:11 +0000 [MT] Processing step: IDEDistributionZipODRItemStep
+2026-07-25 00:45:11 +0000 [MT] Skipping step: IDEDistributionZipODRItemStep because it said so
+2026-07-25 00:45:11 +0000 [MT] Skipping step: IDEDistributionZipODRItemStep because it said so
+2026-07-25 00:45:11 +0000 [MT] Processing step: IDEDistributionSkipPackagingStep
+2026-07-25 00:45:11 +0000 [MT] Processing step: IDEDistributionAppStoreInformationStep
+2026-07-25 00:45:11 +0000 [MT] Skipping step: IDEDistributionAppStoreInformationStep because it said so
+2026-07-25 00:45:11 +0000 [MT] Processing step: IDEDistributionGenerateProcessedDistributionItems
+2026-07-25 00:45:11 +0000 [MT] IDEDistributionItem init <DVTFilePath:0x8bd06b020:'/var/folders/58/vj_m9q91351608zhf9_p46n40000gn/T/XcodeDistPipeline.~~~8nl1aV/Root/Applications/Alfie.app/Contents/Library/SystemExtensions/Morris.CinematicCoreMacOS.CinematicCoreExtension.systemextension'>
+2026-07-25 00:45:11 +0000 [MT] [OPTIONAL] Didn't find embedded provisioning profile for <DVTFilePath:0x8bd06b020:'/var/folders/58/vj_m9q91351608zhf9_p46n40000gn/T/XcodeDistPipeline.~~~8nl1aV/Root/Applications/Alfie.app/Contents/Library/SystemExtensions/Morris.CinematicCoreMacOS.CinematicCoreExtension.systemextension'>: Error Domain=NSCocoaErrorDomain Code=4 "No file at <DVTFilePath:0x8bee93790:'/var/folders/58/vj_m9q91351608zhf9_p46n40000gn/T/XcodeDistPipeline.~~~8nl1aV/Root/Applications/Alfie.app/Contents/Library/SystemExtensions/Morris.CinematicCoreMacOS.CinematicCoreExtension.systemextension/Contents/embedded.provisionprofile'>" UserInfo={NSLocalizedDescription=No file at <DVTFilePath:0x8bee93790:'/var/folders/58/vj_m9q91351608zhf9_p46n40000gn/T/XcodeDistPipeline.~~~8nl1aV/Root/Applications/Alfie.app/Contents/Library/SystemExtensions/Morris.CinematicCoreMacOS.CinematicCoreExtension.systemextension/Contents/embedded.provisionprofile'>}
+2026-07-25 00:45:11 +0000 [MT] IDEDistributionItem init <DVTFilePath:0x8bedf5ec0:'/var/folders/58/vj_m9q91351608zhf9_p46n40000gn/T/XcodeDistPipeline.~~~8nl1aV/Root/Applications/Alfie.app'>
+2026-07-25 00:45:11 +0000 [MT] Processing step: IDEDistributionCreateManifestStep
+2026-07-25 00:45:11 +0000 [MT] Skipping step: IDEDistributionCreateManifestStep because it said so
