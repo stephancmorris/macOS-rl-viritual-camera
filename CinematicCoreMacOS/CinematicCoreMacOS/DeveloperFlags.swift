@@ -58,4 +58,20 @@ enum DeveloperFlags {
     ///
     /// Set to 1 to restore per-frame detection for an A/B comparison.
     nonisolated static let detectionFrameInterval = 2
+
+    /// How often (seconds) to drop Core Image's internal caches. 0 disables.
+    ///
+    /// Measured 26 July: Alfie retains ~40 small allocations per frame. They
+    /// accumulate until something releases them in bulk, and as the pile grows
+    /// the MainActor gets slower — past ~5 ms of frame-start delay the capture
+    /// gate begins discarding frames and the feed visibly stutters. Three
+    /// natural releases were observed in one 42-minute session, at 13, 5 and
+    /// 20-minute intervals; each restored 50 fps instantly. Left to itself that
+    /// is a choppy patch of unpredictable length arriving mid-show.
+    ///
+    /// Flushing on a fixed schedule trades one deliberate, tiny cost every 30 s
+    /// for that cliff. It is also the experiment: if the heap stays flat and the
+    /// stutter never appears, Core Image was the source; if the heap climbs
+    /// anyway, it was not, and the main suspect is eliminated cheaply.
+    nonisolated static let imageCacheFlushInterval: TimeInterval = 30
 }

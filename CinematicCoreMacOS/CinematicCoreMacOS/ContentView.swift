@@ -57,7 +57,8 @@ struct ContentView: View {
                     steadyBand: cameraManager.shotComposer.steadyBand,
                     framingTitle: cameraManager.shotComposer.config.shotFraming.title,
                     onSelectPerson: cameraManager.lockTarget,
-                    onTapPoint: tapPointHandler
+                    onTapPoint: tapPointHandler,
+                    onHoldPoint: holdPointHandler
                 )
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
             } else {
@@ -157,6 +158,16 @@ struct ContentView: View {
             return { point in cameraManager.manualCropPoint = point }
         }
         return nil
+    }
+
+    /// Press-and-hold handler. Only live while a subject is already locked —
+    /// holding on someone else switches the shot to them without going back
+    /// through the Detect button. Suppressed in manual-crop mode, where the
+    /// pointer is already driving the crop.
+    private var holdPointHandler: ((CGPoint) -> Void)? {
+        guard cameraManager.activeMode != .manualCrop else { return nil }
+        guard cameraManager.manualLockedTargetID != nil else { return nil }
+        return { point in cameraManager.retargetSubject(at: point) }
     }
 
     private func startCamera() async {

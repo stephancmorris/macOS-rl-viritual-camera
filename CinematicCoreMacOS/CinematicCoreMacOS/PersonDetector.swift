@@ -409,6 +409,16 @@ final class PersonDetector: ObservableObject {
         return detectedPersons
     }
     
+    /// Drop Core Image's caches for the detection downscaler.
+    ///
+    /// Unlike the crop renderer's context this one is created with default
+    /// caching, and it renders a fresh 1080p buffer on every detection — so it
+    /// is at least as likely a source of the per-frame accumulation as the crop
+    /// path. Both are flushed together.
+    nonisolated func flushImageCaches() {
+        Self.downscaleContext.clearCaches()
+    }
+
     /// Synchronous equivalent of the `.off` / `.awaitingTap` early-out in
     /// `processFrame`, for callers that no longer await detection at all.
     ///

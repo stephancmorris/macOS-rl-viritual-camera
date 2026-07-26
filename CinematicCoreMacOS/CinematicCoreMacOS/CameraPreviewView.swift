@@ -25,6 +25,11 @@ struct CameraPreviewView: View {
     var trackedSubjectRect: CGRect? = nil
     var onSelectPerson: ((UUID) -> Void)? = nil
     var onTapPoint: ((CGPoint) -> Void)? = nil
+    /// Press-and-hold on the preview, reported in normalized frame coords.
+    /// Used to re-target while a subject is already locked: a deliberate hold
+    /// rather than a click, so a stray press on the preview (or clicking to
+    /// focus the window) can never change the programme shot mid-show.
+    var onHoldPoint: ((CGPoint) -> Void)? = nil
     var cropIndicator: CropEngine.CropRect? = nil
     var isRecovering: Bool = false
     var isZoomLimited: Bool = false
@@ -33,6 +38,13 @@ struct CameraPreviewView: View {
     var steadyBand: ShotComposer.SteadyBand? = nil
     var framingTitle: String = "Wide"
     var aspectFill: Bool = false
+
+    /// How long a press must be held before it counts as a re-target.
+    private static let retargetHoldDuration: TimeInterval = 0.4
+    /// Movement above this (points) means the operator dragged, not held.
+    private static let retargetHoldSlop: CGFloat = 12
+
+    @State private var holdStartedAt: Date?
 
     var body: some View {
         GeometryReader { geometry in
@@ -77,32 +89,81 @@ struct CameraPreviewView: View {
                         .allowsHitTesting(false)
                     }
 
+                    // Tap and hold are mutually exclusive by construction:
+                    // `onTapPoint` is supplied while picking a subject, and
+                    // `onHoldPoint` while one is already locked. Attaching only
+                    // the relevant gesture avoids the two competing.
                     if onTapPoint != nil {
                         Color.clear
                             .contentShape(Rectangle())
                             .onTapGesture { location in
-                                let viewSize = geometry.size
-                                let scale = aspectFill
-                                    ? max(viewSize.width / imageSize.width, viewSize.height / imageSize.height)
-                                    : min(viewSize.width / imageSize.width, viewSize.height / imageSize.height)
-                                let displayWidth = imageSize.width * scale
-                                let displayHeight = imageSize.height * scale
-                                let offsetX = (viewSize.width - displayWidth) / 2
-                                let offsetY = (viewSize.height - displayHeight) / 2
-
-                                let x = (location.x - offsetX) / displayWidth
-                                let y = 1.0 - ((location.y - offsetY) / displayHeight)
-
-                                if x >= 0 && x <= 1 && y >= 0 && y <= 1 {
-                                    onTapPoint?(CGPoint(x: x, y: y))
+                                if let point = normalizedPoint(
+                                    location,
+                                    viewSize: geometry.size,
+                                    imageSize: imageSize
+                                ) {
+                                    onTapPoint?(point)
                                 }
                             }
+                    } else if onHoldPoint != nil {
+                        Color.clear
+                            .contentShape(Rectangle())
+                            .gesture(
+                                DragGesture(minimumDistance: 0)
+                                    .onChanged { _ in
+                                        if holdStartedAt == nil { holdStartedAt = Date() }
+                                    }
+                                    .onEnded { value in
+                                        let held = holdStartedAt.map {
+                                            Date().timeIntervalSince($0)
+                                        } ?? 0
+                                        holdStartedAt = nil
+                                        // A quick click is not a re-target, and
+                                        // neither is a drag.
+                                        guard held >= Self.retargetHoldDuration else { return }
+                                        let moved = hypot(
+                                            value.translation.width,
+                                            value.translation.height
+                                        )
+                                        guard moved <= Self.retargetHoldSlop else { return }
+                                        if let point = normalizedPoint(
+                                            value.location,
+                                            viewSize: geometry.size,
+                                            imageSize: imageSize
+                                        ) {
+                                            onHoldPoint?(point)
+                                        }
+                                    }
+                            )
                     }
                 }
             } else {
                 Color.black
             }
         }
+    }
+
+    /// View point → normalized frame coords (bottom-left origin, Vision's
+    /// convention). Returns nil when the point lands on the letterbox rather
+    /// than on the picture.
+    private func normalizedPoint(
+        _ location: CGPoint,
+        viewSize: CGSize,
+        imageSize: CGSize
+    ) -> CGPoint? {
+        guard imageSize.width > 0, imageSize.height > 0 else { return nil }
+        let scale = aspectFill
+            ? max(viewSize.width / imageSize.width, viewSize.height / imageSize.height)
+            : min(viewSize.width / imageSize.width, viewSize.height / imageSize.height)
+        let displayWidth = imageSize.width * scale
+        let displayHeight = imageSize.height * scale
+        let offsetX = (viewSize.width - displayWidth) / 2
+        let offsetY = (viewSize.height - displayHeight) / 2
+
+        let x = (location.x - offsetX) / displayWidth
+        let y = 1.0 - ((location.y - offsetY) / displayHeight)
+        guard x >= 0, x <= 1, y >= 0, y <= 1 else { return nil }
+        return CGPoint(x: x, y: y)
     }
 }
 

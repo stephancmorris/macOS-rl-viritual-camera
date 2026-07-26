@@ -28,6 +28,7 @@ struct CropPreviewView: View {
     let framingTitle: String
     var onSelectPerson: ((UUID) -> Void)? = nil
     var onTapPoint: ((CGPoint) -> Void)? = nil
+    var onHoldPoint: ((CGPoint) -> Void)? = nil
 
     var body: some View {
         HStack(spacing: 0) {
@@ -41,6 +42,7 @@ struct CropPreviewView: View {
                 trackedSubjectRect: trackedSubjectRect,
                 onSelectPerson: onSelectPerson,
                 onTapPoint: onTapPoint,
+                onHoldPoint: onHoldPoint,
                 cropIndicator: cropRect,
                 isRecovering: isRecovering,
                 isZoomLimited: isZoomLimited,

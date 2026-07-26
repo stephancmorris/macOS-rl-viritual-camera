@@ -243,8 +243,10 @@ final class ShotComposer: ObservableObject {
 
             /// Presets the operator can choose from (excludes `custom`, which is
             /// only ever entered by editing sliders directly).
+            /// Steady Follow first: it is the default feel for stage work, so
+            /// it leads the list rather than sitting at the end of it.
             static var selectable: [TuningPreset] {
-                [.slowPan, .balanced, .fastFollow, .lockedDown, .steadyFollow]
+                [.steadyFollow, .balanced, .slowPan, .fastFollow, .lockedDown]
             }
 
             var title: String {
@@ -288,9 +290,9 @@ final class ShotComposer: ObservableObject {
                 case .balanced: return (0.10, 0.02, 0.05, 0.75)
                 case .fastFollow: return (0.20, 0.03, 0.03, 0.40)
                 case .lockedDown: return (0.06, 0.01, 0.12, 2.00)
-                // Steady Follow: balanced smoothing; deadzone 0.10 maps to a
-                // 0.20 steady band via the ×2 rule in `apply(_:)`.
-                case .steadyFollow: return (0.10, 0.02, 0.10, 0.75)
+                // Steady Follow: balanced smoothing; deadzone 0.05 maps to a
+                // 0.10 (10%) steady band via the ×2 rule in `apply(_:)`.
+                case .steadyFollow: return (0.10, 0.02, 0.05, 0.75)
                 case .custom: return nil
                 }
             }
@@ -311,7 +313,7 @@ final class ShotComposer: ObservableObject {
         /// True while the "Steady Follow" feel is selected. Gates the
         /// hold/band state machine + yellow guides; when false the classic
         /// velocity-adaptive deadzone gate runs instead.
-        var steadyFollowingEnabled: Bool = false
+        var steadyFollowingEnabled: Bool = true
 
         /// Smoothing factor per frame (synced to CropEngine.transitionSmoothing)
         var smoothingFactor: Float = 0.10 // 10% per frame
@@ -366,9 +368,10 @@ final class ShotComposer: ObservableObject {
             frameProfile.aspectRatio
         }
 
-        /// Currently selected beginner tuning preset. Defaults to the balanced
-        /// bundle, which mirrors the per-field defaults above.
-        var tuningPreset: TuningPreset = .balanced
+        /// Currently selected beginner tuning preset. Defaults to Steady
+        /// Follow, whose bundle mirrors the per-field defaults above — the only
+        /// difference from Balanced is that the steady band gate is on.
+        var tuningPreset: TuningPreset = .steadyFollow
 
         /// Apply a named tuning preset, writing its bundle into the four
         /// preset-controlled fields. `custom` only records the selection.

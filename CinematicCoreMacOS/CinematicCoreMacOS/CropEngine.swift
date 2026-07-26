@@ -429,6 +429,15 @@ final class CropEngine: ObservableObject {
         return outputBuffer
     }
 
+    /// Drop Core Image's internal caches for the crop renderer.
+    ///
+    /// `cacheIntermediates: false` is already set on this context, which limits
+    /// but does not eliminate what it holds. Called on a schedule rather than
+    /// per frame — see `DeveloperFlags.imageCacheFlushInterval`.
+    nonisolated func flushImageCaches() {
+        ciContext.clearCaches()
+    }
+
     /// MainActor-only: record a completed render for the stats HUD. Called
     /// fire-and-forget after `processCrop` returns so the cooperative thread
     /// isn't blocked on SwiftUI updates. Accumulates every frame but only

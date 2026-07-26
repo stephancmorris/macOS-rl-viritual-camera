@@ -311,6 +311,28 @@ final class CameraManager: NSObject, ObservableObject {
     /// Frame counter driving `DeveloperFlags.detectionFrameInterval`.
     private var detectionFrameCounter: UInt64 = 0
 
+    /// Wall-clock of the last Core Image cache flush.
+    private var lastImageCacheFlush: TimeInterval = 0
+
+    /// Drop both Core Image contexts' caches on a fixed schedule. One cheap
+    /// comparison per frame; the flush itself runs at most every
+    /// `DeveloperFlags.imageCacheFlushInterval` seconds.
+    private func flushImageCachesIfDue(now: TimeInterval) {
+        let interval = DeveloperFlags.imageCacheFlushInterval
+        guard interval > 0 else { return }
+        guard lastImageCacheFlush > 0 else {
+            lastImageCacheFlush = now
+            return
+        }
+        guard now - lastImageCacheFlush >= interval else { return }
+        lastImageCacheFlush = now
+        cropEngine?.flushImageCaches()
+        personDetector.flushImageCaches()
+        // Marked in the diagnostics CSV so a flush can be lined up against the
+        // heap and frame-rate columns when reviewing a session.
+        programOutput.noteDiagnostics("image cache flush")
+    }
+
     /// Start a detection if none is running and the cadence allows it. Returns
     /// immediately either way — the caller never awaits.
     private func scheduleDetectionIfDue(
@@ -664,6 +686,7 @@ final class CameraManager: NSObject, ObservableObject {
         // acquiring → tracking and we get the .acquired tick outcome).
         detectionDiscoveryActive = false
         pendingTapPoint = nil
+        pendingTapIsRetarget = false
         tapPending = false
         shotComposer.lockTarget(personID)
     }
@@ -682,6 +705,7 @@ final class CameraManager: NSObject, ObservableObject {
     func cancelDetection() {
         detectionDiscoveryActive = false
         pendingTapPoint = nil
+        pendingTapIsRetarget = false
         tapPending = false
     }
 
@@ -691,6 +715,26 @@ final class CameraManager: NSObject, ObservableObject {
     func selectSubject(at point: CGPoint) {
         guard detectionDiscoveryActive else { return }
         pendingTapPoint = point
+        pendingTapIsRetarget = false
+        tapPending = true
+    }
+
+    /// True while the pending tap is a re-target of an existing lock rather
+    /// than a first-time selection. It changes what a miss means: a re-target
+    /// that finds nobody must leave the current subject locked and on air,
+    /// where a first selection falls back to discovery.
+    private var pendingTapIsRetarget = false
+
+    /// Operator pressed and held on the preview while a subject is already
+    /// locked — switch to whoever is at that point.
+    ///
+    /// Reuses the ordinary one-shot ROI scan: `currentDetectionPlan()` gives a
+    /// pending tap priority over the lock state, so the next frame scans around
+    /// the held point exactly as a first selection would.
+    func retargetSubject(at point: CGPoint) {
+        guard shotComposer.manualLockedTargetID != nil else { return }
+        pendingTapPoint = point
+        pendingTapIsRetarget = true
         tapPending = true
     }
 
@@ -951,6 +995,7 @@ final class CameraManager: NSObject, ObservableObject {
 
         let captureInterval = Self.signposter.beginInterval("captureFrame")
         let captureStart = CACurrentMediaTime()
+        flushImageCachesIfDue(now: captureStart)
 
         programOutput.recordInputFrame(timestamp: timestampSeconds)
 
@@ -1047,17 +1092,26 @@ final class CameraManager: NSObject, ObservableObject {
         // detected person nearest the tap point. If nothing was found, keep
         // discovery armed so the operator can tap again.
         if let tap = pendingTapPoint {
+            let wasRetarget = pendingTapIsRetarget
             pendingTapPoint = nil
+            pendingTapIsRetarget = false
             tapPending = false
             if let picked = personNearest(to: tap, in: detectedPersons) {
                 lockTarget(personID: picked.id)   // → .acquiring, leaves discovery
                 lastSubjectROIBox = picked.boundingBox
-            } else {
+                if wasRetarget {
+                    programOutput.noteDiagnostics("operator re-targeted subject")
+                }
+            } else if !wasRetarget {
                 // Scan found no one at the tap — re-arm discovery so the
                 // operator can try again, and surface that nothing was found.
                 detectionDiscoveryActive = true
                 discoveryTimeoutAt = CACurrentMediaTime() + Self.discoveryTimeout
             }
+            // A re-target that found nobody deliberately does nothing: the
+            // current subject stays locked and on air. Dropping the shot
+            // because the operator held on an empty patch of stage would be a
+            // far worse outcome than the hold appearing to be ignored.
         }
 
         // Track the acquiring/locked subject's latest box to seed the next
