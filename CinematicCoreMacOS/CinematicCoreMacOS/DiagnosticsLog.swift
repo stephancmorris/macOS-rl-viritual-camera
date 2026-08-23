@@ -120,6 +120,7 @@ final class DiagnosticsLog {
         elapsed_s,clock,thermal,low_power,cpu_cores,cpu_pct,threads,\
         source_h,crop_h_frac,upscale,footprint_mb,\
         hop_mean_ms,hop_max_ms,queue_mean_ms,queue_max_ms,vision_mean_ms,vision_max_ms,\
+        frame_mean_ms,frame_max_ms,\
         detections,frames_window,frames_total,out_drops_window,out_drops_total,\
         gate_drops_window,gate_drops_total,note
 
@@ -234,8 +235,8 @@ final class DiagnosticsLog {
     private func appendMarkerRow(_ text: String) {
         let elapsed = CACurrentMediaTime() - sessionStart
         let processInfo = ProcessInfo.processInfo
-        // 21 commas span the 20 empty measurement columns and land on `note`.
-        let emptyMeasurements = String(repeating: ",", count: 21)
+        // 23 commas span the 22 empty measurement columns and land on `note`.
+        let emptyMeasurements = String(repeating: ",", count: 23)
         let row = String(
             format: "%.1f,%@,%@,%@%@%@\n",
             elapsed,
@@ -271,6 +272,8 @@ final class DiagnosticsLog {
         queueMaxMS: Double,
         visionMeanMS: Double,
         visionMaxMS: Double,
+        frameMeanMS: Double,
+        frameMaxMS: Double,
         detections: Int,
         framesWindow: Int,
         framesTotal: Int,
@@ -297,7 +300,7 @@ final class DiagnosticsLog {
         lastCPUSampleAt = now
 
         let row = String(
-            format: "%.1f,%@,%@,%@,%.2f,%.0f,%d,%d,%.4f,%.2f,%.0f,%.2f,%.2f,%.2f,%.2f,%.2f,%.2f,%d,%d,%d,%d,%d,%llu,%llu,%@\n",
+            format: "%.1f,%@,%@,%@,%.2f,%.0f,%d,%d,%.4f,%.2f,%.0f,%.2f,%.2f,%.2f,%.2f,%.2f,%.2f,%.2f,%.2f,%d,%d,%d,%d,%d,%llu,%llu,%@\n",
             elapsed,
             Self.clockFormatter.string(from: Date()),
             Self.thermalStateName(processInfo.thermalState),
@@ -310,6 +313,7 @@ final class DiagnosticsLog {
             hopMeanMS, hopMaxMS,
             queueMeanMS, queueMaxMS,
             visionMeanMS, visionMaxMS,
+            frameMeanMS, frameMaxMS,
             detections,
             framesWindow, framesTotal,
             outDropsWindow, outDropsTotal,

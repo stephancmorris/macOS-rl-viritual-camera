@@ -1,49 +1,37 @@
-# Cinematic Core (Broadcast Helper)
+# Alfie — Autonomous Live Framing Intelligence Engine
 
-An autonomous virtual camera operator for live broadcast environments. This macOS application ingests a static 4K wide shot, uses computer vision to detect subjects, and outputs a digitally panned and zoomed 1080p signal to ATEM switchers via dedicated hardware.
+An autonomous virtual camera operator for church-stage livestreams. Alfie ingests one fixed wide 4K shot of the stage, finds the active speaker, and publishes a digitally panned and zoomed 1080p50 program crop as a macOS virtual camera (plus a fullscreen Program Display feed for HDMI→converter chains). A volunteer operator can always override it: tap-to-lock a subject, Return to Wide, Resume Tracking.
 
 ## System Architecture
 
 **Input**
-4K video feed (3840x2160) from a stationary camera via a capture card.
+4K video feed (3840×2160) from a stationary camera via a UVC capture card (e.g. Elgato Cam Link 4K). Capture runs at the persisted show standard — default **1080p50**, switchable to 59.94/60.
 
-**Processing (macOS)**
-1. **Perception:** Apple's Vision framework detects subject position and body keypoints.
-2. **Control:** A Reinforcement Learning (RL) agent calculates cinematic camera moves (Digital PTZ).
-3. **Rendering:** Metal-based engine performs high-quality cropping and scaling.
+**Processing (macOS host app)**
+1. **Perception:** Apple's Vision framework (`VNDetectHumanRectanglesRequest`, `VNDetectHumanBodyPoseRequest`, `VNDetectFaceLandmarksRequest`) on a ≤1080p proxy, off the frame path, scoped to an ROI around the locked subject.
+2. **Control:** `ShotComposer` — deterministic, rule-based framing (tap-to-lock acquisition with a face-signature gallery, Steady Follow hold-band, HOLD → wide → face-print re-acquire). An RL agent exists as scaffolding behind a developer flag and is not the shipping controller.
+3. **Rendering:** Core Image crop-and-scale (Metal-backed `CIContext`) to 1920×1080, rendered off the main thread with critically damped spring interpolation.
 
 **Output**
-1080p broadcast signal via Blackmagic UltraStudio Monitor 3G to an ATEM switcher.
+- **Program Display (default route):** borderless fullscreen window on a chosen display, for an HDMI→SDI converter into an ATEM. Blackmagic Desktop Video SDK integration is *not* implemented; SDI remains deferred.
+- **Virtual Camera:** frames cross XPC as IOSurface IDs to a CoreMediaIO system extension ("Alfie" camera) that drains at the show standard and feeds OBS/ATEM Software Control/Zoom/NDI tools.
 
 ## Hardware Requirements
 
-- **Host:** Apple Silicon Mac (M1/M2/M3/M4...)
-- **Camera:** 4K capable camera
-- **Input Device:** Elgato Cam Link 4K or Blackmagic UltraStudio Recorder
-- **Output Device:** Blackmagic UltraStudio Monitor 3G
+- **Host:** Apple Silicon Mac (M1/M2/M3/M4…)
+- **Camera:** 4K-capable camera
+- **Input Device:** Elgato Cam Link 4K or equivalent UVC capture card
 
 ## Development Setup
 
-1. Install Xcode 15.0 or later.
-2. Install Blackmagic Desktop Video 12.0+ drivers and SDK.
-3. Clone the repository.
-4. Open `CinematicCore.xcodeproj`.
-5. Select the `CinematicCore` target and build.
+1. Install Xcode 15 or later.
+2. Clone the repository.
+3. Open `CinematicCoreMacOS.xcodeproj`.
+4. Select the Alfie app target and build. On first run, approve the system extension installation when macOS prompts.
 
-## Roadmap Status
+## Status
 
-**Phase 1: Infrastructure (Current)**
-- [x] 4K Video Capture Pipeline
-- [ ] Blackmagic SDK Output Integration
-- [ ] Metal Rendering Engine
-
-**Phase 2: Perception**
-- [ ] Apple's Vision framework Integration
-- [ ] Subject Tracking Logic
-
-**Phase 3: Automation**
-- [ ] RL Agent Integration
-- [ ] Smooth Motion Control
+Shipping for single-speaker church MVP: capture pipeline, Vision perception, ShotComposer control, Core Image render, CMIO virtual camera + Program Display routes, per-session diagnostics CSVs (memory/latency soak), operator recovery paths. Not yet validated: full-length (60 min) Sunday soak without intervention, and end-to-end latency against the 100–150 ms target on the show rig.
 
 ## License
 

@@ -1,5 +1,13 @@
 # Church MVP Task List
 
+> **STATUS NOTE (July 2026).** The "Current blockers" list below is out of date:
+> output **is** wired (Program Display route + CMIO virtual camera at the show
+> standard, default 1080p50), and the Blackmagic SDK path was deliberately
+> **not** implemented — SDI remains deferred, not shipped. Rendering is Core
+> Image on a Metal-backed CIContext (the "Metal-based crop rendering" bullet
+> means the Metal device; the compute kernel was replaced). This file is kept
+> as the historical task breakdown.
+
 This task list narrows the project to the real ministry use case:
 
 - One fixed wide camera covering the full stage

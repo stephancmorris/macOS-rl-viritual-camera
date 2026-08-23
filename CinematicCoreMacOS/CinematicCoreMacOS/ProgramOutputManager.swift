@@ -121,9 +121,10 @@ protocol ProgramOutputSink: AnyObject {
     var canReconnect: Bool { get }
     var reconnectStatus: String? { get }
     var bringUpChecks: [OutputBringUpCheck] { get }
-    /// The fixed hardware playout rate of this route, if it has one. `nil`
-    /// for routes with no clock of their own (e.g. the virtual camera, which
-    /// is drained at whatever rate the consuming app pulls frames).
+    /// The fixed playout rate of this route, if it has a clock of its own.
+    /// The virtual camera drains at the show standard (the host pushes the
+    /// rate to the extension over XPC); Program Display is compositor-timed,
+    /// so it reports nil and relies on the display-mode check instead.
     var playoutFrameRate: Double? { get }
     var onStateChange: (() -> Void)? { get set }
 
@@ -276,9 +277,9 @@ final class ProgramOutputManager: ObservableObject {
     /// device's advertised format is not trustworthy here.
     @Published private(set) var measuredInputFPS: Double = 0
 
-    /// Playout clock of the active route, if it has one (the program display
-    /// runs at its refresh rate; the virtual camera has none). Drives the HUD
-    /// mismatch tint and the frame-rate bring-up check.
+    /// Playout clock of the active route, if it has one (the virtual camera
+    /// drains at the show standard; the program display runs at its refresh
+    /// rate). Drives the HUD mismatch tint and the frame-rate bring-up check.
     var activePlayoutFrameRate: Double? {
         activeSink?.playoutFrameRate
     }
@@ -324,6 +325,16 @@ final class ProgramOutputManager: ObservableObject {
     private var rawVisionWallSum: Double = 0
     private var rawVisionWallMax: Double = 0
     private var rawDetectionCount: Int = 0
+
+    /// Main-thread occupancy per frame — how long `processFrame` actually holds
+    /// the one thread every pipeline has to share. This is the number that
+    /// decides how many camera streams can run at once: at 50 Hz the whole
+    /// budget is 20 ms, so three streams need one stream to fit in under ~6 ms.
+    /// Total CPU is not the constraint; this is.
+    private var rawFrameSum: Double = 0
+    private var rawFrameMax: Double = 0
+    private var rawFrameCount: Int = 0
+
     private var statsRefreshCounter: Int = 0
     private let soakEmitEveryNRefreshes = 10
 
@@ -441,6 +452,7 @@ final class ProgramOutputManager: ObservableObject {
         let hopMean = rawHopLagCount > 0 ? rawHopLagSum / Double(rawHopLagCount) : 0
         let qwMean = rawDetectionCount > 0 ? rawQueueWaitSum / Double(rawDetectionCount) : 0
         let vwMean = rawDetectionCount > 0 ? rawVisionWallSum / Double(rawDetectionCount) : 0
+        let frMean = rawFrameCount > 0 ? rawFrameSum / Double(rawFrameCount) : 0
         // Gate drops are reported as "this window / cumulative" — the per-window
         // number is what climbs as the pipeline degrades.
         let gateDropsWindow = rawGateDropTotal &- lastEmittedGateDropTotal
@@ -467,6 +479,8 @@ final class ProgramOutputManager: ObservableObject {
             queueMaxMS: rawQueueWaitMax * 1000,
             visionMeanMS: vwMean * 1000,
             visionMaxMS: rawVisionWallMax * 1000,
+            frameMeanMS: frMean * 1000,
+            frameMaxMS: rawFrameMax * 1000,
             detections: rawDetectionCount,
             framesWindow: framesWindow,
             framesTotal: rawFramesSent,
@@ -500,6 +514,7 @@ final class ProgramOutputManager: ObservableObject {
         rawQueueWaitSum = 0; rawQueueWaitMax = 0
         rawVisionWallSum = 0; rawVisionWallMax = 0
         rawDetectionCount = 0
+        rawFrameSum = 0; rawFrameMax = 0; rawFrameCount = 0
     }
 
     init(sinks: [any ProgramOutputSink] = []) {
@@ -676,6 +691,11 @@ final class ProgramOutputManager: ObservableObject {
     ) {
         // Accumulate only; the published `stageLatencies` snapshot is rebuilt by
         // the coalesced refresh, not on every sample (~250 samples/sec arrive here).
+        if stage == .total {
+            rawFrameSum += duration
+            rawFrameMax = max(rawFrameMax, duration)
+            rawFrameCount += 1
+        }
         var samples = latencySamples[stage, default: []]
         samples.append(TimedDuration(timestamp: timestamp, duration: duration))
         let windowStart = timestamp - 5

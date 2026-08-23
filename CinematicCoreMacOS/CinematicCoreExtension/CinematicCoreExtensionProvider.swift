@@ -14,7 +14,17 @@ import Security
 
 // MARK: - Configuration
 
-let kFrameRate: Int = 30  // Match CameraManager target frame rate
+/// Playout rate used until the host informs the extension otherwise over XPC
+/// (`updatePlayoutFrameRate`). The host derives this from the persisted show
+/// standard (`ShowStandard.current.frameRate`, default 1080p50) — the same
+/// value that drives capture — so the drain clock always matches what the
+/// host is sending. The old hardcoded 30 was a webcam-era guess that forced
+/// `drainToLatest` to discard ~40% of 50p program frames and added judder;
+/// it is gone. Advertised stream-format durations below are stamped with this
+/// default at extension load; live rate changes re-time the drain timer and
+/// are reported via the `.streamFrameDuration` property, so consumers pick up
+/// a new show standard when they (re)open the camera.
+let extensionDefaultFrameRate: Double = 50.0
 
 private enum ExtensionSecurityPolicy {
 	static let expectedHostBundleIdentifier = "Morris.CinematicCoreMacOS"
@@ -79,32 +89,38 @@ private enum ExtensionSecurityPolicy {
 
 // MARK: - Shared Frame Queue
 
-/// Thread-safe queue for incoming frames from XPC
-actor FrameQueue {
+/// Thread-safe queue for incoming frames from XPC.
+///
+/// A lock-guarded class rather than an actor on purpose: the playout timer
+/// drains it synchronously on its own serial queue. The previous actor version
+/// forced every drain through `Task { await … }`, adding a scheduling hop (and
+/// occasional missed tick) between the timer firing and the frame going out.
+/// Both enqueue and drain are O(1) work; a lock is the honest primitive here.
+final class FrameQueue {
     private var frames: [(surfaceID: UInt32, timestamp: Double, width: Int32, height: Int32)] = []
     private let maxQueueSize = 5
-    
+    private let lock = NSLock()
+
     func enqueue(surfaceID: UInt32, timestamp: Double, width: Int32, height: Int32) {
+        lock.lock()
+        defer { lock.unlock() }
         frames.append((surfaceID, timestamp, width, height))
-        
+
         // Limit queue size to prevent memory buildup
         if frames.count > maxQueueSize {
             frames.removeFirst()
             os_log(.debug, "Frame queue full, dropping oldest frame")
         }
     }
-    
-    func dequeue() -> (surfaceID: UInt32, timestamp: Double, width: Int32, height: Int32)? {
-        guard !frames.isEmpty else { return nil }
-        return frames.removeFirst()
-    }
 
     /// Returns the newest frame and discards everything older. The host can
-    /// produce faster than the 30 Hz stream timer consumes; draining one frame
-    /// per tick lets the queue sit at its cap, which is a standing
-    /// (queue depth × tick) of latency on the virtual camera. Showing the
+    /// produce faster than the playout timer consumes (e.g. during a rate
+    /// change); draining one frame per tick would let the queue sit at its
+    /// cap, which is standing latency of queue depth × tick. Showing the
     /// newest frame bounds that backlog to at most one frame.
     func drainToLatest() -> (surfaceID: UInt32, timestamp: Double, width: Int32, height: Int32)? {
+        lock.lock()
+        defer { lock.unlock() }
         guard let latest = frames.last else { return nil }
         if frames.count > 1 {
             os_log(.debug, "Frame queue drained %d stale frames", frames.count - 1)
@@ -112,13 +128,17 @@ actor FrameQueue {
         frames.removeAll()
         return latest
     }
-    
+
     func clear() {
+        lock.lock()
+        defer { lock.unlock() }
         frames.removeAll()
     }
-    
+
     var count: Int {
-        frames.count
+        lock.lock()
+        defer { lock.unlock() }
+        return frames.count
     }
 }
 
@@ -141,6 +161,13 @@ class CinematicCoreExtensionDeviceSource: NSObject, CMIOExtensionDeviceSource {
 	
 	// Frame queue for incoming frames from host app
 	private let frameQueue = FrameQueue()
+	
+	/// The playout (drain) rate. Starts at `extensionDefaultFrameRate` and is
+	/// corrected by the host over XPC (`updatePlayoutFrameRate`) to the show
+	/// standard that also drives capture, so the drain clock and the host's
+	/// production rate can never disagree. Re-times the running timer live.
+	private var _playoutFrameRate: Double = extensionDefaultFrameRate
+	private var hasLoggedPlayoutRate = false
 	
 	// Track if we're receiving frames from host
 	private var isReceivingFrames = false
@@ -169,7 +196,7 @@ class CinematicCoreExtensionDeviceSource: NSObject, CMIOExtensionDeviceSource {
 		let dims = currentFrameDimensions
 		CMVideoFormatDescriptionCreate(allocator: kCFAllocatorDefault, codecType: kCVPixelFormatType_32BGRA, width: dims.width, height: dims.height, extensions: nil, formatDescriptionOut: &_videoDescription)
 
-		let frameDuration = CMTime(value: 1, timescale: Int32(kFrameRate))
+		let frameDuration = playoutFrameDuration()
 		let videoStreamFormats: [CMIOExtensionStreamFormat] = Self.advertisedDimensions.map { dims in
 			var description: CMFormatDescription?
 			CMVideoFormatDescriptionCreate(allocator: kCFAllocatorDefault, codecType: kCVPixelFormatType_32BGRA, width: dims.width, height: dims.height, extensions: nil, formatDescriptionOut: &description)
@@ -178,6 +205,11 @@ class CinematicCoreExtensionDeviceSource: NSObject, CMIOExtensionDeviceSource {
 
 		let videoID = UUID() // replace this with your video UUID
 		_streamSource = CinematicCoreExtensionStreamSource(localizedName: "Alfie.Video", streamID: videoID, streamFormats: videoStreamFormats, device: device)
+		// The stream reports the LIVE playout duration (it moves when the host
+		// pushes a new show standard), not the advertised-at-load default.
+		_streamSource.playoutFrameRateProvider = { [weak self] in
+			self?._playoutFrameRate ?? extensionDefaultFrameRate
+		}
 		do {
 			try device.addStream(_streamSource.stream)
 		} catch let error {
@@ -210,6 +242,40 @@ class CinematicCoreExtensionDeviceSource: NSObject, CMIOExtensionDeviceSource {
 	
 	// MARK: - Frame Reception from XPC
 	
+	/// Exact CMTime duration for one frame at the current playout rate.
+	/// Timescale 60000 represents 50, 59.94 (1001/60000) and 60 exactly.
+	private func playoutFrameDuration() -> CMTime {
+		CMTime(seconds: 1.0 / _playoutFrameRate, preferredTimescale: 60000)
+	}
+	
+	/// Host → extension: adopt the show standard as the playout (drain) rate
+	/// and re-time the running timer live. This is what keeps the drain clock
+	/// matched to the frames the host is actually sending — the queue is
+	/// drained to latest either way, but a mismatched clock would drop surplus
+	/// program frames and add judder downstream.
+	func updatePlayoutFrameRate(_ frameRate: Double) {
+		guard frameRate.isFinite, frameRate >= 23.976, frameRate <= 120 else {
+			os_log(.error, "Rejected implausible playout frame rate %{public}.3f", frameRate)
+			return
+		}
+		let changed = abs(frameRate - _playoutFrameRate) > 0.001
+		guard changed || !hasLoggedPlayoutRate else { return }
+		_playoutFrameRate = frameRate
+		if !hasLoggedPlayoutRate {
+			hasLoggedPlayoutRate = true
+			os_log(.info, "Playout rate set from host: %{public}.3f fps", frameRate)
+		} else {
+			os_log(.info, "Playout rate changed: %{public}.3f fps", frameRate)
+		}
+
+		// Note: the advertised stream formats' min/max durations are fixed per
+		// extension load; a consumer that negotiated against the old rate
+		// should reopen the camera after a show-standard change. The drain
+		// timer itself follows immediately, and `.streamFrameDuration`
+		// (see CinematicCoreExtensionStreamSource) reports the new rate live.
+		rescheduleTimerIfNeeded()
+	}
+	
 	/// Receive video frame from host app via XPC
 	func enqueueFrame(surfaceID: UInt32, timestamp: Double, width: Int32, height: Int32) {
 		guard ExtensionSecurityPolicy.validateFrameMetadata(
@@ -229,22 +295,20 @@ class CinematicCoreExtensionDeviceSource: NSObject, CMIOExtensionDeviceSource {
 			return
 		}
 
-		Task {
-			if !hasLoggedFirstEnqueuedFrame {
-				hasLoggedFirstEnqueuedFrame = true
-				os_log(.info, "First frame enqueued from host via XPC at %{public}.3f", timestamp)
-			}
-			await frameQueue.enqueue(surfaceID: surfaceID, timestamp: timestamp, width: width, height: height)
-			isReceivingFrames = true
+		// Synchronous enqueue: the lock-guarded FrameQueue makes this O(1) on
+		// the XPC delivery queue with no Task hop.
+		frameQueue.enqueue(surfaceID: surfaceID, timestamp: timestamp, width: width, height: height)
+		isReceivingFrames = true
+		if !hasLoggedFirstEnqueuedFrame {
+			hasLoggedFirstEnqueuedFrame = true
+			os_log(.info, "First frame enqueued from host via XPC at %{public}.3f", timestamp)
 		}
 	}
 	
 	/// Update capture status from host app
 	func updateCaptureStatus(isRunning: Bool) {
 		if !isRunning {
-			Task {
-				await frameQueue.clear()
-			}
+			frameQueue.clear()
 			isReceivingFrames = false
 			os_log(.info, "Host app stopped capturing")
 		} else {
@@ -259,39 +323,8 @@ class CinematicCoreExtensionDeviceSource: NSObject, CMIOExtensionDeviceSource {
 	func startStreaming() {
 		
 		_streamingCounter += 1
-		
-		_timer = DispatchSource.makeTimerSource(flags: .strict, queue: _timerQueue)
-		_timer!.schedule(deadline: .now(), repeating: 1.0 / Double(kFrameRate), leeway: .seconds(0))
-		
-		_timer!.setEventHandler { [weak self] in
-			guard let self = self else { return }
-			
-			// Show the newest available frame; older queued frames are stale
-			// by definition (the timer is the playout clock) and only add latency.
-			Task {
-				if let frame = await self.frameQueue.drainToLatest() {
-					if !self.hasLoggedFirstDequeuedFrame {
-						self.hasLoggedFirstDequeuedFrame = true
-						os_log(.info, "First frame dequeued for CMIO stream at %{public}.3f", frame.timestamp)
-					}
-					// We have a real frame from the host app - forward it
-					self.sendFrameFromIOSurface(surfaceID: frame.surfaceID, timestamp: frame.timestamp, width: frame.width, height: frame.height)
-				} else if self.isReceivingFrames {
-					// Queue is empty but we're receiving frames - just skip this timer tick
-					// This prevents synthetic frames from appearing while transitioning
-					os_log(.debug, "Frame queue empty, skipping")
-				} else {
-					// Not receiving frames - send a blank frame to keep stream alive
-					self.sendBlankFrame()
-				}
-			}
-		}
-		
-		_timer!.setCancelHandler {
-		}
-		
-		_timer!.resume()
-		os_log(.info, "Virtual camera streaming started")
+		rescheduleTimerIfNeeded()
+		os_log(.info, "Virtual camera streaming started at %{public}.3f fps", _playoutFrameRate)
 	}
 	
 	func stopStreaming() {
@@ -305,11 +338,55 @@ class CinematicCoreExtensionDeviceSource: NSObject, CMIOExtensionDeviceSource {
 				timer.cancel()
 				_timer = nil
 			}
-			Task {
-				await frameQueue.clear()
-			}
+			frameQueue.clear()
 			os_log(.info, "Virtual camera streaming stopped")
 		}
+	}
+
+	/// (Re)create the playout timer on the device source's serial queue. The
+	/// timer IS the playout clock: it ticks once per frame duration and drains
+	/// the newest queued frame. DispatchSourceTimer intervals are fixed at
+	/// schedule time, so a show-standard change tears the old timer down and
+	/// schedules a fresh one at the new rate.
+	private func rescheduleTimerIfNeeded() {
+		guard _streamingCounter > 0 else { return }
+
+		if let existing = _timer {
+			existing.cancel()
+			_timer = nil
+		}
+
+		let timer = DispatchSource.makeTimerSource(flags: .strict, queue: _timerQueue)
+		timer.schedule(deadline: .now(), repeating: 1.0 / _playoutFrameRate, leeway: .seconds(0))
+
+		timer.setEventHandler { [weak self] in
+			guard let self = self else { return }
+
+			// Show the newest available frame; older queued frames are stale
+			// by definition (the timer is the playout clock) and only add
+			// latency. Drained synchronously on this serial queue — the old
+			// actor + Task hop between tick and send is gone.
+			if let frame = self.frameQueue.drainToLatest() {
+				if !self.hasLoggedFirstDequeuedFrame {
+					self.hasLoggedFirstDequeuedFrame = true
+					os_log(.info, "First frame dequeued for CMIO stream at %{public}.3f", frame.timestamp)
+				}
+				// We have a real frame from the host app - forward it
+				self.sendFrameFromIOSurface(surfaceID: frame.surfaceID, timestamp: frame.timestamp, width: frame.width, height: frame.height)
+			} else if self.isReceivingFrames {
+				// Queue is empty but we're receiving frames - just skip this timer tick
+				// This prevents synthetic frames from appearing while transitioning
+				os_log(.debug, "Frame queue empty, skipping")
+			} else {
+				// Not receiving frames - send a blank frame to keep stream alive
+				self.sendBlankFrame()
+			}
+		}
+
+		timer.setCancelHandler {
+		}
+		timer.resume()
+		_timer = timer
 	}
 	
 	// MARK: - Frame Sending
@@ -497,6 +574,16 @@ class CinematicCoreExtensionStreamSource: NSObject, CMIOExtensionStreamSource {
 
 	private let _streamFormats: [CMIOExtensionStreamFormat]
 
+	/// Live playout rate, provided by the device source so `.streamFrameDuration`
+	/// always reports what the drain clock is actually running at (the host can
+	/// push a new show standard while this stream exists).
+	var playoutFrameRateProvider: (() -> Double)?
+
+	private func currentFrameDuration() -> CMTime {
+		let rate = playoutFrameRateProvider?() ?? extensionDefaultFrameRate
+		return CMTime(seconds: 1.0 / rate, preferredTimescale: 60000)
+	}
+
 	init(localizedName: String, streamID: UUID, streamFormats: [CMIOExtensionStreamFormat], device: CMIOExtensionDevice) {
 
 		self.device = device
@@ -542,8 +629,7 @@ class CinematicCoreExtensionStreamSource: NSObject, CMIOExtensionStreamSource {
 			streamProperties.activeFormatIndex = activeFormatIndex
 		}
 		if properties.contains(.streamFrameDuration) {
-			let frameDuration = CMTime(value: 1, timescale: Int32(kFrameRate))
-			streamProperties.frameDuration = frameDuration
+			streamProperties.frameDuration = currentFrameDuration()
 		}
 
 		return streamProperties
@@ -706,6 +792,10 @@ private class XPCServiceImplementation: NSObject, CinematicCoreXPCProtocol {
 	func updateCaptureStatus(isRunning: Bool) {
 		os_log(.info, "Extension received capture status update: %{public}@", isRunning ? "running" : "stopped")
 		deviceSource?.updateCaptureStatus(isRunning: isRunning)
+	}
+	
+	func updatePlayoutFrameRate(_ frameRate: Double) {
+		deviceSource?.updatePlayoutFrameRate(frameRate)
 	}
 	
 	func ping(reply: @escaping () -> Void) {

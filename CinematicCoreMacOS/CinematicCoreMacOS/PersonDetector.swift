@@ -118,9 +118,11 @@ final class PersonDetector: ObservableObject {
         /// single person there (rect + pose + face for gallery fill).
         case acquiring
         /// Subject locked; scan a ROI around their last box. Runs rect + pose
-        /// ONLY — the face request is dropped to save a full inference per
-        /// frame (the gallery is already full and re-acquisition only needs
-        /// faces in the wide `.reacquiring` state).
+        /// ONLY — the per-frame face request is dropped to save a full
+        /// inference per frame. The gallery still refreshes after lock via a
+        /// throttled `.acquiring` scan (roughly once per capture spacing, see
+        /// `ShotComposer.shouldRunGalleryRefreshScan()`), and re-acquisition
+        /// runs faces full-frame in `.reacquiring`.
         case lockedROI
         /// Subject lost and we're wide; face request runs full-frame so a
         /// returning subject can be re-acquired anywhere in the frame.
@@ -167,7 +169,13 @@ final class PersonDetector: ObservableObject {
     
     private let processingQueue = DispatchQueue(
         label: "com.cinematiccore.personDetection",
-        qos: .userInitiated
+        qos: .userInitiated,
+        // `.workItem` drains the autorelease pool after every job. Without it
+        // the queue inherits its thread's pool, so objects created per frame
+        // stay alive until the thread happens to be recycled — measured 26 July
+        // as ~40 retained allocations per frame, released in irregular bulk
+        // drops minutes apart, each drop restoring 50 fps instantly.
+        autoreleaseFrequency: .workItem
     )
 
     // MARK: - Vision input downscale
@@ -187,7 +195,11 @@ final class PersonDetector: ObservableObject {
     /// detection doesn't care about color accuracy, skip the conversion.
     nonisolated(unsafe) private static let downscaleContext = CIContext(options: [
         .useSoftwareRenderer: false,
-        .workingColorSpace: NSNull()
+        .workingColorSpace: NSNull(),
+        // This context renders a fresh 1080p proxy on every detection and never
+        // reuses an intermediate, so caching them only accumulates. CropEngine's
+        // context already runs this way.
+        .cacheIntermediates: false
     ])
 
     /// Source height above which detection input is downscaled to 1080 px.
@@ -409,12 +421,12 @@ final class PersonDetector: ObservableObject {
         return detectedPersons
     }
     
-    /// Drop Core Image's caches for the detection downscaler.
-    ///
-    /// Unlike the crop renderer's context this one is created with default
-    /// caching, and it renders a fresh 1080p buffer on every detection — so it
-    /// is at least as likely a source of the per-frame accumulation as the crop
-    /// path. Both are flushed together.
+    /// Diagnostic A/B hook: drop Core Image's caches for the detection
+    /// downscaler. NOT the memory fix — the downscale context is created with
+    /// `.cacheIntermediates: false` (see `downscaleContext`), so it should no
+    /// longer accumulate on its own. This exists only to A/B against
+    /// `DeveloperFlags.imageCacheFlushInterval` while a soak proves the
+    /// autorelease fix; keep it off (interval 0) in normal operation.
     nonisolated func flushImageCaches() {
         Self.downscaleContext.clearCaches()
     }
@@ -435,20 +447,8 @@ final class PersonDetector: ObservableObject {
         }
     }
 
-    /// Process a CIImage frame
-    func processFrame(
-        _ ciImage: CIImage,
-        plan: DetectionRequestPlan = DetectionRequestPlan(mode: .acquiring, roi: nil)
-    ) async -> [DetectedPerson] {
-        // Convert CIImage to CVPixelBuffer
-        guard let pixelBuffer = ciImage.toPixelBuffer() else {
-            return []
-        }
-        return await processFrame(pixelBuffer, plan: plan)
-    }
-    
     // MARK: - Private Methods
-    
+
     private struct SendablePixelBuffer: @unchecked Sendable {
         let value: CVPixelBuffer
     }
@@ -463,80 +463,86 @@ final class PersonDetector: ObservableObject {
 
         return await withCheckedContinuation { continuation in
             processingQueue.async { [self] in
-                let queueWait = CACurrentMediaTime() - enqueueTime
-                if config.useHighAccuracy {
-                    self.cachedRectRequest.revision = VNDetectHumanRectanglesRequestRevision2
-                } else {
-                    self.cachedRectRequest.revision = VNDetectHumanRectanglesRequestRevision1
-                }
+                autoreleasepool {
+                    let queueWait = CACurrentMediaTime() - enqueueTime
+                    if config.useHighAccuracy {
+                        self.cachedRectRequest.revision = VNDetectHumanRectanglesRequestRevision2
+                    } else {
+                        self.cachedRectRequest.revision = VNDetectHumanRectanglesRequestRevision1
+                    }
 
-                // Region of interest. Acquiring / lockedROI scope every request
-                // to the padded box around the one subject, so cost is flat
-                // regardless of how many other guests are in frame. Other modes
-                // reset to the full frame. Vision still returns results in
-                // full-image normalized coords, so nothing downstream changes.
-                let fullFrame = CGRect(x: 0, y: 0, width: 1, height: 1)
-                let roi: CGRect
-                switch plan.mode {
-                case .acquiring, .lockedROI:
-                    roi = (plan.roi ?? fullFrame).intersection(fullFrame)
-                case .off, .awaitingTap, .reacquiring:
-                    roi = fullFrame
-                }
-                let effectiveROI = roi.isEmpty ? fullFrame : roi
-                self.cachedRectRequest.regionOfInterest = effectiveROI
-                self.cachedPoseRequest.regionOfInterest = effectiveROI
-                self.cachedFaceRequest.regionOfInterest = effectiveROI
+                    // Region of interest. Acquiring / lockedROI scope every request
+                    // to the padded box around the one subject, so cost is flat
+                    // regardless of how many other guests are in frame. Other modes
+                    // reset to the full frame. Vision still returns results in
+                    // full-image normalized coords, so nothing downstream changes.
+                    let fullFrame = CGRect(x: 0, y: 0, width: 1, height: 1)
+                    let roi: CGRect
+                    switch plan.mode {
+                    case .acquiring, .lockedROI:
+                        roi = (plan.roi ?? fullFrame).intersection(fullFrame)
+                    case .off, .awaitingTap, .reacquiring:
+                        roi = fullFrame
+                    }
+                    let effectiveROI = roi.isEmpty ? fullFrame : roi
+                    self.cachedRectRequest.regionOfInterest = effectiveROI
+                    self.cachedPoseRequest.regionOfInterest = effectiveROI
+                    self.cachedFaceRequest.regionOfInterest = effectiveROI
 
-                // Which requests to run. Each request is a separate model
-                // inference; ROI does NOT shrink that cost, so the latency win
-                // once locked comes from running fewer requests.
-                //   acquiring  → rect + pose + face  (face fills the gallery)
-                //   lockedROI  → rect + pose ONLY    (gallery already full; face
-                //                only matters for re-acquisition, which is wide.
-                //                Dropping it removes a full inference per frame.)
-                //   reacquiring→ rect + pose + face  (returning subject anywhere)
-                // `if case` avoids needing Equatable on the main-actor-isolated
-                // enum from this nonisolated closure.
-                let isLockedROI: Bool = { if case .lockedROI = plan.mode { return true }; return false }()
-                var requests: [VNRequest] = [
-                    self.cachedRectRequest,
-                    self.cachedPoseRequest
-                ]
-                if !isLockedROI {
-                    requests.append(self.cachedFaceRequest)
-                }
+                    // Which requests to run. Each request is a separate model
+                    // inference; ROI does NOT shrink that cost, so the latency win
+                    // once locked comes from running fewer requests.
+                    //   acquiring  → rect + pose + face  (fills the gallery at
+                    //                lock-on AND on the throttled refresh scans
+                    //                that keep it current after lock)
+                    //   lockedROI  → rect + pose ONLY    (per-frame default while
+                    //                locked; face matters only for gallery refresh
+                    //                and re-acquisition, both of which use other
+                    //                modes — dropping it removes a full inference
+                    //                per frame)
+                    //   reacquiring→ rect + pose + face  (returning subject anywhere)
+                    // `if case` avoids needing Equatable on the main-actor-isolated
+                    // enum from this nonisolated closure.
+                    let isLockedROI: Bool = { if case .lockedROI = plan.mode { return true }; return false }()
+                    var requests: [VNRequest] = [
+                        self.cachedRectRequest,
+                        self.cachedPoseRequest
+                    ]
+                    if !isLockedROI {
+                        requests.append(self.cachedFaceRequest)
+                    }
 
-                // Detect on a ≤1080p proxy of tall (4K) buffers. Vision results
-                // are normalized, so downstream consumers are unaffected; the
-                // original full-res buffer is untouched and continues to feed
-                // crop/output and face-signature capture.
-                let detectionBuffer = self.downscaledForDetection(sendablePixelBuffer.value)
+                    // Detect on a ≤1080p proxy of tall (4K) buffers. Vision results
+                    // are normalized, so downstream consumers are unaffected; the
+                    // original full-res buffer is untouched and continues to feed
+                    // crop/output and face-signature capture.
+                    let detectionBuffer = self.downscaledForDetection(sendablePixelBuffer.value)
 
-                let handler = VNImageRequestHandler(
-                    cvPixelBuffer: detectionBuffer,
-                    orientation: .up,
-                    options: [:]
-                )
+                    let handler = VNImageRequestHandler(
+                        cvPixelBuffer: detectionBuffer,
+                        orientation: .up,
+                        options: [:]
+                    )
 
-                do {
-                    try handler.perform(requests)
+                    do {
+                        try handler.perform(requests)
 
-                    let rectResults = (self.cachedRectRequest.results ?? [])
-                        .filter { $0.confidence >= config.confidenceThreshold }
-                    let limited = Array(rectResults.prefix(config.maxPersons))
+                        let rectResults = (self.cachedRectRequest.results ?? [])
+                            .filter { $0.confidence >= config.confidenceThreshold }
+                        let limited = Array(rectResults.prefix(config.maxPersons))
 
-                    let poseResults = self.cachedPoseRequest.results ?? []
-                    // Only read face results when the face request actually ran
-                    // this frame — otherwise the cached request still holds the
-                    // previous frame's faces, which would attach a stale face to
-                    // the locked subject and trigger spurious gallery captures.
-                    let faceResults = isLockedROI ? [] : (self.cachedFaceRequest.results ?? [])
+                        let poseResults = self.cachedPoseRequest.results ?? []
+                        // Only read face results when the face request actually ran
+                        // this frame — otherwise the cached request still holds the
+                        // previous frame's faces, which would attach a stale face to
+                        // the locked subject and trigger spurious gallery captures.
+                        let faceResults = isLockedROI ? [] : (self.cachedFaceRequest.results ?? [])
 
-                    continuation.resume(returning: (limited, poseResults, faceResults, queueWait))
-                } catch {
-                    Self.logger.error("Person detection error: \(error.localizedDescription, privacy: .public)")
-                    continuation.resume(returning: ([], [], [], queueWait))
+                        continuation.resume(returning: (limited, poseResults, faceResults, queueWait))
+                    } catch {
+                        Self.logger.error("Person detection error: \(error.localizedDescription, privacy: .public)")
+                        continuation.resume(returning: ([], [], [], queueWait))
+                    }
                 }
             }
         }
@@ -1135,40 +1141,5 @@ final class PersonDetector: ObservableObject {
         let alpha: TimeInterval = 0.1 // Smoothing factor
         stats.averageDetectionTime = (alpha * detectionTime) + ((1 - alpha) * stats.averageDetectionTime)
         frameStateRevision &+= 1
-    }
-}
-
-// MARK: - CIImage Extension
-
-private extension CIImage {
-    /// Convert CIImage to CVPixelBuffer for Vision framework
-    func toPixelBuffer() -> CVPixelBuffer? {
-        let context = CIContext(options: [.useSoftwareRenderer: false])
-        
-        var pixelBuffer: CVPixelBuffer?
-        let width = Int(extent.width)
-        let height = Int(extent.height)
-        
-        let attributes: [String: Any] = [
-            kCVPixelBufferCGImageCompatibilityKey as String: true,
-            kCVPixelBufferCGBitmapContextCompatibilityKey as String: true,
-            kCVPixelBufferMetalCompatibilityKey as String: true
-        ]
-        
-        let status = CVPixelBufferCreate(
-            kCFAllocatorDefault,
-            width,
-            height,
-            kCVPixelFormatType_32BGRA,
-            attributes as CFDictionary,
-            &pixelBuffer
-        )
-        
-        guard status == kCVReturnSuccess, let buffer = pixelBuffer else {
-            return nil
-        }
-        
-        context.render(self, to: buffer)
-        return buffer
     }
 }

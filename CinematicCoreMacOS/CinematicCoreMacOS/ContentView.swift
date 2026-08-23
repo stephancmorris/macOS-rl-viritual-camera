@@ -148,10 +148,12 @@ struct ContentView: View {
     }
 
     /// Preview tap handler. While discovering a subject (operator tapped
-    /// Detect), a tap picks the subject to acquire. In manual-crop mode it
-    /// repositions the crop. Otherwise taps are ignored.
+    /// Detect), a tap picks the subject to acquire. From HOLD or WIDE-WAITING
+    /// (the "lost the green box" states) a tap directly re-acquires whoever is
+    /// under it — no Detect press needed. In manual-crop mode it repositions
+    /// the crop. Otherwise taps are ignored.
     private var tapPointHandler: ((CGPoint) -> Void)? {
-        if cameraManager.detectionDiscoveryActive {
+        if cameraManager.detectionDiscoveryActive || cameraManager.canDirectlyReacquire {
             return { point in cameraManager.selectSubject(at: point) }
         }
         if cameraManager.activeMode == .manualCrop {

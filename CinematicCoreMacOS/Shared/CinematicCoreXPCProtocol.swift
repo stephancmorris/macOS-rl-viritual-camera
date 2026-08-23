@@ -23,6 +23,15 @@ import Foundation
     /// - Parameter isRunning: Whether the capture session is active
     func updateCaptureStatus(isRunning: Bool)
     
+    /// Tell the extension what rate the host is producing frames at, so the
+    /// extension's playout clock (the timer that drains the frame queue) can
+    /// match it. Single source of truth: `ShowStandard.current.frameRate` on
+    /// the host (default 1080p50). Pushed whenever capture status changes and
+    /// once before the first frame; the extension re-times its drain live.
+    /// - Parameter frameRate: Exact playout frame rate in fps (e.g. 50,
+    ///   60000/1001, 60)
+    func updatePlayoutFrameRate(_ frameRate: Double)
+    
     /// Ping to verify XPC connection is alive
     /// - Parameter reply: Completion handler that returns when connection is verified
     func ping(reply: @escaping () -> Void)

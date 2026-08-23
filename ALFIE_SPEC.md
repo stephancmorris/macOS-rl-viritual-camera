@@ -65,7 +65,8 @@ Alfie is a macOS 14+ application with a companion CoreMediaIO system extension. 
 
 `ShotComposer` is the controller that decides, per frame, what rectangle the program feed should crop to. Key behaviors:
 
-- **Sticky speaker selection** with configurable target-hold duration so the camera does not jump between people when a second person briefly appears on stage.
+- **Sticky speaker selection** — a UUID track bound at lock time, guarded by the locked matcher (IoU/probation/jump-radius policy) so the camera does not jump between people when a second person briefly appears on stage. Hold behavior is the HOLD FSM (10 s at the last shot, operator-set) plus Steady Follow's band; the crop's size carries 5% hysteresis and tight shots damp their vertical head-anchor, so the rectangle does not breathe or bob with detection noise.
+- **Preset crop caps** — Wide ≤85%, Full Body ≤95%, Waist Up ≤80% of frame height, so every preset keeps travel to follow with even at close range where subject-relative framing would otherwise exceed the sensor and pin the crop.
 - **Manual subject lock** — operator taps a detected person in the preview to force that person as the active target.
 - **Wide / Medium / Waist-Up framing** anchored to the full subject detection, so vertical extent scales with subject height rather than the tighter tracked-torso region.
 - **Deadzone** on subject movement to suppress jitter from small detection noise.
@@ -78,8 +79,8 @@ The composer is heuristic, by design. See "Deep learning policy" below.
 
 **Status:** Shipping.
 
-- Metal compute kernel does the crop-and-scale in a single dispatch to a fixed output size (1920×1080 MVP default).
-- Lerp-based interpolation between target crops produces cinematic motion without visible stepping.
+- Core Image crop-and-scale on a Metal-backed `CIContext`, rendered on a serial render queue off the MainActor, into a fixed output size (1920×1080 MVP default). An earlier Metal compute kernel was replaced after it hit Apple Silicon GPU power-state scheduling (~30–45 ms slots).
+- Critically damped spring interpolation between target crops produces cinematic motion without visible stepping (`CropEngine.updateInterpolation`; stiffness scales from each tuning preset's smoothing value). A lerp helper exists but is not the live path.
 - Output pixel buffers are IOSurface-backed for zero-copy handoff to the system extension.
 
 ## Output routing
@@ -112,9 +113,9 @@ The interface is a single dark window built around three ideas: the video is the
 A floating glass pill anchored to the bottom-center of the window. Six controls separated by hairline dividers:
 
 1. **Lock state** — shows whether tracking is idle, locked on a subject, or recovering. Tapping while locked clears the lock; tapping while recovering resumes tracking.
-2. **Framing** — segmented control with Wide, Medium, Waist Up. The selected preset drives composition immediately.
+2. **Framing** — segmented control with Wide, Full Body, Waist Up. Wide is the widest *crop* (capped at 85% of the frame, so Auto Pan can sweep from it); Return to Wide is the only uncropped view.
 3. **Crop** — toggles the digital PTZ pipeline on or off without ending the session.
-4. **Return to Wide** — one-tap reset to the safety shot.
+4. **Return to Wide** — one-tap reset to the full, uncropped camera picture.
 5. **Resume Tracking** — re-engages tracking after a recovery state. Disabled when not applicable.
 6. **Stop session** — the only destructive control, styled red and isolated at the right end so it cannot be hit by accident.
 
@@ -125,7 +126,7 @@ The pill is the entire live-control surface. There are no menus, no toolbars, no
 Slides in from the right edge over the dual feed without reflowing it. Five sections, in order:
 
 - **Source** — camera picker, resolution, color profile, refresh and camera-list buttons.
-- **Composition** — read-only target hold, deadzone, and lerp-ease values, with detail buttons for Detection, Crop, and Composer settings.
+- **Composition** — read-only deadzone and spring-ease values, with detail buttons for Detection, Crop, and Composer settings.
 - **Output** — routing pills for Virtual Camera (active), Blackmagic SDI (deferred), and NDI (deferred), with an Output settings button.
 - **Modules** — capability rows with status dots: Composer, Playback, Output, Cinematic Agent (developer flag), Recorder (developer flag).
 - **Diagnostics** — build version, extension load state, GPU, and a Reveal Logs button.
@@ -163,7 +164,7 @@ Stated as livestream-realistic targets, not cinema:
 | Stage              | Target             | Status        |
 |--------------------|--------------------|---------------|
 | Capture → frame    | < 5 ms             | Not measured  |
-| Detection          | < 30 ms            | Measured ~28 ms at 1080p (UI readout) |
+| Detection          | < 30 ms            | ~16.4 ms wall at a ≤1080p detection proxy (runs off the frame path) |
 | Composition        | < 2 ms             | Not measured  |
 | GPU crop/scale     | < 8 ms             | Logged per-frame in CropEngine stats |
 | XPC → extension    | < 5 ms             | Not measured  |
@@ -191,7 +192,7 @@ These are explicitly **not** part of MVP and should not shape the current design
 - NDI ingest or output
 - Multi-camera coordination or switching
 - Multi-speaker autonomous shot grammar (who-to-cut-to logic)
-- Cinematic shot presets beyond the basic Wide/Medium/Waist set
+- Cinematic shot presets beyond the basic Wide/Full Body/Waist Up set
 - RL agent as default controller
 - iOS or iPadOS companion control
 - Mac App Store distribution (direct install is fine for church deployment)
@@ -207,10 +208,10 @@ Things Alfie is explicitly not:
 
 ## Current blockers to first production test
 
-Tracked separately in the project task list, but summarized here for spec completeness:
+Re-verified July 2026 against the implementation:
 
-1. CMIO system extension is not installed via `OSSystemExtensionRequest` on first launch.
-2. Per-frame debug logging is active and will cost latency under load.
-3. XPC auto-reconnect on extension crash is not implemented.
-4. End-to-end latency has not been instrumented.
-5. Speaker-selection rules have not been validated against real church footage.
+1. A 60-minute Sunday-length soak without operator intervention has not been demonstrated (the flush-off autorelease fix is in the tree awaiting its before/after soak).
+2. End-to-end motion-to-pixels latency has not been measured on the show rig; the soak CSV carries per-stage numbers, but the 100–150 ms target is unconfirmed.
+3. Tracking quality on real footage (fast walks, turns at a lectern, a second person crossing) has not been operator-validated; the locked matcher itself is unit-tested.
+
+Previously listed items that are now done: CMIO extension install flow (`SystemExtensionActivationManager`), per-frame debug logging off by default (`verboseFrameLogging` / `latencyConsoleLogging` = false), XPC reconnect (`XPCConnectionManager` retry/backoff plus Reconnect Output), and end-to-end instrumentation (per-session soak CSVs + stage latencies).

@@ -33,15 +33,29 @@ final class FaceSignatureExtractor: @unchecked Sendable {
 
     private let processingQueue = DispatchQueue(
         label: "com.cinematiccore.faceSignature",
-        qos: .userInitiated
+        qos: .userInitiated,
+        // `.workItem` drains the autorelease pool after every job. Without it
+        // the queue inherits its thread's pool, so objects created per frame
+        // stay alive until the thread happens to be recycled — measured 26 July
+        // as ~40 retained allocations per frame, released in irregular bulk
+        // drops minutes apart, each drop restoring 50 fps instantly.
+        autoreleaseFrequency: .workItem
     )
 
-    /// CIContext is heavyweight; instantiate once and reuse.
     private let ciContext: CIContext
 
+    /// CIContext is heavyweight; instantiate once and reuse. Every extraction
+    /// renders a one-off face crop to a CGImage and nothing downstream reuses
+    /// it, so caching intermediates would only accumulate — same policy as the
+    /// crop renderer and the detection downscaler. This context is the one
+    /// that historically still grew (gallery fill every 0.4 s plus
+    /// re-acquisition scoring per candidate per fresh frame), so it must stay
+    /// cache-free.
     init() {
-        // Hardware-accelerated CIContext for cropping the face region.
-        ciContext = CIContext(options: [.useSoftwareRenderer: false])
+        ciContext = CIContext(options: [
+            .useSoftwareRenderer: false,
+            .cacheIntermediates: false
+        ])
     }
 
     /// Sendable wrapper so we can hand the buffer to a non-isolated queue.
@@ -75,36 +89,38 @@ final class FaceSignatureExtractor: @unchecked Sendable {
 
         return await withCheckedContinuation { continuation in
             processingQueue.async { [self] in
-                // Convert normalised bbox to pixel coords. Vision uses
-                // bottom-left origin; CoreImage also uses bottom-left, so
-                // no Y-flip needed for cropping.
-                let pixelRect = CGRect(
-                    x: padded.origin.x * bufferWidth,
-                    y: padded.origin.y * bufferHeight,
-                    width: padded.width * bufferWidth,
-                    height: padded.height * bufferHeight
-                )
+                autoreleasepool {
+                    // Convert normalised bbox to pixel coords. Vision uses
+                    // bottom-left origin; CoreImage also uses bottom-left, so
+                    // no Y-flip needed for cropping.
+                    let pixelRect = CGRect(
+                        x: padded.origin.x * bufferWidth,
+                        y: padded.origin.y * bufferHeight,
+                        width: padded.width * bufferWidth,
+                        height: padded.height * bufferHeight
+                    )
 
-                let ciImage = CIImage(cvPixelBuffer: sendableBuffer.value)
-                    .cropped(to: pixelRect)
+                    let ciImage = CIImage(cvPixelBuffer: sendableBuffer.value)
+                        .cropped(to: pixelRect)
 
-                guard !ciImage.extent.isEmpty,
-                      let cgImage = ciContext.createCGImage(ciImage, from: ciImage.extent)
-                else {
-                    continuation.resume(returning: nil)
-                    return
-                }
+                    guard !ciImage.extent.isEmpty,
+                          let cgImage = ciContext.createCGImage(ciImage, from: ciImage.extent)
+                    else {
+                        continuation.resume(returning: nil)
+                        return
+                    }
 
-                let request = VNGenerateImageFeaturePrintRequest()
-                let handler = VNImageRequestHandler(cgImage: cgImage, options: [:])
+                    let request = VNGenerateImageFeaturePrintRequest()
+                    let handler = VNImageRequestHandler(cgImage: cgImage, options: [:])
 
-                do {
-                    try handler.perform([request])
-                    let observation = request.results?.first
-                    continuation.resume(returning: observation)
-                } catch {
-                    Self.logger.error("Face signature extraction failed: \(error.localizedDescription, privacy: .public)")
-                    continuation.resume(returning: nil)
+                    do {
+                        try handler.perform([request])
+                        let observation = request.results?.first
+                        continuation.resume(returning: observation)
+                    } catch {
+                        Self.logger.error("Face signature extraction failed: \(error.localizedDescription, privacy: .public)")
+                        continuation.resume(returning: nil)
+                    }
                 }
             }
         }

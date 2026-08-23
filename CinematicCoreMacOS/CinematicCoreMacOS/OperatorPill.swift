@@ -372,6 +372,10 @@ struct OperatorPill: View {
 
     private var autoPanButton: some View {
         let isOn = cameraManager.activeMode == .autoPan
+        // Available from every stage preset, including Wide (the Wide crop is
+        // capped at 85% of the frame, so there is always horizontal travel).
+        // If the composed crop ever fills the width anyway, CameraManager's
+        // auto-pan case holds center rather than thrashing.
         let enabled = cameraManager.isRunning && !isOn
         return Button {
             cameraManager.activeMode = .autoPan
@@ -393,6 +397,7 @@ struct OperatorPill: View {
                     .fill(Color.white.opacity(isOn ? 0.14 : 0.0))
             )
             .contentShape(Rectangle())
+            .help("Sweep the program crop across the stage")
         }
         .buttonStyle(.plain)
         .disabled(!enabled)

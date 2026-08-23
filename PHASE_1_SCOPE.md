@@ -1,5 +1,11 @@
 # Phase 1 Scope
 
+> **HISTORICAL (July 2026).** This document is the original planning record and
+> is superseded by `README.md` and `ALFIE_SPEC.md`. Its Blackmagic
+> SDI/UltraStudio-centric output path was **not** built: the shipping routes
+> are the Program Display window (HDMI out of the Mac into a converter) and the
+> CMIO virtual camera. Read it for intent, not for current behavior.
+
 This document locks the Phase 1 product scope for the church-stage MVP.
 
 It turns the current broad idea into a buildable first version with clear assumptions, open questions, and a recommended technical direction.

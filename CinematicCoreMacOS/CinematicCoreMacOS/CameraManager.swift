@@ -62,8 +62,9 @@ private nonisolated final class CaptureFrameProcessingGate: @unchecked Sendable 
         let droppedFPS = Double(windowDropped) / elapsed
         let total = windowDelivered + windowDropped
         let dropPercent = total > 0 ? Double(windowDropped) / Double(total) * 100.0 : 0
+        let targetRate = ShowStandard.current.frameRate
         Self.logger.notice(
-            "Capture throughput: \(deliveredFPS, format: .fixed(precision: 1)) fps delivered to pipeline (target 50), dropped \(droppedFPS, format: .fixed(precision: 1)) fps (\(dropPercent, format: .fixed(precision: 1))% of frames)"
+            "Capture throughput: \(deliveredFPS, format: .fixed(precision: 1)) fps delivered to pipeline (target \(targetRate, format: .fixed(precision: 0))), dropped \(droppedFPS, format: .fixed(precision: 1)) fps (\(dropPercent, format: .fixed(precision: 1))% of frames)"
         )
         windowStart = now
         windowDelivered = 0
@@ -314,9 +315,12 @@ final class CameraManager: NSObject, ObservableObject {
     /// Wall-clock of the last Core Image cache flush.
     private var lastImageCacheFlush: TimeInterval = 0
 
-    /// Drop both Core Image contexts' caches on a fixed schedule. One cheap
-    /// comparison per frame; the flush itself runs at most every
-    /// `DeveloperFlags.imageCacheFlushInterval` seconds.
+    /// Diagnostic A/B hook: drop both Core Image contexts' caches on a fixed
+    /// schedule. NOT the memory fix — the autorelease drains and
+    /// `cacheIntermediates: false` contexts are the fix (July 2026); this hook
+    /// only exists so a soak can A/B the flush back in via
+    /// `DeveloperFlags.imageCacheFlushInterval`. One cheap comparison per
+    /// frame; the flush itself runs at most every `interval` seconds.
     private func flushImageCachesIfDue(now: TimeInterval) {
         let interval = DeveloperFlags.imageCacheFlushInterval
         guard interval > 0 else { return }
@@ -333,16 +337,18 @@ final class CameraManager: NSObject, ObservableObject {
         programOutput.noteDiagnostics("image cache flush")
     }
 
-    /// Start a detection if none is running and the cadence allows it. Returns
-    /// immediately either way — the caller never awaits.
+    /// Start a detection if none is running and `due` says this frame holds a
+    /// cadence slot. Slot accounting happens once per frame in `processFrame`
+    /// (so the detection plan knows whether Vision will run); this function
+    /// only re-checks and arms the work. Returns immediately either way — the
+    /// caller never awaits.
     private func scheduleDetectionIfDue(
         pixelBuffer: CVPixelBuffer,
-        plan: PersonDetector.DetectionRequestPlan
+        plan: PersonDetector.DetectionRequestPlan,
+        due: Bool
     ) {
-        guard !detectionInFlight else { return }
-        detectionFrameCounter &+= 1
-        let interval = UInt64(max(1, DeveloperFlags.detectionFrameInterval))
-        guard detectionFrameCounter % interval == 0 else { return }
+        guard due, !detectionInFlight else { return }
+        // The slot was already counted in processFrame; nothing to advance here.
 
         detectionInFlight = true
         // Retains the capture buffer for the life of the detection. Bounded to
@@ -357,6 +363,23 @@ final class CameraManager: NSObject, ObservableObject {
         }
     }
 
+    /// Pure cadence rule: does the Nth eligible frame (every captured frame
+    /// where no detection is in flight — counting starts at 1) carry a
+    /// detection slot?
+    ///
+    /// REGRESSION NOTE (Aug 2026): an intermediate version of this gate tested
+    /// `(counter + 1) % interval == 0` but only advanced the counter on frames
+    /// that were already due. From counter 0 with interval 2 that predicate is
+    /// false forever, scheduled detection dead-locked, and tracking froze on
+    /// the single tap-time detection — the "tracking box doesn't move" bug.
+    /// The rule below is the original, correct accounting: EVERY eligible
+    /// frame advances the count; slots land on multiples of the interval. Unit
+    /// tested in `DetectionCadenceTests`.
+    nonisolated static func detectionSlotIsDue(eligibleFrameCount: UInt64, interval: Int) -> Bool {
+        let interval = UInt64(max(1, interval))
+        return eligibleFrameCount % interval == 0
+    }
+
     // State for Auto Pan
     private var autoPanPhase: CGFloat = 0.5
     private var autoPanDirection: CGFloat = 1.0
@@ -365,12 +388,17 @@ final class CameraManager: NSObject, ObservableObject {
 
     private static let autoPanPauseDuration: Double = 1.5
 
-    // Briefly boost crop smoothing after an operator-driven shot-preset change so
-    // the camera reaches the new framing quickly (instead of crawling there with
-    // the default subject-tracking smoothing).
+    // Briefly boost crop smoothing after an operator-driven shot-preset change
+    // (and after a Steady Follow band exit) so the camera reaches the new
+    // framing quickly instead of crawling there with the default
+    // subject-tracking stiffness.
     private var fastFramingUntil: Double = 0
     private static let fastFramingDuration: Double = 0.5
     private static let fastFramingSmoothing: Float = 0.25
+
+    /// Last frame's Steady Follow band, observed to detect band exit (the
+    /// moment holding → following) and open the fast catch-up window.
+    private var lastObservedSteadyBand: ShotComposer.SteadyBand?
 
     /// Call after changing `shotComposer.config.shotPreset` so the crop animates
     /// faster to the newly-chosen framing for the next ~0.5s.
@@ -427,7 +455,13 @@ final class CameraManager: NSObject, ObservableObject {
     private var videoOutput: AVCaptureVideoDataOutput?
     private let videoOutputQueue = DispatchQueue(
         label: "com.cinematiccore.videoOutput",
-        qos: .userInteractive
+        qos: .userInteractive,
+        // `.workItem` drains the autorelease pool after every job. Without it
+        // the queue inherits its thread's pool, so objects created per frame
+        // stay alive until the thread happens to be recycled — measured 26 July
+        // as ~40 retained allocations per frame, released in irregular bulk
+        // drops minutes apart, each drop restoring 50 fps instantly.
+        autoreleaseFrequency: .workItem
     )
     private var cancellables = Set<AnyCancellable>()
     private var clipPlaybackTask: Task<Void, Never>?
@@ -664,8 +698,24 @@ final class CameraManager: NSObject, ObservableObject {
         activeMode = .wide
         shotComposer.reset(clearManualLock: true)
         cinematicAgent.reset()
-        cropEngine.resetToFullFrame(aspect: shotComposer.normalizedAspect)
+        cropEngine.setTargetCrop(widestSafeCrop())
         cropEngine.jumpToTarget()
+    }
+
+    /// Crop target for "wide" as a *view*: the entire camera picture — truly
+    /// uncropped — when the delivered source already matches the output shape
+    /// (the common 16:9 rig). On an odd-shaped source it falls back to the
+    /// largest undistorted output-aspect region, because stretching the
+    /// program feed would be worse than a minimal crop. This is what
+    /// Return to Wide shows; the Wide *preset* remains a capped crop
+    /// (`FramingTuning.maximumCropHeight`) so the two stay distinct.
+    private func widestSafeCrop() -> CropEngine.CropRect {
+        let outputAspect = shotComposer.config.outputAspectRatio
+        if lastAppliedSourceAspect > 0,
+           abs(lastAppliedSourceAspect - outputAspect) < 0.01 {
+            return .fullFrame
+        }
+        return .widest(aspect: shotComposer.normalizedAspect)
     }
 
     /// Hand control back to the tracker after a manual wide hold.
@@ -691,11 +741,15 @@ final class CameraManager: NSObject, ObservableObject {
         shotComposer.lockTarget(personID)
     }
 
-    /// Operator tapped the "Detect" button. Arm the tap-a-subject state. No
-    /// Vision runs yet — the preview just shows a tap affordance until the
-    /// operator taps a point (or the discovery window times out).
+    /// Operator tapped the "Detect" button. Arm the tap-a-subject state.
+    /// Arming works from idle, HOLD, and WIDE-WAITING — the states where the
+    /// operator most needs to grab someone back. While a subject is actively
+    /// tracked or mid-acquisition, selection goes through press-and-hold
+    /// retarget on the preview instead, so an accidental click can't drop a
+    /// healthy lock.
     func beginDetection() {
-        guard !shotComposer.isManualLockActive else { return }
+        if case .tracking = shotComposer.lockState { return }
+        if case .acquiring = shotComposer.lockState { return }
         detectionDiscoveryActive = true
         pendingTapPoint = nil
         discoveryTimeoutAt = CACurrentMediaTime() + Self.discoveryTimeout
@@ -709,11 +763,22 @@ final class CameraManager: NSObject, ObservableObject {
         tapPending = false
     }
 
+    /// True when a plain preview tap should acquire whoever is under the
+    /// finger WITHOUT first pressing Detect: HOLD and WIDE-WAITING are the
+    /// "I lost my green box" states (amber recovering / cyan idle after an
+    /// acquire timeout), and a volunteer must be able to tap themselves to
+    /// regain the lock in one gesture.
+    var canDirectlyReacquire: Bool {
+        shotComposer.isWideWaiting || shotComposer.isHolding
+    }
+
     /// Operator tapped a point on the preview to pick a subject. Stored for a
     /// one-shot ROI scan on the next frame; the scan finds the single person
-    /// at that point and starts acquisition.
+    /// at that point and starts acquisition. Accepted while discovery is
+    /// armed (Detect flow) or while directly re-acquiring from HOLD /
+    /// WIDE-WAITING.
     func selectSubject(at point: CGPoint) {
-        guard detectionDiscoveryActive else { return }
+        guard detectionDiscoveryActive || canDirectlyReacquire else { return }
         pendingTapPoint = point
         pendingTapIsRetarget = false
         tapPending = true
@@ -752,7 +817,13 @@ final class CameraManager: NSObject, ObservableObject {
 
     /// Compute this frame's detection plan from the discovery flag + lock FSM.
     /// This is the single place that decides whether and where Vision runs.
-    private func currentDetectionPlan() -> PersonDetector.DetectionRequestPlan {
+    ///
+    /// - Parameter detectionRunsThisFrame: whether the cadence gate will
+    ///   actually run Vision this frame. Plan decisions that consume a
+    ///   one-shot opportunity (the throttled gallery refresh scan) must only
+    ///   fire when the answer is true, or the opportunity would burn on a
+    ///   frame whose detection is skipped by `scheduleDetectionIfDue`.
+    private func currentDetectionPlan(detectionRunsThisFrame: Bool) -> PersonDetector.DetectionRequestPlan {
         // A pending tap takes priority: scan a ROI around it to acquire.
         if let tap = pendingTapPoint {
             return PersonDetector.DetectionRequestPlan(
@@ -772,6 +843,21 @@ final class CameraManager: NSObject, ObservableObject {
                 roi: lockedROI()
             )
         case .tracking, .hold:
+            // Locked ROI scopes every request to the padded box and drops the
+            // per-frame face request — a real latency/load win that stays the
+            // default. The one exception is the throttled gallery refresh:
+            // roughly once per capture spacing (0.4 s), the plan upgrades to
+            // a face-including ROI scan so the gallery keeps adapting to new
+            // head poses after lock. Without it the gallery stays frozen at
+            // the 3 acquisition signatures and re-acquisition is stuck with
+            // lectern-frontals only.
+            if detectionRunsThisFrame,
+               shotComposer.shouldRunGalleryRefreshScan() {
+                return PersonDetector.DetectionRequestPlan(
+                    mode: .acquiring,
+                    roi: lockedROI()
+                )
+            }
             return PersonDetector.DetectionRequestPlan(
                 mode: .lockedROI,
                 roi: lockedROI()
@@ -1050,8 +1136,22 @@ final class CameraManager: NSObject, ObservableObject {
             detectionDiscoveryActive = false
         }
 
-        // Decide whether/where Vision runs this frame (off by default).
-        let detectionPlan = currentDetectionPlan()
+        // Cadence accounting comes first: every frame with no detection in
+        // flight advances the counter, and this frame holds a slot when the
+        // new count hits a multiple of the interval (see
+        // `detectionSlotIsDue` — the counter MUST advance on non-due frames
+        // too, or the gate dead-locks and tracking freezes). Knowing `due`
+        // before building the plan lets one-shot plan decisions (the throttled
+        // gallery refresh scan) fire only on frames where Vision actually runs.
+        var detectionDue = false
+        if !detectionInFlight {
+            detectionFrameCounter &+= 1
+            detectionDue = Self.detectionSlotIsDue(
+                eligibleFrameCount: detectionFrameCounter,
+                interval: DeveloperFlags.detectionFrameInterval
+            )
+        }
+        let detectionPlan = currentDetectionPlan(detectionRunsThisFrame: detectionDue)
         // The diagnostics CSV starts on the first frame that actually runs
         // Vision, not at capture start — the progressive lag only appears under
         // detection load, so `elapsed_s` should read as time under load.
@@ -1077,7 +1177,7 @@ final class CameraManager: NSObject, ObservableObject {
             lastDetections = detectedPersons
             detectionRevision &+= 1
         } else {
-            scheduleDetectionIfDue(pixelBuffer: pixelBuffer, plan: detectionPlan)
+            scheduleDetectionIfDue(pixelBuffer: pixelBuffer, plan: detectionPlan, due: detectionDue)
             detectedPersons = lastDetections
         }
 
@@ -1174,6 +1274,23 @@ final class CameraManager: NSObject, ObservableObject {
             programOutput.noteDiagnostics("subject locked, tracking")
         }
 
+        // Steady Follow band exit: while holding, the composer emits no target
+        // and the spring sits at rest. The instant the speaker leaves the band
+        // (steadyBand clears while still tracking), give the catch-up the same
+        // fast window preset changes get, so re-centering doesn't crawl at the
+        // default stiffness. Gated on .tracking so lock loss (which also
+        // clears the band on its way to hold/wide) doesn't log a misleading
+        // "band exit" or open a boost window nothing will use. Entering the
+        // band (nil → non-nil) needs no boost — the final centering target is
+        // accepted right there and the camera is already essentially on it.
+        if case .tracking = shotComposer.lockState,
+           shotComposer.steadyBand == nil,
+           lastObservedSteadyBand != nil {
+            boostFramingTransition()
+            programOutput.noteDiagnostics("steady band exit")
+        }
+        lastObservedSteadyBand = shotComposer.steadyBand
+
         let primaryPerson = activeMode != .autoTracking
             ? nil
             : shotComposer.primaryPerson(from: detectedPersons)
@@ -1218,20 +1335,16 @@ final class CameraManager: NSObject, ObservableObject {
         if let cropEngine {
             switch activeMode {
             case .wide:
-                    // Drive the spring toward full frame. Explicit "Return to
-                    // Wide" snaps via cropEngine.jumpToTarget() in returnToWide();
-                    // entering .wide via a softer path (e.g. unlocking the
-                    // subject) animates instead. Honour the framing-boost
-                    // window so the pull-back arrives in ~0.5s rather than
-                    // crawling at the default subject-tracking smoothing.
+                    // Drive the spring toward the wide VIEW. Return to Wide
+                    // snaps there via jumpToTarget(); entering .wide through a
+                    // softer path (e.g. unlocking the subject) animates
+                    // instead. Honour the framing-boost window so the pull-out
+                    // arrives in ~0.5s rather than crawling.
                     let smoothing = CACurrentMediaTime() < fastFramingUntil
                         ? Self.fastFramingSmoothing
                         : shotComposer.config.smoothingFactor
                     cropEngine.config.transitionSmoothing = smoothing
-                    // Aspect-correct wide: the largest 16:9 region of the
-                    // source. Sending .fullFrame here would stretch a non-16:9
-                    // source (e.g. 3576×2192) when rendered to the 16:9 output.
-                    cropEngine.setTargetCrop(.widest(aspect: shotComposer.normalizedAspect))
+                    cropEngine.setTargetCrop(widestSafeCrop())
                 case .autoTracking:
                     if useMLAgent {
                         cropEngine.config.transitionSmoothing = 0.05
@@ -1292,11 +1405,16 @@ final class CameraManager: NSObject, ObservableObject {
                     } else {
                         if now > autoPanPauseUntil {
                             // Constant phase velocity throughout the sweep.
-                            // autoPanSpeed (0.01–0.05) is treated as phase units per
-                            // second * 9. The multiplier is high enough that even the
-                            // slowest (1%) setting moves visibly — at lower values the
-                            // near-edge crawl was only ~0.4 px/frame and looked frozen.
-                            let rate = CGFloat(shotComposer.config.autoPanSpeed) * 9.0
+                            // autoPanSpeed (Slow 0.01 / Normal 0.02 / Fast 0.03)
+                            // is phase units per second * 3, and the phase maps
+                            // 1:1 onto the VISIBLE center range above — so the
+                            // multiplier IS the sweep speed: Slow crosses the
+                            // visible travel in ~33 s, Normal ~17 s, Fast ~11 s.
+                            // The old ×9 predates this visible-range mapping and
+                            // was compensating for dead edge travel it no longer
+                            // exists; at ×9 even Slow swept in ~11 s, which read
+                            // as a fast pendulum rather than a cinematic pan.
+                            let rate = CGFloat(shotComposer.config.autoPanSpeed) * 3.0
                             autoPanPhase += rate * autoPanDirection * CGFloat(dt)
                             if autoPanPhase >= 1.0 {
                                 autoPanPhase = 1.0
@@ -1320,11 +1438,14 @@ final class CameraManager: NSObject, ObservableObject {
             Self.signposter.endInterval("compose", composeInterval)
             programOutput.recordLatency(stage: .compose, duration: composeDuration)
 
-            frameLog("🔍 DEBUG: About to call processCrop...")
+            frameLog("🔍 DEBUG: About to call renderCrop...")
             do {
                 let cropStart = CACurrentMediaTime()
                 let snapshot = cropEngine.tickInterpolation()
-                let croppedBuffer = try cropEngine.processCrop(
+                // Render off the MainActor: the 4K Lanczos downscale no longer
+                // holds the thread the capture gate waits on. Snapshot first
+                // (MainActor), then await the serial render queue.
+                let croppedBuffer = try await cropEngine.renderCrop(
                     pixelBuffer,
                     crop: snapshot.crop,
                     outputSize: snapshot.outputSize
@@ -1332,7 +1453,7 @@ final class CameraManager: NSObject, ObservableObject {
                 cropDuration = CACurrentMediaTime() - cropStart
                 programOutput.recordLatency(stage: .cropRender, duration: cropDuration)
                 cropEngine.publishRenderStats(renderTime: cropDuration)
-                frameLog("🔍 DEBUG: processCrop returned successfully")
+                frameLog("🔍 DEBUG: renderCrop returned successfully")
                 outputPixelBuffer = croppedBuffer
             } catch {
                 Self.logger.error("Crop processing failed: \(error.localizedDescription, privacy: .public)")
@@ -1641,14 +1762,14 @@ final class CameraManager: NSObject, ObservableObject {
         
         // Set frame rate using EXACT duration from supported range
         // DO NOT construct CMTime manually - use the range's exact values
-        if let range30fps = format.videoSupportedFrameRateRanges.first(where: { range in
+        if let showRateRange = format.videoSupportedFrameRateRanges.first(where: { range in
             range.minFrameRate <= Config.targetFrameRate && range.maxFrameRate >= Config.targetFrameRate
         }) {
-            Self.logger.notice("Using 30fps-supported range")
-            device.activeVideoMinFrameDuration = range30fps.minFrameDuration
-            device.activeVideoMaxFrameDuration = range30fps.maxFrameDuration
+            Self.logger.notice("Using frame-rate range supporting the \(Config.targetFrameRate, privacy: .public) fps show standard")
+            device.activeVideoMinFrameDuration = showRateRange.minFrameDuration
+            device.activeVideoMaxFrameDuration = showRateRange.maxFrameDuration
         } else {
-            Self.logger.warning("No 30fps range found; using first available range")
+            Self.logger.warning("No frame-rate range supporting the show standard; using first available range")
             if let firstRange = format.videoSupportedFrameRateRanges.first {
                 device.activeVideoMinFrameDuration = firstRange.minFrameDuration
                 device.activeVideoMaxFrameDuration = firstRange.maxFrameDuration
@@ -1770,15 +1891,19 @@ private final class VirtualCameraOutputSink: ProgramOutputSink {
     private let xpcManager = XPCConnectionManager()
     private(set) var lastFrameSendDuration: TimeInterval?
     private var hasLoggedFirstFrameSend = false
+    /// Set once the current session's show standard has been pushed to the
+    /// extension, so the drain clock matches what this sink is sending.
+    private var hasPushedPlayoutRate = false
 
     /// The XPC message carries only an IOSurfaceID — nothing on the extension
     /// side retains the backing CVPixelBuffer for us. The extension's frame
-    /// queue can hold a frame for ~166 ms (5 frames drained at 30 Hz), while
-    /// the CropEngine pool recycles a buffer as soon as the app drops its last
-    /// reference (~one frame later). Retaining the most recent sends here keeps
-    /// a surface alive until the extension has certainly consumed it; without
-    /// this, the next render can overwrite a surface the extension is still
-    /// reading (visible as tearing).
+    /// queue can hold a frame for one playout interval per queued entry (the
+    /// drain clock runs at the show standard, e.g. 10 frames ≈ 200 ms at 50),
+    /// while the CropEngine pool recycles a buffer as soon as the app drops
+    /// its last reference (~one frame later). Retaining the most recent sends
+    /// here keeps a surface alive until the extension has certainly consumed
+    /// it; without this, the next render can overwrite a surface the extension
+    /// is still reading (visible as tearing).
     private static let retainedFrameDepth = 10
     private var recentlySentBuffers: [CVPixelBuffer] = []
     var onStateChange: (() -> Void)? {
@@ -1824,6 +1949,15 @@ private final class VirtualCameraOutputSink: ProgramOutputSink {
         xpcManager.lastErrorDescription
     }
 
+    /// The extension drains its queue at this rate — the host pushes
+    /// `ShowStandard.current.frameRate` over XPC whenever capture status
+    /// changes and before the first frame, so both sides agree by construction.
+    /// Reporting it here is what arms the HUD frame-rate-match check for the
+    /// virtual-camera route (it used to read nil and never warn).
+    var playoutFrameRate: Double? {
+        ShowStandard.current.frameRate
+    }
+
     var canReconnect: Bool {
         xpcManager.canReconnect
     }
@@ -1858,6 +1992,7 @@ private final class VirtualCameraOutputSink: ProgramOutputSink {
     func disconnect() {
         xpcManager.disconnect()
         recentlySentBuffers.removeAll()
+        hasPushedPlayoutRate = false
     }
 
     func reconnect() {
@@ -1870,7 +2005,24 @@ private final class VirtualCameraOutputSink: ProgramOutputSink {
         } else {
             Self.logger.notice("Sending capture status STOPPED to virtual camera extension")
         }
+        if isRunning {
+            pushPlayoutRateIfNeeded()
+        }
         xpcManager.remoteProxy()?.updateCaptureStatus(isRunning: isRunning)
+    }
+
+    /// Tell the extension to drain at the show standard. Idempotent per
+    /// connection; re-pushed on every capture-status change so a reconnect
+    /// always lands the current rate before frames flow. The show standard is
+    /// applied at capture start, so this value matches what processFrame is
+    /// producing for the whole session.
+    private func pushPlayoutRateIfNeeded() {
+        guard !hasPushedPlayoutRate else { return }
+        guard let proxy = xpcManager.remoteProxy() else { return }
+        let rate = ShowStandard.current.frameRate
+        proxy.updatePlayoutFrameRate(rate)
+        hasPushedPlayoutRate = true
+        Self.logger.notice("Pushed playout frame rate \(rate, privacy: .public) fps to virtual camera extension")
     }
 
     func sendFrame(pixelBuffer: CVPixelBuffer, timestamp: Double) -> Bool {
@@ -1889,6 +2041,9 @@ private final class VirtualCameraOutputSink: ProgramOutputSink {
             width: Int32(CVPixelBufferGetWidth(pixelBuffer)),
             height: Int32(CVPixelBufferGetHeight(pixelBuffer))
         )
+        // Belt and braces: if the status push raced the XPC handshake, land the
+        // rate before the first frame so the drain clock is never wrong.
+        pushPlayoutRateIfNeeded()
         recentlySentBuffers.append(pixelBuffer)
         if recentlySentBuffers.count > Self.retainedFrameDepth {
             recentlySentBuffers.removeFirst()
@@ -1986,42 +2141,47 @@ extension CameraManager: AVCaptureVideoDataOutputSampleBufferDelegate {
         didOutput sampleBuffer: CMSampleBuffer,
         from connection: AVCaptureConnection
     ) {
-        // Extract pixel buffer
-        guard let pixelBuffer = CMSampleBufferGetImageBuffer(sampleBuffer) else {
-            return
-        }
+        // Drain per frame: this delegate callback allocates a pixel-buffer
+        // box and a sample-buffer read on every frame at 50 Hz, and those
+        // must not sit waiting for the queue thread to be recycled.
+        autoreleasepool {
+            // Extract pixel buffer
+            guard let pixelBuffer = CMSampleBufferGetImageBuffer(sampleBuffer) else {
+                return
+            }
         
-        // Verify IOSurface backing (zero-copy requirement)
-        guard CVPixelBufferGetIOSurface(pixelBuffer) != nil else {
-            assertionFailure("PixelBuffer must be IOSurface-backed for zero-copy operations")
-            return
-        }
+            // Verify IOSurface backing (zero-copy requirement)
+            guard CVPixelBufferGetIOSurface(pixelBuffer) != nil else {
+                assertionFailure("PixelBuffer must be IOSurface-backed for zero-copy operations")
+                return
+            }
 
-        Self.logFirstFrameResolution(pixelBuffer)
+            Self.logFirstFrameResolution(pixelBuffer)
 
-        let timestampSeconds = CMSampleBufferGetPresentationTimeStamp(sampleBuffer).seconds
+            let timestampSeconds = CMSampleBufferGetPresentationTimeStamp(sampleBuffer).seconds
 
-        // No per-drop logging here. Under overload this fires at frame rate on
-        // the capture delegate queue, and the logging itself then contributes to
-        // the overload. The gate already emits a delivered/dropped summary once
-        // per second (`CaptureThroughput`), and the [SOAK] line carries the
-        // running total.
-        guard frameProcessingGate.begin() else { return }
+            // No per-drop logging here. Under overload this fires at frame rate on
+            // the capture delegate queue, and the logging itself then contributes to
+            // the overload. The gate already emits a delivered/dropped summary once
+            // per second (`CaptureThroughput`), and the [SOAK] line carries the
+            // running total.
+            guard frameProcessingGate.begin() else { return }
 
-        let sendableBuffer = SendablePixelBufferBox(pixelBuffer)
+            let sendableBuffer = SendablePixelBufferBox(pixelBuffer)
 
-        // Soak diagnostic: how long the frame Task waits for the MainActor.
-        // A growing hopLag with flat Vision wall time is the signature of
-        // MainActor/SwiftUI accumulation (see the [SOAK] line).
-        let enqueueTime = CACurrentMediaTime()
+            // Soak diagnostic: how long the frame Task waits for the MainActor.
+            // A growing hopLag with flat Vision wall time is the signature of
+            // MainActor/SwiftUI accumulation (see the [SOAK] line).
+            let enqueueTime = CACurrentMediaTime()
 
-        Task(priority: .userInitiated) { @MainActor in
-            defer { self.frameProcessingGate.finish() }
-            self.programOutput.recordMainActorHop(CACurrentMediaTime() - enqueueTime)
-            await self.processFrame(
-                pixelBuffer: sendableBuffer.pixelBuffer,
-                timestampSeconds: timestampSeconds
-            )
+            Task(priority: .userInitiated) { @MainActor in
+                defer { self.frameProcessingGate.finish() }
+                self.programOutput.recordMainActorHop(CACurrentMediaTime() - enqueueTime)
+                await self.processFrame(
+                    pixelBuffer: sendableBuffer.pixelBuffer,
+                    timestampSeconds: timestampSeconds
+                )
+            }
         }
     }
     

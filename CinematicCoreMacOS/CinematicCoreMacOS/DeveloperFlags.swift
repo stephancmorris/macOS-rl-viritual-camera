@@ -69,9 +69,11 @@ enum DeveloperFlags {
     /// 20-minute intervals; each restored 50 fps instantly. Left to itself that
     /// is a choppy patch of unpredictable length arriving mid-show.
     ///
-    /// Flushing on a fixed schedule trades one deliberate, tiny cost every 30 s
-    /// for that cliff. It is also the experiment: if the heap stays flat and the
-    /// stutter never appears, Core Image was the source; if the heap climbs
-    /// anyway, it was not, and the main suspect is eliminated cheaply.
-    nonisolated static let imageCacheFlushInterval: TimeInterval = 30
+    /// **Now 0 (off), deliberately.** This was a stop-gap that swept up the mess
+    /// periodically. The real cause turned out to be autorelease pools that were
+    /// never draining per work item — fixed at source in `PersonDetector`,
+    /// `CameraManager` and `FaceSignatureExtractor`. Leaving both in place would
+    /// mask whether that fix actually worked, so the flush stays off while the
+    /// before/after soak is run. Set to 30 only to A/B it back.
+    nonisolated static let imageCacheFlushInterval: TimeInterval = 0
 }

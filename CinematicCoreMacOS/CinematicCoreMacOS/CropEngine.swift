@@ -91,8 +91,15 @@ final class CropEngine: ObservableObject {
     /// Assign `targetCrop` with the quality floor applied. Use this instead of
     /// setting `targetCrop` directly so over-tight crops are enlarged back to
     /// the floor (re-centered) before interpolation.
+    ///
+    /// Identical targets are dropped: the frame path re-sends the composed
+    /// crop every frame, and re-assigning an unchanged target would restart
+    /// interpolation bookkeeping (`isInterpolating`, timers) for no motion —
+    /// churn the crop rectangle's stability doesn't need.
     func setTargetCrop(_ crop: CropRect) {
-        targetCrop = crop.clampedToQualityFloor(qualityFloor)
+        let floored = crop.clampedToQualityFloor(qualityFloor)
+        guard floored != targetCrop else { return }
+        targetCrop = floored
     }
 
     /// Whether we're actively interpolating between crops
@@ -203,20 +210,6 @@ final class CropEngine: ObservableObject {
             )
         }
 
-        /// Create crop from center point and zoom level
-        static func centered(at center: CGPoint, zoom: Float) -> CropRect {
-            let width = 1.0 / CGFloat(zoom)
-            let height = 1.0 / CGFloat(zoom)
-            
-            return CropRect(
-                origin: CGPoint(
-                    x: center.x - width / 2,
-                    y: center.y - height / 2
-                ),
-                size: CGSize(width: width, height: height)
-            )
-        }
-        
         /// Create crop to frame a bounding box (with padding)
         static func framing(
             boundingBox: CGRect,
@@ -341,20 +334,55 @@ final class CropEngine: ObservableObject {
     // MARK: - Public Methods
 
     /// MainActor-only: advance interpolation toward `targetCrop`, then snapshot
-    /// the values `processCrop` needs. Call this from `processFrame` before
-    /// invoking `processCrop` so the heavy crop work runs without an actor hop.
+    /// the values the render needs. Call this from `processFrame` before
+    /// handing off to `renderCrop` so only the GPU work leaves the main thread.
     @MainActor
     func tickInterpolation() -> (crop: CropRect, outputSize: CGSize, smoothingFactor: Float) {
         updateInterpolation()
         return (currentCrop, config.outputSize, config.transitionSmoothing)
     }
 
-    /// Crop and scale a video frame using CoreImage. Caller must have already
-    /// advanced interpolation via `tickInterpolation()` to obtain the snapshot
-    /// values — doing it here would force a MainActor hop that serializes
-    /// against SwiftUI rendering. (See git history for the Metal compute path
-    /// that this replaces; it hit an Apple Silicon GPU power-state issue where
-    /// isolated compute kernels were scheduled into a 30-45ms idle slot.)
+    /// Serial queue for crop renders. The render used to run synchronously on
+    /// the MainActor, so a 4K Lanczos downscale held the one thread the
+    /// capture gate waits on (20 ms budget at 50 Hz). Serial here keeps frames
+    /// rendering in order and one at a time — the capture gate already
+    /// guarantees a single frame in flight, so there is no queueing latency.
+    private nonisolated static let renderQueue = DispatchQueue(
+        label: "com.cinematiccore.cropRender",
+        qos: .userInteractive,
+        autoreleaseFrequency: .workItem
+    )
+
+    /// Off-MainActor crop render. Snapshot (crop rect + output size) must have
+    /// been taken on the MainActor via `tickInterpolation()` first; only the
+    /// Core Image render runs on `renderQueue`. Safety notes: CIContext is
+    /// thread-safe; the source buffer is retained for the duration of the
+    /// render (capture-pool recycling cannot reclaim it while we hold a
+    /// reference); the output pool is NSLock-guarded; and the capture gate
+    /// serializes frames, so two renders can never overlap.
+    nonisolated func renderCrop(
+        _ pixelBuffer: CVPixelBuffer,
+        crop: CropRect,
+        outputSize: CGSize
+    ) async throws -> CVPixelBuffer {
+        try await withCheckedThrowingContinuation { continuation in
+            Self.renderQueue.async {
+                do {
+                    let buffer = try self.processCrop(pixelBuffer, crop: crop, outputSize: outputSize)
+                    continuation.resume(returning: buffer)
+                } catch {
+                    continuation.resume(throwing: error)
+                }
+            }
+        }
+    }
+
+    /// Crop and scale a video frame using CoreImage. This is the synchronous
+    /// render core — the frame path calls it via `renderCrop`, which hops to a
+    /// serial render queue so it never occupies the MainActor. (See git history
+    /// for the Metal compute path that this replaces; it hit an Apple Silicon
+    /// GPU power-state issue where isolated compute kernels were scheduled into
+    /// a 30-45ms idle slot.)
     nonisolated func processCrop(
         _ pixelBuffer: CVPixelBuffer,
         crop: CropRect,
@@ -429,11 +457,10 @@ final class CropEngine: ObservableObject {
         return outputBuffer
     }
 
-    /// Drop Core Image's internal caches for the crop renderer.
-    ///
-    /// `cacheIntermediates: false` is already set on this context, which limits
-    /// but does not eliminate what it holds. Called on a schedule rather than
-    /// per frame — see `DeveloperFlags.imageCacheFlushInterval`.
+    /// Diagnostic A/B hook: drop Core Image's internal caches for the crop
+    /// renderer. NOT the memory fix — this context already runs with
+    /// `cacheIntermediates: false`. Kept only so a soak can A/B
+    /// `DeveloperFlags.imageCacheFlushInterval`; keep it off (interval 0).
     nonisolated func flushImageCaches() {
         ciContext.clearCaches()
     }
@@ -453,16 +480,6 @@ final class CropEngine: ObservableObject {
     }
 
 
-    /// Set crop to frame a detected person with smooth transition
-    func framePerson(_ person: PersonDetector.DetectedPerson, padding: CGFloat = 0.15) {
-        setTargetCrop(
-            CropRect.framing(
-                boundingBox: person.boundingBox,
-                padding: padding
-            ).clamped()
-        )
-    }
-    
     /// Reset to a wide shot. Pass the composer's `normalizedAspect` for an
     /// aspect-correct widest crop (largest output-aspect region of the source);
     /// omit it only when an exact full-frame source rect is genuinely wanted
@@ -503,7 +520,20 @@ final class CropEngine: ObservableObject {
         
         // Map transitionSmoothing (0.05 to 0.30) to a spring stiffness.
         // Higher value = stiffer spring = faster snap.
-        let stiffness = CGFloat(config.transitionSmoothing) * 300.0
+        //
+        // ×600 (July 2026, was ×300): the old default (0.10 → k=30, ω≈5.5)
+        // trailed a walking speaker by ≈0.37 s of ramp lag and needed ~0.7–1.1
+        // s to converge after a band exit — the dominant "tracking feels late"
+        // term after the Steady Follow band itself. ×600 (0.10 → k=60, ω≈7.7)
+        // roughly halves both (≈0.26 s ramp lag, ≈0.5 s step convergence),
+        // which fits the spring term inside the 100–150 ms motion-lag budget
+        // at walking speeds, while still attenuating bbox jitter: a ±0.3%
+        // Vision box wobble at ~3 Hz passes through at <20% amplitude, well
+        // under a visible pixel at output scale. The preset hierarchy is
+        // unchanged (Locked Down 0.06 → k=36 smoothest, Fast Follow 0.20 →
+        // k=120 snappiest); band exits additionally run the
+        // fastFramingTransition window (see CameraManager).
+        let stiffness = CGFloat(config.transitionSmoothing) * 600.0
         let damping = 2.0 * sqrt(stiffness) // Critically damped
         
         // Spring physics: acceleration = (target - current) * stiffness - velocity * damping

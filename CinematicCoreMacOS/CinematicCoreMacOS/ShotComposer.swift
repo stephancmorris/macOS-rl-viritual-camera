@@ -112,7 +112,7 @@ final class ShotComposer: ObservableObject {
 
             var detail: String {
                 switch self {
-                case .wide: return "Widest stage view around the speaker."
+                case .wide: return "Widest tracked crop (capped at 85% of frame — Return to Wide is the uncropped view)."
                 case .fullBody: return "Wide shot with ~2–3 people of context."
                 case .waistUp: return "Tightest shot: the speaker with a little context."
                 }
@@ -202,9 +202,11 @@ final class ShotComposer: ObservableObject {
             }
         }
 
-        /// The three discrete auto-pan speeds offered in the UI. Backed by the
-        /// `autoPanSpeed` phase-rate values consumed in CameraManager's `.autoPan`
-        /// case (Slow 0.01, Normal 0.02, Fast 0.03).
+        /// The three discrete auto-pan speeds offered in the UI. Backed by
+        /// `autoPanSpeed` phase-rate values consumed in CameraManager's
+        /// `.autoPan` case as phase units per second × 3, with phase mapped
+        /// onto the visible center range — so the value IS the sweep speed:
+        /// Slow crosses the visible travel in ~33 s, Normal ~17 s, Fast ~11 s.
         enum AutoPanSpeed: Float, CaseIterable, Identifiable, Sendable {
             case slow = 0.01
             case normal = 0.02
@@ -328,7 +330,9 @@ final class ShotComposer: ObservableObject {
         var stageVerticalMargin: CGFloat = 0.04
 
         /// Speed of the auto pan sweep across the stage. One of the three
-        /// discrete UI options: Slow 0.01, Normal 0.02, Fast 0.03.
+        /// discrete UI options: Slow 0.01, Normal 0.02, Fast 0.03 — phase units
+        /// per second × 3 over the visible center range (Slow ≈ 33 s per
+        /// crossing, Normal ≈ 17 s, Fast ≈ 11 s).
         var autoPanSpeed: Float = 0.02
 
         /// Vertical center of the auto-pan crop. Vision coordinates: 0 = bottom,
@@ -414,6 +418,11 @@ final class ShotComposer: ObservableObject {
 
     private struct FramingTuning {
         let minimumCropHeight: CGFloat
+        /// Ceiling on the composed crop height. The Wide preset caps at 0.85 so
+        /// the widest *preset* stays a visible crop, distinct from Return to
+        /// Wide (the uncropped full picture). Everything else allows up to a
+        /// full frame-fit.
+        let maximumCropHeight: CGFloat
         let horizontalPaddingMultiplier: CGFloat
         let trackedWidthMultiplier: CGFloat
         let trackedAspectFloor: CGFloat
@@ -422,6 +431,28 @@ final class ShotComposer: ObservableObject {
         let fallbackHeightMultiplier: CGFloat
         let cropHeadroomMultiplier: CGFloat
         let cropLowerMarginMultiplier: CGFloat
+
+        init(minimumCropHeight: CGFloat,
+             maximumCropHeight: CGFloat = 1.0,
+             horizontalPaddingMultiplier: CGFloat,
+             trackedWidthMultiplier: CGFloat,
+             trackedAspectFloor: CGFloat,
+             poseHeadroomMultiplier: CGFloat,
+             poseLowerMarginMultiplier: CGFloat,
+             fallbackHeightMultiplier: CGFloat,
+             cropHeadroomMultiplier: CGFloat,
+             cropLowerMarginMultiplier: CGFloat) {
+            self.minimumCropHeight = minimumCropHeight
+            self.maximumCropHeight = maximumCropHeight
+            self.horizontalPaddingMultiplier = horizontalPaddingMultiplier
+            self.trackedWidthMultiplier = trackedWidthMultiplier
+            self.trackedAspectFloor = trackedAspectFloor
+            self.poseHeadroomMultiplier = poseHeadroomMultiplier
+            self.poseLowerMarginMultiplier = poseLowerMarginMultiplier
+            self.fallbackHeightMultiplier = fallbackHeightMultiplier
+            self.cropHeadroomMultiplier = cropHeadroomMultiplier
+            self.cropLowerMarginMultiplier = cropLowerMarginMultiplier
+        }
     }
 
     struct GeometrySnapshot: Equatable, Sendable {
@@ -438,6 +469,31 @@ final class ShotComposer: ObservableObject {
 
     /// Last accepted detection center (for deadzone comparison)
     private var lastAcceptedCenter: CGPoint?
+
+    /// Size emitted by the most recent accepted compose, baseline for the
+    /// crop-size hysteresis in `clampAndAccept` (keeps the program-crop
+    /// rectangle from breathing with Vision bbox noise while the subject is
+    /// still). Cleared on reset; rebaselined automatically when framing inputs
+    /// change.
+    private var lastEmittedCropSize: CGSize?
+
+    /// Relative crop-height delta below which a fresh detection's size is
+    /// ignored in favour of the previously emitted size. Above ~5% is a real
+    /// approach/retreat, not bbox jitter.
+    private static let cropSizeHysteresis: CGFloat = 0.05
+
+    /// Last vertically-emitted crop anchor for TIGHT shots (stage Waist Up,
+    /// webcam), baseline for `smoothedVerticalAnchor`. Context shots (Wide /
+    /// Full Body) center on body-mid and don't need it.
+    private var lastEmittedVerticalAnchor: CGFloat?
+
+    /// Per-frame fraction of a new vertical anchor to adopt for tight shots.
+    /// Tight shots anchor the crop's top edge to the subject's HEAD, and a
+    /// speaking head bobs at ~1–2 Hz — right where the tracking spring
+    /// transmits best, which read as "Waist Up is jumpy". A one-pole low-pass
+    /// at the target emitter damps that band (≥60% attenuation at 2 Hz) while
+    /// adding only ~60–80 ms of vertical lag. Lateral tracking is untouched.
+    private static let verticalAnchorSmoothing: CGFloat = 0.35
 
     /// Snapshot of the framing inputs the last accepted center was computed under.
     /// When any of these change, the next compose frame bypasses the deadzone gate
@@ -697,8 +753,11 @@ final class ShotComposer: ObservableObject {
     @Published private(set) var lockState: LockState = .inactive
 
     /// Duration the crop holds at last-known position when the locked
-    /// subject goes missing, before pulling back to wide.
-    static let holdDuration: TimeInterval = 2.5
+    /// subject goes missing, before pulling back to wide. 10 s (Aug 2026,
+    /// operator-set): long enough to ride out a speaker stepping off-stage
+    /// for a moment without the program flinching, short enough that a real
+    /// exit reaches the safety shot quickly.
+    static let holdDuration: TimeInterval = 10.0
 
     // MARK: - Signature capture & re-acquisition
 
@@ -709,6 +768,34 @@ final class ShotComposer: ObservableObject {
     /// Whether a signature capture is currently in flight. Prevents
     /// multiple concurrent extracts queueing up on a slow Vision call.
     private var signatureCaptureInFlight: Bool = false
+
+    /// Wall-clock of the last frame that upgraded the detection plan for a
+    /// gallery refresh scan. Keeps the refresh to the capture throttle even
+    /// when the subject's face is not visible (turned away, occluded) — see
+    /// `shouldRunGalleryRefreshScan()`.
+    private var lastGalleryRefreshAttemptAt: TimeInterval = 0
+
+    /// Returns true at most once per `captureSpacing` while the lock is in
+    /// `tracking` and no capture is in flight. The caller upgrades that
+    /// frame's detection plan from `.lockedROI` (no face request) to a
+    /// face-including ROI scan so `maybeAppendToGallery` can refresh the
+    /// gallery — without this, the gallery stays frozen at the 3 signatures
+    /// captured during acquisition and re-acquisition can never adapt beyond
+    /// those first views.
+    ///
+    /// The attempt is marked *before* returning, so a subject who is facing
+    /// away cannot turn this into a per-frame face inference: locked ROI
+    /// dropping the face model every frame was a real latency/load win and
+    /// stays the default. Cost when healthy: one extra ~1 ms face-landmarks
+    /// inference every ≥0.4 s, scoped to the locked ROI.
+    func shouldRunGalleryRefreshScan() -> Bool {
+        guard case .tracking = lockState else { return false }
+        let now = CACurrentMediaTime()
+        guard now - lastGalleryRefreshAttemptAt >= FaceSignatureGallery.captureSpacing else { return false }
+        guard !signatureCaptureInFlight else { return false }
+        lastGalleryRefreshAttemptAt = now
+        return true
+    }
 
     // MARK: - Re-acquisition decision thresholds
     //
@@ -1409,6 +1496,8 @@ final class ShotComposer: ObservableObject {
         subjectVelocity = 0.0
         lastComposeTime = 0
         lastComposeTrackingCenter = nil
+        lastEmittedCropSize = nil
+        lastEmittedVerticalAnchor = nil
 
         // Steady Following returns to following + clears the guide lines.
         enterSteadyFollowing()
@@ -1443,6 +1532,15 @@ final class ShotComposer: ObservableObject {
         reacquisitionConsecutive.removeAll()
         latestScores.removeAll()
         enterSteadyFollowing()
+    }
+
+    /// TEST-ONLY: promote the current `.acquiring` lock straight to `.tracking`,
+    /// exactly as `tick()` does when the gallery reaches `readyThreshold`. Lets
+    /// unit tests exercise post-lock behavior without running Vision. Never
+    /// call from app code.
+    func forceTrackingForTesting() {
+        guard case .acquiring(let id, let gallery, _) = lockState else { return }
+        lockState = .tracking(targetID: id, gallery: gallery)
     }
 
     var isManualLockActive: Bool {
@@ -1497,6 +1595,11 @@ final class ShotComposer: ObservableObject {
         // composer crops instead of silently re-shaping them.
         setZoomLimited(desiredHeight < qualityFloorHeightFraction)
         var cropHeight = max(desiredHeight, tuning.minimumCropHeight, qualityFloorHeightFraction)
+        // Wide is the widest CROP, not the full picture — Return to Wide is
+        // the uncropped view. Cap the preset so it stays visibly cropped.
+        cropHeight = min(cropHeight, tuning.maximumCropHeight)
+        // The floor always wins over the cap (degenerate zoom safety).
+        cropHeight = max(cropHeight, qualityFloorHeightFraction)
         var cropWidth = cropHeight * aspect
 
         // Frame-fit while preserving 16:9. If either dimension overflows, shrink
@@ -1514,6 +1617,7 @@ final class ShotComposer: ObservableObject {
         let originX = centerX - cropWidth / 2.0
 
         let originY: CGFloat
+        let isTightShot: Bool
         if config.cinematicFormat == .stage,
            config.shotPreset == .wide || config.shotPreset == .fullBody {
             // Context shots (crop is several times the subject's height):
@@ -1521,6 +1625,7 @@ final class ShotComposer: ObservableObject {
             // the subject at the top of the frame and fills the bottom with
             // audience/stage floor.
             originY = subjectBounds.midY - (cropHeight / 2.0)
+            isTightShot = false
         } else {
             // Tight shots: center the final crop on the *desired* region's
             // vertical center. When cropHeight == desiredHeight this is
@@ -1529,11 +1634,22 @@ final class ShotComposer: ObservableObject {
             // difference is distributed symmetrically, so the subject stays
             // centered instead of pinned to the top.
             originY = cropTop - (desiredHeight / 2.0) - (cropHeight / 2.0)
+            isTightShot = true
+        }
+
+        // Tight shots anchor to the head — damp natural head-bob before the
+        // target reaches the spring (see `verticalAnchorSmoothing`).
+        var emittedOriginY = originY
+        if isTightShot {
+            emittedOriginY = smoothedVerticalAnchor(
+                originY,
+                framingChanged: lastAppliedFramingFingerprint != currentFramingFingerprint
+            )
         }
 
         return clampAndAccept(
             CropEngine.CropRect(
-                origin: CGPoint(x: originX, y: originY),
+                origin: CGPoint(x: originX, y: emittedOriginY),
                 size: CGSize(width: cropWidth, height: cropHeight)
             ),
             trackingCenter: trackingCenter,
@@ -1626,18 +1742,59 @@ final class ShotComposer: ObservableObject {
         )
     }
 
+    /// One-pole low-pass on the tight shot's vertical anchor. First frame (or
+    /// a framing change) adopts the raw value outright; afterwards each fresh
+    /// target moves the emitted anchor only `verticalAnchorSmoothing` of the
+    /// remaining distance.
+    private func smoothedVerticalAnchor(_ y: CGFloat, framingChanged: Bool) -> CGFloat {
+        guard !framingChanged, let last = lastEmittedVerticalAnchor else {
+            lastEmittedVerticalAnchor = y
+            return y
+        }
+        let smoothed = last + (y - last) * Self.verticalAnchorSmoothing
+        lastEmittedVerticalAnchor = smoothed
+        return smoothed
+    }
+
     private func clampAndAccept(
         _ crop: CropEngine.CropRect,
         trackingCenter: CGPoint,
         isFresh: Bool
     ) -> CropEngine.CropRect? {
-        let clampedCrop = clampCropToFrame(crop)
+        let fingerprint = currentFramingFingerprint
+        let framingChanged = lastAppliedFramingFingerprint != fingerprint
+
+        // Crop-SIZE hysteresis. Position has noise gates (deadzone / Steady
+        // Follow band), but the crop's width/height are re-derived from the
+        // Vision bbox height every fresh detection, and bbox height wobbles a
+        // few percent even for a perfectly still subject — the program-crop
+        // rectangle visibly breathed as a result. Below the hysteresis band
+        // the previously emitted size is reused (re-centered on the fresh
+        // position, so tracking stays responsive); real approach/retreat
+        // drifts past the band in 5% quantized steps, which reads as a calm
+        // reframe rather than noise. A framing change rebaselines via the
+        // emitted-size store below.
+        var stabilized = crop
+        if !framingChanged,
+           let last = lastEmittedCropSize,
+           last.height > 0.01, crop.size.height > 0.01 {
+            let relativeDelta = abs(crop.size.height - last.height) / last.height
+            if relativeDelta < Self.cropSizeHysteresis {
+                let centerX = crop.origin.x + crop.size.width / 2
+                let centerY = crop.origin.y + crop.size.height / 2
+                stabilized.size = last
+                stabilized.origin = CGPoint(
+                    x: centerX - last.width / 2,
+                    y: centerY - last.height / 2
+                )
+            }
+        }
+
+        let clampedCrop = clampCropToFrame(stabilized)
+        lastEmittedCropSize = clampedCrop.size
         currentComputedCrop = clampedCrop
         frameStateRevision &+= 1
 
-        let fingerprint = currentFramingFingerprint
-        let framingChanged = lastAppliedFramingFingerprint != fingerprint
-        
         // Calculate velocity for dynamic deadzone
         let now = CACurrentMediaTime()
         if let lastCenter = lastComposeTrackingCenter, lastComposeTime > 0 {
@@ -1869,6 +2026,7 @@ final class ShotComposer: ObservableObject {
         case (.livestream, .wide):
             return FramingTuning(
                 minimumCropHeight: 0.70,
+                maximumCropHeight: 0.85,
                 horizontalPaddingMultiplier: 0.50,
                 trackedWidthMultiplier: 1.00,
                 trackedAspectFloor: 0.80,
@@ -1881,6 +2039,7 @@ final class ShotComposer: ObservableObject {
         case (.livestream, .fullBody):
             return FramingTuning(
                 minimumCropHeight: 0.55,
+                maximumCropHeight: 0.95,
                 horizontalPaddingMultiplier: 0.32,
                 trackedWidthMultiplier: 0.90,
                 trackedAspectFloor: 0.68,
@@ -1893,6 +2052,7 @@ final class ShotComposer: ObservableObject {
         case (.livestream, .waistUp):
             return FramingTuning(
                 minimumCropHeight: 0.35,
+                maximumCropHeight: 0.80,
                 horizontalPaddingMultiplier: 0.15,
                 trackedWidthMultiplier: 0.76,
                 trackedAspectFloor: 0.60,
@@ -1905,6 +2065,7 @@ final class ShotComposer: ObservableObject {
         case (.portrait, .wide):
             return FramingTuning(
                 minimumCropHeight: 0.65,
+                maximumCropHeight: 0.85,
                 horizontalPaddingMultiplier: 0.28,
                 trackedWidthMultiplier: 0.96,
                 trackedAspectFloor: 0.48,
@@ -1917,6 +2078,7 @@ final class ShotComposer: ObservableObject {
         case (.portrait, .fullBody):
             return FramingTuning(
                 minimumCropHeight: 0.45,
+                maximumCropHeight: 0.95,
                 horizontalPaddingMultiplier: 0.18,
                 trackedWidthMultiplier: 0.92,
                 trackedAspectFloor: 0.44,
@@ -1929,6 +2091,7 @@ final class ShotComposer: ObservableObject {
         case (.portrait, .waistUp):
             return FramingTuning(
                 minimumCropHeight: 0.30,
+                maximumCropHeight: 0.85,
                 horizontalPaddingMultiplier: 0.10,
                 trackedWidthMultiplier: 0.88,
                 trackedAspectFloor: 0.40,

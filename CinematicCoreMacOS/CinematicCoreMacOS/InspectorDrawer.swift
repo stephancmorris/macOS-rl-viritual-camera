@@ -248,7 +248,7 @@ struct InspectorDrawer: View {
                     monospaced: true
                 )
             }
-            row("Lerp ease") {
+            row("Spring ease") {
                 if let cropEngine = cameraManager.cropEngine {
                     valueText(String(format: "%.2f / frame", cropEngine.config.transitionSmoothing), monospaced: true)
                 } else {
