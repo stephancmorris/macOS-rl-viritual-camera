@@ -52,10 +52,10 @@ struct ContentView: View {
                     manualLockedTargetID: cameraManager.manualLockedTargetID,
                     acquiringTargetID: cameraManager.shotComposer.acquiringTargetID,
                     trackedSubjectRect: cameraManager.shotComposer.displayedTrackedBounds,
-                    isRecovering: false,
+                    isRecovering: cameraManager.shotComposer.isHolding || cameraManager.shotComposer.isWideWaiting,
                     isZoomLimited: cameraManager.shotComposer.isZoomLimitedByQuality,
                     steadyBand: cameraManager.shotComposer.steadyBand,
-                    framingTitle: cameraManager.shotComposer.config.shotFraming.title,
+                    framingTitle: cameraManager.shotComposer.config.activeFramingTitle,
                     onSelectPerson: cameraManager.lockTarget,
                     onTapPoint: tapPointHandler,
                     onHoldPoint: holdPointHandler

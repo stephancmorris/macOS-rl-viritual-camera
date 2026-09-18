@@ -33,6 +33,8 @@ ZIP="$OUT/$APP_NAME.zip"
 DMG="$OUT/$APP_NAME.dmg"
 
 mkdir -p "$OUT"
+SOURCE_FINGERPRINT="$(python3 scripts/source_fingerprint.py)"
+printf '%s\n' "$SOURCE_FINGERPRINT" > "$OUT/source-fingerprint.txt"
 
 # --- Step 4: Archive --------------------------------------------------------
 echo "==> [1/6] Archiving…"
@@ -40,6 +42,7 @@ rm -rf "$ARCHIVE"
 xcodebuild -project "$PROJECT" -scheme "$SCHEME" -configuration Release \
     -destination 'generic/platform=macOS' \
     -archivePath "$ARCHIVE" \
+    "ALFIE_SOURCE_FINGERPRINT=$SOURCE_FINGERPRINT" \
     -allowProvisioningUpdates \
     archive
 
@@ -48,6 +51,7 @@ echo "==> [2/6] Exporting Developer ID build…"
 rm -rf "$EXPORT_DIR"
 xcodebuild -exportArchive \
     -archivePath "$ARCHIVE" \
+    "ALFIE_SOURCE_FINGERPRINT=$SOURCE_FINGERPRINT" \
     -exportPath "$EXPORT_DIR" \
     -exportOptionsPlist "$OUT/ExportOptions.plist" \
     -allowProvisioningUpdates

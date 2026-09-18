@@ -107,7 +107,7 @@ struct ShotComposerSettingsView: View {
                 )
                 .disabled(!shotComposer.config.isEnabled)
 
-                Text("The speaker can move within this band before the camera re-centers. Shown as yellow guides in the preview.")
+                Text("Width as a percentage of the program shot. The speaker can move within this band before the camera re-centers. Yellow guides show its boundaries.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }

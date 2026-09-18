@@ -1,0 +1,173 @@
+Command line invocation:
+    /Applications/Xcode.app/Contents/Developer/usr/bin/xcodebuild -project CinematicCoreMacOS/CinematicCoreMacOS.xcodeproj -scheme CinematicCoreMacOS -configuration Debug -destination platform=macOS -derivedDataPath /tmp/alfie-fixes-build CODE_SIGNING_ALLOWED=NO ALFIE_SOURCE_FINGERPRINT=a809490d5d7a3ad948fafc3a63d6ddd612d274cd1eba836cf049454d6c6ab765 test "-only-testing:CinematicCoreMacOSTests"
+
+Build settings from command line:
+    ALFIE_SOURCE_FINGERPRINT = a809490d5d7a3ad948fafc3a63d6ddd612d274cd1eba836cf049454d6c6ab765
+    CODE_SIGNING_ALLOWED = NO
+
+--- xcodebuild: WARNING: Using the first of multiple matching destinations:
+{ platform:macOS, arch:arm64, id:00006040-000A70203AA0801C, name:My Mac }
+{ platform:macOS, arch:x86_64, id:00006040-000A70203AA0801C, name:My Mac }
+ComputePackagePrebuildTargetDependencyGraph
+
+Prepare packages
+
+CreateBuildRequest
+
+SendProjectDescription
+
+CreateBuildOperation
+
+ComputeTargetDependencyGraph
+note: Building targets in dependency order
+note: Target dependency graph (4 targets)
+    Target 'CinematicCoreMacOSUITests' in project 'CinematicCoreMacOS'
+        ➜ Explicit dependency on target 'CinematicCoreMacOS' in project 'CinematicCoreMacOS'
+    Target 'CinematicCoreMacOSTests' in project 'CinematicCoreMacOS'
+        ➜ Explicit dependency on target 'CinematicCoreMacOS' in project 'CinematicCoreMacOS'
+    Target 'CinematicCoreMacOS' in project 'CinematicCoreMacOS'
+        ➜ Explicit dependency on target 'CinematicCoreExtension' in project 'CinematicCoreMacOS'
+    Target 'CinematicCoreExtension' in project 'CinematicCoreMacOS' (no dependencies)
+
+GatherProvisioningInputs
+
+CreateBuildDescription
+
+ExecuteExternalTool /Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/clang -v -E -dM -isysroot /Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX26.2.sdk -x c -c /dev/null
+
+ExecuteExternalTool /Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/swiftc --version
+
+ExecuteExternalTool /Applications/Xcode.app/Contents/Developer/usr/bin/actool --version --output-format xml1
+
+ExecuteExternalTool /Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/ld -version_details
+
+Build description signature: dd10a740c8d00ac34a17441c97fe0381
+Build description path: /tmp/alfie-fixes-build/Build/Intermediates.noindex/XCBuildData/dd10a740c8d00ac34a17441c97fe0381.xcbuilddata
+ClangStatCache /Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/clang-stat-cache /Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX26.2.sdk /tmp/alfie-fixes-build/SDKStatCaches.noindex/macosx26.2-25C57-dc75598d0054f22ec865fa860f139d7200fa09913b459cbbc988d1f6730289ae.sdkstatcache
+    cd /Users/stephanmorris/Documents/macOS-rl-viritual-camera/CinematicCoreMacOS/CinematicCoreMacOS.xcodeproj
+    /Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/clang-stat-cache /Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX26.2.sdk -o /tmp/alfie-fixes-build/SDKStatCaches.noindex/macosx26.2-25C57-dc75598d0054f22ec865fa860f139d7200fa09913b459cbbc988d1f6730289ae.sdkstatcache
+
+ProcessInfoPlistFile /tmp/alfie-fixes-build/Build/Products/Debug/Morris.CinematicCoreMacOS.CinematicCoreExtension.systemextension/Contents/Info.plist /Users/stephanmorris/Documents/macOS-rl-viritual-camera/CinematicCoreMacOS/CinematicCoreExtension/Info.plist (in target 'CinematicCoreExtension' from project 'CinematicCoreMacOS')
+    cd /Users/stephanmorris/Documents/macOS-rl-viritual-camera/CinematicCoreMacOS
+    builtin-infoPlistUtility /Users/stephanmorris/Documents/macOS-rl-viritual-camera/CinematicCoreMacOS/CinematicCoreExtension/Info.plist -producttype com.apple.product-type.system-extension -expandbuildsettings -platform macosx -o /tmp/alfie-fixes-build/Build/Products/Debug/Morris.CinematicCoreMacOS.CinematicCoreExtension.systemextension/Contents/Info.plist
+
+CopySwiftLibs /tmp/alfie-fixes-build/Build/Products/Debug/Alfie.app (in target 'CinematicCoreMacOS' from project 'CinematicCoreMacOS')
+    cd /Users/stephanmorris/Documents/macOS-rl-viritual-camera/CinematicCoreMacOS
+    builtin-swiftStdLibTool --copy --verbose --scan-executable /tmp/alfie-fixes-build/Build/Products/Debug/Alfie.app/Contents/MacOS/Alfie.debug.dylib --scan-folder /tmp/alfie-fixes-build/Build/Products/Debug/Alfie.app/Contents/Frameworks --scan-folder /tmp/alfie-fixes-build/Build/Products/Debug/Alfie.app/Contents/PlugIns --scan-folder /tmp/alfie-fixes-build/Build/Products/Debug/Alfie.app/Contents/Library/SystemExtensions --scan-folder /tmp/alfie-fixes-build/Build/Products/Debug/Alfie.app/Contents/Extensions --platform macosx --toolchain /var/run/com.apple.security.cryptexd/mnt/com.apple.MobileAsset.MetalToolchain-v17.3.7003.10.InU4CR/Metal.xctoolchain --toolchain /Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain --destination /tmp/alfie-fixes-build/Build/Products/Debug/Alfie.app/Contents/Frameworks --strip-bitcode --strip-bitcode-tool /Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/bitcode_strip --emit-dependency-info /tmp/alfie-fixes-build/Build/Intermediates.noindex/CinematicCoreMacOS.build/Debug/CinematicCoreMacOS.build/SwiftStdLibToolInputDependencies.dep --filter-for-swift-os
+Ignoring --strip-bitcode because --sign was not passed
+
+ProcessInfoPlistFile /tmp/alfie-fixes-build/Build/Products/Debug/Alfie.app/Contents/Info.plist /Users/stephanmorris/Documents/macOS-rl-viritual-camera/CinematicCoreMacOS/BuildInfo.plist (in target 'CinematicCoreMacOS' from project 'CinematicCoreMacOS')
+    cd /Users/stephanmorris/Documents/macOS-rl-viritual-camera/CinematicCoreMacOS
+    builtin-infoPlistUtility /Users/stephanmorris/Documents/macOS-rl-viritual-camera/CinematicCoreMacOS/BuildInfo.plist -producttype com.apple.product-type.application -genpkginfo /tmp/alfie-fixes-build/Build/Products/Debug/Alfie.app/Contents/PkgInfo -expandbuildsettings -platform macosx -additionalcontentfile /tmp/alfie-fixes-build/Build/Intermediates.noindex/CinematicCoreMacOS.build/Debug/CinematicCoreMacOS.build/assetcatalog_generated_info.plist -scanforprivacyfile /tmp/alfie-fixes-build/Build/Products/Debug/Alfie.app/Contents/Library/SystemExtensions/Morris.CinematicCoreMacOS.CinematicCoreExtension.systemextension -o /tmp/alfie-fixes-build/Build/Products/Debug/Alfie.app/Contents/Info.plist
+
+ValidateEmbeddedBinary /tmp/alfie-fixes-build/Build/Products/Debug/Alfie.app/Contents/Library/SystemExtensions/Morris.CinematicCoreMacOS.CinematicCoreExtension.systemextension (in target 'CinematicCoreMacOS' from project 'CinematicCoreMacOS')
+    cd /Users/stephanmorris/Documents/macOS-rl-viritual-camera/CinematicCoreMacOS
+    /Applications/Xcode.app/Contents/Developer/usr/bin/embeddedBinaryValidationUtility /tmp/alfie-fixes-build/Build/Products/Debug/Alfie.app/Contents/Library/SystemExtensions/Morris.CinematicCoreMacOS.CinematicCoreExtension.systemextension -info-plist-path /tmp/alfie-fixes-build/Build/Products/Debug/Alfie.app/Contents/Info.plist
+warning: Morris.CinematicCoreMacOS.CinematicCoreExtension.systemextension is a Foundation extension and must be embedded in the parent app bundle's PlugIns directory, but is embedded in the parent app bundle's Contents/Library/SystemExtensions directory.
+
+ProcessInfoPlistFile /tmp/alfie-fixes-build/Build/Products/Debug/Alfie.app/Contents/PlugIns/CinematicCoreMacOSTests.xctest/Contents/Info.plist /tmp/alfie-fixes-build/Build/Intermediates.noindex/CinematicCoreMacOS.build/Debug/CinematicCoreMacOSTests.build/empty-CinematicCoreMacOSTests.plist (in target 'CinematicCoreMacOSTests' from project 'CinematicCoreMacOS')
+    cd /Users/stephanmorris/Documents/macOS-rl-viritual-camera/CinematicCoreMacOS
+    builtin-infoPlistUtility /tmp/alfie-fixes-build/Build/Intermediates.noindex/CinematicCoreMacOS.build/Debug/CinematicCoreMacOSTests.build/empty-CinematicCoreMacOSTests.plist -producttype com.apple.product-type.bundle.unit-test -expandbuildsettings -platform macosx -o /tmp/alfie-fixes-build/Build/Products/Debug/Alfie.app/Contents/PlugIns/CinematicCoreMacOSTests.xctest/Contents/Info.plist
+
+CopySwiftLibs /tmp/alfie-fixes-build/Build/Products/Debug/Alfie.app/Contents/PlugIns/CinematicCoreMacOSTests.xctest (in target 'CinematicCoreMacOSTests' from project 'CinematicCoreMacOS')
+    cd /Users/stephanmorris/Documents/macOS-rl-viritual-camera/CinematicCoreMacOS
+    builtin-swiftStdLibTool --copy --verbose --scan-executable /tmp/alfie-fixes-build/Build/Products/Debug/Alfie.app/Contents/PlugIns/CinematicCoreMacOSTests.xctest/Contents/MacOS/CinematicCoreMacOSTests --scan-folder /tmp/alfie-fixes-build/Build/Products/Debug/Alfie.app/Contents/PlugIns/CinematicCoreMacOSTests.xctest/Contents/Frameworks --scan-folder /tmp/alfie-fixes-build/Build/Products/Debug/Alfie.app/Contents/PlugIns/CinematicCoreMacOSTests.xctest/Contents/PlugIns --scan-folder /tmp/alfie-fixes-build/Build/Products/Debug/Alfie.app/Contents/PlugIns/CinematicCoreMacOSTests.xctest/Contents/Library/SystemExtensions --scan-folder /tmp/alfie-fixes-build/Build/Products/Debug/Alfie.app/Contents/PlugIns/CinematicCoreMacOSTests.xctest/Contents/Extensions --platform macosx --toolchain /var/run/com.apple.security.cryptexd/mnt/com.apple.MobileAsset.MetalToolchain-v17.3.7003.10.InU4CR/Metal.xctoolchain --toolchain /Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain --destination /tmp/alfie-fixes-build/Build/Products/Debug/Alfie.app/Contents/PlugIns/CinematicCoreMacOSTests.xctest/Contents/Frameworks --strip-bitcode --scan-executable /Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/usr/lib/libXCTestSwiftSupport.dylib --strip-bitcode-tool /Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/bitcode_strip --emit-dependency-info /tmp/alfie-fixes-build/Build/Intermediates.noindex/CinematicCoreMacOS.build/Debug/CinematicCoreMacOSTests.build/SwiftStdLibToolInputDependencies.dep --filter-for-swift-os
+Ignoring --strip-bitcode because --sign was not passed
+
+Validate /tmp/alfie-fixes-build/Build/Products/Debug/Alfie.app (in target 'CinematicCoreMacOS' from project 'CinematicCoreMacOS')
+    cd /Users/stephanmorris/Documents/macOS-rl-viritual-camera/CinematicCoreMacOS
+    builtin-validationUtility /tmp/alfie-fixes-build/Build/Products/Debug/Alfie.app -no-validate-extension -infoplist-subpath Contents/Info.plist
+
+RegisterWithLaunchServices /tmp/alfie-fixes-build/Build/Products/Debug/Alfie.app (in target 'CinematicCoreMacOS' from project 'CinematicCoreMacOS')
+    cd /Users/stephanmorris/Documents/macOS-rl-viritual-camera/CinematicCoreMacOS
+    /System/Library/Frameworks/CoreServices.framework/Versions/Current/Frameworks/LaunchServices.framework/Versions/Current/Support/lsregister -f -R -trusted /tmp/alfie-fixes-build/Build/Products/Debug/Alfie.app
+
+ProcessInfoPlistFile /tmp/alfie-fixes-build/Build/Products/Debug/CinematicCoreMacOSUITests-Runner.app/Contents/PlugIns/CinematicCoreMacOSUITests.xctest/Contents/Info.plist /tmp/alfie-fixes-build/Build/Intermediates.noindex/CinematicCoreMacOS.build/Debug/CinematicCoreMacOSUITests.build/empty-CinematicCoreMacOSUITests.plist (in target 'CinematicCoreMacOSUITests' from project 'CinematicCoreMacOS')
+    cd /Users/stephanmorris/Documents/macOS-rl-viritual-camera/CinematicCoreMacOS
+    builtin-infoPlistUtility /tmp/alfie-fixes-build/Build/Intermediates.noindex/CinematicCoreMacOS.build/Debug/CinematicCoreMacOSUITests.build/empty-CinematicCoreMacOSUITests.plist -producttype com.apple.product-type.bundle.ui-testing -expandbuildsettings -platform macosx -additionalcontentfile /tmp/alfie-fixes-build/Build/Intermediates.noindex/CinematicCoreMacOS.build/Debug/CinematicCoreMacOSUITests.build/ProductTypeInfoPlistAdditions.plist -o /tmp/alfie-fixes-build/Build/Products/Debug/CinematicCoreMacOSUITests-Runner.app/Contents/PlugIns/CinematicCoreMacOSUITests.xctest/Contents/Info.plist
+
+CopySwiftLibs /tmp/alfie-fixes-build/Build/Products/Debug/CinematicCoreMacOSUITests-Runner.app/Contents/PlugIns/CinematicCoreMacOSUITests.xctest (in target 'CinematicCoreMacOSUITests' from project 'CinematicCoreMacOS')
+    cd /Users/stephanmorris/Documents/macOS-rl-viritual-camera/CinematicCoreMacOS
+    builtin-swiftStdLibTool --copy --verbose --scan-executable /tmp/alfie-fixes-build/Build/Products/Debug/CinematicCoreMacOSUITests-Runner.app/Contents/PlugIns/CinematicCoreMacOSUITests.xctest/Contents/MacOS/CinematicCoreMacOSUITests --scan-folder /tmp/alfie-fixes-build/Build/Products/Debug/CinematicCoreMacOSUITests-Runner.app/Contents/PlugIns/CinematicCoreMacOSUITests.xctest/Contents/Frameworks --scan-folder /tmp/alfie-fixes-build/Build/Products/Debug/CinematicCoreMacOSUITests-Runner.app/Contents/PlugIns/CinematicCoreMacOSUITests.xctest/Contents/PlugIns --scan-folder /tmp/alfie-fixes-build/Build/Products/Debug/CinematicCoreMacOSUITests-Runner.app/Contents/PlugIns/CinematicCoreMacOSUITests.xctest/Contents/Library/SystemExtensions --scan-folder /tmp/alfie-fixes-build/Build/Products/Debug/CinematicCoreMacOSUITests-Runner.app/Contents/PlugIns/CinematicCoreMacOSUITests.xctest/Contents/Extensions --platform macosx --toolchain /var/run/com.apple.security.cryptexd/mnt/com.apple.MobileAsset.MetalToolchain-v17.3.7003.10.InU4CR/Metal.xctoolchain --toolchain /Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain --destination /tmp/alfie-fixes-build/Build/Products/Debug/CinematicCoreMacOSUITests-Runner.app/Contents/PlugIns/CinematicCoreMacOSUITests.xctest/Contents/Frameworks --strip-bitcode --scan-executable /Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/usr/lib/libXCTestSwiftSupport.dylib --strip-bitcode-tool /Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/bitcode_strip --emit-dependency-info /tmp/alfie-fixes-build/Build/Intermediates.noindex/CinematicCoreMacOS.build/Debug/CinematicCoreMacOSUITests.build/SwiftStdLibToolInputDependencies.dep --filter-for-swift-os
+Ignoring --strip-bitcode because --sign was not passed
+
+note: Removed stale file '/tmp/alfie-fixes-build/Build/Intermediates.noindex/CinematicCoreMacOS.build/Debug/CinematicCoreMacOS.build/empty-Alfie.plist'
+
+Testing started
+Test suite 'DetectionCadenceTests' started on 'My Mac - Alfie (24189)'
+Test suite 'LockedTrackMatcherTests' started on 'My Mac - Alfie (24189)'
+Test suite 'CropStabilityTests' started on 'My Mac - Alfie (24189)'
+Test suite 'AcquisitionDeadlineRegressionTests' started on 'My Mac - Alfie (24189)'
+Test suite 'GalleryRefreshCadenceTests' started on 'My Mac - Alfie (24189)'
+Test suite 'LockedTrackIntegrationRegressionTests' started on 'My Mac - Alfie (24189)'
+Test suite 'DetectionFrameFreshnessRegressionTests' started on 'My Mac - Alfie (24189)'
+Test suite 'OutputRateRegressionTests' started on 'My Mac - Alfie (24189)'
+Test suite 'FramingRegressionTests' started on 'My Mac - Alfie (24189)'
+Test suite 'ReacquisitionEvidenceRegressionTests' started on 'My Mac - Alfie (24189)'
+Test suite 'CinematicCoreMacOSTests' started on 'My Mac - Alfie (24189)'
+Test suite 'PipelineLifecycleTests' started on 'My Mac - Alfie (24189)'
+Test case 'OutputRateRegressionTests/advertisedShowDurationsAreExact()' passed on 'My Mac - Alfie (24189)' (0.000 seconds)
+Test case 'OutputRateRegressionTests/acknowledgementCannotAuthorizeANewConnection()' passed on 'My Mac - Alfie (24189)' (0.000 seconds)
+Test case 'LockedTrackMatcherTests/discontinuousCandidateInsideRadiusRequiresProbationFrames()' passed on 'My Mac - Alfie (24189)' (0.000 seconds)
+Test case 'OutputRateRegressionTests/activeStandardStaysFrozenUntilTheNextSession()' passed on 'My Mac - Alfie (24189)' (0.000 seconds)
+Test case 'OutputRateRegressionTests/captureDurationUsesTheSelectedRateNotRangeEndpoints()' passed on 'My Mac - Alfie (24189)' (0.000 seconds)
+Test case 'LockedTrackMatcherTests/contestedCandidateRequiresProbationFramesContested()' passed on 'My Mac - Alfie (24189)' (0.000 seconds)
+Test case 'LockedTrackMatcherTests/stationaryLockRejectsCandidateOutsideBaseRadius()' passed on 'My Mac - Alfie (24189)' (0.000 seconds)
+Test case 'LockedTrackMatcherTests/adaptiveRadiusGrowsWithVelocityAndTime()' passed on 'My Mac - Alfie (24189)' (0.000 seconds)
+Test case 'LockedTrackMatcherTests/crossingCandidatesWithinMarginNeverInstantAcceptsWhileBothPresent()' passed on 'My Mac - Alfie (24189)' (0.000 seconds)
+Test case 'OutputRateRegressionTests/matchingAcceptsOnlyAdvertisedShowRates()' passed on 'My Mac - Alfie (24189)' (0.000 seconds)
+Test case 'DetectionCadenceTests/intervalTwoRunsEverySecondEligibleFrame()' passed on 'My Mac - Alfie (24189)' (0.000 seconds)
+Test case 'DetectionCadenceTests/degenerateIntervalStillRuns()' passed on 'My Mac - Alfie (24189)' (0.000 seconds)
+Test case 'LockedTrackMatcherTests/reappearsInPlaceAfterMissedFramesInstantAccepts()' passed on 'My Mac - Alfie (24189)' (0.000 seconds)
+Test case 'DetectionCadenceTests/intervalOneRunsEveryEligibleFrame()' passed on 'My Mac - Alfie (24189)' (0.000 seconds)
+Test case 'LockedTrackMatcherTests/stationarySubjectInstantAcceptsEveryFrame()' passed on 'My Mac - Alfie (24189)' (0.000 seconds)
+Test case 'DetectionCadenceTests/intervalThreeSkipsThenRunsOnMultiples()' passed on 'My Mac - Alfie (24189)' (0.000 seconds)
+Test case 'CinematicCoreMacOSTests/example()' passed on 'My Mac - Alfie (24189)' (0.000 seconds)
+Test case 'LockedTrackMatcherTests/subjectExitsFrameBreaksProbationSequence()' passed on 'My Mac - Alfie (24189)' (0.000 seconds)
+Test case 'PipelineLifecycleTests/retiredFrameCannotUnlockNewSession()' passed on 'My Mac - Alfie (24189)' (0.000 seconds)
+Test case 'LockedTrackMatcherTests/resolveLockedAssignmentPerformance()' passed on 'My Mac - Alfie (24189)' (0.000 seconds)
+Test case 'PipelineLifecycleTests/diagnosticsDistinguishWallTimeFromMainWork()' passed on 'My Mac - Alfie (24189)' (0.000 seconds)
+Test case 'DetectionFrameFreshnessRegressionTests/observationIsFreshExactlyOnceAndExpiresWithItsPixels()' passed on 'My Mac - Alfie (24189)' (0.000 seconds)
+Test case 'DetectionFrameFreshnessRegressionTests/invalidationRejectsResultsFromThePreviousGeneration()' passed on 'My Mac - Alfie (24189)' (0.000 seconds)
+Test case 'DetectionFrameFreshnessRegressionTests/originalPixelsStayPairedAndLateResultsCannotReplaceExpiredNewerOnes()' passed on 'My Mac - Alfie (24189)' (0.000 seconds)
+Test case 'AcquisitionDeadlineRegressionTests/missingGraceStartsAtObservationCaptureTime()' passed on 'My Mac - Alfie (24189)' (0.000 seconds)
+Test case 'AcquisitionDeadlineRegressionTests/missingGraceUsesTheLastFreshSighting()' passed on 'My Mac - Alfie (24189)' (0.000 seconds)
+Test case 'AcquisitionDeadlineRegressionTests/visibleBodyWithoutFaceCannotAcquireForever()' passed on 'My Mac - Alfie (24189)' (0.000 seconds)
+Test case 'LockedTrackIntegrationRegressionTests/probationCandidateCannotBypassLockedPolicy()' passed on 'My Mac - Alfie (24189)' (0.000 seconds)
+Test case 'LockedTrackIntegrationRegressionTests/outOfRadiusCandidateCannotBypassLockedPolicy()' passed on 'My Mac - Alfie (24189)' (0.000 seconds)
+Test case 'LockedTrackIntegrationRegressionTests/incompatibleBodySizeCannotBypassLockedPolicy()' passed on 'My Mac - Alfie (24189)' (0.000 seconds)
+Test case 'FramingRegressionTests/steadyFollowSettlesByCaptureTimeAtEverySupportedRate(fps:)' passed on 'My Mac - Alfie (24189)' (0.000 seconds)
+Test case 'FramingRegressionTests/bandExitRequiresFreshElapsedEvidence(fps:)' passed on 'My Mac - Alfie (24189)' (0.000 seconds)
+Test case 'FramingRegressionTests/steadyFollowSettlesByCaptureTimeAtEverySupportedRate(fps:)' passed on 'My Mac - Alfie (24189)' (0.000 seconds)
+Test case 'FramingRegressionTests/bandExitRequiresFreshElapsedEvidence(fps:)' passed on 'My Mac - Alfie (24189)' (0.000 seconds)
+Test case 'FramingRegressionTests/steadyFollowSettlesByCaptureTimeAtEverySupportedRate(fps:)' passed on 'My Mac - Alfie (24189)' (0.000 seconds)
+Test case 'CropStabilityTests/widePresetIsACappedCropNotTheFullPicture()' passed on 'My Mac - Alfie (24189)' (0.000 seconds)
+Test case 'ReacquisitionEvidenceRegressionTests/missingObservationBreaksConsecutiveEvidence()' passed on 'My Mac - Alfie (24189)' (0.000 seconds)
+Test case 'CropStabilityTests/stationarySubjectKeepsStableCropSize()' passed on 'My Mac - Alfie (24189)' (0.000 seconds)
+Test case 'FramingRegressionTests/bandExitRequiresFreshElapsedEvidence(fps:)' passed on 'My Mac - Alfie (24189)' (0.000 seconds)
+Test case 'CropStabilityTests/realApproachReframesPastHysteresisBand()' passed on 'My Mac - Alfie (24189)' (0.000 seconds)
+Test case 'CropStabilityTests/closeRangeFullBodyStaysCappedAndFollowable()' passed on 'My Mac - Alfie (24189)' (0.000 seconds)
+Test case 'FramingRegressionTests/tallStageSubjectNeverReversesPresetOrderAcrossProfiles()' passed on 'My Mac - Alfie (24189)' (0.000 seconds)
+Test case 'CropStabilityTests/positionStillTracksWhileSizeIsFrozen()' passed on 'My Mac - Alfie (24189)' (0.000 seconds)
+Test case 'ReacquisitionEvidenceRegressionTests/landmarkVetoedBystanderDoesNotRelaxSoloThreshold()' passed on 'My Mac - Alfie (24189)' (0.000 seconds)
+Test case 'ReacquisitionEvidenceRegressionTests/oneCrowdBatchCountsAsOneSighting()' passed on 'My Mac - Alfie (24189)' (0.000 seconds)
+Test case 'CropStabilityTests/holdDurationIsOperatorSetTenSeconds()' passed on 'My Mac - Alfie (24189)' (0.000 seconds)
+Test case 'ReacquisitionEvidenceRegressionTests/threeDistinctCompleteObservationBatchesAreRequired()' passed on 'My Mac - Alfie (24189)' (0.000 seconds)
+Test case 'FramingRegressionTests/stagePresetNamesDescribeTheActiveFormat()' passed on 'My Mac - Alfie (24189)' (0.000 seconds)
+Test case 'CropStabilityTests/closeRangeWaistUpStaysCappedAndFollowable()' passed on 'My Mac - Alfie (24189)' (0.000 seconds)
+Test case 'GalleryRefreshCadenceTests/stopsGrantingAfterLockReleased()' passed on 'My Mac - Alfie (24189)' (0.000 seconds)
+Test case 'FramingRegressionTests/validationPlaybackUsesAbsolutePresentationTime()' passed on 'My Mac - Alfie (24189)' (0.000 seconds)
+Test case 'CropStabilityTests/tightShotDampsVerticalHeadBob()' passed on 'My Mac - Alfie (24189)' (0.000 seconds)
+Test case 'ReacquisitionEvidenceRegressionTests/lateOlderObservationCannotAdvanceEvidence()' passed on 'My Mac - Alfie (24189)' (0.000 seconds)
+Test case 'ReacquisitionEvidenceRegressionTests/ambiguousBatchBreaksConsecutiveEvidence()' passed on 'My Mac2026-09-06 21:16:17.820 xcodebuild[24175:1111492] [MT] IDETestOperationsObserverDebug: 1.497 elapsed -- Testing started completed.
+2026-09-06 21:16:17.820 xcodebuild[24175:1111492] [MT] IDETestOperationsObserverDebug: 0.000 sec, +0.000 sec -- start
+2026-09-06 21:16:17.820 xcodebuild[24175:1111492] [MT] IDETestOperationsObserverDebug: 1.497 sec, +1.497 sec -- end
+
+Test session results, code coverage, and logs:
+	/tmp/alfie-fixes-build/Logs/Test/Test-CinematicCoreMacOS-2026.09.06_21-16-15-+1000.xcresult
+
+** TEST SUCCEEDED **
+
+ - Alfie (24189)' (0.000 seconds)
+Test case 'GalleryRefreshCadenceTests/grantsOnceThenThrottlesWithinSpacingWindow()' passed on 'My Mac - Alfie (24189)' (0.000 seconds)
+Test case 'FramingRegressionTests/steadyFollowBandScalesToTheVisibleProgramCrop()' passed on 'My Mac - Alfie (24189)' (0.000 seconds)

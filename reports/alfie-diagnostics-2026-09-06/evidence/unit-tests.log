@@ -1,0 +1,144 @@
+Command line invocation:
+    /Applications/Xcode.app/Contents/Developer/usr/bin/xcodebuild -project CinematicCoreMacOS/CinematicCoreMacOS.xcodeproj -scheme CinematicCoreMacOS -configuration Debug -destination platform=macOS -derivedDataPath /tmp/alfie-diagnostics/build "-only-testing:CinematicCoreMacOSTests" -parallel-testing-enabled NO CODE_SIGNING_ALLOWED=NO test-without-building
+
+Build settings from command line:
+    CODE_SIGNING_ALLOWED = NO
+
+--- xcodebuild: WARNING: Using the first of multiple matching destinations:
+{ platform:macOS, arch:arm64, id:00006040-000A70203AA0801C, name:My Mac }
+{ platform:macOS, arch:x86_64, id:00006040-000A70203AA0801C, name:My Mac }
+2026-09-06 10:05:31.699006+1000 Alfie[16202:645094] [Connection] Unable to get synchronousRemoteObjectProxy, error: Error Domain=NSCocoaErrorDomain Code=4097 "connection to service named com.apple.linkd.autoShortcut" UserInfo={NSDebugDescription=connection to service named com.apple.linkd.autoShortcut}
+2026-09-06 10:05:31.699705+1000 Alfie[16202:645097] [Connection] Unable to get synchronousRemoteObjectProxy, error: Error Domain=NSCocoaErrorDomain Code=4097 "connection to service named com.apple.linkd.autoShortcut" UserInfo={NSDebugDescription=connection to service named com.apple.linkd.autoShortcut}
+2026-09-06 10:05:31.699474+1000 Alfie[16202:645093] [Connection] Unable to get synchronousRemoteObjectProxy, error: Error Domain=NSCocoaErrorDomain Code=4097 "connection to service named com.apple.linkd.autoShortcut" UserInfo={NSDebugDescription=connection to service named com.apple.linkd.autoShortcut}
+2026-09-06 10:05:31.700098+1000 Alfie[16202:645099] [Connection] Unable to get synchronousRemoteObjectProxy, err2026-09-06 10:05:31.699904+1000 Alfie[16202:645098] [Connection] Unable to get synchronousRemoteObjectProxy, error: Error Domain=NSCocoaErrorDomain Code=4097 "connection to service named com.apple.linkd.autoShortcut" UserInfo={NSDebugDescription=connection to service named com.apple.linkd.autoShortcut}
+2026-09-06 10:05:31.700302+1000 Alfie[16202:645100] [Connection] Unable to get synchronousRemoteObjectProxy, error: Error Domain=NSCocoaErrorDomain Code=4097 "connection to service named com.apple.linkd.autoShortcut" UserInfo={NSDebugDescription=connection to service named com.apple.linkd.autoShortcut}
+2026-09-06 10:05:31.697575+1000 Alfie[16202:645088] [Connection] Unable to get synchronousRemoteObjectProxy, error: Error Domain=NSCocoaErrorDomain Code=4097 "connection to service named com.apple.linkd.autoShortcut" UserInfo={NSDebugDescription=connection to service named com.apple.linkd.autoShortcut}
+2026-09-06 10:05:31.697820+1000 Alfie[16202:645089] [Connection] Unable to get synchronousRemoteObjectProxy, err2026-09-06 10:05:31.698576+1000 Alfie[16202:645092] [Connection] Unable to get synchronousRemoteObjectProxy, error: Error Domain=NSCocoaErrorDomain Code=4097 "connection to service named com.apple.linkd.autoShortcut" UserInfo={NSDebugDescription=connection to service named com.apple.linkd.autoShortcut}
+2026-09-06 10:05:31.698781+1000 Alfie[16202:645090] [Connection] Unable to get synchronousRemoteObjectProxy, error: Error Domain=NSCocoaErrorDomain Code=4097 "connection to service named com.apple.linkd.autoShortcut" UserInfo={NSDebugDescription=connection to service named com.apple.linkd.autoShortcut}
+2026-09-06 10:05:31.700420+1000 Alfie[16202:645088] [Connection] Unable to re-register with Process Instance Registry, error: Error Domain=NSCocoaErrorDomain Code=4097 "connection to service named com.apple.linkd.autoShortcut" UserInfo={NSDebugDescription=connection to service named com.apple.linkd.autoShortcut}
+2026-09-06 10:05:31.700429+1000 Alfie[16202:645098] [Connection] Unable to re-register with Process Instance Registry, error: Error Domain=NSCocoaErrorDomain Code=4097 "connection to service named com.apple.linkd.autoShortcut" UserInfo={NSDebugDescription=connection to service named com.apple.linkd.autoShortcut}
+2026-09-06 10:05:31.700430+1000 Alfie[16202:645100] [Connection] Unable to re-register with Process Instance Registry, error: Error Domain=NSCocoaErrorDomain Code=4097 "connection to service named com.apple.linkd.autoShortcut" UserInfo={NSDebugDescription=connection to service named com.apple.linkd.autoShortcut}
+2026-09-06 10:05:31.696404+1000 Alfie[16202:645084] [Connection] Unable to get synchronousRemoteObjectProxy, error: Error Domain=NSCocoaErrorDomain Code=4097 "connection to service named com.apple.linkd.autoShortcut" UserInfo={NSDebugDescription=connection to service named com.apple.linkd.autoShortcut}
+2026-09-06 10:05:31.700443+1000 Alfie[16202:645092] [Connection] Unable to re-register with Process Instance Registry, error: Error Domain=NSCocoaErrorDomain Code=4097 "connection to service named com.apple.linkd.autoShortcut" UserInfo={NSDebugDescription=connection to service named com.apple.linkd.autoShortcut}
+2026-09-06 10:05:31.700444+1000 Alfie[16202:645094] [Connection] Unable to re-register with Process Instance Registry, error: Error Domain=NSCocoaErrorDomain Code=4097 "connection to service named com.apple.linkd.autoShortcut" UserInfo={NSDebugDescription=connection to service named com.apple.linkd.autoShortcut}
+or: Error Domain=NSCocoaErrorDomain Code=4097 "connection to service named com.apple.linkd.autoShortcut" UserInfo={NSDebugDescription=connection to service named com.apple.linkd.autoShortcut}
+or: Error Domain=NSCocoaErrorDomain Code=4097 "connection to service named com.apple.linkd.autoShortcut" UserInfo={NSDebugDescription=connection to service named com.apple.linkd.autoShortcut}
+2026-09-06 10:05:31.697271+1000 Alfie[16202:645078] [Connection] Unable to get synchronousRemoteObjectPr2026-09-06 10:05:31.698110+1000 Alfie[16202:645087] [Connection] Unable to get synchronousRemoteObjectProxy, error: Error Domain=NSCocoaErrorDomain Code=4097 "connection to service named com.apple.linkd.autoShortcut" UserInfo={NSDebugDescription=connection to service named com.apple.linkd.autoShortcut}
+2026-09-06 10:05:31.699259+1000 Alfie[16202:645095] [Connection] Unable to get synchronousRemoteObjectProxy, error: Error Domain=NSCocoaErrorDomain Code=4097 "connection to service named com.apple.linkd.autoShortcut" UserInfo={NSDebugDescription=connection to service named com.apple.linkd.autoShortcut}
+2026-09-06 10:05:31.698344+1000 Alfie[16202:645091] [Connection] Unable to get synchronousRemoteObjectProxy, error: Error Domain=NSCocoaErrorDomain Code=4097 "connection to service named com.apple.linkd.autoShortcut" UserInfo={NSDebugDescription=connection to service named com.apple.linkd.autoShortcut}
+2026-09-06 10:05:31.700483+1000 Alfie[16202:645097] [Connection] Unable to re-register with Process Instance Registry, error: Error Domain=NSCocoaErrorDomain Code=4097 "connection to service named com.apple.linkd.autoShortcut" UserInfo={NSDebugDescription=connection to service named com.apple.linkd.autoShortcut}
+2026-09-06 10:05:31.700723+1000 Alfie[16202:645089] [Connection] Unable to re-register with Process Instance Registry, error: Error Domain=NSCocoaErrorDomain Code=4097 "connection to service named com.apple.linkd.autoShortcut" UserInfo={NSDebugDescription=connection to service named com.apple.linkd.autoShortcut}
+2026-09-06 10:05:31.700647+1000 Alfie[16202:645100] [Connection] Will NOT re-try to establish the connection
+oxy, error: Error Domain=NSCocoaErrorDomain Code=4097 "connection to service named com.apple.linkd.autoShortcut" UserInfo={NSDebugDescription=connection to service named com.apple.linkd.autoShortcut}
+2026-09-06 10:05:31.696732+1000 Alfie[16202:645077] [Connection] Unable to get synchronousRemoteObjectProxy, error: Error Domain=NSCocoaErrorDomain Code=4097 "connection to service named com.apple.linkd.autoShortcut" UserInfo={NSDebugDescription=connection to service named com.apple.linkd.autoShortcut}
+2026-09-06 10:05:31.700729+1000 Alfie[16202:645099] [Connection] Unable to re-register with Process Instance Registry, error: Error Domain=NSCocoaErrorDomain Code=4097 "connection to service named com.apple.linkd.autoShortcut" UserInfo={NSDebugDescription=connection to service named com.apple.linkd.autoShortcut}
+2026-09-06 10:05:31.697028+1000 Alfie[16202:645086] [Connection] Unable to get synchronousRemoteObjectProxy, error: Error Domain=NSCocoaErrorDomain Code=4097 "connection to service named com.apple.linkd.autoShortcut" UserInfo={NSDebugDescription=connection to service named com.apple.linkd.autoShortcut}
+2026-09-06 10:05:31.700483+1000 Alfie[16202:645093] [Connection] Unable to re-register with Process Instance Registry, error: Error Domain=NSCocoaErrorDomain Code=4097 "connection to service named com.apple.linkd.autoShortcut" UserInfo={NSDebugDescription=connection to service named com.apple.linkd.autoShortcut}
+2026-09-06 10:05:31.700450+1000 Alfie[16202:645090] [Connection] Unable to re-register with Process Instance Registry, error: Error Domain=NSCocoaErrorDomain Code=4097 "connection to service named com.apple.linkd.autoShortcut" UserInfo={NSDebugDescription=connection to service named com.apple.linkd.autoShortcut}
+2026-09-06 10:05:31.700736+1000 Alfie[16202:645087] [Connection] Unable to re-register with Process Instance Registry, error: Error Domain=NSCocoaErrorDomain Code=4097 "connection to service named com.apple.linkd.autoShortcut" UserInfo={NSDebugDescription=connection to service named com.apple.link2026-09-06 10:05:31.702190+1000 Alfie[16202:645078] [Connection] Unable to re-register with Process Instance Registry, error: Error Domain=NSCocoaErrorDomain Code=4097 "connection to service named com.apple.linkd.autoShortcut" UserInfo={NSDebugDescription=connection to service named com.apple.linkd.autoShortcut}
+2026-09-06 10:05:31.702203+1000 Alfie[16202:645101] [Connection] Unable to get synchronousRemoteObjectProxy, error: Error Domain=NSCocoaErrorDomain Code=4097 "connection to service named com.apple.linkd.autoShortcut" UserInfo={NSDebugDescription=connection to service named com.apple.linkd.autoShortcut}
+2026-09-06 10:05:31.702625+1000 Alfie[16202:645086] [Connection] Unable to re-register with Process Instance Registry, error: Error Domain=NSCocoaErrorDomain Code=4097 "connection to service named com.apple.linkd.autoShortcut" UserInfo={NSDebugDescription=connection to service named com.apple.linkd.autoShortcut}
+d.autoShortcut}
+2026-09-06 10:05:31.700741+1000 Alfie[16202:645095] [Connection] Unable to r2026-09-06 10:05:31.702184+1000 Alfie[16202:645077] [Connection] Unable to re-register with Process Instance Registry, error: Error Domain=NSCocoaErrorDomain Code=4097 "connection to service named com.apple.linkd.autoShortcut" UserInfo={NSDebugDescription=connection to service named com.apple.linkd.autoShortcut}
+2026-09-06 10:05:31.700452+1000 Alfie[16202:645084] [Application] Error registering app with intents framework: Error Domain=NSCocoaErrorDomain Code=4097 "connection to service named com.apple.linkd.autoShortcut" UserInfo={NSDebugDescription=connection to service named com.apple.linkd.autoShortcut}
+e-register with Process Instance Registry, error: Error Domain=NSCocoaErrorDomain Code=4097 "connection to service named com.apple.linkd.autoShortcut" UserInfo={NSDebugDescription=connection to service named com.apple.linkd.autoShortcut}
+2026-09-06 10:05:31.702648+1000 Alfie[16202:645101] [Connection] Unable to re-register with Process Instance Registry, error: Error Domain=NSCocoaErrorDomain Code=4097 "con2026-09-06 10:05:31.700738+1000 Alfie[16202:645091] [Connection] Unable to re-register with Process Instance Registry, error: Error Domain=NSCocoaErrorDomain Code=4097 "connection to service named com.apple.linkd.autoShortcut" UserInfo={NSDebugDescription=connection to service named com.apple.linkd.autoShortcut}
+nection to service named com.apple.linkd.autoShortcut" UserInfo={NSDebugDescription=connection to service named com.apple.linkd.autoShortcut}
+2026-09-06 10:05:31.715713+1000 Alfie[16202:644996] [CropEngine] CropEngine initialized with Metal device: Apple M4 Pro
+2026-09-06 10:05:31.715761+1000 Alfie[16202:644996] [Camera] CropEngine initialized successfully
+2026-09-06 10:05:31.716154+1000 Alfie[16202:644996] [Camera] Discovering cameras
+2026-09-06 10:05:31.727401+1000 Alfie[16202:644996] [plugin] AddInstanceForFactory: No factory registered for id <CFUUID 0x8b114bfe0> F8BB1C28-BAE8-11D6-9C31-00039315CD46
+2026-09-06 10:05:31.752269+1000 Alfie[16202:645101] [] CMIOExtensionProviderHostContext.m:75:-[CMIOExtensionProviderHostContext initWithConnection:delegate:]_block_invoke [0] received Connection invalid
+2026-09-06 10:05:31.752356+1000 Alfie[16202:645101] [] CMIOExtensionProviderHostContext.m:1282:-[CMIOExtensionProviderHostContext sendEmptyClientInfo]_block_invoke received Connection invalid
+2026-09-06 10:05:31.752366+1000 Alfie[16202:644996] [] CMIOExtensionProviderHostContext.m:434:-[CMIOExtensionProviderHostContext pluginStates:] received Connection invalid
+2026-09-06 10:05:31.752393+1000 Alfie[16202:644996] [] CMIOExtensionSession.m:1309:-[CMIOExtensionSessionProvider initWithEndpoint:delegate:]_block_invoke failed getting the states of the plugin error Error Domain=NSOSStatusErrorDomain Code=-7 "kCSIdentityInvalidPosixNameErr"
+2026-09-06 10:05:31.752456+1000 Alfie[16202:644996] [] CMIO_DAL_CMIOExtension_PlugIn.mm:316:-[CMIODALExtensionPlugIn initWithPlugIn:endpoint:] plugin 37 / <CMIOExtensionSessionProvider> provider bundleID com.apple.appleh13camerad endpoint 0x8b096d060 could not call devices/properties initializer
+2026-09-06 10:05:31.752480+1000 Alfie[16202:644996] [] CMIO_DAL_CMIOExtension_PlugIn.mm:754:Initialize invalid provider state
+2026-09-06 10:05:31.752521+1000 Alfie[16202:644996] [] CMIO_DAL_CMIOExtension_PlugIn.mm:163:-[CMIODALExtensionSession updateStateWithExtensionsArrived:extensionsRemoved:] an error occurred
+2026-09-06 10:05:31.760829+1000 Alfie[16202:644996] [] CMIO_DAL_CMIOExtension_Device.mm:373:Device legacy uuid isn't present, using new style uuid instead
+2026-09-06 10:05:31.760872+1000 Alfie[16202:644996] [] CMIO_DAL_CMIOExtension_Device.mm:373:Device legacy uuid isn't present, using new style uuid instead
+2026-09-06 10:05:31.761652+1000 Alfie[16202:644996] [] CMIO_DAL_CMIOExtension_Stream.mm:1906:GetPropertyData background replacement pixel buffer size invalid or not available
+2026-09-06 10:05:31.761674+1000 Alfie[16202:644996] [] CMIOHardware.cpp:331:CMIOObjectGetPropertyData Error: 2003332927, failed
+2026-09-06 10:05:31.773181+1000 Alfie[16202:644996] [Camera] Selected camera: MacBook Pro Camera
+2026-09-06 10:05:31.816975+1000 Alfie[16202:644996] ApplePersistenceIgnoreState: Existing state will not be touched. New state will be written to /var/folders/58/vj_m9q91351608zhf9_p46n40000gn/T/Morris.CinematicCoreMacOS.savedState
+2026-09-06 10:05:31.830203+1000 Alfie[16202:644996] [SystemExtensionActivation] Refreshing system-extension status for Morris.CinematicCoreMacOS.CinematicCoreExtension; appBundle=/private/tmp/alfie-diagnostics/build/Build/Products/Debug/Alfie.app
+2026-09-06 10:05:31.923254+1000 Alfie[16202:644996] [SystemExtensionActivation] Found 0 system-extension properties for Morris.CinematicCoreMacOS.CinematicCoreExtension
+2026-09-06 10:05:31.923293+1000 Alfie[16202:644996] [SystemExtensionActivation] System-extension status -> notInstalled
+Test Suite 'All tests' started at 2026-09-06 10:05:32.304.
+Test Suite 'All tests' passed at 2026-09-06 10:05:32.304.
+	 Executed 0 tests, with 0 failures (0 unexpected) in 0.000 (0.000) seconds
+◇ Test run started.
+↳ Testing Library Version: 1501
+↳ Target Platform: arm64e-apple-macos14.0
+◇ Suite CinematicCoreMacOSTests started.
+◇ Test example() started.
+✔ Test example() passed after 0.001 seconds.
+✔ Suite CinematicCoreMacOSTests passed after 0.001 seconds.
+◇ Suite DetectionCadenceTests started.
+◇ Test intervalTwoRunsEverySecondEligibleFrame() started.
+✔ Test intervalTwoRunsEverySecondEligibleFrame() passed after 0.001 seconds.
+◇ Test intervalThreeSkipsThenRunsOnMultiples() started.
+✔ Test intervalThreeSkipsThenRunsOnMultiples() passed after 0.001 seconds.
+◇ Test intervalOneRunsEveryEligibleFrame() started.
+✔ Test intervalOneRunsEveryEligibleFrame() passed after 0.001 seconds.
+◇ Test degenerateIntervalStillRuns() started.
+✔ Test degenerateIntervalStillRuns() passed after 0.001 seconds.
+✔ Suite DetectionCadenceTests passed after 0.009 seconds.
+◇ Suite CropStabilityTests started.
+◇ Test stationarySubjectKeepsStableCropSize() started.
+✔ Test stationarySubjectKeepsStableCropSize() passed after 0.001 seconds.
+◇ Test positionStillTracksWhileSizeIsFrozen() started.
+✔ Test positionStillTracksWhileSizeIsFrozen() passed after 0.001 seconds.
+◇ Test realApproachReframesPastHysteresisBand() started.
+✔ Test realApproachReframesPastHysteresisBand() passed after 0.001 seconds.
+◇ Test widePresetIsACappedCropNotTheFullPicture() started.
+✔ Test widePresetIsACappedCropNotTheFullPicture() passed after 0.001 seconds.
+◇ Test holdDurationIsOperatorSetTenSeconds() started.
+✔ Test holdDurationIsOperatorSetTenSeconds() passed after 0.001 seconds.
+◇ Test closeRangeWaistUpStaysCappedAndFollowable() started.
+✔ Test closeRangeWaistUpStaysCappedAndFollowable() passed after 0.001 seconds.
+◇ Test closeRangeFullBodyStaysCappedAndFollowable() started.
+✔ Test closeRangeFullBodyStaysCappedAndFollowable() passed after 0.001 seconds.
+◇ Test tightShotDampsVerticalHeadBob() started.
+✔ Test tightShotDampsVerticalHeadBob() passed after 0.001 seconds.
+✔ Suite CropStabilityTests passed after 0.012 seconds.
+◇ Suite GalleryRefreshCadenceTests started.
+◇ Test grantsOnceThenThrottlesWithinSpacingWindow() started.
+2026-09-06 10:05:32.328495+1000 Alfie[16202:644996] [Vision] LOCK-STATE old=inactive new=acquiring reason=operator_select target=06BA2B5C
+✔ Test grantsOnceThenThrottlesWithinSpacingWindow() passed after 0.001 seconds.
+◇ Test stopsGrantingAfterLockReleased() started.
+2026-09-06 10:05:32.328918+1000 Alfie[16202:644996] [Vision] LOCK-STATE old=inactive new=acquiring reason=operator_select target=1CF19BF7
+2026-09-06 10:05:32.328930+1000 Alfie[16202:644996] [Vision] LOCK-STATE old=tracking new=inactive reason=operator_release
+✔ Test stopsGrantingAfterLockReleased() passed after 0.001 seconds.
+✔ Suite GalleryRefreshCadenceTests passed after 0.001 seconds.
+◇ Suite LockedTrackMatcherTests started.
+◇ Test stationarySubjectInstantAcceptsEveryFrame() started.
+✔ Test stationarySubjectInstantAcceptsEveryFrame() passed after 0.001 seconds.
+◇ Test reappearsInPlaceAfterMissedFramesInstantAccepts() started.
+✔ Test reappearsInPlaceAfterMissedFramesInstantAccepts() passed after 0.001 seconds.
+◇ Test stationaryLockRejectsCandidateOutsideBaseRadius() started.
+✔ Test stationaryLockRejectsCandidateOutsideBaseRadius() passed after 0.001 seconds.
+◇ Test discontinuousCandidateInsideRadiusRequiresProbationFrames() started.
+✔ Test discontinuousCandidateInsideRadiusRequiresProbationFrames() passed after 0.001 seconds.
+◇ Test contestedCandidateRequiresProbationFramesContested() started.
+✔ Test contestedCandidateRequiresProbationFramesContested() passed after 0.001 seconds.
+◇ Test crossingCandidatesWithinMarginNeverInstantAcceptsWhileBothPresent() started.
+✔ Test crossingCandidatesWithinMarginNeverInstantAcceptsWhileBothPresent() passed after 0.001 seconds.
+◇ Test subjectExitsFrameCoastsAndPreservesProbation() started.
+✔ Test subjectExitsFrameCoastsAndPreservesProbation() passed after 0.001 seconds.
+◇ Test adaptiveRadiusGrowsWithVelocityAndTime() started.
+✔ Test adaptiveRadiusGrowsWithVelocityAndTime() passed after 0.001 seconds.
+◇ Test resolveLockedAssignmentPerformance() started.
+✔ Test resolveLockedAssignmentPerformance() passed after 0.001 seconds.
+✔ Suite LockedTrackMatcherTests passed after 0.009 seconds.
+✔ Test run with 24 tests in 5 suites passed after 0.033 seconds.
+2026-09-06 10:05:32.609 xcodebuild[16195:644861] [MT] IDETestOperationsObserverDebug: 2.058 elapsed -- Testing started completed.
+2026-09-06 10:05:32.610 xcodebuild[16195:644861] [MT] IDETestOperationsObserverDebug: 0.000 sec, +0.000 sec -- start
+2026-09-06 10:05:32.610 xcodebuild[16195:644861] [MT] IDETestOperationsObserverDebug: 2.058 sec, +2.058 sec -- end
+
+Test session results, code coverage, and logs:
+	/tmp/alfie-diagnostics/build/Logs/Test/Test-CinematicCoreMacOS-2026.09.06_10-05-30-+1000.xcresult
+
+** TEST EXECUTE SUCCEEDED **
+
+Testing started

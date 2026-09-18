@@ -1,0 +1,13 @@
+probation bypass: Pass A accepted=false, full matcher rebound locked UUID=true
+distance rejection bypass: Pass A accepted=false, full matcher rebound locked UUID=true
+size rejection bypass: Pass A accepted=false, full matcher rebound locked UUID=true
+All 3 bypass reproductions confirmed using production assignTracks and resolver.
+Reacquisition: one observation each of A,B,C -> A count=3, pending A=true
+Body visible without face at 120s: acquiring=true
+First missing frame after 120s: state=inactive
+Missing subject at 9.9s: holding=true
+Missing subject at 10.01s: wideWaiting=true
+Composer diagnosis checks complete.
+Large subject preset wide: crop height 0.85
+Large subject preset fullBody: crop height 0.95
+Large subject preset waistUp: crop height 0.8

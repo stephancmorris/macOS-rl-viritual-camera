@@ -21,9 +21,10 @@ private final class SendablePixelBufferBox: @unchecked Sendable {
     }
 }
 
-private nonisolated final class CaptureFrameProcessingGate: @unchecked Sendable {
+nonisolated final class CaptureFrameProcessingGate: @unchecked Sendable {
     private let lock = NSLock()
-    private var isProcessing = false
+    private var activeLease: UInt64?
+    private var leaseSequence: UInt64 = 0
     private var droppedFrames: UInt64 = 0
 
     // Windowed throughput diagnostics. The delivered rate here is the ceiling on
@@ -37,19 +38,20 @@ private nonisolated final class CaptureFrameProcessingGate: @unchecked Sendable 
 
     init() {}
 
-    func begin() -> Bool {
+    func begin() -> UInt64? {
         lock.lock()
         defer { lock.unlock() }
-        guard !isProcessing else {
+        guard activeLease == nil else {
             droppedFrames &+= 1
             windowDropped &+= 1
             logThroughputIfDueLocked()
-            return false
+            return nil
         }
-        isProcessing = true
+        leaseSequence &+= 1
+        activeLease = leaseSequence
         windowDelivered &+= 1
         logThroughputIfDueLocked()
-        return true
+        return leaseSequence
     }
 
     /// Caller must hold `lock`. Emits a delivered/dropped FPS summary once the
@@ -62,7 +64,7 @@ private nonisolated final class CaptureFrameProcessingGate: @unchecked Sendable 
         let droppedFPS = Double(windowDropped) / elapsed
         let total = windowDelivered + windowDropped
         let dropPercent = total > 0 ? Double(windowDropped) / Double(total) * 100.0 : 0
-        let targetRate = ShowStandard.current.frameRate
+        let targetRate = ShowStandard.activeOrCurrent.frameRate
         Self.logger.notice(
             "Capture throughput: \(deliveredFPS, format: .fixed(precision: 1)) fps delivered to pipeline (target \(targetRate, format: .fixed(precision: 0))), dropped \(droppedFPS, format: .fixed(precision: 1)) fps (\(dropPercent, format: .fixed(precision: 1))% of frames)"
         )
@@ -71,16 +73,22 @@ private nonisolated final class CaptureFrameProcessingGate: @unchecked Sendable 
         windowDropped = 0
     }
 
-    func finish() {
+    func isCurrent(_ lease: UInt64) -> Bool {
         lock.lock()
         defer { lock.unlock() }
-        isProcessing = false
+        return activeLease == lease
+    }
+
+    func finish(_ lease: UInt64) {
+        lock.lock()
+        defer { lock.unlock() }
+        if activeLease == lease { activeLease = nil }
     }
 
     func reset() {
         lock.lock()
         defer { lock.unlock() }
-        isProcessing = false
+        activeLease = nil
         droppedFrames = 0
         windowStart = CACurrentMediaTime()
         windowDelivered = 0
@@ -296,7 +304,7 @@ final class CameraManager: NSObject, ObservableObject {
 
     /// Most recent completed detection set. Read every frame; written only when
     /// a detection finishes.
-    private var lastDetections: [PersonDetector.DetectedPerson] = []
+    private let detectionFrames = DetectionFrameStore()
 
     /// One detection at a time. Without this, a pipeline that falls behind would
     /// queue detections faster than they complete and spawn unbounded work.
@@ -306,8 +314,7 @@ final class CameraManager: NSObject, ObservableObject {
     /// `consumedDetectionRevision` tells a frame whether its detections are new
     /// or a repeat of the previous frame's — which matters because several
     /// framing rules count *consecutive frames* and a repeat is not evidence.
-    private var detectionRevision: UInt64 = 0
-    private var consumedDetectionRevision: UInt64 = 0
+    private var captureGeneration: UInt64 = 0
 
     /// Frame counter driving `DeveloperFlags.detectionFrameInterval`.
     private var detectionFrameCounter: UInt64 = 0
@@ -342,24 +349,42 @@ final class CameraManager: NSObject, ObservableObject {
     /// (so the detection plan knows whether Vision will run); this function
     /// only re-checks and arms the work. Returns immediately either way — the
     /// caller never awaits.
+    private func invalidateDetection(clearTracks: Bool = true) {
+        detectionFrames.invalidate()
+        personDetector.invalidatePendingWork(clearTracks: clearTracks)
+        detectionFrameCounter = 0
+        if clearTracks { lastSubjectROIBox = nil }
+        // Leave detectionInFlight armed until the old job actually completes.
+    }
+
     private func scheduleDetectionIfDue(
         pixelBuffer: CVPixelBuffer,
+        sourceTimestamp: Double,
         plan: PersonDetector.DetectionRequestPlan,
         due: Bool
     ) {
         guard due, !detectionInFlight else { return }
-        // The slot was already counted in processFrame; nothing to advance here.
-
         detectionInFlight = true
-        // Retains the capture buffer for the life of the detection. Bounded to
-        // one frame by `detectionInFlight`, so the capture pool cannot starve.
+        let generation = detectionFrames.generation
+        let id = detectionFrames.nextObservationID()
+        let capturedAt = CACurrentMediaTime()
         let box = SendablePixelBufferBox(pixelBuffer)
         Task { [weak self] in
             guard let self else { return }
+            defer { self.detectionInFlight = false }
+            // The task may sit behind other MainActor work after it was
+            // scheduled. Do not let it begin Vision under a newer
+            // session/target generation and mutate the detector before the
+            // frame store gets its post-work rejection chance.
+            guard self.detectionFrames.generation == generation else { return }
             let persons = await self.personDetector.processFrame(box.pixelBuffer, plan: plan)
-            self.lastDetections = persons
-            self.detectionRevision &+= 1
-            self.detectionInFlight = false
+            let frame = DetectionFrame(observationID: id, capturedAt: capturedAt,
+                sourceTimestamp: sourceTimestamp, pixelBuffer: box.pixelBuffer, persons: persons,
+                queueWait: self.personDetector.stats.lastQueueWait,
+                detectionDuration: self.personDetector.stats.lastDetectionTime)
+            guard self.detectionFrames.publish(frame, generation: generation) else { return }
+            self.programOutput.recordDetectionTiming(queueWait: frame.queueWait, visionWall: frame.detectionDuration)
+            self.programOutput.recordLatency(stage: .detection, duration: frame.detectionDuration)
         }
     }
 
@@ -495,7 +520,7 @@ final class CameraManager: NSObject, ObservableObject {
         // Capture format preference and the playout clock must come from the same
         // selection, so this reads the persisted show standard rather than a
         // constant. Defaults to 1080p50 (50.0) when nothing is persisted.
-        static var targetFrameRate: Double { ShowStandard.current.frameRate }
+        static var targetFrameRate: Double { ShowStandard.activeOrCurrent.frameRate }
         static let pixelFormat = kCVPixelFormatType_32BGRA
     }
     
@@ -605,6 +630,8 @@ final class CameraManager: NSObject, ObservableObject {
     func startCapture() async throws {
         let sourceTitle = preferredInputSource.title
         Self.logger.notice("Starting capture from \(sourceTitle, privacy: .public)")
+        captureGeneration &+= 1
+        invalidateDetection()
         frameProcessingGate.reset()
         programOutput.start()
 
@@ -669,6 +696,9 @@ final class CameraManager: NSObject, ObservableObject {
     /// Stop the capture session
     func stopCapture() {
         Self.logger.notice("Stopping capture")
+        captureGeneration &+= 1
+        invalidateDetection()
+        cancelDetection()
         clipPlaybackTask?.cancel()
         clipPlaybackTask = nil
         frameProcessingGate.reset()
@@ -694,6 +724,8 @@ final class CameraManager: NSObject, ObservableObject {
     /// Hold a wide safety shot while keeping the output path active.
     func returnToWide() {
         guard let cropEngine else { return }
+        cancelDetection()
+        invalidateDetection()
 
         activeMode = .wide
         shotComposer.reset(clearManualLock: true)
@@ -731,6 +763,7 @@ final class CameraManager: NSObject, ObservableObject {
     }
 
     func lockTarget(personID: UUID) {
+        invalidateDetection(clearTracks: false)
         // Selection made — leave discovery and begin acquisition. Cropping
         // stays wide until the gallery is ready (ShotComposer promotes
         // acquiring → tracking and we get the .acquired tick outcome).
@@ -757,6 +790,7 @@ final class CameraManager: NSObject, ObservableObject {
 
     /// Cancel discovery and return to the passive (off) state.
     func cancelDetection() {
+        invalidateDetection(clearTracks: false)
         detectionDiscoveryActive = false
         pendingTapPoint = nil
         pendingTapIsRetarget = false
@@ -779,6 +813,7 @@ final class CameraManager: NSObject, ObservableObject {
     /// WIDE-WAITING.
     func selectSubject(at point: CGPoint) {
         guard detectionDiscoveryActive || canDirectlyReacquire else { return }
+        invalidateDetection(clearTracks: false)
         pendingTapPoint = point
         pendingTapIsRetarget = false
         tapPending = true
@@ -798,6 +833,7 @@ final class CameraManager: NSObject, ObservableObject {
     /// the held point exactly as a first selection would.
     func retargetSubject(at point: CGPoint) {
         guard shotComposer.manualLockedTargetID != nil else { return }
+        invalidateDetection(clearTracks: false)
         pendingTapPoint = point
         pendingTapIsRetarget = true
         tapPending = true
@@ -807,6 +843,7 @@ final class CameraManager: NSObject, ObservableObject {
     /// Differs from `returnToWide()` which snaps — this animates so the
     /// operator gets a soft pull-back when tapping "unlock" on the lock pill.
     func clearManualTargetLock() {
+        invalidateDetection()
         activeMode = .wide
         detectionDiscoveryActive = false
         pendingTapPoint = nil
@@ -842,7 +879,7 @@ final class CameraManager: NSObject, ObservableObject {
                 mode: .acquiring,
                 roi: lockedROI()
             )
-        case .tracking, .hold:
+        case .tracking:
             // Locked ROI scopes every request to the padded box and drops the
             // per-frame face request — a real latency/load win that stays the
             // default. The one exception is the throttled gallery refresh:
@@ -862,7 +899,7 @@ final class CameraManager: NSObject, ObservableObject {
                 mode: .lockedROI,
                 roi: lockedROI()
             )
-        case .wideWaiting:
+        case .hold, .wideWaiting:
             return PersonDetector.DetectionRequestPlan(mode: .reacquiring, roi: nil)
         case .inactive:
             return detectionDiscoveryActive
@@ -1041,6 +1078,7 @@ final class CameraManager: NSObject, ObservableObject {
         programOutput.updateCaptureStatus(isRunning: true)
 
         clipPlaybackTask?.cancel()
+        let playbackGeneration = captureGeneration
         clipPlaybackTask = Task.detached(priority: .userInitiated) { [weak self] in
             guard let self else { return }
 
@@ -1049,7 +1087,8 @@ final class CameraManager: NSObject, ObservableObject {
                     try await Self.playValidationClip(from: validationClipURL) { pixelBufferBox, timestampSeconds in
                         await self.processValidationFrame(
                             pixelBufferBox,
-                            timestampSeconds: timestampSeconds
+                            timestampSeconds: timestampSeconds,
+                            generation: playbackGeneration
                         )
                     }
 
@@ -1063,16 +1102,18 @@ final class CameraManager: NSObject, ObservableObject {
                     )
                 } while !Task.isCancelled
 
-                await self.finishValidationClipPlayback(cancelled: Task.isCancelled)
+                await self.finishValidationClipPlayback(cancelled: Task.isCancelled, generation: playbackGeneration)
             } catch is CancellationError {
-                await self.finishValidationClipPlayback(cancelled: true)
+                await self.finishValidationClipPlayback(cancelled: true, generation: playbackGeneration)
             } catch {
-                await self.handleValidationClipFailure(error)
+                await self.handleValidationClipFailure(error, generation: playbackGeneration)
             }
         }
     }
 
     private func processFrame(pixelBuffer: CVPixelBuffer, timestampSeconds: Double) async {
+        let sessionGeneration = captureGeneration
+        guard isRunning else { return }
         // NOTE: a `CIImage(cvPixelBuffer:)` used to be built here and never
         // used — one wasted image object per frame on the exact path the memory
         // investigation is looking at. Removed so it cannot muddy attribution.
@@ -1081,6 +1122,8 @@ final class CameraManager: NSObject, ObservableObject {
 
         let captureInterval = Self.signposter.beginInterval("captureFrame")
         let captureStart = CACurrentMediaTime()
+        var mainActiveTime: TimeInterval = 0
+        var mainSegmentStart = captureStart
         flushImageCachesIfDue(now: captureStart)
 
         programOutput.recordInputFrame(timestamp: timestampSeconds)
@@ -1126,7 +1169,6 @@ final class CameraManager: NSObject, ObservableObject {
         }
 
         let detectionInterval = Self.signposter.beginInterval("detection")
-        let detectionStart = CACurrentMediaTime()
         // Auto-cancel a stale discovery (operator tapped Detect but never
         // picked anyone) so we fall back to the passive off state.
         if detectionDiscoveryActive,
@@ -1155,38 +1197,52 @@ final class CameraManager: NSObject, ObservableObject {
         // The diagnostics CSV starts on the first frame that actually runs
         // Vision, not at capture start — the progressive lag only appears under
         // detection load, so `elapsed_s` should read as time under load.
-        if detectionPlan.runsVision {
-            programOutput.beginDiagnosticsSessionIfNeeded(note: "detection start")
+        if detectionPlan.runsVision, programOutput.diagnosticsFileName == nil {
+            let bundle = Bundle.main
+            let version = bundle.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "unknown"
+            let build = bundle.object(forInfoDictionaryKey: "CFBundleVersion") as? String ?? "unknown"
+            let recordedFingerprint = bundle.object(forInfoDictionaryKey: "AlfieSourceFingerprint") as? String
+            let fingerprint = recordedFingerprint.flatMap { $0.isEmpty ? nil : $0 } ?? "unrecorded"
+            programOutput.beginDiagnosticsSessionIfNeeded(note:
+                "detection start; app=\(version)(\(build)); source_fingerprint=\(fingerprint); input=\(activeInputSource.title); pixels=\(Int(bufferWidth))x\(Int(bufferHeight)); show_fps=\(ShowStandard.activeOrCurrent.frameRate); detection_interval=\(DeveloperFlags.detectionFrameInterval); smoothing=\(shotComposer.config.smoothingFactor); band=\(shotComposer.config.steadyBandWidth)")
         }
         // Hand the matcher the current operator lock so it can bind that track
         // first with a relaxed threshold (PersonDetector.swift assignTracks).
         personDetector.lockedTargetID = shotComposer.manualLockedTargetID
 
-        let detectedPersons: [PersonDetector.DetectedPerson]
         if !detectionPlan.runsVision {
-            // No Vision in these modes. Clear synchronously rather than
-            // suspending on the detector just to be told there is nothing to do.
+            // Release the retained source pixels immediately and reject any
+            // scheduled detection that has not entered Vision yet. Without
+            // this, an organic transition to off (for example discovery or
+            // acquisition timeout) can leave the latest observation buffer
+            // retained until the next explicit operator action.
+            detectionFrames.invalidate()
             personDetector.clearForInactiveMode()
-            lastDetections = []
-            detectedPersons = []
         } else if pendingTapPoint != nil {
-            // The operator's tap drives exactly one scan and they are waiting on
-            // the result, so this single frame still runs detection inline. It
-            // happens once per acquisition, not per frame.
-            detectedPersons = await personDetector.processFrame(pixelBuffer, plan: detectionPlan)
-            lastDetections = detectedPersons
-            detectionRevision &+= 1
+            let generation = detectionFrames.generation
+            let id = detectionFrames.nextObservationID()
+            let capturedAt = CACurrentMediaTime()
+            mainActiveTime += CACurrentMediaTime() - mainSegmentStart
+            let persons = await personDetector.processFrame(pixelBuffer, plan: detectionPlan)
+            mainSegmentStart = CACurrentMediaTime()
+            guard generation == detectionFrames.generation, sessionGeneration == captureGeneration else {
+                Self.signposter.endInterval("detection", detectionInterval)
+                Self.signposter.endInterval("captureFrame", captureInterval)
+                return
+            }
+            let frame = DetectionFrame(observationID: id, capturedAt: capturedAt,
+                sourceTimestamp: timestampSeconds, pixelBuffer: pixelBuffer, persons: persons,
+                queueWait: personDetector.stats.lastQueueWait, detectionDuration: personDetector.stats.lastDetectionTime)
+            detectionFrames.publish(frame, generation: generation)
+            programOutput.recordDetectionTiming(queueWait: frame.queueWait, visionWall: frame.detectionDuration)
+            programOutput.recordLatency(stage: .detection, duration: frame.detectionDuration)
         } else {
-            scheduleDetectionIfDue(pixelBuffer: pixelBuffer, plan: detectionPlan, due: detectionDue)
-            detectedPersons = lastDetections
+            scheduleDetectionIfDue(pixelBuffer: pixelBuffer, sourceTimestamp: timestampSeconds,
+                plan: detectionPlan, due: detectionDue)
         }
-
-        // True only on frames carrying a detection result not seen before. The
-        // framing rules that count consecutive frames must advance on these
-        // only — a repeated detection shows exactly zero movement, which would
-        // otherwise read as proof the subject has stopped.
-        let detectionIsFresh = detectionRevision != consumedDetectionRevision
-        consumedDetectionRevision = detectionRevision
+        let observation = detectionPlan.runsVision ? detectionFrames.consume(at: CACurrentMediaTime()) : (frame: nil, isFresh: false)
+        let detectedPersons = observation.frame?.persons ?? []
+        let detectionIsFresh = observation.isFresh
 
         // The pending tap drove exactly one ROI scan. Bind acquisition to the
         // detected person nearest the tap point. If nothing was found, keep
@@ -1227,17 +1283,9 @@ final class CameraManager: NSObject, ObservableObject {
                 lastSubjectROIBox = nil
             }
         }
-        let detectionDuration = CACurrentMediaTime() - detectionStart
         Self.signposter.endInterval("detection", detectionInterval)
-        // Timing is recorded only for frames that actually detected. Recording
-        // it every frame would repeat the last measurement and dilute the
-        // visionWall/queueWait means the diagnostics CSV reports.
-        if detectionIsFresh {
-            programOutput.recordDetectionTiming(
-                queueWait: personDetector.stats.lastQueueWait,
-                visionWall: personDetector.stats.lastDetectionTime
-            )
-            programOutput.recordLatency(stage: .detection, duration: detectionDuration)
+        if let observation = observation.frame {
+            programOutput.recordObservationAge(CACurrentMediaTime() - observation.capturedAt)
         }
 
         let composeInterval = Self.signposter.beginInterval("compose")
@@ -1252,8 +1300,10 @@ final class CameraManager: NSObject, ObservableObject {
         let lockOutcome = shotComposer.tick(
             detections: detectedPersons,
             timestamp: CACurrentMediaTime(),
-            pixelBuffer: pixelBuffer,
-            isFresh: detectionIsFresh
+            pixelBuffer: detectionIsFresh ? observation.frame?.pixelBuffer : nil,
+            isFresh: detectionIsFresh,
+            observationID: observation.frame?.observationID,
+            observationTimestamp: observation.frame?.capturedAt
         )
         switch lockOutcome {
         case .noChange:
@@ -1362,7 +1412,8 @@ final class CameraManager: NSObject, ObservableObject {
                             frameLog("🔍 DEBUG: Composing shot for person at \(primaryPerson.boundingBox)")
                             if let idealCrop = shotComposer.compose(
                                 person: primaryPerson,
-                                isFresh: detectionIsFresh
+                                isFresh: detectionIsFresh,
+                                observationTimestamp: observation.frame?.capturedAt
                             ) {
                                 cropEngine.setTargetCrop(idealCrop)
                             }
@@ -1445,17 +1496,26 @@ final class CameraManager: NSObject, ObservableObject {
                 // Render off the MainActor: the 4K Lanczos downscale no longer
                 // holds the thread the capture gate waits on. Snapshot first
                 // (MainActor), then await the serial render queue.
+                let renderGeneration = detectionFrames.generation
+                mainActiveTime += CACurrentMediaTime() - mainSegmentStart
                 let croppedBuffer = try await cropEngine.renderCrop(
                     pixelBuffer,
                     crop: snapshot.crop,
                     outputSize: snapshot.outputSize
                 )
+                mainSegmentStart = CACurrentMediaTime()
+                guard sessionGeneration == captureGeneration,
+                      renderGeneration == detectionFrames.generation, isRunning else {
+                    Self.signposter.endInterval("captureFrame", captureInterval)
+                    return
+                }
                 cropDuration = CACurrentMediaTime() - cropStart
                 programOutput.recordLatency(stage: .cropRender, duration: cropDuration)
                 cropEngine.publishRenderStats(renderTime: cropDuration)
                 frameLog("🔍 DEBUG: renderCrop returned successfully")
                 outputPixelBuffer = croppedBuffer
             } catch {
+                mainSegmentStart = CACurrentMediaTime()
                 Self.logger.error("Crop processing failed: \(error.localizedDescription, privacy: .public)")
                 programOutput.recordDroppedFrame(
                     timestamp: timestampSeconds,
@@ -1467,6 +1527,13 @@ final class CameraManager: NSObject, ObservableObject {
             composeDuration = CACurrentMediaTime() - composeStart
             Self.signposter.endInterval("compose", composeInterval)
             programOutput.recordLatency(stage: .compose, duration: composeDuration)
+        }
+
+        // A failed render can also resume after a stop/retarget. Never send
+        // its fallback source frame into the replacement session.
+        guard sessionGeneration == captureGeneration, isRunning else {
+            Self.signposter.endInterval("captureFrame", captureInterval)
+            return
         }
 
         // Only real detections are recorded. Logging repeats would teach the
@@ -1497,7 +1564,10 @@ final class CameraManager: NSObject, ObservableObject {
         croppedFrameBuffer = outputPixelBuffer
         programOutput.sendFrame(outputPixelBuffer, timestamp: timestampSeconds)
 
+        let detectionDuration = observation.frame?.detectionDuration ?? 0
         let totalDuration = CACurrentMediaTime() - captureStart
+        mainActiveTime += CACurrentMediaTime() - mainSegmentStart
+        programOutput.recordLatency(stage: .mainActor, duration: mainActiveTime)
         programOutput.recordLatency(stage: .total, duration: totalDuration)
         Self.signposter.endInterval("captureFrame", captureInterval)
 
@@ -1522,8 +1592,10 @@ final class CameraManager: NSObject, ObservableObject {
 
     private func processValidationFrame(
         _ pixelBufferBox: SendablePixelBufferBox,
-        timestampSeconds: Double
+        timestampSeconds: Double,
+        generation: UInt64
     ) async {
+        guard generation == captureGeneration else { return }
         await processFrame(
             pixelBuffer: pixelBufferBox.pixelBuffer,
             timestampSeconds: timestampSeconds
@@ -1534,14 +1606,17 @@ final class CameraManager: NSObject, ObservableObject {
         validationClipStatus = status
     }
 
-    private func handleValidationClipFailure(_ error: Error) {
+    private func handleValidationClipFailure(_ error: Error, generation: UInt64) {
+        guard generation == captureGeneration else { return }
         Self.logger.error("Validation clip playback failed: \(error.localizedDescription, privacy: .public)")
         self.error = .validationClipPlaybackFailed(error.localizedDescription)
         validationClipStatus = "Playback failed: \(error.localizedDescription)"
-        finishValidationClipPlayback(cancelled: false)
+        finishValidationClipPlayback(cancelled: false, generation: generation)
     }
 
-    private func finishValidationClipPlayback(cancelled: Bool) {
+    private func finishValidationClipPlayback(cancelled: Bool, generation: UInt64) {
+        guard generation == captureGeneration else { return }
+        invalidateDetection()
         guard activeInputSource == .validationClip || isRunning else { return }
 
         clipPlaybackTask = nil
@@ -1562,6 +1637,11 @@ final class CameraManager: NSObject, ObservableObject {
                 ? "Validation clip stopped."
                 : "Validation clip finished."
         }
+    }
+
+    nonisolated static func playbackDelay(sourceTimestamp: Double, firstTimestamp: Double,
+        playbackStart: Double, now: Double) -> Double {
+        max(0, playbackStart + max(0, sourceTimestamp - firstTimestamp) - now)
     }
 
     private nonisolated static func playValidationClip(
@@ -1596,22 +1676,18 @@ final class CameraManager: NSObject, ObservableObject {
             )
         }
 
-        var previousTimestamp: Double?
+        var firstTimestamp: Double?
+        let playbackStart = CACurrentMediaTime()
         while !Task.isCancelled, let sampleBuffer = output.copyNextSampleBuffer() {
             guard let pixelBuffer = CMSampleBufferGetImageBuffer(sampleBuffer) else {
                 continue
             }
 
             let timestampSeconds = CMSampleBufferGetPresentationTimeStamp(sampleBuffer).seconds
-            if let previousTimestamp {
-                let delta = max(0, timestampSeconds - previousTimestamp)
-                if delta > 0 {
-                    try await Task.sleep(
-                        nanoseconds: UInt64((delta * 1_000_000_000).rounded())
-                    )
-                }
-            }
-            previousTimestamp = timestampSeconds
+            if firstTimestamp == nil { firstTimestamp = timestampSeconds }
+            let delay = Self.playbackDelay(sourceTimestamp: timestampSeconds,
+                firstTimestamp: firstTimestamp!, playbackStart: playbackStart, now: CACurrentMediaTime())
+            if delay > 0 { try await Task.sleep(nanoseconds: UInt64(delay * 1_000_000_000)) }
 
             let pixelBufferBox = SendablePixelBufferBox(pixelBuffer)
             await onFrame(pixelBufferBox, timestampSeconds)
@@ -1760,21 +1836,21 @@ final class CameraManager: NSObject, ObservableObject {
             Self.logger.debug("\(range.minFrameRate, privacy: .public) to \(range.maxFrameRate, privacy: .public) fps")
         }
         
-        // Set frame rate using EXACT duration from supported range
-        // DO NOT construct CMTime manually - use the range's exact values
-        if let showRateRange = format.videoSupportedFrameRateRanges.first(where: { range in
+        // Set both limits to the selected show's exact duration. Assigning a
+        // range's endpoints (for example 30...60) only leaves a rate limit; it
+        // does not configure 50/59.94/60 as the active capture cadence.
+        guard let showRateRange = format.videoSupportedFrameRateRanges.first(where: { range in
             range.minFrameRate <= Config.targetFrameRate && range.maxFrameRate >= Config.targetFrameRate
-        }) {
-            Self.logger.notice("Using frame-rate range supporting the \(Config.targetFrameRate, privacy: .public) fps show standard")
-            device.activeVideoMinFrameDuration = showRateRange.minFrameDuration
-            device.activeVideoMaxFrameDuration = showRateRange.maxFrameDuration
-        } else {
-            Self.logger.warning("No frame-rate range supporting the show standard; using first available range")
-            if let firstRange = format.videoSupportedFrameRateRanges.first {
-                device.activeVideoMinFrameDuration = firstRange.minFrameDuration
-                device.activeVideoMaxFrameDuration = firstRange.maxFrameDuration
-            }
+        }) else {
+            Self.logger.error("No frame-rate range supports the \(Config.targetFrameRate, privacy: .public) fps show standard")
+            error = .unsupportedFormat
+            throw CameraError.unsupportedFormat
         }
+        Self.logger.notice("Using frame-rate range supporting the \(Config.targetFrameRate, privacy: .public) fps show standard")
+        let duration = ShowStandard.captureDuration(target: Config.targetFrameRate,
+            minimum: showRateRange.minFrameRate, maximum: showRateRange.maxFrameRate)
+        device.activeVideoMinFrameDuration = duration
+        device.activeVideoMaxFrameDuration = duration
 
         configuredMinFrameDuration = device.activeVideoMinFrameDuration
         configuredMaxFrameDuration = device.activeVideoMaxFrameDuration
@@ -1866,9 +1942,7 @@ final class CameraManager: NSObject, ObservableObject {
         // Tiered rather than a blunt "16:9 always wins", so a camera whose only
         // widescreen mode is tiny still ends up on something sensible.
         return sortedFormats.first { isWidescreen($0) && supportsShowFrameRate($0) }
-            ?? sortedFormats.first { isWidescreen($0) }
             ?? sortedFormats.first { supportsShowFrameRate($0) }
-            ?? sortedFormats.first
     }
 }
 
@@ -1893,7 +1967,7 @@ private final class VirtualCameraOutputSink: ProgramOutputSink {
     private var hasLoggedFirstFrameSend = false
     /// Set once the current session's show standard has been pushed to the
     /// extension, so the drain clock matches what this sink is sending.
-    private var hasPushedPlayoutRate = false
+    private var playoutHandshake = PlayoutRateHandshake()
 
     /// The XPC message carries only an IOSurfaceID — nothing on the extension
     /// side retains the backing CVPixelBuffer for us. The extension's frame
@@ -1950,12 +2024,12 @@ private final class VirtualCameraOutputSink: ProgramOutputSink {
     }
 
     /// The extension drains its queue at this rate — the host pushes
-    /// `ShowStandard.current.frameRate` over XPC whenever capture status
+    /// `ShowStandard.activeOrCurrent.frameRate` over XPC whenever capture status
     /// changes and before the first frame, so both sides agree by construction.
     /// Reporting it here is what arms the HUD frame-rate-match check for the
     /// virtual-camera route (it used to read nil and never warn).
     var playoutFrameRate: Double? {
-        ShowStandard.current.frameRate
+        ShowStandard.activeOrCurrent.frameRate
     }
 
     var canReconnect: Bool {
@@ -1992,7 +2066,7 @@ private final class VirtualCameraOutputSink: ProgramOutputSink {
     func disconnect() {
         xpcManager.disconnect()
         recentlySentBuffers.removeAll()
-        hasPushedPlayoutRate = false
+        playoutHandshake = PlayoutRateHandshake()
     }
 
     func reconnect() {
@@ -2016,19 +2090,30 @@ private final class VirtualCameraOutputSink: ProgramOutputSink {
     /// always lands the current rate before frames flow. The show standard is
     /// applied at capture start, so this value matches what processFrame is
     /// producing for the whole session.
-    private func pushPlayoutRateIfNeeded() {
-        guard !hasPushedPlayoutRate else { return }
-        guard let proxy = xpcManager.remoteProxy() else { return }
-        let rate = ShowStandard.current.frameRate
-        proxy.updatePlayoutFrameRate(rate)
-        hasPushedPlayoutRate = true
-        Self.logger.notice("Pushed playout frame rate \(rate, privacy: .public) fps to virtual camera extension")
+    @discardableResult
+    private func pushPlayoutRateIfNeeded() -> Bool {
+        guard case .connected = xpcManager.connectionState,
+              let proxy = xpcManager.remoteProxy() else { return false }
+        let rate = ShowStandard.activeOrCurrent.frameRate
+        let generation = xpcManager.connectionGeneration
+        if playoutHandshake.isReady(rate: rate, generation: generation) { return true }
+        if playoutHandshake.begin(rate: rate, generation: generation) {
+            proxy.updatePlayoutFrameRate(rate) { [weak self] accepted in
+                Task { @MainActor in
+                    guard let self else { return }
+                    self.playoutHandshake.complete(rate: rate, generation: generation, accepted: accepted)
+                    if !accepted { Self.logger.error("Extension rejected the requested show standard") }
+                }
+            }
+        }
+        return false
     }
 
     func sendFrame(pixelBuffer: CVPixelBuffer, timestamp: Double) -> Bool {
         let sendInterval = Self.signposter.beginInterval("xpcSend")
         let sendStart = CACurrentMediaTime()
-        guard let ioSurface = CVPixelBufferGetIOSurface(pixelBuffer)?.takeUnretainedValue(),
+        guard pushPlayoutRateIfNeeded(),
+              let ioSurface = CVPixelBufferGetIOSurface(pixelBuffer)?.takeUnretainedValue(),
               let proxy = xpcManager.remoteProxy() else {
             lastFrameSendDuration = nil
             Self.signposter.endInterval("xpcSend", sendInterval)
@@ -2041,9 +2126,6 @@ private final class VirtualCameraOutputSink: ProgramOutputSink {
             width: Int32(CVPixelBufferGetWidth(pixelBuffer)),
             height: Int32(CVPixelBufferGetHeight(pixelBuffer))
         )
-        // Belt and braces: if the status push raced the XPC handshake, land the
-        // rate before the first frame so the drain clock is never wrong.
-        pushPlayoutRateIfNeeded()
         recentlySentBuffers.append(pixelBuffer)
         if recentlySentBuffers.count > Self.retainedFrameDepth {
             recentlySentBuffers.removeFirst()
@@ -2165,7 +2247,7 @@ extension CameraManager: AVCaptureVideoDataOutputSampleBufferDelegate {
             // the overload. The gate already emits a delivered/dropped summary once
             // per second (`CaptureThroughput`), and the [SOAK] line carries the
             // running total.
-            guard frameProcessingGate.begin() else { return }
+            guard let frameLease = frameProcessingGate.begin() else { return }
 
             let sendableBuffer = SendablePixelBufferBox(pixelBuffer)
 
@@ -2175,7 +2257,8 @@ extension CameraManager: AVCaptureVideoDataOutputSampleBufferDelegate {
             let enqueueTime = CACurrentMediaTime()
 
             Task(priority: .userInitiated) { @MainActor in
-                defer { self.frameProcessingGate.finish() }
+                defer { self.frameProcessingGate.finish(frameLease) }
+                guard self.frameProcessingGate.isCurrent(frameLease) else { return }
                 self.programOutput.recordMainActorHop(CACurrentMediaTime() - enqueueTime)
                 await self.processFrame(
                     pixelBuffer: sendableBuffer.pixelBuffer,

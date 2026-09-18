@@ -9,8 +9,9 @@
 //
 
 import Foundation
+import CoreMedia
 
-enum ShowStandard: String, CaseIterable, Identifiable {
+nonisolated enum ShowStandard: String, CaseIterable, Identifiable {
     case p50
     case p5994
     case p60
@@ -19,6 +20,13 @@ enum ShowStandard: String, CaseIterable, Identifiable {
 
     /// UserDefaults key the selection is persisted under.
     static let userDefaultsKey = "showStandard"
+
+    /// Capture sessions must not follow preference changes live: the camera is
+    /// configured once at start, while the picker explicitly says changes apply
+    /// to the next capture. Keep that selected standard stable until output
+    /// stops, including if the virtual-camera XPC link reconnects.
+    private static let sessionLock = NSLock()
+    nonisolated(unsafe) private static var sessionStandard: ShowStandard?
 
     /// Human-readable label for the settings picker.
     var title: String {
@@ -44,6 +52,24 @@ enum ShowStandard: String, CaseIterable, Identifiable {
         }
     }
 
+    var frameDuration: CMTime {
+        switch self {
+        case .p50: return CMTime(value: 1200, timescale: 60000)
+        case .p5994: return CMTime(value: 1001, timescale: 60000)
+        case .p60: return CMTime(value: 1000, timescale: 60000)
+        }
+    }
+
+    static func matching(frameRate: Double) -> ShowStandard? {
+        allCases.first { frameRate.isFinite && abs($0.frameRate - frameRate) < 0.001 }
+    }
+
+    /// Exact selection within a supported device range, not its endpoints.
+    static func captureDuration(target: Double, minimum: Double, maximum: Double) -> CMTime {
+        let rate = min(max(target, minimum), maximum)
+        return matching(frameRate: rate)?.frameDuration ?? CMTime(seconds: 1 / rate, preferredTimescale: 60000)
+    }
+
     /// The persisted selection, defaulting to 1080p50 (the historical default,
     /// which the running show depends on).
     static var current: ShowStandard {
@@ -52,5 +78,59 @@ enum ShowStandard: String, CaseIterable, Identifiable {
             return standard
         }
         return .p50
+    }
+
+    /// The standard frozen at `ProgramOutputManager.start()`, if any.
+    static var activeSession: ShowStandard? {
+        sessionLock.lock()
+        defer { sessionLock.unlock() }
+        return sessionStandard
+    }
+
+    /// Use the active capture selection while running; otherwise reflect the
+    /// persisted operator preference for preflight UI.
+    static var activeOrCurrent: ShowStandard {
+        activeSession ?? current
+    }
+
+    static func beginSession(standard: ShowStandard = ShowStandard.current) {
+        sessionLock.lock()
+        sessionStandard = standard
+        sessionLock.unlock()
+    }
+
+    static func endSession() {
+        sessionLock.lock()
+        sessionStandard = nil
+        sessionLock.unlock()
+    }
+}
+
+/// Connection-scoped acknowledgement; a reply from a retired connection cannot
+/// authorize frames on a new one.
+struct PlayoutRateHandshake {
+    private(set) var generation: UInt64 = 0
+    private(set) var acknowledgedRate: Double?
+    private var pendingRate: Double?
+
+    mutating func begin(rate: Double, generation: UInt64) -> Bool {
+        if self.generation != generation {
+            self.generation = generation
+            acknowledgedRate = nil
+            pendingRate = nil
+        }
+        guard acknowledgedRate != rate, pendingRate == nil else { return false }
+        pendingRate = rate
+        return true
+    }
+
+    mutating func complete(rate: Double, generation: UInt64, accepted: Bool) {
+        guard generation == self.generation, pendingRate == rate else { return }
+        pendingRate = nil
+        acknowledgedRate = accepted ? rate : nil
+    }
+
+    func isReady(rate: Double, generation: UInt64) -> Bool {
+        self.generation == generation && acknowledgedRate == rate
     }
 }

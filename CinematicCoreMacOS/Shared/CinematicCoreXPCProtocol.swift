@@ -25,12 +25,12 @@ import Foundation
     
     /// Tell the extension what rate the host is producing frames at, so the
     /// extension's playout clock (the timer that drains the frame queue) can
-    /// match it. Single source of truth: `ShowStandard.current.frameRate` on
-    /// the host (default 1080p50). Pushed whenever capture status changes and
-    /// once before the first frame; the extension re-times its drain live.
+    /// match it. The host freezes `ShowStandard.current` when output starts,
+    /// then restores that same session rate after a reconnect. The reply
+    /// acknowledges that the extension accepted one of its advertised rates.
     /// - Parameter frameRate: Exact playout frame rate in fps (e.g. 50,
     ///   60000/1001, 60)
-    func updatePlayoutFrameRate(_ frameRate: Double)
+    func updatePlayoutFrameRate(_ frameRate: Double, reply: @escaping (Bool) -> Void)
     
     /// Ping to verify XPC connection is alive
     /// - Parameter reply: Completion handler that returns when connection is verified

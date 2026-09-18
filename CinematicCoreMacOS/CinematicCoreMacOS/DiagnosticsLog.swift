@@ -116,13 +116,15 @@ final class DiagnosticsLog {
     /// Column order. `elapsed_s` is the column to sort by when hunting the
     /// onset; `thermal` is the column that confirms or kills the throttling
     /// hypothesis without needing `sudo powermetrics`.
-    private static let header = """
+    static let header = """
         elapsed_s,clock,thermal,low_power,cpu_cores,cpu_pct,threads,\
         source_h,crop_h_frac,upscale,footprint_mb,\
         hop_mean_ms,hop_max_ms,queue_mean_ms,queue_max_ms,vision_mean_ms,vision_max_ms,\
-        frame_mean_ms,frame_max_ms,\
+        frame_wall_mean_ms,frame_wall_max_ms,\
         detections,frames_window,frames_total,out_drops_window,out_drops_total,\
-        gate_drops_window,gate_drops_total,note
+        gate_drops_window,gate_drops_total,\
+        main_active_mean_ms,main_active_max_ms,observation_age_mean_ms,observation_age_max_ms,\
+        processed_input_fps,detector_fps,handoff_fps,window_s,note
 
         """
 
@@ -204,6 +206,8 @@ final class DiagnosticsLog {
         writer.prune(directory: Self.directory, olderThan: 30)
 
         sessionStart = CACurrentMediaTime()
+        lastCPUSeconds = Self.processCPUSeconds()
+        lastCPUSampleAt = sessionStart
         isOpen = true
         currentFileName = name
         pendingNotes = []
@@ -235,8 +239,7 @@ final class DiagnosticsLog {
     private func appendMarkerRow(_ text: String) {
         let elapsed = CACurrentMediaTime() - sessionStart
         let processInfo = ProcessInfo.processInfo
-        // 23 commas span the 22 empty measurement columns and land on `note`.
-        let emptyMeasurements = String(repeating: ",", count: 23)
+        let emptyMeasurements = String(repeating: ",", count: Self.header.trimmingCharacters(in: .whitespacesAndNewlines).split(separator: ",").count - 4)
         let row = String(
             format: "%.1f,%@,%@,%@%@%@\n",
             elapsed,
@@ -280,7 +283,10 @@ final class DiagnosticsLog {
         outDropsWindow: Int,
         outDropsTotal: Int,
         gateDropsWindow: UInt64,
-        gateDropsTotal: UInt64
+        gateDropsTotal: UInt64,
+        mainMeanMS: Double, mainMaxMS: Double,
+        observationMeanMS: Double, observationMaxMS: Double,
+        processedInputFPS: Double, detectorFPS: Double, handoffFPS: Double, windowSeconds: Double
     ) {
         guard isOpen else { return }
 
@@ -294,13 +300,13 @@ final class DiagnosticsLog {
         // 1.0 means one core saturated, 3.5 means three and a half cores' worth.
         // `pct` is the same number as Activity Monitor's % CPU column.
         let cpuNow = Self.processCPUSeconds()
-        let windowSeconds = lastCPUSampleAt > 0 ? now - lastCPUSampleAt : 0
-        let cpuCores = windowSeconds > 0 ? (cpuNow - lastCPUSeconds) / windowSeconds : 0
+        let cpuWindowSeconds = lastCPUSampleAt > 0 ? now - lastCPUSampleAt : 0
+        let cpuCores = cpuWindowSeconds > 0 ? (cpuNow - lastCPUSeconds) / cpuWindowSeconds : 0
         lastCPUSeconds = cpuNow
         lastCPUSampleAt = now
 
         let row = String(
-            format: "%.1f,%@,%@,%@,%.2f,%.0f,%d,%d,%.4f,%.2f,%.0f,%.2f,%.2f,%.2f,%.2f,%.2f,%.2f,%.2f,%.2f,%d,%d,%d,%d,%d,%llu,%llu,%@\n",
+            format: "%.1f,%@,%@,%@,%.2f,%.0f,%d,%d,%.4f,%.2f,%.0f,%.2f,%.2f,%.2f,%.2f,%.2f,%.2f,%.2f,%.2f,%d,%d,%d,%d,%d,%llu,%llu,%.2f,%.2f,%.2f,%.2f,%.2f,%.2f,%.2f,%.3f,%@\n",
             elapsed,
             Self.clockFormatter.string(from: Date()),
             Self.thermalStateName(processInfo.thermalState),
@@ -318,6 +324,8 @@ final class DiagnosticsLog {
             framesWindow, framesTotal,
             outDropsWindow, outDropsTotal,
             gateDropsWindow, gateDropsTotal,
+            mainMeanMS, mainMaxMS, observationMeanMS, observationMaxMS,
+            processedInputFPS, detectorFPS, handoffFPS, windowSeconds,
             Self.csvEscaped(noteField)
         )
         writer.append(row)

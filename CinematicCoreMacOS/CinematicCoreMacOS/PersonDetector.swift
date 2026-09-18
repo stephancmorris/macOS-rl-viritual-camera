@@ -285,6 +285,14 @@ final class PersonDetector: ObservableObject {
     /// candidate. Cleared on lock change, stale lock, acceptance, or when the
     /// candidate stops persisting.
     private var lockProbation: LockProbation?
+    private var processingGeneration: UInt64 = 0
+
+    /// Discard any result whose Vision work began before an operator/session change.
+    func invalidatePendingWork(clearTracks: Bool = true) {
+        processingGeneration &+= 1
+        lockProbation = nil
+        if clearTracks { clearForInactiveMode() }
+    }
 
     // Matching thresholds for normal (non-locked) tracks.
     private static let normalIoUThreshold: CGFloat = 0.2
@@ -396,6 +404,7 @@ final class PersonDetector: ObservableObject {
         let detectionInterval = Self.signposter.beginInterval("visionDetection")
         let startTime = CACurrentMediaTime()
         let configSnapshot = config
+        let generation = processingGeneration
 
         // Perform detection on background queue (rect + pose + face together).
         let (rectObservations, poseObservations, faceObservations, queueWait) = await performDetection(
@@ -407,16 +416,13 @@ final class PersonDetector: ObservableObject {
         let detectionTime = CACurrentMediaTime() - startTime
         Self.signposter.endInterval("visionDetection", detectionInterval)
 
-        // Match and update on main actor
-        await MainActor.run {
-            updateTracking(
-                rectObservations: rectObservations,
-                poseObservations: poseObservations,
-                faceObservations: faceObservations,
-                timestamp: startTime
-            )
-            updateStats(detectionTime: detectionTime, queueWait: queueWait)
-        }
+        guard generation == processingGeneration else { return [] }
+
+        // Already isolated to MainActor: do not suspend after validating the generation.
+        updateTracking(rectObservations: rectObservations,
+                       poseObservations: poseObservations,
+                       faceObservations: faceObservations, timestamp: startTime)
+        updateStats(detectionTime: detectionTime, queueWait: queueWait)
 
         return detectedPersons
     }
@@ -438,6 +444,8 @@ final class PersonDetector: ObservableObject {
     /// on `processFrame` just to be told there is nothing to do — one MainActor
     /// hop per frame for no work.
     func clearForInactiveMode() {
+        processingGeneration &+= 1
+        lockProbation = nil
         if !detectedPersons.isEmpty {
             detectedPersons = []
             frameStateRevision &+= 1
@@ -591,7 +599,7 @@ final class PersonDetector: ObservableObject {
         return PoseKeypoints(head: h, waist: w, confidence: pose.confidence)
     }
     
-    private func updateTracking(
+    func updateTracking(
         rectObservations: [VNHumanObservation],
         poseObservations: [VNHumanBodyPoseObservation],
         faceObservations: [VNFaceObservation],
@@ -761,7 +769,10 @@ final class PersonDetector: ObservableObject {
         detections: [VNHumanObservation],
         timestamp: TimeInterval
     ) -> [Int: UUID] {
-        guard !detections.isEmpty, !trackedPersons.isEmpty else { return [:] }
+        guard !detections.isEmpty, !trackedPersons.isEmpty else {
+            lockProbation = nil
+            return [:]
+        }
 
         // Precompute predicted boxes once per track.
         let predicted: [UUID: CGRect] = trackedPersons.mapValues {
@@ -837,7 +848,7 @@ final class PersonDetector: ObservableObject {
         pairs.reserveCapacity(detections.count * trackedPersons.count)
 
         for (idx, det) in detections.enumerated() where !usedDetections.contains(idx) {
-            for (id, box) in predicted where !usedTracks.contains(id) {
+            for (id, box) in predicted where id != lockedTargetID && !usedTracks.contains(id) {
                 let score = matchScore(
                     detection: det.boundingBox,
                     predicted: box,
@@ -974,9 +985,8 @@ final class PersonDetector: ObservableObject {
         }
 
         guard let best else {
-            // Nothing inside the radius: coast. Probation is preserved — a
-            // candidate Vision missed for one frame keeps its progress.
-            return LockedResolution(assignedIndex: nil, probation: probation)
+            // Missing candidates break consecutive probation evidence.
+            return LockedResolution(assignedIndex: nil, probation: nil)
         }
 
         let candidate = detections[best.index]

@@ -166,7 +166,13 @@ class CinematicCoreExtensionDeviceSource: NSObject, CMIOExtensionDeviceSource {
 	/// corrected by the host over XPC (`updatePlayoutFrameRate`) to the show
 	/// standard that also drives capture, so the drain clock and the host's
 	/// production rate can never disagree. Re-times the running timer live.
+	private let stateLock = NSRecursiveLock()
 	private var _playoutFrameRate: Double = extensionDefaultFrameRate
+
+	private var currentPlayoutRate: Double {
+		stateLock.lock(); defer { stateLock.unlock() }
+		return _playoutFrameRate
+	}
 	private var hasLoggedPlayoutRate = false
 	
 	// Track if we're receiving frames from host
@@ -196,11 +202,13 @@ class CinematicCoreExtensionDeviceSource: NSObject, CMIOExtensionDeviceSource {
 		let dims = currentFrameDimensions
 		CMVideoFormatDescriptionCreate(allocator: kCFAllocatorDefault, codecType: kCVPixelFormatType_32BGRA, width: dims.width, height: dims.height, extensions: nil, formatDescriptionOut: &_videoDescription)
 
-		let frameDuration = playoutFrameDuration()
+		let durations = ShowStandard.allCases.map(\.frameDuration)
+		let minDuration = ShowStandard.p60.frameDuration
+		let maxDuration = ShowStandard.p50.frameDuration
 		let videoStreamFormats: [CMIOExtensionStreamFormat] = Self.advertisedDimensions.map { dims in
 			var description: CMFormatDescription?
 			CMVideoFormatDescriptionCreate(allocator: kCFAllocatorDefault, codecType: kCVPixelFormatType_32BGRA, width: dims.width, height: dims.height, extensions: nil, formatDescriptionOut: &description)
-			return CMIOExtensionStreamFormat(formatDescription: description!, maxFrameDuration: frameDuration, minFrameDuration: frameDuration, validFrameDurations: nil)
+			return CMIOExtensionStreamFormat(formatDescription: description!, maxFrameDuration: maxDuration, minFrameDuration: minDuration, validFrameDurations: durations)
 		}
 
 		let videoID = UUID() // replace this with your video UUID
@@ -208,7 +216,7 @@ class CinematicCoreExtensionDeviceSource: NSObject, CMIOExtensionDeviceSource {
 		// The stream reports the LIVE playout duration (it moves when the host
 		// pushes a new show standard), not the advertised-at-load default.
 		_streamSource.playoutFrameRateProvider = { [weak self] in
-			self?._playoutFrameRate ?? extensionDefaultFrameRate
+			self?.currentPlayoutRate ?? extensionDefaultFrameRate
 		}
 		do {
 			try device.addStream(_streamSource.stream)
@@ -253,31 +261,24 @@ class CinematicCoreExtensionDeviceSource: NSObject, CMIOExtensionDeviceSource {
 	/// matched to the frames the host is actually sending — the queue is
 	/// drained to latest either way, but a mismatched clock would drop surplus
 	/// program frames and add judder downstream.
-	func updatePlayoutFrameRate(_ frameRate: Double) {
-		guard frameRate.isFinite, frameRate >= 23.976, frameRate <= 120 else {
-			os_log(.error, "Rejected implausible playout frame rate %{public}.3f", frameRate)
-			return
-		}
-		let changed = abs(frameRate - _playoutFrameRate) > 0.001
-		guard changed || !hasLoggedPlayoutRate else { return }
-		_playoutFrameRate = frameRate
-		if !hasLoggedPlayoutRate {
-			hasLoggedPlayoutRate = true
-			os_log(.info, "Playout rate set from host: %{public}.3f fps", frameRate)
-		} else {
-			os_log(.info, "Playout rate changed: %{public}.3f fps", frameRate)
-		}
-
-		// Note: the advertised stream formats' min/max durations are fixed per
-		// extension load; a consumer that negotiated against the old rate
-		// should reopen the camera after a show-standard change. The drain
-		// timer itself follows immediately, and `.streamFrameDuration`
-		// (see CinematicCoreExtensionStreamSource) reports the new rate live.
+	@discardableResult
+	func updatePlayoutFrameRate(_ frameRate: Double) -> Bool {
+		stateLock.lock(); defer { stateLock.unlock() }
+		guard let standard = ShowStandard.matching(frameRate: frameRate) else { return false }
+		guard _playoutFrameRate != standard.frameRate || !hasLoggedPlayoutRate else { return true }
+		_playoutFrameRate = standard.frameRate
+		hasLoggedPlayoutRate = true
 		rescheduleTimerIfNeeded()
+		let duration = CMTimeCopyAsDictionary(standard.frameDuration, allocator: kCFAllocatorDefault)!
+		_streamSource.stream.notifyPropertiesChanged([
+			.streamFrameDuration: CMIOExtensionPropertyState<AnyObject>(value: duration as AnyObject)
+		])
+		return true
 	}
 	
 	/// Receive video frame from host app via XPC
 	func enqueueFrame(surfaceID: UInt32, timestamp: Double, width: Int32, height: Int32) {
+		stateLock.lock(); defer { stateLock.unlock() }
 		guard ExtensionSecurityPolicy.validateFrameMetadata(
 			surfaceID: surfaceID,
 			timestamp: timestamp,
@@ -307,6 +308,7 @@ class CinematicCoreExtensionDeviceSource: NSObject, CMIOExtensionDeviceSource {
 	
 	/// Update capture status from host app
 	func updateCaptureStatus(isRunning: Bool) {
+		stateLock.lock(); defer { stateLock.unlock() }
 		if !isRunning {
 			frameQueue.clear()
 			isReceivingFrames = false
@@ -321,6 +323,7 @@ class CinematicCoreExtensionDeviceSource: NSObject, CMIOExtensionDeviceSource {
 	}
 	
 	func startStreaming() {
+		stateLock.lock(); defer { stateLock.unlock() }
 		
 		_streamingCounter += 1
 		rescheduleTimerIfNeeded()
@@ -328,6 +331,7 @@ class CinematicCoreExtensionDeviceSource: NSObject, CMIOExtensionDeviceSource {
 	}
 	
 	func stopStreaming() {
+		stateLock.lock(); defer { stateLock.unlock() }
 		
 		if _streamingCounter > 1 {
 			_streamingCounter -= 1
@@ -361,6 +365,7 @@ class CinematicCoreExtensionDeviceSource: NSObject, CMIOExtensionDeviceSource {
 
 		timer.setEventHandler { [weak self] in
 			guard let self = self else { return }
+			self.stateLock.lock(); defer { self.stateLock.unlock() }
 
 			// Show the newest available frame; older queued frames are stale
 			// by definition (the timer is the playout clock) and only add
@@ -794,8 +799,8 @@ private class XPCServiceImplementation: NSObject, CinematicCoreXPCProtocol {
 		deviceSource?.updateCaptureStatus(isRunning: isRunning)
 	}
 	
-	func updatePlayoutFrameRate(_ frameRate: Double) {
-		deviceSource?.updatePlayoutFrameRate(frameRate)
+	func updatePlayoutFrameRate(_ frameRate: Double, reply: @escaping (Bool) -> Void) {
+		reply(deviceSource?.updatePlayoutFrameRate(frameRate) ?? false)
 	}
 	
 	func ping(reply: @escaping () -> Void) {

@@ -546,6 +546,7 @@
 				ENABLE_RESOURCE_ACCESS_USB = YES;
 				ENABLE_USER_SELECTED_FILES = readonly;
 				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = BuildInfo.plist;
 				INFOPLIST_KEY_CFBundleDisplayName = Alfie;
 				INFOPLIST_KEY_CFBundleName = Alfie;
 				INFOPLIST_KEY_NSCameraUsageDescription = "Alfie needs camera access to capture and process video frames for the virtual camera system.";
@@ -595,6 +596,7 @@
 				ENABLE_RESOURCE_ACCESS_USB = YES;
 				ENABLE_USER_SELECTED_FILES = readonly;
 				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = BuildInfo.plist;
 				INFOPLIST_KEY_CFBundleDisplayName = Alfie;
 				INFOPLIST_KEY_CFBundleName = Alfie;
 				INFOPLIST_KEY_NSCameraUsageDescription = "Alfie needs camera access to capture and process video frames for the virtual camera system.";

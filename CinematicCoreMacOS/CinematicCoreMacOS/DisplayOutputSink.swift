@@ -188,7 +188,7 @@ final class DisplayOutputSink: ProgramOutputSink {
             )
         }
 
-        let standard = ShowStandard.current
+        let standard = ShowStandard.activeOrCurrent
         guard let mode = CGDisplayCopyDisplayMode(id) else {
             return OutputBringUpCheck(
                 id: "display.mode",

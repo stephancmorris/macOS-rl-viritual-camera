@@ -1,0 +1,27 @@
+{
+  "reviewed_commit": "22d7524ca998d70ba709b27a217abacdfc0223d3",
+  "videos": [
+    {
+      "path": "/Users/stephanmorris/Downloads/Alfie before the changes.mov",
+      "sha256": "6585b6b281875e68e15966acf1a3c5d73ad4d5456bb57283251d85e648e07917",
+      "duration_seconds": 68.41333333333333,
+      "video_track_nominal_fps": 52.157387,
+      "dimensions": [
+        1896,
+        856
+      ],
+      "audio_tracks": 0
+    },
+    {
+      "path": "/Users/stephanmorris/Downloads/After the new changes.mov",
+      "sha256": "c66c3a56d6af39321c2abb1268c4cd0139d2d547a63d2881522544687e79b6da",
+      "duration_seconds": 59.10166666666667,
+      "video_track_nominal_fps": 23.276009,
+      "dimensions": [
+        1896,
+        856
+      ],
+      "audio_tracks": 0
+    }
+  ]
+}

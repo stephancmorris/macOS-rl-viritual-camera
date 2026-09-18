@@ -1,0 +1,9 @@
+elapsed_s,clock,thermal,low_power,cpu_cores,cpu_pct,threads,source_h,crop_h_frac,upscale,footprint_mb,hop_mean_ms,hop_max_ms,queue_mean_ms,queue_max_ms,vision_mean_ms,vision_max_ms,frame_mean_ms,frame_max_ms,detections,frames_window,frames_total,out_drops_window,out_drops_total,gate_drops_window,gate_drops_total,note
+0.0,12:39:27,nominal,no,,,,,,,,,,,,,,,,,,,,,,,detection start; thermal=nominal
+4.5,12:39:31,nominal,no,0.00,0,26,1080,0.8032,1.25,380,0.04,0.43,0.02,0.04,17.32,216.12,6.65,226.74,52,128,215,0,0,36,44,"subject locked, tracking"
+9.8,12:39:36,nominal,no,0.42,42,26,1080,0.9302,1.08,376,0.03,0.42,0.02,0.03,13.66,24.10,5.00,6.96,65,130,345,0,0,31,75,
+15.1,12:39:42,nominal,no,0.41,41,26,1080,0.8500,1.18,374,0.05,1.29,0.02,0.04,12.22,20.85,4.73,7.11,65,130,475,0,0,30,105,
+20.5,12:39:47,nominal,no,0.33,33,26,1080,0.5000,2.00,376,0.03,0.61,0.02,0.02,12.67,20.06,4.70,10.28,16,130,605,0,0,30,135,
+25.8,12:39:52,nominal,no,0.37,37,27,1080,0.8000,1.25,377,0.09,4.53,0.02,0.06,13.71,37.34,4.87,47.01,41,129,734,0,0,31,166,"subject locked, tracking"
+31.1,12:39:58,nominal,no,0.42,42,27,1080,0.8000,1.25,377,0.05,2.83,0.02,0.03,13.53,20.04,5.03,6.93,65,130,864,0,0,31,197,
+33.9,12:40:00,nominal,no,,,,,,,,,,,,,,,,,,,,,,,capture stop

@@ -27,6 +27,17 @@ struct DetectionOverlayView: View {
     var body: some View {
         GeometryReader { geometry in
             ZStack {
+                if isRecovering, let rect = trackedSubjectRect,
+                   let id = manualLockedTargetID ?? activeTargetID,
+                   !detectedPersons.contains(where: { $0.id == id }) {
+                    BoundingBoxView(
+                        person: PersonDetector.DetectedPerson(id: id, boundingBox: rect, confidence: 0,
+                            timestamp: 0, poseKeypoints: nil, faceBoundingBox: nil, faceLandmarkRatios: nil),
+                        displayBoundingBox: rect, imageSize: imageSize, viewSize: geometry.size,
+                        isLocked: false, isActive: false, isRecovering: true,
+                        framingTitle: framingTitle, onSelect: nil)
+                        .allowsHitTesting(false)
+                }
                 ForEach(detectedPersons) { person in
                     let isAcquiring = person.id == acquiringTargetID
                     let usesTrackedRect = !isAcquiring
@@ -163,7 +174,7 @@ struct BoundingBoxView: View {
             return BoxStyle(
                 color: Color(red: 1.0, green: 0.72, blue: 0.24),
                 labelColor: .black.opacity(0.85),
-                label: "RECOVERING · \(Int(person.confidence * 100))%",
+                label: "RECOVERING · LAST POSITION",
                 isPulsing: true
             )
         }
@@ -171,7 +182,7 @@ struct BoundingBoxView: View {
             return BoxStyle(
                 color: Color(red: 0.22, green: 1.0, blue: 0.08),
                 labelColor: .black.opacity(0.85),
-                label: "PROGRAM CROP · \(framingTitle.uppercased()) · \(Int(person.confidence * 100))%",
+                label: "SUBJECT · \(framingTitle.uppercased())",
                 isPulsing: false
             )
         }

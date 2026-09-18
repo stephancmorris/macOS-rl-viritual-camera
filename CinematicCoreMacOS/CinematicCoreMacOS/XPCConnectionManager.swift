@@ -23,11 +23,11 @@ final class XPCConnectionManager {
     // MARK: - Properties
 
     private var connection: NSXPCConnection?
+    private(set) var connectionGeneration: UInt64 = 0
     private var reconnectTask: Task<Void, Never>?
     private var shouldMaintainConnection = false
     private var reconnectAttemptCount = 0
     private var nextReconnectDelay: TimeInterval?
-    private var suppressNextInvalidationReconnect = false
     private let logger = Logger(subsystem: "com.alfie", category: "XPC")
     private var noConnectionWarningCount = 0
     private let maxNoConnectionWarnings = 10
@@ -89,17 +89,22 @@ final class XPCConnectionManager {
         )
         newConnection.remoteObjectInterface = NSXPCInterface(with: CinematicCoreXPCProtocol.self)
         
+        connectionGeneration &+= 1
+        let generation = connectionGeneration
+
         // Handle connection interruption (extension crashed or was killed)
         newConnection.interruptionHandler = { [weak self] in
             Task { @MainActor in
-                self?.handleInterruption()
+                guard let self, self.connectionGeneration == generation else { return }
+                self.handleInterruption()
             }
         }
         
         // Handle connection invalidation (connection explicitly closed)
         newConnection.invalidationHandler = { [weak self] in
             Task { @MainActor in
-                self?.handleInvalidation()
+                guard let self, self.connectionGeneration == generation else { return }
+                self.handleInvalidation()
             }
         }
         
@@ -116,6 +121,7 @@ final class XPCConnectionManager {
         shouldMaintainConnection = false
         reconnectTask?.cancel()
         reconnectTask = nil
+        connectionGeneration &+= 1
         connection?.invalidate()
         connection = nil
         reconnectAttemptCount = 0
@@ -146,7 +152,7 @@ final class XPCConnectionManager {
         reconnectAttemptCount = 0
 
         if let connection {
-            suppressNextInvalidationReconnect = true
+            connectionGeneration &+= 1
             self.connection = nil
             connection.invalidate()
         }
@@ -176,14 +182,19 @@ final class XPCConnectionManager {
         // Reset warning count when we have a connection
         noConnectionWarningCount = 0
 
+        let generation = connectionGeneration
         return connection.remoteObjectProxyWithErrorHandler { [weak self] error in
             Task { @MainActor in
-                self?.logger.error("XPC proxy error: \(error.localizedDescription)")
+                guard let self, self.connectionGeneration == generation else { return }
+                self.logger.error("XPC proxy error: \(error.localizedDescription)")
                 AlfieDiagnosticsLog.append("XPC", "proxy error: \(error.localizedDescription)")
-                self?.lastErrorDescription = error.localizedDescription
-                self?.connectionState = .error(error.localizedDescription)
-                self?.onStateChange?()
-                self?.scheduleReconnect(reason: "remote proxy error")
+                self.lastErrorDescription = error.localizedDescription
+                self.connectionState = .error(error.localizedDescription)
+                self.onStateChange?()
+                self.connectionGeneration &+= 1
+                self.connection?.invalidate()
+                self.connection = nil
+                self.scheduleReconnect(reason: "remote proxy error")
             }
         } as? CinematicCoreXPCProtocol
     }
@@ -205,9 +216,11 @@ final class XPCConnectionManager {
             return
         }
         
+        let generation = connectionGeneration
         proxy.ping { [weak self] in
             Task { @MainActor in
                 guard let self = self else { return }
+                guard self.connectionGeneration == generation, self.connection != nil else { return }
                 self.logger.info("✓ XPC connection verified")
                 AlfieDiagnosticsLog.append("XPC", "connection verified")
                 self.reconnectAttemptCount = 0
@@ -225,6 +238,8 @@ final class XPCConnectionManager {
     private func handleInterruption() {
         logger.warning("⚠️ XPC connection interrupted")
         AlfieDiagnosticsLog.append("XPC", "connection interrupted")
+        connectionGeneration &+= 1
+        connection?.invalidate()
         connection = nil
         lastErrorDescription = "The CMIO extension connection was interrupted."
         connectionState = .error("The CMIO extension connection was interrupted.")
@@ -236,12 +251,6 @@ final class XPCConnectionManager {
         logger.info("XPC connection invalidated")
         AlfieDiagnosticsLog.append("XPC", "connection invalidated")
         connection = nil
-        if suppressNextInvalidationReconnect {
-            suppressNextInvalidationReconnect = false
-            connectionState = shouldMaintainConnection ? .connecting : .disconnected
-            onStateChange?()
-            return
-        }
 
         if shouldMaintainConnection {
             lastErrorDescription = "The CMIO extension connection was invalidated."

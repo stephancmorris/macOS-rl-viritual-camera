@@ -260,7 +260,7 @@ struct LockedTrackMatcherTests {
 
     // MARK: - 7. Subject exits frame
 
-    @Test func subjectExitsFrameCoastsAndPreservesProbation() {
+    @Test func subjectExitsFrameBreaksProbationSequence() {
         // Establish some probation first with an inside-radius, non-overlapping
         // candidate for one frame.
         let candidate = Self.nonOverlappingCandidate(distanceFromReferenceCenter: 0.10)
@@ -277,7 +277,8 @@ struct LockedTrackMatcherTests {
         #expect(establishedProbation?.framesAgreed == 1)
 
         // Now the subject exits frame entirely: no detections at all (or all
-        // far outside the radius). Probation must be preserved unchanged.
+        // far outside the radius). A probation run is consecutive evidence,
+        // so the missing observation must break it.
         let emptyResolution = PersonDetector.resolveLockedAssignment(
             detections: [],
             referenceBox: Self.narrowReferenceBox,
@@ -287,9 +288,10 @@ struct LockedTrackMatcherTests {
             probation: establishedProbation
         )
         #expect(emptyResolution.assignedIndex == nil)
-        #expect(emptyResolution.probation == establishedProbation)
+        #expect(emptyResolution.probation == nil)
 
-        // Also verify an all-far-away detection set coasts and keeps probation.
+        // An all-far-away detection set likewise supplies no evidence for the
+        // prior candidate and must reset the run.
         let farAway = Self.box(offsetFromReferenceBy: 0.5, 0.5)
         let farResolution = PersonDetector.resolveLockedAssignment(
             detections: [farAway],
@@ -300,7 +302,7 @@ struct LockedTrackMatcherTests {
             probation: establishedProbation
         )
         #expect(farResolution.assignedIndex == nil)
-        #expect(farResolution.probation == establishedProbation)
+        #expect(farResolution.probation == nil)
     }
 
     // MARK: - 8. Adaptive radius grows with motion

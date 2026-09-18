@@ -155,6 +155,7 @@ final class ProgramOutputManager: ObservableObject {
         case cropRender
         case xpcSend
         case total
+        case mainActor
 
         var id: String { rawValue }
 
@@ -169,7 +170,9 @@ final class ProgramOutputManager: ObservableObject {
             case .xpcSend:
                 return "XPC Send"
             case .total:
-                return "Total"
+                return "Frame elapsed"
+            case .mainActor:
+                return "Main actor work"
             }
         }
     }
@@ -326,21 +329,32 @@ final class ProgramOutputManager: ObservableObject {
     private var rawVisionWallMax: Double = 0
     private var rawDetectionCount: Int = 0
 
-    /// Main-thread occupancy per frame — how long `processFrame` actually holds
-    /// the one thread every pipeline has to share. This is the number that
-    /// decides how many camera streams can run at once: at 50 Hz the whole
-    /// budget is 20 ms, so three streams need one stream to fit in under ~6 ms.
-    /// Total CPU is not the constraint; this is.
+    /// Wall-clock pipeline duration, including time awaiting the off-main render.
     private var rawFrameSum: Double = 0
     private var rawFrameMax: Double = 0
     private var rawFrameCount: Int = 0
+
+    private var rawMainSum: TimeInterval = 0
+    private var rawMainMax: TimeInterval = 0
+    private var rawMainCount = 0
+    private var rawObservationSum: TimeInterval = 0
+    private var rawObservationMax: TimeInterval = 0
+    private var rawObservationCount = 0
+    private var lastSoakTime: TimeInterval = 0
+
+    func recordObservationAge(_ age: TimeInterval) {
+        guard age.isFinite, age >= 0 else { return }
+        rawObservationSum += age
+        rawObservationMax = max(rawObservationMax, age)
+        rawObservationCount += 1
+    }
 
     private var statsRefreshCounter: Int = 0
     private let soakEmitEveryNRefreshes = 10
 
     /// Cumulative capture-gate drop count, pushed in from CameraManager. This is
     /// the metric that actually tracks progressive lag: because the gate admits
-    /// a frame only when the MainActor is idle, a slowing pipeline shows up as
+    /// a frame only when the previous frame has completed, a slowing pipeline shows up as
     /// *skipped* frames, not as growing hop lag on the ones that got through.
     private var rawGateDropTotal: UInt64 = 0
     private var lastEmittedGateDropTotal: UInt64 = 0
@@ -402,8 +416,8 @@ final class ProgramOutputManager: ObservableObject {
         rawDetectedPersonCount = detectedPersons
     }
 
-    /// Running total of frames the capture gate skipped because the MainActor
-    /// was still busy with the previous frame.
+    /// Running total of frames the capture gate skipped because the previous
+    /// frame had not finished, including its off-main render.
     func recordGateDropTotal(_ total: UInt64) {
         guard let baseline = gateDropBaseline else {
             gateDropBaseline = total
@@ -446,9 +460,12 @@ final class ProgramOutputManager: ObservableObject {
         return Double(info.phys_footprint) / (1024 * 1024)
     }
 
-    private func emitSoakLineIfDue() {
+    private func emitSoakLineIfDue(force: Bool = false) {
         statsRefreshCounter += 1
-        guard statsRefreshCounter % soakEmitEveryNRefreshes == 0 else { return }
+        guard force || statsRefreshCounter % soakEmitEveryNRefreshes == 0 else { return }
+        let now = CACurrentMediaTime()
+        let windowDuration = lastSoakTime > 0 ? now - lastSoakTime : 0
+        lastSoakTime = now
         let hopMean = rawHopLagCount > 0 ? rawHopLagSum / Double(rawHopLagCount) : 0
         let qwMean = rawDetectionCount > 0 ? rawQueueWaitSum / Double(rawDetectionCount) : 0
         let vwMean = rawDetectionCount > 0 ? rawVisionWallSum / Double(rawDetectionCount) : 0
@@ -487,7 +504,15 @@ final class ProgramOutputManager: ObservableObject {
             outDropsWindow: outDropsWindow,
             outDropsTotal: rawDroppedFrames,
             gateDropsWindow: gateDropsWindow,
-            gateDropsTotal: rawGateDropTotal
+            gateDropsTotal: rawGateDropTotal,
+            mainMeanMS: rawMainCount > 0 ? rawMainSum / Double(rawMainCount) * 1000 : 0,
+            mainMaxMS: rawMainMax * 1000,
+            observationMeanMS: rawObservationCount > 0 ? rawObservationSum / Double(rawObservationCount) * 1000 : 0,
+            observationMaxMS: rawObservationMax * 1000,
+            processedInputFPS: measuredInputFPS,
+            detectorFPS: windowDuration > 0 ? Double(rawDetectionCount) / windowDuration : 0,
+            handoffFPS: windowDuration > 0 ? Double(framesWindow) / windowDuration : 0,
+            windowSeconds: windowDuration
         )
 
         // Second row, second file: the memory-growth investigation. Same window,
@@ -515,6 +540,8 @@ final class ProgramOutputManager: ObservableObject {
         rawVisionWallSum = 0; rawVisionWallMax = 0
         rawDetectionCount = 0
         rawFrameSum = 0; rawFrameMax = 0; rawFrameCount = 0
+        rawMainSum = 0; rawMainMax = 0; rawMainCount = 0
+        rawObservationSum = 0; rawObservationMax = 0; rawObservationCount = 0
     }
 
     init(sinks: [any ProgramOutputSink] = []) {
@@ -528,6 +555,10 @@ final class ProgramOutputManager: ObservableObject {
     }
 
     func start() {
+        // Freeze the preference before any sink connects. Capture configuration,
+        // playout, reconnect restoration and bring-up checks must all describe
+        // this one session even if the operator changes the picker mid-show.
+        ShowStandard.beginSession()
         framesSent = 0
         droppedFrames = 0
         dropRatePerMinute = 0
@@ -576,6 +607,16 @@ final class ProgramOutputManager: ObservableObject {
     /// capture session, including any stretch where detection is switched off.
     func beginDiagnosticsSessionIfNeeded(note: String) {
         guard diagnosticsFileName == nil else { return }
+        lastSoakTime = CACurrentMediaTime()
+        rawHopLagSum = 0; rawHopLagMax = 0; rawHopLagCount = 0
+        rawQueueWaitSum = 0; rawQueueWaitMax = 0
+        rawVisionWallSum = 0; rawVisionWallMax = 0; rawDetectionCount = 0
+        rawFrameSum = 0; rawFrameMax = 0; rawFrameCount = 0
+        rawMainSum = 0; rawMainMax = 0; rawMainCount = 0
+        rawObservationSum = 0; rawObservationMax = 0; rawObservationCount = 0
+        lastEmittedFramesSent = rawFramesSent
+        lastEmittedDroppedFrames = rawDroppedFrames
+        lastEmittedGateDropTotal = rawGateDropTotal
         diagnosticsLog.beginSession(
             note: note + "; thermal="
                 + DiagnosticsLog.thermalStateName(ProcessInfo.processInfo.thermalState)
@@ -595,6 +636,7 @@ final class ProgramOutputManager: ObservableObject {
         refreshPublishedStatsIfDue(force: true)
         diagnosticsLog.endSession(note: "capture stop")
         diagnosticsFileName = nil
+        ShowStandard.endSession()
     }
 
     /// Record an operator- or pipeline-level marker in the diagnostics CSV. It
@@ -691,6 +733,11 @@ final class ProgramOutputManager: ObservableObject {
     ) {
         // Accumulate only; the published `stageLatencies` snapshot is rebuilt by
         // the coalesced refresh, not on every sample (~250 samples/sec arrive here).
+        if stage == .mainActor {
+            rawMainSum += duration
+            rawMainMax = max(rawMainMax, duration)
+            rawMainCount += 1
+        }
         if stage == .total {
             rawFrameSum += duration
             rawFrameMax = max(rawFrameMax, duration)
@@ -731,7 +778,7 @@ final class ProgramOutputManager: ObservableObject {
         refreshLatencySnapshot()
         refreshStatuses()
         refreshBringUpChecks()
-        emitSoakLineIfDue()
+        emitSoakLineIfDue(force: force)
     }
 
     var activeRouteTitle: String {

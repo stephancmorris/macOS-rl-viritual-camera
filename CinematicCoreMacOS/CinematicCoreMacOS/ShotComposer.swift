@@ -161,6 +161,10 @@ final class ShotComposer: ObservableObject {
             }
         }
 
+        var activeFramingTitle: String {
+            cinematicFormat == .webcam ? webcamPreset.title : shotPreset.title
+        }
+
         /// Top-level use case. Stage targets distant speakers/performers
         /// (the original behaviour). Webcam targets a close-range subject on a
         /// video call and uses a simpler, tighter, head-anchored framing.
@@ -305,10 +309,13 @@ final class ShotComposer: ObservableObject {
         /// velocity-adaptive gate used by every feel except Steady Follow.
         var deadzoneThreshold: CGFloat = 0.05 // 5% of frame
 
-        /// Full width (normalized) of the Steady Following band. While holding,
-        /// the subject may roam ±steadyBandWidth/2 horizontally (and 0.75× that
+        /// Full width of the Steady Following band as a fraction of the visible
+        /// program crop. While holding, the subject may roam
+        /// ±steadyBandWidth/2 of that crop horizontally (and 0.75× that
         /// vertically) around the held center before the camera re-centers.
-        /// Surfaced as the yellow guide lines in the preview. Only active when
+        /// This keeps the operator-selected tolerance stable as a share of the
+        /// output shot rather than enlarging it for a tight crop. Surfaced as
+        /// the yellow guide lines in the preview. Only active when
         /// `steadyFollowingEnabled` is true (Steady Follow feel).
         var steadyBandWidth: CGFloat = 0.10
 
@@ -317,7 +324,7 @@ final class ShotComposer: ObservableObject {
         /// velocity-adaptive deadzone gate runs instead.
         var steadyFollowingEnabled: Bool = true
 
-        /// Smoothing factor per frame (synced to CropEngine.transitionSmoothing)
+        /// Spring-response setting (synced to CropEngine.transitionSmoothing).
         var smoothingFactor: Float = 0.10 // 10% per frame
 
         /// How long to keep the current target "warm" after detections drop.
@@ -626,30 +633,35 @@ final class ShotComposer: ObservableObject {
     private enum SteadyState { case following, holding }
     private var steadyState: SteadyState = .following
 
-    /// Consecutive frames the subject has been beyond the band (hold → follow).
-    private var bandExitFrameCount: Int = 0
-    /// Consecutive frames the subject has stayed within `settleRadius` of
-    /// `settleAnchor` while following (follow → hold).
-    private var settleFrameCount: Int = 0
+    /// Fresh-observation timing for the hold → follow and follow → hold
+    /// confirmations. These stay in the detection frame's capture-time clock
+    /// domain so their feel does not change with camera/detection cadence.
+    private var bandExitStartedAt: TimeInterval?
+    private var bandExitLastObservationAt: TimeInterval?
+    private var settleStartedAt: TimeInterval?
+    private var settleLastObservationAt: TimeInterval?
     /// Position the settle detector is measuring dwell around. Position-based
     /// settling (not velocity): the Vision bbox center jitters a few tenths of
     /// a percent per frame even for a perfectly still subject, which reads as
     /// a nonzero velocity EWMA forever — so dwell-in-a-radius is the signal.
     private var settleAnchor: CGPoint?
 
-    /// Band exit requires this many consecutive out-of-band frames (noise
-    /// debounce) before the camera resumes following.
-    private static let bandExitConfirmFrames: Int = 2
-    /// Consecutive settled frames required to re-enter holding.
-    private static let settleConfirmFrames: Int = 12
+    /// Confirmation periods preserve the former two- and twelve-frame feel at
+    /// the 50 fps show standard without making slower input look stickier.
+    private static let bandExitConfirmation: TimeInterval = 2.0 / 50.0
+    private static let settleConfirmation: TimeInterval = 12.0 / 50.0
+    /// A long gap means the camera has no continuous evidence of a settled or
+    /// out-of-band subject. 150 ms admits 25/50/60 fps sources while rejecting
+    /// stale detection work as continuity evidence.
+    private static let steadyObservationGap: TimeInterval = 0.150
     /// Vertical half-band as a fraction of the horizontal half-band.
     private static let verticalBandRatio: CGFloat = 0.75
 
     /// Dwell radius for the settle detector: a quarter of the half-band,
-    /// floored at 2% of frame — comfortably above bbox jitter, well inside
+    /// floored at 0.2% of source width — comfortably above bbox jitter, well inside
     /// the band.
-    private var settleRadius: CGFloat {
-        max(0.02, config.steadyBandWidth * 0.125)
+    private func settleRadius(for programCropWidth: CGFloat) -> CGFloat {
+        max(0.002, programCropWidth * config.steadyBandWidth * 0.125)
     }
 
     /// Enter the following state and clear the band. Transition-only publish:
@@ -658,27 +670,34 @@ final class ShotComposer: ObservableObject {
     /// and safe to call per frame from the legacy gate (compare-before-write).
     private func enterSteadyFollowing() {
         steadyState = .following
-        bandExitFrameCount = 0
-        settleFrameCount = 0
+        bandExitStartedAt = nil
+        bandExitLastObservationAt = nil
+        settleStartedAt = nil
+        settleLastObservationAt = nil
         settleAnchor = nil
         if steadyBand != nil { steadyBand = nil }
     }
 
     /// Enter the holding state, re-centering the band on the settled subject.
     /// Transition-only publish.
-    private func enterSteadyHolding(centeredOn center: CGPoint) {
+    private func enterSteadyHolding(centeredOn center: CGPoint, programCropWidth: CGFloat) {
         steadyState = .holding
-        bandExitFrameCount = 0
-        settleFrameCount = 0
+        bandExitStartedAt = nil
+        bandExitLastObservationAt = nil
+        settleStartedAt = nil
+        settleLastObservationAt = nil
         settleAnchor = nil
-        let band = SteadyBand(centerX: center.x, width: config.steadyBandWidth)
+        let band = SteadyBand(
+            centerX: center.x,
+            width: config.steadyBandWidth * min(max(programCropWidth, 0), 1)
+        )
         if steadyBand != band { steadyBand = band }
     }
 
     // MARK: - Lock state machine
     //
     // The lock has a lifecycle: a tap puts it in `tracking`; if the subject
-    // goes missing it transitions to `hold` (crop frozen for ~2.5 s); if
+    // goes missing it transitions to `hold` (crop frozen for the configured hold duration); if
     // they don't return it transitions to `wideWaiting` (camera animates
     // to full-frame wide, signature retained for re-acquisition).
     //
@@ -843,30 +862,73 @@ final class ShotComposer: ObservableObject {
     /// candidate margin comparison. Older scores are evicted.
     private static let scoreFreshness: TimeInterval = 0.3
 
-    /// Per-track count of consecutive matching frames during wideWaiting.
-    /// Cleared on every state transition out of wideWaiting.
-    private var reacquisitionConsecutive: [UUID: Int] = [:]
-
-    /// Most recent score per candidate, used for the cross-candidate
-    /// margin check. Stale entries (older than `scoreFreshness`) are
-    /// dropped on every update.
-    private struct CandidateScore: Sendable {
-        let bestPrintDistance: Float
+    struct ReacquisitionScore: Sendable {
+        let id: UUID
+        let printDistance: Float?
         let landmarkDistance: Float?
-        let receivedAt: TimeInterval
     }
-    private var latestScores: [UUID: CandidateScore] = [:]
 
-    /// Whether a re-acquisition comparison is currently in flight (per
-    /// candidate). Same rationale as signatureCaptureInFlight.
-    private var reacquisitionInFlight: Set<UUID> = []
+    /// One decision per completed observation, after ALL visible candidates were scored.
+    struct ReacquisitionEvidence {
+        private(set) var candidate: UUID?
+        private(set) var count = 0
+        private var lastObservationID: UInt64?
 
-    /// A pending re-acquisition decision queued by an async task — the
-    /// next `tick()` consumes this and applies the transition. Use a
-    /// queue rather than mutating `lockState` directly from the task to
-    /// keep all transitions visible in tick's switch and avoid races
-    /// with synchronous operator actions.
-    private var pendingReacquisition: UUID? = nil
+        mutating func reset() { candidate = nil; count = 0; lastObservationID = nil }
+
+        mutating func consider(observationID: UInt64, scores: [ReacquisitionScore]) -> UUID? {
+            // Results can complete out of order when a session/target changes.
+            // Only a strictly newer observation may add evidence; duplicates
+            // and late older batches are ignored rather than counted twice.
+            guard lastObservationID.map({ observationID > $0 }) ?? true else { return nil }
+            lastObservationID = observationID
+            // Unknown/failed candidates make this observation ambiguous.
+            guard !scores.isEmpty, scores.allSatisfy({ $0.printDistance?.isFinite == true }) else {
+                candidate = nil; count = 0; return nil
+            }
+            let eligible = scores.filter { ($0.landmarkDistance ?? 0) <= ShotComposer.landmarkRejectionThreshold }
+                .sorted { $0.printDistance! < $1.printDistance! }
+            guard let winner = eligible.first,
+                  // A landmark-vetoed face is not a viable runner-up and must
+                  // not relax the stricter threshold for an effectively solo
+                  // candidate.
+                  winner.printDistance! < (eligible.count == 1 ? ShotComposer.soloThreshold : ShotComposer.absoluteThreshold),
+                  eligible.count < 2 || eligible[1].printDistance! >= winner.printDistance! * ShotComposer.marginRatio else {
+                candidate = nil; count = 0; return nil
+            }
+            count = candidate == winner.id ? count + 1 : 1
+            candidate = winner.id
+            return count >= ShotComposer.reacquisitionConsecutiveFrames ? winner.id : nil
+        }
+    }
+
+    private var reacquisitionEvidence = ReacquisitionEvidence()
+    private var reacquisitionBatchInFlight = false
+    private var recoveryVisibleIDs = Set<UUID>()
+    private var recoveryVisibilityRevision: UInt64 = 0
+    private var pendingReacquisition: UUID?
+    private var lockGeneration: UInt64 = 0
+    private var fallbackObservationID: UInt64 = 0
+    private var lastGalleryObservationID: UInt64?
+    /// Capture time of the newest observation admitted to recovery evidence.
+    /// Evidence older than the frame store's lifetime is not allowed to bind.
+    private var lastRecoveryObservationAt: TimeInterval?
+    private var acquisitionLastSeenAt: TimeInterval = 0
+    static let acquisitionTimeout: TimeInterval = 8.0
+    @Published private(set) var acquisitionFeedback: String?
+
+    private func invalidateIdentityWork() {
+        lockGeneration &+= 1
+        reacquisitionEvidence.reset()
+        recoveryVisibleIDs.removeAll()
+        recoveryVisibilityRevision &+= 1
+        pendingReacquisition = nil
+        lastGalleryObservationID = nil
+        lastRecoveryObservationAt = nil
+        lastGalleryRefreshAttemptAt = 0
+        // In-flight jobs retain their slot until they finish; generation guards
+        // discard their results without allowing unbounded replacement work.
+    }
 
     /// Backward-compatible accessor: returns the currently-locked UUID
     /// (when one is bound to a track). Returns nil in `inactive` and
@@ -903,6 +965,17 @@ final class ShotComposer: ObservableObject {
     var acquisitionProgress: Double? {
         guard case .acquiring(_, let gallery, _) = lockState else { return nil }
         return min(1.0, Double(gallery.size) / Double(FaceSignatureGallery.readyThreshold))
+    }
+
+    /// Operator-facing detail while acquisition is active. The generic
+    /// "Acquiring" label alone cannot distinguish a body that is visible from
+    /// the missing face samples that are preventing a safe identity lock.
+    var acquisitionStatusText: String? {
+        guard case .acquiring(_, let gallery, _) = lockState else { return acquisitionFeedback }
+        if gallery.size == 0 {
+            return "Face not visible — look toward camera"
+        }
+        return "Learning face \(gallery.size)/\(FaceSignatureGallery.readyThreshold)"
     }
 
     /// Whether the lock is in the WIDE-WAITING state — armed but pulled
@@ -983,22 +1056,52 @@ final class ShotComposer: ObservableObject {
         detections: [PersonDetector.DetectedPerson],
         timestamp: TimeInterval,
         pixelBuffer: CVPixelBuffer?,
-        isFresh: Bool = true
+        isFresh: Bool = true,
+        observationID: UInt64? = nil,
+        observationTimestamp: TimeInterval? = nil
     ) -> TickOutcome {
+        if isFresh { fallbackObservationID &+= 1 }
+        let frameID = observationID ?? fallbackObservationID
+        let sampleTime = observationTimestamp ?? timestamp
+        let isRecovering: Bool = {
+            switch lockState {
+            case .hold, .wideWaiting: return true
+            default: return false
+            }
+        }()
+        if isRecovering {
+            // Expire evidence before admitting a newer observation. Otherwise
+            // a pending decision from an old batch could bind merely because
+            // the same UUID happens to be visible after a long gap.
+            if let lastRecoveryObservationAt,
+               timestamp - lastRecoveryObservationAt > DetectionFrameStore.maximumAge {
+                reacquisitionEvidence.reset()
+                recoveryVisibleIDs.removeAll()
+                recoveryVisibilityRevision &+= 1
+                pendingReacquisition = nil
+                self.lastRecoveryObservationAt = nil
+            }
+            if isFresh {
+                lastRecoveryObservationAt = sampleTime
+            }
+        }
         // Drain any async re-acquisition decision queued from a prior frame's
         // background task. Doing this first keeps all state transitions
         // visible in this single switch.
         if let candidateID = pendingReacquisition {
             pendingReacquisition = nil
-            if case .wideWaiting(let gallery) = lockState {
-                Self.logger.info("LOCK-STATE old=wide_waiting new=tracking reason=reacquisition target=\(String(candidateID.uuidString.prefix(8)), privacy: .public)")
+            let gallery: FaceSignatureGallery?
+            switch lockState {
+            case .hold(_, let stored, _), .wideWaiting(let stored): gallery = stored
+            default: gallery = nil
+            }
+            if let gallery, detections.contains(where: { $0.id == candidateID }) {
                 lockState = .tracking(targetID: candidateID, gallery: gallery)
                 activeTargetID = candidateID
-                reacquisitionConsecutive.removeAll()
-                latestScores.removeAll()
+                invalidateIdentityWork()
+                enterSteadyFollowing()
                 return .resumeTracking
             }
-            // State moved on (operator override) — drop the stale decision.
         }
 
         switch lockState {
@@ -1006,18 +1109,29 @@ final class ShotComposer: ObservableObject {
             return .noChange
 
         case .acquiring(let targetID, let gallery, let sinceTime):
+            if timestamp - sinceTime >= Self.acquisitionTimeout {
+                acquisitionFeedback = "Could not learn the face. Tap Detect and try again with the face visible."
+                lockState = .inactive
+                activeTargetID = nil
+                invalidateIdentityWork()
+                return .noChange
+            }
             let lockedDetection = detections.first { $0.id == targetID }
 
             if let lockedDetection {
+                if isFresh { acquisitionLastSeenAt = sampleTime }
                 // Keep filling the gallery from the subject's face. When it
                 // reaches readyThreshold we promote to tracking (green box).
-                maybeAppendToGallery(
+                if isFresh, lastGalleryObservationID != frameID {
+                    lastGalleryObservationID = frameID
+                    maybeAppendToGallery(
                     for: targetID,
                     person: lockedDetection,
                     pixelBuffer: pixelBuffer,
                     gallery: gallery,
-                    timestamp: timestamp
-                )
+                    timestamp: sampleTime
+                    )
+                }
 
                 if currentGallery(forTarget: targetID)?.isReady ?? gallery.isReady {
                     Self.logger.info("LOCK-STATE old=acquiring new=tracking reason=gallery_ready target=\(String(targetID.uuidString.prefix(8)), privacy: .public)")
@@ -1031,10 +1145,12 @@ final class ShotComposer: ObservableObject {
             // Subject not visible this frame. Allow a short grace (the tap may
             // have briefly missed, or the subject turned). If they stay gone
             // past acquireGrace, release the half-built lock back to inactive.
-            if timestamp - sinceTime >= Self.acquireGrace {
+            if timestamp - acquisitionLastSeenAt >= Self.acquireGrace {
                 Self.logger.info("LOCK-STATE old=acquiring new=inactive reason=acquire_timeout target=\(String(targetID.uuidString.prefix(8)), privacy: .public)")
+                acquisitionFeedback = "Subject lost during acquisition. Tap Detect to try again."
                 lockState = .inactive
                 activeTargetID = nil
+                invalidateIdentityWork()
                 return .noChange
             }
             return .noChange
@@ -1046,13 +1162,16 @@ final class ShotComposer: ObservableObject {
                 // Healthy tracking. Opportunistically fill / refresh the
                 // gallery — the gallery must reach `readyThreshold` for
                 // re-acquisition to ever work after a wide-pull.
-                maybeAppendToGallery(
+                if isFresh, lastGalleryObservationID != frameID {
+                    lastGalleryObservationID = frameID
+                    maybeAppendToGallery(
                     for: targetID,
                     person: lockedDetection,
                     pixelBuffer: pixelBuffer,
                     gallery: gallery,
-                    timestamp: timestamp
-                )
+                    timestamp: sampleTime
+                    )
+                }
                 return .noChange
             }
 
@@ -1060,6 +1179,7 @@ final class ShotComposer: ObservableObject {
             // at their last position because primaryPerson returned nil
             // so the crop engine's target wasn't updated.
             Self.logger.info("LOCK-STATE old=tracking new=hold reason=subject_absent")
+            invalidateIdentityWork()
             lockState = .hold(
                 targetID: targetID,
                 gallery: gallery,
@@ -1076,6 +1196,10 @@ final class ShotComposer: ObservableObject {
                 Self.logger.info("LOCK-STATE old=hold new=tracking reason=subject_returned")
                 lockState = .tracking(targetID: targetID, gallery: gallery)
                 return .noChange
+            }
+            if isFresh, gallery.isReady {
+                scheduleReacquisitionScoring(detections: detections, pixelBuffer: pixelBuffer,
+                    gallery: gallery, observationID: frameID)
             }
             // Hold window expired? Pull back to wide. Gallery is preserved
             // so re-acquisition can work when the subject returns.
@@ -1105,7 +1229,7 @@ final class ShotComposer: ObservableObject {
                 detections: detections,
                 pixelBuffer: pixelBuffer,
                 gallery: gallery,
-                timestamp: timestamp
+                observationID: frameID
             )
             return .noChange
         }
@@ -1141,6 +1265,7 @@ final class ShotComposer: ObservableObject {
         let captureTimestamp = timestamp
         let extractor = signatureExtractor
         let landmarkVector = person.faceLandmarkRatios
+        let generation = lockGeneration
 
         Task.detached(priority: .userInitiated) { @Sendable [weak self] in
             let result = await Self.runSignatureCapture(
@@ -1150,6 +1275,8 @@ final class ShotComposer: ObservableObject {
             )
             guard let strong = self else { return }
             await MainActor.run {
+                strong.signatureCaptureInFlight = false
+                guard strong.lockGeneration == generation else { return }
                 strong.applySignatureCaptureResult(
                     print: result.print,
                     landmarkVector: landmarkVector,
@@ -1242,53 +1369,47 @@ final class ShotComposer: ObservableObject {
         detections: [PersonDetector.DetectedPerson],
         pixelBuffer: CVPixelBuffer?,
         gallery: FaceSignatureGallery,
-        timestamp: TimeInterval
+        observationID: UInt64
     ) {
-        guard let pixelBuffer else { return }
-
         let candidates = detections.filter { $0.faceBoundingBox != nil }
-        guard !candidates.isEmpty else { return }
-
-        // Forget consecutive counters for candidates that aren't visible
-        // this frame — a run must be unbroken.
-        let visibleIDs = Set(candidates.map { $0.id })
-        reacquisitionConsecutive = reacquisitionConsecutive.filter { visibleIDs.contains($0.key) }
-
-        // Snapshot the gallery into per-entry value types the detached
-        // task can hold across the actor boundary. We pair each feature
-        // print with its landmark vector so the worker can return the
-        // landmark distance for *the same gallery entry* that yielded
-        // the best print distance.
-        let referenceEntries: [(print: VNFeaturePrintObservation, landmarks: LandmarkRatios?)] =
-            gallery.entries.map { ($0.featurePrint, $0.landmarkVector) }
-        let consecutiveTarget = Self.reacquisitionConsecutiveFrames
+        let visibleIDs = Set(candidates.map(\.id))
+        if recoveryVisibleIDs != visibleIDs {
+            recoveryVisibleIDs = visibleIDs
+            recoveryVisibilityRevision &+= 1
+            reacquisitionEvidence.reset()
+            pendingReacquisition = nil
+        }
+        guard !candidates.isEmpty, let pixelBuffer else {
+            reacquisitionEvidence.reset()
+            return
+        }
+        guard !reacquisitionBatchInFlight else { return }
+        reacquisitionBatchInFlight = true
+        let generation = lockGeneration
+        let visibilityRevision = recoveryVisibilityRevision
+        let referenceEntries = gallery.entries.map { (print: $0.featurePrint, landmarks: $0.landmarkVector) }
         let bufferBox = SendablePixelBuffer(value: pixelBuffer)
         let extractor = signatureExtractor
-
-        for candidate in candidates {
-            guard let faceBox = candidate.faceBoundingBox else { continue }
-            guard !reacquisitionInFlight.contains(candidate.id) else { continue }
-
-            reacquisitionInFlight.insert(candidate.id)
-            let candidateID = candidate.id
-            let candidateLandmarks = candidate.faceLandmarkRatios
-
-            Task.detached(priority: .userInitiated) { @Sendable [weak self] in
-                let scored = await Self.runReacquisitionScoring(
-                    extractor: extractor,
-                    bufferBox: bufferBox,
-                    faceBox: faceBox,
-                    candidateLandmarks: candidateLandmarks,
-                    referenceEntries: referenceEntries
-                )
-                guard let strong = self else { return }
-                await MainActor.run {
-                    strong.applyReacquisitionResult(
-                        candidateID: candidateID,
-                        bestPrintDistance: scored?.printDistance,
-                        landmarkDistance: scored?.landmarkDistance,
-                        consecutiveTarget: consecutiveTarget
-                    )
+        Task.detached(priority: .userInitiated) { [weak self] in
+            var scores: [ReacquisitionScore] = []
+            for candidate in candidates {
+                let result = await Self.runReacquisitionScoring(extractor: extractor,
+                    bufferBox: bufferBox, faceBox: candidate.faceBoundingBox!,
+                    candidateLandmarks: candidate.faceLandmarkRatios, referenceEntries: referenceEntries)
+                scores.append(ReacquisitionScore(id: candidate.id,
+                    printDistance: result?.printDistance, landmarkDistance: result?.landmarkDistance))
+            }
+            let completedScores = scores
+            guard let strong = self else { return }
+            await MainActor.run {
+                strong.reacquisitionBatchInFlight = false
+                guard strong.lockGeneration == generation,
+                      strong.recoveryVisibilityRevision == visibilityRevision else { return }
+                switch strong.lockState {
+                case .hold, .wideWaiting:
+                    strong.pendingReacquisition = strong.reacquisitionEvidence.consider(
+                        observationID: observationID, scores: completedScores)
+                default: break
                 }
             }
         }
@@ -1327,124 +1448,21 @@ final class ShotComposer: ObservableObject {
         return (best, landmarkDistance)
     }
 
-    /// Main-actor side of re-acquisition: update the consecutive-match
-    /// counter and queue `pendingReacquisition` when the threshold is
-    /// cleared for N consecutive frames.
-    private func applyReacquisitionResult(
-        candidateID: UUID,
-        bestPrintDistance: Float?,
-        landmarkDistance: Float?,
-        consecutiveTarget: Int
-    ) {
-        reacquisitionInFlight.remove(candidateID)
-        guard case .wideWaiting = lockState else {
-            reacquisitionConsecutive.removeAll()
-            latestScores.removeAll()
-            return
-        }
-
-        let now = CACurrentMediaTime()
-        let shortID = String(candidateID.uuidString.prefix(8))
-        let lmStr = landmarkDistance.map { String(format: "%.3f", $0) } ?? "n/a"
-        let distStr = bestPrintDistance.map { String(format: "%.3f", $0) } ?? "n/a"
-
-        guard let bestPrintDistance else {
-            // Extraction failed — reset this candidate.
-            reacquisitionConsecutive[candidateID] = 0
-            latestScores.removeValue(forKey: candidateID)
-            Self.logger.info("REACQ candidate=\(shortID, privacy: .public) verdict=extract-failed")
-            return
-        }
-
-        // Landmark veto: if landmark distance exceeds the rejection
-        // threshold, the candidate is definitely not the same person no
-        // matter how close their feature print is.
-        if let landmarkDistance, landmarkDistance > Self.landmarkRejectionThreshold {
-            reacquisitionConsecutive[candidateID] = 0
-            latestScores.removeValue(forKey: candidateID)
-            let lmThrStr = String(format: "%.2f", Self.landmarkRejectionThreshold)
-            Self.logger.info("REACQ candidate=\(shortID, privacy: .public) faceDist=\(distStr, privacy: .public) landmarkDist=\(lmStr, privacy: .public) landmarkThr=\(lmThrStr, privacy: .public) verdict=landmark-veto")
-            return
-        }
-
-        // Store the fresh score, then evict stale ones.
-        latestScores[candidateID] = CandidateScore(
-            bestPrintDistance: bestPrintDistance,
-            landmarkDistance: landmarkDistance,
-            receivedAt: now
-        )
-        latestScores = latestScores.filter { now - $0.value.receivedAt <= Self.scoreFreshness }
-
-        // Find the best candidate among current fresh scores.
-        guard let winner = latestScores.min(by: { $0.value.bestPrintDistance < $1.value.bestPrintDistance }) else {
-            return
-        }
-
-        // Determine threshold context: solo (this is the only fresh
-        // score) or multi (≥2 fresh scores → margin check applies).
-        let candidateCount = latestScores.count
-        let isSolo = candidateCount == 1
-        let absoluteThr = isSolo ? Self.soloThreshold : Self.absoluteThreshold
-        let absStr = String(format: "%.3f", absoluteThr)
-
-        // Absolute threshold check on the winner.
-        let winnerPrint = winner.value.bestPrintDistance
-        if winnerPrint >= absoluteThr {
-            // Winner doesn't even clear the bar — reset everyone.
-            for id in latestScores.keys {
-                reacquisitionConsecutive[id] = 0
-            }
-            Self.logger.info("REACQ candidate=\(shortID, privacy: .public) faceDist=\(distStr, privacy: .public) landmarkDist=\(lmStr, privacy: .public) absThr=\(absStr, privacy: .public) solo=\(isSolo, privacy: .public) verdict=over-threshold")
-            return
-        }
-
-        // Multi-candidate margin check. Second-best print distance must
-        // be at least `marginRatio × winnerPrint` for the winner to be
-        // considered uniquely the locked subject vs. a look-alike.
-        if !isSolo {
-            let sorted = latestScores.values.sorted { $0.bestPrintDistance < $1.bestPrintDistance }
-            // sorted.count ≥ 2 because isSolo == false
-            let secondBest = sorted[1].bestPrintDistance
-            let requiredSecond = winnerPrint * Self.marginRatio
-            let marginStr = String(format: "%.2f", secondBest / max(winnerPrint, 0.0001))
-            if secondBest < requiredSecond {
-                // Margin too small — winner isn't clearly distinct from
-                // runner-up. Reset everyone.
-                for id in latestScores.keys {
-                    reacquisitionConsecutive[id] = 0
-                }
-                Self.logger.info("REACQ candidate=\(shortID, privacy: .public) winner=\(String(winner.key.uuidString.prefix(8)), privacy: .public) ratio=\(marginStr, privacy: .public) requiredRatio=\(String(format: "%.2f", Self.marginRatio), privacy: .public) verdict=margin-too-small")
-                return
-            }
-        }
-
-        // All gates cleared for the winner. Increment its consec; reset
-        // any other candidate's counter so only one accumulates at a time.
-        for id in latestScores.keys where id != winner.key {
-            reacquisitionConsecutive[id] = 0
-        }
-        let prev = reacquisitionConsecutive[winner.key] ?? 0
-        let next = prev + 1
-        reacquisitionConsecutive[winner.key] = next
-        Self.logger.info("REACQ candidate=\(shortID, privacy: .public) winner=\(String(winner.key.uuidString.prefix(8)), privacy: .public) faceDist=\(distStr, privacy: .public) landmarkDist=\(lmStr, privacy: .public) absThr=\(absStr, privacy: .public) consec=\(next, privacy: .public)/\(consecutiveTarget, privacy: .public) verdict=BIND-eligible")
-
-        if next >= consecutiveTarget {
-            pendingReacquisition = winner.key
-        }
-    }
-
     /// Compose a stage-friendly speaker shot.
     /// Returns a CropRect when the target should be updated, nil when within deadzone.
-    /// - Parameter isFresh: see `tick(detections:timestamp:pixelBuffer:isFresh:)`.
-    ///   The Steady Following detectors below count consecutive frames, and a
-    ///   repeated detection has *exactly* zero movement — which would read as
-    ///   perfect stillness and park the camera roughly twice as eagerly as it
-    ///   should, and would satisfy the band-exit debounce on a single sighting.
+    /// - Parameters:
+    ///   - isFresh: whether this is a new detection observation. Repeated
+    ///     detections never contribute to Steady Follow confirmation.
+    ///   - observationTimestamp: monotonic capture time of that observation.
+    ///     Confirmation uses this rather than display-frame time so it remains
+    ///     stable across input and detection rates.
     func compose(
         person: PersonDetector.DetectedPerson,
-        isFresh: Bool = true
+        isFresh: Bool = true,
+        observationTimestamp: TimeInterval? = nil
     ) -> CropEngine.CropRect? {
         guard config.isEnabled else { return nil }
+        let sampleTime = observationTimestamp ?? CACurrentMediaTime()
 
         let subjectBounds = person.boundingBox.standardized
 
@@ -1457,7 +1475,8 @@ final class ShotComposer: ObservableObject {
                 trackedBounds,
                 subjectBounds: subjectBounds,
                 trackingCenter: CGPoint(x: trackedBounds.midX, y: trackedBounds.midY),
-                isFresh: isFresh
+                isFresh: isFresh,
+                observationTimestamp: sampleTime
             )
         }
 
@@ -1468,7 +1487,8 @@ final class ShotComposer: ObservableObject {
             trackedBounds,
             subjectBounds: subjectBounds,
             trackingCenter: CGPoint(x: trackedBounds.midX, y: trackedBounds.midY),
-            isFresh: isFresh
+            isFresh: isFresh,
+            observationTimestamp: sampleTime
         )
     }
 
@@ -1482,6 +1502,8 @@ final class ShotComposer: ObservableObject {
 
     /// Reset state (e.g., when switching subjects or losing track)
     func reset(clearManualLock: Bool = false) {
+        invalidateIdentityWork()
+        acquisitionFeedback = nil
         lastAcceptedCenter = nil
         lastAppliedFramingFingerprint = nil
         // @Published transition state: compare-before-write (reset can run
@@ -1514,6 +1536,8 @@ final class ShotComposer: ObservableObject {
     /// gallery reaches `readyThreshold` the FSM promotes to `tracking` (green
     /// box) and cropping begins. Accuracy/consistency over instant lock.
     func lockTarget(_ targetID: UUID) {
+        acquisitionFeedback = nil
+        acquisitionLastSeenAt = CACurrentMediaTime()
         Self.logger.info("LOCK-STATE old=\(self.lockStateName, privacy: .public) new=acquiring reason=operator_select target=\(String(targetID.uuidString.prefix(8)), privacy: .public)")
         lockState = .acquiring(
             targetID: targetID,
@@ -1521,16 +1545,19 @@ final class ShotComposer: ObservableObject {
             sinceTime: CACurrentMediaTime()
         )
         activeTargetID = nil
-        reacquisitionConsecutive.removeAll()
-        latestScores.removeAll()
+        lastAcceptedCenter = nil
+        lastAppliedFramingFingerprint = nil
+        lastEmittedCropSize = nil
+        lastEmittedVerticalAnchor = nil
+        enterSteadyFollowing()
+        invalidateIdentityWork()
     }
 
     /// Operator pressed Return to Wide / unlock — discard all lock state.
     func clearManualLock() {
         Self.logger.info("LOCK-STATE old=\(self.lockStateName, privacy: .public) new=inactive reason=operator_release")
         lockState = .inactive
-        reacquisitionConsecutive.removeAll()
-        latestScores.removeAll()
+        invalidateIdentityWork()
         enterSteadyFollowing()
     }
 
@@ -1572,7 +1599,8 @@ final class ShotComposer: ObservableObject {
         _ trackedBounds: CGRect,
         subjectBounds: CGRect,
         trackingCenter: CGPoint,
-        isFresh: Bool
+        isFresh: Bool,
+        observationTimestamp: TimeInterval
     ) -> CropEngine.CropRect? {
         let tuning = framingTuning
         let aspect = normalizedAspect
@@ -1653,7 +1681,8 @@ final class ShotComposer: ObservableObject {
                 size: CGSize(width: cropWidth, height: cropHeight)
             ),
             trackingCenter: trackingCenter,
-            isFresh: isFresh
+            isFresh: isFresh,
+            observationTimestamp: observationTimestamp
         )
     }
 
@@ -1759,7 +1788,8 @@ final class ShotComposer: ObservableObject {
     private func clampAndAccept(
         _ crop: CropEngine.CropRect,
         trackingCenter: CGPoint,
-        isFresh: Bool
+        isFresh: Bool,
+        observationTimestamp: TimeInterval
     ) -> CropEngine.CropRect? {
         let fingerprint = currentFramingFingerprint
         let framingChanged = lastAppliedFramingFingerprint != fingerprint
@@ -1844,8 +1874,13 @@ final class ShotComposer: ObservableObject {
         // band and no new target is emitted (the camera stays put); while
         // `following`, targets are emitted every frame and the CropEngine
         // spring smooths them. Transitions publish `steadyBand`.
-        let halfWidth = config.steadyBandWidth / 2.0
+        // A band is a proportion of the active program crop, not of the whole
+        // source frame. Once holding begins, use the published band width so
+        // later bbox-size noise cannot make a parked shot's guides drift.
+        let programBandWidth = config.steadyBandWidth * clampedCrop.size.width
+        let halfWidth = (steadyBand?.width ?? programBandWidth) / 2.0
         let verticalHalf = halfWidth * Self.verticalBandRatio
+        let settleRadius = settleRadius(for: clampedCrop.size.width)
 
         // Framing inputs changed (new preset/anchor): force back to following,
         // clear the band, and accept one centering target immediately so the
@@ -1871,19 +1906,28 @@ final class ShotComposer: ObservableObject {
             let dx = abs(trackingCenter.x - bandCenter.x)
             let dy = abs(trackingCenter.y - bandCenter.y)
             if dx > halfWidth || dy > verticalHalf {
-                // Repeats are not evidence: this debounce exists to reject a
-                // single noisy Vision box, and counting the same box twice
-                // would defeat it entirely.
-                if isFresh { bandExitFrameCount += 1 }
-                if bandExitFrameCount >= Self.bandExitConfirmFrames {
-                    // Confirmed band exit — resume following and accept.
-                    enterSteadyFollowing()
-                    lastAcceptedCenter = trackingCenter
-                    if !hasActiveTarget { hasActiveTarget = true }
-                    return clampedCrop
+                // Repeats are not evidence. Fresh capture timestamps preserve
+                // the former debounce duration at every supported cadence.
+                if isFresh {
+                    let isContinuous = bandExitLastObservationAt.map {
+                        observationTimestamp >= $0
+                            && observationTimestamp - $0 <= Self.steadyObservationGap
+                    } ?? true
+                    if !isContinuous { bandExitStartedAt = observationTimestamp }
+                    if bandExitStartedAt == nil { bandExitStartedAt = observationTimestamp }
+                    bandExitLastObservationAt = observationTimestamp
+                    if let startedAt = bandExitStartedAt,
+                       observationTimestamp - startedAt >= Self.bandExitConfirmation {
+                        // Confirmed band exit — resume following and accept.
+                        enterSteadyFollowing()
+                        lastAcceptedCenter = trackingCenter
+                        if !hasActiveTarget { hasActiveTarget = true }
+                        return clampedCrop
+                    }
                 }
             } else if isFresh {
-                bandExitFrameCount = 0
+                bandExitStartedAt = nil
+                bandExitLastObservationAt = nil
             }
             // Still holding — emit no new target; the camera stays parked.
             return nil
@@ -1893,7 +1937,7 @@ final class ShotComposer: ObservableObject {
             // zero (Vision bbox jitter alone registers ~0.1–0.3 frame-widths/s
             // for a still subject), so settling is dwell-in-a-radius instead.
             // Once the subject stays within `settleRadius` of the anchor for
-            // `settleConfirmFrames` consecutive frames, re-enter holding,
+            // `settleConfirmation` of capture time, re-enter holding,
             // centered on the ANCHOR (not the instantaneous jittered center),
             // and accept one final centering target.
             //
@@ -1905,18 +1949,26 @@ final class ShotComposer: ObservableObject {
             if isFresh {
                 if let anchor = settleAnchor,
                    hypot(trackingCenter.x - anchor.x, trackingCenter.y - anchor.y) <= settleRadius {
-                    settleFrameCount += 1
+                    let isContinuous = settleLastObservationAt.map {
+                        observationTimestamp >= $0
+                            && observationTimestamp - $0 <= Self.steadyObservationGap
+                    } ?? true
+                    if !isContinuous { settleStartedAt = observationTimestamp }
                 } else {
                     settleAnchor = trackingCenter
-                    settleFrameCount = 1
+                    settleStartedAt = observationTimestamp
                 }
-            }
-            if settleFrameCount >= Self.settleConfirmFrames, let anchor = settleAnchor {
-                enterSteadyHolding(centeredOn: anchor)
-                lastAcceptedCenter = anchor
-                lastAppliedFramingFingerprint = fingerprint
-                if !hasActiveTarget { hasActiveTarget = true }
-                return clampedCrop
+                if settleStartedAt == nil { settleStartedAt = observationTimestamp }
+                settleLastObservationAt = observationTimestamp
+                if let startedAt = settleStartedAt,
+                   observationTimestamp - startedAt >= Self.settleConfirmation,
+                   let anchor = settleAnchor {
+                    enterSteadyHolding(centeredOn: anchor, programCropWidth: clampedCrop.size.width)
+                    lastAcceptedCenter = anchor
+                    lastAppliedFramingFingerprint = fingerprint
+                    if !hasActiveTarget { hasActiveTarget = true }
+                    return clampedCrop
+                }
             }
             // Keep following — emit a target every frame.
             lastAcceptedCenter = trackingCenter
@@ -2039,7 +2091,7 @@ final class ShotComposer: ObservableObject {
         case (.livestream, .fullBody):
             return FramingTuning(
                 minimumCropHeight: 0.55,
-                maximumCropHeight: 0.95,
+                maximumCropHeight: 0.85,
                 horizontalPaddingMultiplier: 0.32,
                 trackedWidthMultiplier: 0.90,
                 trackedAspectFloor: 0.68,
@@ -2078,7 +2130,7 @@ final class ShotComposer: ObservableObject {
         case (.portrait, .fullBody):
             return FramingTuning(
                 minimumCropHeight: 0.45,
-                maximumCropHeight: 0.95,
+                maximumCropHeight: 0.85,
                 horizontalPaddingMultiplier: 0.18,
                 trackedWidthMultiplier: 0.92,
                 trackedAspectFloor: 0.44,

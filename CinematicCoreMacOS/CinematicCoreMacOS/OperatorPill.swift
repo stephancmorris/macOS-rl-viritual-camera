@@ -49,6 +49,18 @@ struct OperatorPill: View {
             RoundedRectangle(cornerRadius: 22, style: .continuous)
                 .strokeBorder(Color.white.opacity(0.12), lineWidth: 0.5)
         )
+        .overlay(alignment: .top) {
+            if let feedback = cameraManager.shotComposer.acquisitionStatusText,
+               !cameraManager.detectionDiscoveryActive {
+                Text(feedback)
+                    .font(.callout)
+                    .foregroundStyle(.white)
+                    .padding(10)
+                    .background(.black.opacity(0.8), in: RoundedRectangle(cornerRadius: 8))
+                    .offset(y: -55)
+                    .accessibilityLabel(feedback)
+            }
+        }
         .shadow(color: .black.opacity(0.55), radius: 30, x: 0, y: 18)
         .shadow(color: .black.opacity(0.35), radius: 60, x: 0, y: 30)
     }
@@ -71,15 +83,30 @@ struct OperatorPill: View {
     private var lockStateSection: some View {
         let state = lockState
         return Button(action: lockStateAction) {
-            HStack(spacing: 8) {
-                Circle()
-                    .fill(state.dotColor)
-                    .frame(width: 7, height: 7)
-                    .shadow(color: state.dotColor.opacity(0.8), radius: state.hasGlow ? 6 : 0)
-                Text(state.label)
-                    .font(.system(size: 12, weight: .medium))
-                    .foregroundStyle(.white.opacity(state.labelOpacity))
+            ZStack {
+                HStack(spacing: 8) {
+                    Circle()
+                        .fill(state.dotColor)
+                        .frame(width: 7, height: 7)
+                        .shadow(color: state.dotColor.opacity(0.8), radius: state.hasGlow ? 6 : 0)
+                    Text(state.label)
+                        .font(.system(size: 12, weight: .medium))
+                        .foregroundStyle(.white.opacity(state.labelOpacity))
+                }
+                HStack(spacing: 8) {
+                    Circle()
+                        .frame(width: 7, height: 7)
+                    ZStack {
+                        ForEach(LockState.allCases, id: \.self) { state in
+                            Text(state.label)
+                                .font(.system(size: 12, weight: .medium))
+                        }
+                    }
+                }
+                .hidden()
+                .accessibilityHidden(true)
             }
+            .fixedSize(horizontal: true, vertical: false)
             .padding(.horizontal, 14)
             .padding(.vertical, 9)
             .contentShape(Rectangle())
@@ -92,6 +119,8 @@ struct OperatorPill: View {
         if cameraManager.shotComposer.isAcquiring {
             return .acquiring
         }
+        if cameraManager.shotComposer.isHolding { return .recovering }
+        if cameraManager.shotComposer.isWideWaiting { return .waiting }
         if cameraManager.isManualTargetLockActive {
             return .locked
         }
@@ -106,15 +135,15 @@ struct OperatorPill: View {
 
     private func lockStateAction() {
         switch lockState {
-        case .locked:
+        case .locked, .recovering, .waiting:
             cameraManager.clearManualTargetLock()
         case .idle, .awaitingTap, .tapPending, .acquiring:
             break
         }
     }
 
-    private enum LockState {
-        case idle, awaitingTap, tapPending, acquiring, locked
+    private enum LockState: CaseIterable, Hashable {
+        case idle, awaitingTap, tapPending, acquiring, locked, recovering, waiting
 
         var label: String {
             switch self {
@@ -123,6 +152,8 @@ struct OperatorPill: View {
             case .tapPending: return "Got it — finding subject…"
             case .acquiring: return "Acquiring subject…"
             case .locked: return "Locked on subject · tap to unlock"
+            case .recovering: return "Recovering · holding shot"
+            case .waiting: return "Wide · searching for subject"
             }
         }
 
@@ -132,6 +163,7 @@ struct OperatorPill: View {
             case .awaitingTap: return Color(red: 0.47, green: 0.86, blue: 1.0)
             case .tapPending: return Color(red: 0.47, green: 0.86, blue: 1.0)
             case .acquiring: return Color(red: 1.0, green: 0.74, blue: 0.23)
+            case .recovering, .waiting: return .orange
             case .locked: return Color(red: 0.04, green: 0.52, blue: 1.0)
             }
         }
@@ -142,21 +174,21 @@ struct OperatorPill: View {
             case .awaitingTap: return 0.78
             case .tapPending: return 0.85
             case .acquiring: return 0.85
-            case .locked: return 0.92
+            case .locked, .recovering, .waiting: return 0.92
             }
         }
 
         var hasGlow: Bool {
             switch self {
             case .idle: return false
-            case .awaitingTap, .tapPending, .acquiring, .locked: return true
+            case .awaitingTap, .tapPending, .acquiring, .locked, .recovering, .waiting: return true
             }
         }
 
         var isInteractive: Bool {
             switch self {
             case .idle, .awaitingTap, .tapPending, .acquiring: return false
-            case .locked: return true
+            case .locked, .recovering, .waiting: return true
             }
         }
     }
@@ -168,7 +200,7 @@ struct OperatorPill: View {
         let isAcquiring = cameraManager.shotComposer.isAcquiring
         let isLocked = cameraManager.isManualTargetLockActive
         // Disabled (but visible) once a subject is locked — unlock via the pill.
-        let enabled = cameraManager.isRunning && !isLocked && !isAcquiring
+        let enabled = cameraManager.isRunning && (!isLocked || cameraManager.canDirectlyReacquire) && !isAcquiring
         let label: String = {
             if isAcquiring { return "Acquiring…" }
             if isDiscovering { return "Cancel" }
@@ -182,14 +214,32 @@ struct OperatorPill: View {
                 cameraManager.beginDetection()
             }
         } label: {
-            HStack(spacing: 7) {
-                Image(systemName: isDiscovering ? "xmark.circle" : "viewfinder")
+            ZStack {
+                HStack(spacing: 7) {
+                    Image(systemName: isDiscovering ? "xmark.circle" : "viewfinder")
+                        .font(.system(size: 12, weight: .semibold))
+                        .foregroundStyle(.white.opacity(highlighted ? 1.0 : (enabled ? 0.86 : 0.32)))
+                    Text(label)
+                        .font(.system(size: 12, weight: highlighted ? .semibold : .medium))
+                        .foregroundStyle(.white.opacity(highlighted ? 1.0 : (enabled ? 0.86 : 0.32)))
+                }
+                HStack(spacing: 7) {
+                    ZStack {
+                        Image(systemName: "viewfinder")
+                        Image(systemName: "xmark.circle")
+                    }
                     .font(.system(size: 12, weight: .semibold))
-                    .foregroundStyle(.white.opacity(highlighted ? 1.0 : (enabled ? 0.86 : 0.32)))
-                Text(label)
-                    .font(.system(size: 12, weight: highlighted ? .semibold : .medium))
-                    .foregroundStyle(.white.opacity(highlighted ? 1.0 : (enabled ? 0.86 : 0.32)))
+                    ZStack {
+                        ForEach(["Detect", "Cancel", "Acquiring…"], id: \.self) { label in
+                            Text(label)
+                                .font(.system(size: 12, weight: .semibold))
+                        }
+                    }
+                }
+                .hidden()
+                .accessibilityHidden(true)
             }
+            .fixedSize(horizontal: true, vertical: false)
             .padding(.horizontal, 14)
             .padding(.vertical, 9)
             .background(
