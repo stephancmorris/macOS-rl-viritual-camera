@@ -3,18 +3,34 @@
 //  CinematicCoreMacOS
 //
 //  Floating glass operator pill: lock state · shot preset segmented ·
-//  Return to Wide · Resume Tracking · Stop session.
+//  push/pull · Return to Wide · Stop session.
 //
 
 import SwiftUI
 
 struct OperatorPill: View {
     @ObservedObject var cameraManager: CameraManager
-    var onStop: () -> Void
-    var onStart: () -> Void
 
     private var isWebcam: Bool {
         cameraManager.shotComposer.config.cinematicFormat == .webcam
+    }
+
+    private var operatorFeedback: String? {
+        if cameraManager.isProgramHolding { return "Holding last good program" }
+        if let status = cameraManager.controlStatus { return status }
+        if cameraManager.isZoomLimited { return "ZOOM LIMITED" }
+        if cameraManager.cropEngine?.hasZoomAdjustment == true { return cameraManager.framingTitle }
+        return cameraManager.detectionDiscoveryActive
+            ? "Tap the subject in the wide frame"
+            : cameraManager.shotComposer.acquisitionStatusText
+    }
+
+    private var zoomButtons: some View {
+        HStack(spacing: 4) {
+            ZoomShotButton(cameraManager: cameraManager, direction: .pullOut)
+            ZoomShotButton(cameraManager: cameraManager, direction: .pushIn)
+        }
+        .padding(.horizontal, 4)
     }
 
     var body: some View {
@@ -38,6 +54,8 @@ struct OperatorPill: View {
                 autoPanButton
                 divider
             }
+            zoomButtons
+            divider
             returnToWideButton
             divider
             stopSessionButton
@@ -50,8 +68,7 @@ struct OperatorPill: View {
                 .strokeBorder(Color.white.opacity(0.12), lineWidth: 0.5)
         )
         .overlay(alignment: .top) {
-            if let feedback = cameraManager.shotComposer.acquisitionStatusText,
-               !cameraManager.detectionDiscoveryActive {
+            if let feedback = operatorFeedback {
                 Text(feedback)
                     .font(.callout)
                     .foregroundStyle(.white)
@@ -107,7 +124,7 @@ struct OperatorPill: View {
                 .accessibilityHidden(true)
             }
             .fixedSize(horizontal: true, vertical: false)
-            .padding(.horizontal, 14)
+            .padding(.horizontal, 10)
             .padding(.vertical, 9)
             .contentShape(Rectangle())
         }
@@ -136,7 +153,7 @@ struct OperatorPill: View {
     private func lockStateAction() {
         switch lockState {
         case .locked, .recovering, .waiting:
-            cameraManager.clearManualTargetLock()
+            cameraManager.dispatch(cameraManager.makeCommand(.unlock))
         case .idle, .awaitingTap, .tapPending, .acquiring:
             break
         }
@@ -147,13 +164,13 @@ struct OperatorPill: View {
 
         var label: String {
             switch self {
-            case .idle: return "Tap Detect to pick a subject"
-            case .awaitingTap: return "Tap the subject in the frame"
-            case .tapPending: return "Got it — finding subject…"
-            case .acquiring: return "Acquiring subject…"
-            case .locked: return "Locked on subject · tap to unlock"
-            case .recovering: return "Recovering · holding shot"
-            case .waiting: return "Wide · searching for subject"
+            case .idle: return "Pick subject"
+            case .awaitingTap: return "Tap subject"
+            case .tapPending: return "Finding…"
+            case .acquiring: return "Acquiring…"
+            case .locked: return "Locked"
+            case .recovering: return "Recovering"
+            case .waiting: return "Searching"
             }
         }
 
@@ -200,7 +217,8 @@ struct OperatorPill: View {
         let isAcquiring = cameraManager.shotComposer.isAcquiring
         let isLocked = cameraManager.isManualTargetLockActive
         // Disabled (but visible) once a subject is locked — unlock via the pill.
-        let enabled = cameraManager.isRunning && (!isLocked || cameraManager.canDirectlyReacquire) && !isAcquiring
+        let operatorGeometryMode = cameraManager.activeMode == .autoPan || cameraManager.activeMode == .manualCrop
+        let enabled = cameraManager.isRunning && !operatorGeometryMode && (!isLocked || cameraManager.canDirectlyReacquire) && !isAcquiring
         let label: String = {
             if isAcquiring { return "Acquiring…" }
             if isDiscovering { return "Cancel" }
@@ -209,9 +227,9 @@ struct OperatorPill: View {
         let highlighted = isDiscovering || isAcquiring
         return Button {
             if isDiscovering {
-                cameraManager.cancelDetection()
+                cameraManager.dispatch(cameraManager.makeCommand(.cancelDetect))
             } else {
-                cameraManager.beginDetection()
+                cameraManager.dispatch(cameraManager.makeCommand(.detect))
             }
         } label: {
             ZStack {
@@ -240,7 +258,7 @@ struct OperatorPill: View {
                 .accessibilityHidden(true)
             }
             .fixedSize(horizontal: true, vertical: false)
-            .padding(.horizontal, 14)
+            .padding(.horizontal, 10)
             .padding(.vertical, 9)
             .background(
                 RoundedRectangle(cornerRadius: 11, style: .continuous)
@@ -260,9 +278,7 @@ struct OperatorPill: View {
         return HStack(spacing: 2) {
             ForEach(ShotComposer.Config.ShotPreset.allCases) { option in
                 shotPresetSegment(option: option, isOn: preset == option) {
-                    guard preset != option else { return }
-                    cameraManager.shotComposer.config.shotPreset = option
-                    cameraManager.boostFramingTransition()
+                    cameraManager.dispatch(cameraManager.makeCommand(.selectPreset(.stage(option))))
                 }
             }
         }
@@ -300,9 +316,7 @@ struct OperatorPill: View {
         return HStack(spacing: 2) {
             ForEach(ShotComposer.Config.WebcamPreset.allCases) { option in
                 webcamPresetSegment(option: option, isOn: preset == option) {
-                    guard preset != option else { return }
-                    cameraManager.shotComposer.config.webcamPreset = option
-                    cameraManager.boostFramingTransition()
+                    cameraManager.dispatch(cameraManager.makeCommand(.selectPreset(.webcam(option))))
                 }
             }
         }
@@ -337,14 +351,14 @@ struct OperatorPill: View {
 
     private var returnToWideButton: some View {
         let isOn = cameraManager.activeMode == .wide
-        let enabled = cameraManager.isRunning && !isOn
+        let enabled = cameraManager.isRunning
         return Button {
-            cameraManager.returnToWide()
+            cameraManager.dispatch(cameraManager.makeCommand(.returnToWide))
         } label: {
             Text("Return to Wide")
                 .font(.system(size: 12, weight: isOn ? .semibold : .medium))
                 .foregroundStyle(.white.opacity(isOn ? 1.0 : (enabled ? 0.86 : 0.32)))
-                .padding(.horizontal, 14)
+                .padding(.horizontal, 10)
                 .padding(.vertical, 9)
                 .background(
                     RoundedRectangle(cornerRadius: 11, style: .continuous)
@@ -363,7 +377,7 @@ struct OperatorPill: View {
         let hasLock = cameraManager.manualLockedTargetID != nil
         let enabled = cameraManager.isRunning && !isOn && hasLock
         return Button {
-            cameraManager.activeMode = .autoTracking
+            cameraManager.dispatch(cameraManager.makeCommand(.setMode(.autoTracking)))
         } label: {
             HStack(spacing: 7) {
                 Circle()
@@ -375,7 +389,7 @@ struct OperatorPill: View {
                     .font(.system(size: 12, weight: isOn ? .semibold : .medium))
                     .foregroundStyle(.white.opacity(isOn ? 1.0 : (enabled ? 0.86 : 0.32)))
             }
-            .padding(.horizontal, 14)
+            .padding(.horizontal, 10)
             .padding(.vertical, 9)
             .background(
                 RoundedRectangle(cornerRadius: 11, style: .continuous)
@@ -394,7 +408,7 @@ struct OperatorPill: View {
         let isOn = cameraManager.activeMode == .manualCrop
         let enabled = cameraManager.isRunning && !isOn
         return Button {
-            cameraManager.activeMode = .manualCrop
+            cameraManager.dispatch(cameraManager.makeCommand(.setMode(.manualCrop)))
         } label: {
             HStack(spacing: 7) {
                 Circle()
@@ -402,11 +416,11 @@ struct OperatorPill: View {
                           ? Color(red: 0.31, green: 0.93, blue: 0.78)
                           : Color.white.opacity(0.3))
                     .frame(width: 6, height: 6)
-                Text("Manual Crop")
+                Text("Manual")
                     .font(.system(size: 12, weight: isOn ? .semibold : .medium))
                     .foregroundStyle(.white.opacity(isOn ? 1.0 : (enabled ? 0.86 : 0.32)))
             }
-            .padding(.horizontal, 14)
+            .padding(.horizontal, 10)
             .padding(.vertical, 9)
             .background(
                 RoundedRectangle(cornerRadius: 11, style: .continuous)
@@ -422,13 +436,10 @@ struct OperatorPill: View {
 
     private var autoPanButton: some View {
         let isOn = cameraManager.activeMode == .autoPan
-        // Available from every stage preset, including Wide (the Wide crop is
-        // capped at 85% of the frame, so there is always horizontal travel).
-        // If the composed crop ever fills the width anyway, CameraManager's
-        // auto-pan case holds center rather than thrashing.
+        // At full width Pan holds its phase; pushing in restores travel.
         let enabled = cameraManager.isRunning && !isOn
         return Button {
-            cameraManager.activeMode = .autoPan
+            cameraManager.dispatch(cameraManager.makeCommand(.setMode(.autoPan)))
         } label: {
             HStack(spacing: 7) {
                 Circle()
@@ -440,7 +451,7 @@ struct OperatorPill: View {
                     .font(.system(size: 12, weight: isOn ? .semibold : .medium))
                     .foregroundStyle(.white.opacity(isOn ? 1.0 : (enabled ? 0.86 : 0.32)))
             }
-            .padding(.horizontal, 14)
+            .padding(.horizontal, 10)
             .padding(.vertical, 9)
             .background(
                 RoundedRectangle(cornerRadius: 11, style: .continuous)
@@ -457,7 +468,7 @@ struct OperatorPill: View {
 
     private var stopSessionButton: some View {
         Button {
-            onStop()
+            cameraManager.dispatch(cameraManager.makeCommand(.stopSession))
         } label: {
             HStack(spacing: 7) {
                 RoundedRectangle(cornerRadius: 2, style: .continuous)
@@ -467,7 +478,7 @@ struct OperatorPill: View {
                     .font(.system(size: 12, weight: .semibold))
                     .foregroundStyle(.white)
             }
-            .padding(.horizontal, 14)
+            .padding(.horizontal, 10)
             .padding(.vertical, 9)
             .background(
                 RoundedRectangle(cornerRadius: 14, style: .continuous)
@@ -475,5 +486,30 @@ struct OperatorPill: View {
             )
         }
         .buttonStyle(.plain)
+    }
+}
+
+/// A normal button tap starts one complete shot move; release has no effect.
+private struct ZoomShotButton: View {
+    @ObservedObject var cameraManager: CameraManager
+    let direction: OperatorCommand.ZoomDirection
+    private var title: String { direction == .pushIn ? "+ Push in" : "− Pull out" }
+    private var enabled: Bool { cameraManager.isRunning && cameraManager.canBeginZoom(direction) }
+
+    var body: some View {
+        Button {
+            cameraManager.dispatch(cameraManager.makeCommand(.beginZoom(direction)))
+        } label: {
+            Text(title)
+                .font(.system(size: 12, weight: .semibold))
+                .foregroundStyle(.white.opacity(enabled || cameraManager.zoomMoveDirection == direction ? 0.95 : 0.32))
+                .frame(width: 88, height: 36)
+                .background(.white.opacity(cameraManager.zoomMoveDirection == direction ? 0.2 : 0.07),
+                            in: RoundedRectangle(cornerRadius: 11))
+        }
+        .buttonStyle(.plain)
+        .disabled(!enabled)
+        .help("Slow zoom to the next shot size.")
+        .onDisappear { cameraManager.cancelOperatorMotion() }
     }
 }

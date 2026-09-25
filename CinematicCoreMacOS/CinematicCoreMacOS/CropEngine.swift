@@ -97,9 +97,123 @@ final class CropEngine: ObservableObject {
     /// interpolation bookkeeping (`isInterpolating`, timers) for no motion —
     /// churn the crop rectangle's stability doesn't need.
     func setTargetCrop(_ crop: CropRect) {
-        let floored = crop.clampedToQualityFloor(qualityFloor)
+        zoomAnchorCrop = crop
+        let sized = zoomHeight.map { resized(crop, height: $0) } ?? crop
+        let floored = sized.clampedToQualityFloor(qualityFloor).clamped()
+        if zoomHeight == nil {
+            let limited = crop.size.height <= qualityFloor.minCropHeightFraction
+            if isZoomLimited != limited { isZoomLimited = limited }
+        }
         guard floored != targetCrop else { return }
         targetCrop = floored
+    }
+
+    // Size has its own critically damped, rate-limited log-space motion.
+    // Tracking catch-up stiffness never changes the speed of a shot move.
+    @Published private(set) var hasZoomAdjustment = false
+    @Published private(set) var isZoomLimited = false
+    @Published private(set) var zoomDirection: OperatorCommand.ZoomDirection?
+    private var zoomHeight: CGFloat?
+    private var zoomDestination: CGFloat = 1
+    private var zoomVelocity: CGFloat = 0
+    private var zoomLastTick: TimeInterval?
+    private var zoomAspect: CGFloat = 1
+    private var zoomAnchorCrop: CropRect?
+    private var deterministicPan = false
+    var zoomUsesTopAnchor = false
+    var adjustedHeight: CGFloat? { zoomHeight }
+    var zoomHasLanded: Bool { zoomHeight != nil && zoomDirection == nil && !hasZoomAdjustment }
+
+    func adoptVisibleSize(from visible: CropRect? = nil) {
+        if let visible { currentCrop = visible }
+        zoomHeight = currentCrop.size.height
+        zoomDestination = currentCrop.size.height
+        zoomAspect = currentCrop.size.width / currentCrop.size.height
+        zoomAnchorCrop = currentCrop
+        targetCrop = currentCrop
+        zoomVelocity = 0
+        velocitySize = .zero
+        zoomLastTick = nil
+        hasZoomAdjustment = true
+    }
+
+    func beginZoom(_ direction: OperatorCommand.ZoomDirection, to height: CGFloat,
+                   visibleCrop: CropRect? = nil) {
+        adoptVisibleSize(from: visibleCrop)
+        zoomDirection = direction
+        let upper = min(1, 1 / zoomAspect)
+        let lower = min(upper, max(0.001, qualityFloor.minCropHeightFraction))
+        zoomDestination = min(upper, max(lower, height))
+        isZoomLimited = height < lower || (direction == .pushIn && zoomDestination <= lower)
+    }
+
+    /// Stop at the visible size; a later push/pull starts a fresh shot move.
+    func endZoom() {
+        guard zoomDirection != nil else { return }
+        zoomDirection = nil
+        zoomDestination = zoomHeight ?? currentCrop.size.height
+        zoomVelocity = 0
+    }
+
+    func clearZoomAdjustment() {
+        zoomHeight = nil
+        zoomDirection = nil
+        zoomVelocity = 0
+        zoomLastTick = nil
+        zoomAnchorCrop = nil
+        hasZoomAdjustment = false
+        isZoomLimited = false
+    }
+
+    private func resized(_ crop: CropRect, height: CGFloat) -> CropRect {
+        let size = CGSize(width: height * zoomAspect, height: height)
+        var center = crop.center
+        if zoomUsesTopAnchor { center.y = crop.origin.y + crop.size.height - height / 2 }
+        return CropRect(center: center, size: size).clamped()
+    }
+
+    func advanceZoom(now: TimeInterval, aspect: CGFloat) {
+        deterministicPan = false
+        zoomAspect = max(0.001, aspect)
+        guard var height = zoomHeight else { return }
+        let upper = min(1, 1 / zoomAspect)
+        let lower = min(upper, max(0.001, qualityFloor.minCropHeightFraction))
+        zoomDestination = min(upper, max(lower, zoomDestination))
+        height = min(upper, max(lower, height))
+        var remaining = CGFloat(min(0.1, max(0, now - (zoomLastTick ?? now))))
+        zoomLastTick = now
+        while remaining > 0, zoomDirection != nil {
+            let dt = min(remaining, 1 / 240)
+            let error = log(zoomDestination / height)
+            let acceleration = min(0.36, max(-0.36, error * 100 - zoomVelocity * 20))
+            zoomVelocity = min(0.12, max(-0.12, zoomVelocity + acceleration * dt))
+            let next = min(upper, max(lower, height * exp(zoomVelocity * dt)))
+            if (zoomDestination - height) * (zoomDestination - next) <= 0 ||
+                (abs(error) < 0.00001 && abs(zoomVelocity) < 0.0001) {
+                height = zoomDestination
+                zoomVelocity = 0
+                zoomDirection = nil
+                hasZoomAdjustment = false
+            } else { height = next }
+            remaining -= dt
+        }
+        zoomHeight = height
+        currentCrop = resized(currentCrop, height: height)
+        targetCrop = resized(zoomAnchorCrop ?? targetCrop, height: height)
+    }
+
+    /// Pan position is deterministic; size is advanced separately above.
+    func placePan(center: CGPoint, baseSize: CGSize) {
+        if zoomHeight == nil {
+            let limited = baseSize.height <= qualityFloor.minCropHeightFraction
+            if isZoomLimited != limited { isZoomLimited = limited }
+        }
+        let size = zoomHeight.map { CGSize(width: $0 * zoomAspect, height: $0) } ?? baseSize
+        let crop = CropRect(center: center, size: size).clampedToQualityFloor(qualityFloor).clamped()
+        targetCrop = crop
+        currentCrop = crop
+        velocityOrigin = .zero
+        deterministicPan = true
     }
 
     /// Whether we're actively interpolating between crops
@@ -180,6 +294,12 @@ final class CropEngine: ObservableObject {
         var origin: CGPoint  // Bottom-left corner (Vision coordinate system)
         var size: CGSize     // Width and height
         
+        var center: CGPoint { CGPoint(x: origin.x + size.width / 2, y: origin.y + size.height / 2) }
+        init(origin: CGPoint, size: CGSize) { self.origin = origin; self.size = size }
+        init(center: CGPoint, size: CGSize) {
+            self.init(origin: CGPoint(x: center.x - size.width / 2, y: center.y - size.height / 2), size: size)
+        }
+
         /// Full frame (no crop). NOTE: this is the entire source rectangle. On a
         /// source whose pixel aspect differs from the output, rendering this to
         /// the output buffer *stretches* the image. For an aspect-correct wide
@@ -237,11 +357,11 @@ final class CropEngine: ObservableObject {
         
         /// Clamp crop to valid 0-1 range
         func clamped() -> CropRect {
-            let clampedX = max(0, min(1 - size.width, origin.x))
-            let clampedY = max(0, min(1 - size.height, origin.y))
-            let clampedWidth = max(0.1, min(1, size.width))
-            let clampedHeight = max(0.1, min(1, size.height))
-            
+            let clampedWidth = max(0.001, min(1, size.width))
+            let clampedHeight = max(0.001, min(1, size.height))
+            let clampedX = max(0, min(1 - clampedWidth, origin.x))
+            let clampedY = max(0, min(1 - clampedHeight, origin.y))
+
             return CropRect(
                 origin: CGPoint(x: clampedX, y: clampedY),
                 size: CGSize(width: clampedWidth, height: clampedHeight)
@@ -337,8 +457,8 @@ final class CropEngine: ObservableObject {
     /// the values the render needs. Call this from `processFrame` before
     /// handing off to `renderCrop` so only the GPU work leaves the main thread.
     @MainActor
-    func tickInterpolation() -> (crop: CropRect, outputSize: CGSize, smoothingFactor: Float) {
-        updateInterpolation()
+    func tickInterpolation(now: TimeInterval = CACurrentMediaTime()) -> (crop: CropRect, outputSize: CGSize, smoothingFactor: Float) {
+        updateInterpolation(now: now)
         return (currentCrop, config.outputSize, config.transitionSmoothing)
     }
 
@@ -503,13 +623,13 @@ final class CropEngine: ObservableObject {
     
     // MARK: - Private Methods
     
-    private func updateInterpolation() {
+    private func updateInterpolation(now: TimeInterval) {
+        if deterministicPan { lastInterpolationTime = 0; return }
         guard isInterpolating else {
             lastInterpolationTime = 0
             return
         }
         
-        let now = CACurrentMediaTime()
         if lastInterpolationTime == 0 {
             lastInterpolationTime = now
             return // Skip first frame to get a valid delta time
@@ -518,6 +638,21 @@ final class CropEngine: ObservableObject {
         let dt = CGFloat(min(now - lastInterpolationTime, 0.1)) // Cap dt at 100ms
         lastInterpolationTime = now
         
+        if zoomHeight != nil {
+            let omega = sqrt(CGFloat(config.transitionSmoothing) * 600)
+            func spring(_ x: CGFloat, _ target: CGFloat, _ velocity: inout CGFloat) -> CGFloat {
+                let offset = x - target
+                let c = velocity + omega * offset
+                let decay = exp(-omega * dt)
+                velocity = (velocity - omega * c * dt) * decay
+                return target + (offset + c * dt) * decay
+            }
+            let x = spring(currentCrop.origin.x, targetCrop.origin.x, &velocityOrigin.x)
+            let y = spring(currentCrop.origin.y, targetCrop.origin.y, &velocityOrigin.y)
+            currentCrop = CropRect(origin: CGPoint(x: x, y: y), size: currentCrop.size).clamped()
+            return
+        }
+
         // Map transitionSmoothing (0.05 to 0.30) to a spring stiffness.
         // Higher value = stiffer spring = faster snap.
         //
@@ -561,7 +696,7 @@ final class CropEngine: ObservableObject {
         currentCrop = CropRect(
             origin: CGPoint(x: newX, y: newY),
             size: CGSize(width: newW, height: newH)
-        )
+        ).clampedToQualityFloor(qualityFloor).clamped()
         
         // Check if we're close enough and moving slow enough to stop interpolating
         let distanceThreshold: CGFloat = 0.001

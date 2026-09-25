@@ -53,10 +53,10 @@ struct ContentView: View {
                     acquiringTargetID: cameraManager.shotComposer.acquiringTargetID,
                     trackedSubjectRect: cameraManager.shotComposer.displayedTrackedBounds,
                     isRecovering: cameraManager.shotComposer.isHolding || cameraManager.shotComposer.isWideWaiting,
-                    isZoomLimited: cameraManager.shotComposer.isZoomLimitedByQuality,
+                    isZoomLimited: cameraManager.isZoomLimited,
                     steadyBand: cameraManager.shotComposer.steadyBand,
-                    framingTitle: cameraManager.shotComposer.config.activeFramingTitle,
-                    onSelectPerson: cameraManager.lockTarget,
+                    framingTitle: cameraManager.framingTitle,
+                    onSelectPerson: nil,
                     onTapPoint: tapPointHandler,
                     onHoldPoint: holdPointHandler
                 )
@@ -90,11 +90,7 @@ struct ContentView: View {
                     .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
                     .allowsHitTesting(false)
 
-                OperatorPill(
-                    cameraManager: cameraManager,
-                    onStop: { toggleCamera() },
-                    onStart: { Task { await startCamera() } }
-                )
+                OperatorPill(cameraManager: cameraManager)
                 .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottom)
                 .padding(.bottom, 26)
             }
@@ -136,6 +132,19 @@ struct ContentView: View {
                 elapsedSeconds = 0
             }
         }
+        .onReceive(NotificationCenter.default.publisher(for: NSApplication.didResignActiveNotification)) { _ in
+            if cameraManager.zoomMoveDirection != nil {
+                cameraManager.dispatch(cameraManager.makeCommand(.endZoom))
+            }
+        }
+        .onReceive(NotificationCenter.default.publisher(for: NSWindow.didResignKeyNotification)) { _ in
+            if cameraManager.zoomMoveDirection != nil {
+                cameraManager.dispatch(cameraManager.makeCommand(.endZoom))
+            }
+        }
+        .onChange(of: cameraManager.error != nil) { _, hasError in
+            if hasError { showError = true }
+        }
         .onReceive(elapsedTimer) { _ in
             guard let start = sessionStartedAt else { return }
             elapsedSeconds = Int(Date().timeIntervalSince(start))
@@ -153,11 +162,15 @@ struct ContentView: View {
     /// under it — no Detect press needed. In manual-crop mode it repositions
     /// the crop. Otherwise taps are ignored.
     private var tapPointHandler: ((CGPoint) -> Void)? {
-        if cameraManager.detectionDiscoveryActive || cameraManager.canDirectlyReacquire {
-            return { point in cameraManager.selectSubject(at: point) }
+        if cameraManager.activeMode == .autoPan { return nil }
+        if cameraManager.detectionDiscoveryActive {
+            return { point in cameraManager.dispatch(cameraManager.makeCommand(.selectSubject(point))) }
         }
         if cameraManager.activeMode == .manualCrop {
-            return { point in cameraManager.manualCropPoint = point }
+            return { point in cameraManager.dispatch(cameraManager.makeCommand(.moveManualCenter(point))) }
+        }
+        if cameraManager.canDirectlyReacquire {
+            return { point in cameraManager.dispatch(cameraManager.makeCommand(.selectSubject(point))) }
         }
         return nil
     }
@@ -167,12 +180,17 @@ struct ContentView: View {
     /// through the Detect button. Suppressed in manual-crop mode, where the
     /// pointer is already driving the crop.
     private var holdPointHandler: ((CGPoint) -> Void)? {
-        guard cameraManager.activeMode != .manualCrop else { return nil }
+        guard cameraManager.activeMode != .manualCrop && cameraManager.activeMode != .autoPan else { return nil }
         guard cameraManager.manualLockedTargetID != nil else { return nil }
-        return { point in cameraManager.retargetSubject(at: point) }
+        return { point in cameraManager.dispatch(cameraManager.makeCommand(.selectSubject(point, retarget: true))) }
     }
 
     private func startCamera() async {
+        // Capture intent before any installation UI suspends. A later Stop
+        // must retire this Start rather than letting it restart the session.
+        let command = OperatorCommand(target: .session, epoch: cameraManager.commands.epoch,
+                                      expiry: ProcessInfo.processInfo.systemUptime + 120,
+                                      action: .startSession)
         if cameraManager.shouldPreflightVirtualCameraInstallation, !systemExtensionManager.isInstallReady {
             let extensionReady = await systemExtensionManager.ensureInstalledForSessionStart()
             if !extensionReady {
@@ -180,16 +198,12 @@ struct ContentView: View {
             }
         }
 
-        do {
-            try await cameraManager.startCapture()
-        } catch {
-            showError = true
-        }
+        cameraManager.dispatch(command)
     }
 
     private func toggleCamera() {
         if cameraManager.isRunning {
-            cameraManager.stopCapture()
+            cameraManager.dispatch(cameraManager.makeCommand(.stopSession))
         } else {
             Task { await startCamera() }
         }

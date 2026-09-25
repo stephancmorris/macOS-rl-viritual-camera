@@ -118,7 +118,7 @@ enum CameraError: LocalizedError {
         case .sessionConfigurationFailed:
             return "Failed to configure capture session"
         case .unsupportedFormat:
-            return "Camera does not support 4K capture"
+            return "Camera has no capture format compatible with the selected show frame rate"
         case .authorizationDenied:
             return "Camera access denied"
         case .noValidationClipSelected:
@@ -247,11 +247,27 @@ final class CameraManager: NSObject, ObservableObject {
     }
 
     /// Current operation mode for the crop engine
-    @Published var activeMode: OperationMode = .wide
+    @Published private(set) var activeMode: OperationMode = .wide
 
     /// Vertical pixel height of the most recent delivered source frame. Drives
     /// the operator-facing output-resolution readout. 0 until the first frame.
     @Published private(set) var sourcePixelHeight: Int = 0
+    @Published private(set) var sourcePixelWidth: Int = 0
+
+    /// What capture asked for, and what the driver actually delivered. The
+    /// latter is authoritative for crop quality and may differ from the format.
+    @Published private(set) var captureProfileStatus: String = "Starts with the next live session."
+
+    /// Estimated resampling for the current crop, using delivered source pixels.
+    /// This measures pixel geometry, not perceived sharpness or tracking quality.
+    var framingCapability: FramingCapability? {
+        guard sourcePixelWidth > 0, sourcePixelHeight > 0, let engine = cropEngine else { return nil }
+        return FramingCapability.evaluate(
+            sourceSize: CGSize(width: sourcePixelWidth, height: sourcePixelHeight),
+            requestedCrop: lastGoodProgramCrop ?? engine.currentCrop,
+            outputSize: engine.config.outputSize
+        )
+    }
 
     /// The center point for the manual crop (normalized 0-1)
     @Published var manualCropPoint: CGPoint = CGPoint(x: 0.5, y: 0.5)
@@ -305,6 +321,8 @@ final class CameraManager: NSObject, ObservableObject {
     /// Most recent completed detection set. Read every frame; written only when
     /// a detection finishes.
     private let detectionFrames = DetectionFrameStore()
+    /// TEST-ONLY: allows lifecycle tests to prove pre-Pan observations are retired.
+    var detectionGenerationForTesting: UInt64 { detectionFrames.generation }
 
     /// One detection at a time. Without this, a pipeline that falls behind would
     /// queue detections faster than they complete and spawn unbounded work.
@@ -627,13 +645,301 @@ final class CameraManager: NSObject, ObservableObject {
     }
     
     /// Request camera permissions and start the capture session
+    let commands = CommandDispatcher()
+    @Published private(set) var controlStatus: String?
+    @Published private(set) var isStartingSession = false
+    @Published private(set) var isProgramHolding = false
+    @Published private(set) var zoomMoveDirection: OperatorCommand.ZoomDirection?
+    private var sessionStartTask: Task<Void, Never>?
+    private var lastGoodProgramBuffer: CVPixelBuffer?
+    private var lastGoodProgramCrop: CropEngine.CropRect?
+    private var lastTrackingCrop: CropEngine.CropRect?
+    private struct ShotMove {
+        var origin: OperatorCommand.Preset
+        var destination: OperatorCommand.Preset
+        var originHeight: CGFloat
+        var destinationHeight: CGFloat
+        var direction: OperatorCommand.ZoomDirection
+        var originIsUncropped = false
+        var destinationIsUncropped = false
+    }
+    private var shotMove: ShotMove?
+
+    var isZoomLimited: Bool {
+        activeMode != .wide && (cropEngine?.isZoomLimited == true ||
+            (activeMode == .autoTracking && cropEngine?.hasZoomAdjustment != true && shotComposer.isZoomLimitedByQuality))
+    }
+    var framingTitle: String {
+        shotComposer.config.activeFramingTitle + (cropEngine?.hasZoomAdjustment == true ? " · Adjusted" : "")
+    }
+    private var selectedShot: OperatorCommand.Preset {
+        shotComposer.config.cinematicFormat == .webcam ? .webcam(shotComposer.config.webcamPreset) : .stage(shotComposer.config.shotPreset)
+    }
+    private var shotLadder: [OperatorCommand.Preset] {
+        shotComposer.config.cinematicFormat == .webcam ? [.webcam(.wide), .webcam(.tight)] :
+            [.stage(.wide), .stage(.fullBody), .stage(.waistUp)]
+    }
+    func canBeginZoom(_ direction: OperatorCommand.ZoomDirection) -> Bool {
+        if let move = shotMove { return direction != move.direction }
+        if activeMode == .wide { return direction == .pushIn }
+        guard let index = shotLadder.firstIndex(of: selectedShot) else { return false }
+        return direction == .pushIn ? index < shotLadder.count - 1 : index > 0
+    }
+    private func fixedHeight(for preset: OperatorCommand.Preset) -> CGFloat {
+        switch preset {
+        case .stage(.wide), .webcam(.wide): return 1
+        case .stage(.fullBody): return 0.8
+        case .stage(.waistUp), .webcam(.tight): return 0.5
+        }
+    }
+    private func choosePreset(_ preset: OperatorCommand.Preset) {
+        switch preset {
+        case .stage(let shot): shotComposer.config.shotPreset = shot
+        case .webcam(let shot): shotComposer.config.webcamPreset = shot
+        }
+        shotComposer.reapplyFraming()
+    }
+    func selectPreset(_ preset: OperatorCommand.Preset) {
+        cancelOperatorMotion()
+        cropEngine?.clearZoomAdjustment()
+        choosePreset(preset)
+        boostFramingTransition()
+    }
+
+    /// A tap owns exactly one destination, not an unbounded held velocity.
+    func beginZoom(_ direction: OperatorCommand.ZoomDirection) {
+        guard canBeginZoom(direction), let engine = cropEngine else { return }
+        let visible = lastGoodProgramCrop ?? engine.currentCrop
+        let move: ShotMove
+        if let prior = shotMove {
+            move = ShotMove(origin: prior.destination, destination: prior.origin,
+                            originHeight: prior.destinationHeight, destinationHeight: prior.originHeight,
+                            direction: direction, originIsUncropped: prior.destinationIsUncropped,
+                            destinationIsUncropped: prior.originIsUncropped)
+        } else {
+            let origin = selectedShot
+            let ladder = shotLadder
+            let index = ladder.firstIndex(of: origin) ?? 0
+            let next = min(ladder.count - 1, max(0, index + (direction == .pushIn ? 1 : -1)))
+            let destination = ladder[next]
+            let height = activeMode == .autoTracking
+                ? shotComposer.destinationHeight(for: destination) : fixedHeight(for: destination)
+            // No known subject geometry: retain the shot rather than inventing a tracked crop.
+            guard let height else { return }
+            let originHeight = activeMode == .wide ? widestSafeCrop().size.height :
+                (activeMode == .autoTracking ? shotComposer.destinationHeight(for: origin) : fixedHeight(for: origin))
+            move = ShotMove(origin: origin, destination: destination,
+                            originHeight: originHeight ?? visible.size.height, destinationHeight: height,
+                            direction: direction, originIsUncropped: activeMode == .wide)
+        }
+        if activeMode == .wide {
+            setOperationMode(.manualCrop)
+        }
+        if activeMode == .manualCrop { manualCropPoint = visible.center }
+        shotMove = move
+        zoomMoveDirection = direction
+        engine.beginZoom(direction, to: move.destinationHeight, visibleCrop: visible)
+    }
+
+    func advanceShotMove(now: TimeInterval) {
+        guard let engine = cropEngine else { return }
+        engine.zoomUsesTopAnchor = activeMode == .autoTracking &&
+            (shotComposer.config.cinematicFormat == .webcam || shotComposer.config.shotPreset == .waistUp)
+        engine.advanceZoom(now: now, aspect: shotComposer.normalizedAspect)
+        shotComposer.setVisibleZoomHeight(engine.adjustedHeight)
+        if let move = shotMove, engine.zoomHasLanded {
+            choosePreset(move.destination)
+            if let anchor = lastTrackingCrop {
+                lastTrackingCrop = .init(center: anchor.center, size: engine.currentCrop.size)
+            }
+            engine.clearZoomAdjustment()
+            shotMove = nil
+            zoomMoveDirection = nil
+            // Reversing a move that began uncropped returns to that view,
+            // never silently re-applying a selected crop on the next frame.
+            if move.destinationIsUncropped { returnToWide() }
+        }
+    }
+
+    func makeCommand(_ action: OperatorCommand.Action) -> OperatorCommand {
+        let target: OperatorCommand.Target
+        switch action { case .startSession, .stopSession: target = .session; default: target = .cameraA }
+        return .init(target: target, epoch: commands.epoch, expiry: CACurrentMediaTime() + 2, action: action)
+    }
+
+    @discardableResult
+    func dispatch(_ command: OperatorCommand) -> CommandResult {
+        if let reason = commands.rejection(for: command, now: CACurrentMediaTime()) { return .rejected(reason) }
+        switch command.action {
+        case .startSession, .stopSession: break
+        default: guard isRunning else { return .rejected("Session is stopped") }
+        }
+        if case .beginZoom(let direction) = command.action {
+            guard canBeginZoom(direction) else { return .rejected("Shot limit") }
+            if activeMode == .autoTracking, shotComposer.destinationHeight(for: selectedShot) == nil {
+                return .rejected("Waiting for subject framing")
+            }
+        }
+        if case .setMode(.autoTracking) = command.action, manualLockedTargetID == nil { return .rejected("Select a subject first") }
+        if activeMode == .autoPan || activeMode == .manualCrop {
+            switch command.action {
+            case .detect, .selectSubject:
+                return .rejected("Switch to Crop or Wide before selecting a subject")
+            default: break
+            }
+        }
+        commands.accept(command)
+        switch command.action {
+        case .beginZoom: break
+        default:
+            cropEngine?.endZoom()
+            shotMove = nil
+            zoomMoveDirection = nil
+        }
+        controlStatus = nil
+        switch command.action {
+        case .detect: beginDetection()
+        case .cancelDetect: cancelDetection()
+        case .selectSubject(let point, let retarget):
+            if retarget { retargetSubject(at: point) } else { selectSubject(at: point) }
+        case .unlock: clearManualTargetLock()
+        case .setMode(let mode): setOperationMode(mode)
+        case .selectPreset(let preset): selectPreset(preset)
+        case .beginZoom(let direction): beginZoom(direction)
+        case .endZoom: break
+        case .moveManualCenter(let point):
+            manualCropPoint = CGPoint(x: min(1, max(0, point.x)), y: min(1, max(0, point.y)))
+        case .returnToWide: returnToWide()
+        case .startSession:
+            guard !isRunning, !isStartingSession else { return .completed }
+            isStartingSession = true
+            sessionStartTask = Task { [weak self] in
+                guard let self else { return }
+                defer { self.isStartingSession = false }
+                do { try await self.startCapture() }
+                catch is CancellationError { }
+                catch { self.error = error as? CameraError; self.controlStatus = error.localizedDescription }
+            }
+        case .stopSession: stopCapture()
+        }
+        return .accepted
+    }
+
+    func cancelOperatorMotion() {
+        commands.invalidateMotion()
+        cropEngine?.endZoom()
+        shotMove = nil
+        zoomMoveDirection = nil
+    }
+
+    func setOperationMode(_ mode: OperationMode) {
+        // Direct callers obey the same eligibility rule as dispatched commands.
+        // Pan/Manual may preserve an old lock, but cannot invent one on exit.
+        guard mode != .autoTracking || manualLockedTargetID != nil else { return }
+        cancelOperatorMotion()
+        if mode == .wide { returnToWide(); return }
+        commands.setTrackingOwnership(mode == .autoTracking)
+        if mode != .autoTracking { cancelDetection() }
+        if mode == .autoPan || mode == .manualCrop {
+            // Pending Vision and face-gallery jobs belong to the previous
+            // tracking mode. The program now follows operator geometry only.
+            personDetector.clearForInactiveMode()
+            shotComposer.suspendIdentityWork()
+            lastSubjectROIBox = nil
+        }
+        if mode == .manualCrop {
+            let visible = lastGoodProgramCrop ?? cropEngine?.currentCrop
+            if let visible { manualCropPoint = visible.center; cropEngine?.adoptVisibleSize(from: visible) }
+        }
+        if mode == .autoTracking { shotComposer.reapplyFraming() }
+        if mode == .autoPan { autoPanLastTick = 0 }
+        activeMode = mode
+    }
+
+    func applyLockOutcome(_ outcome: ShotComposer.TickOutcome) {
+        guard commands.admitRecovery(outcome) else { return }
+        cropEngine?.endZoom()
+        shotMove = nil
+        zoomMoveDirection = nil
+        switch outcome {
+        case .noChange: break
+        case .pullBackToWide:
+            cropEngine?.clearZoomAdjustment()
+            shotComposer.setVisibleZoomHeight(nil)
+            activeMode = .wide
+            controlStatus = "Subject lost · widening"
+            boostFramingTransition()
+        case .resumeTracking, .acquired:
+            activeMode = .autoTracking
+            controlStatus = nil
+            boostFramingTransition()
+        }
+    }
+
+    func manualCropSize() -> CGSize {
+        let aspect = shotComposer.normalizedAspect
+        let height = min(1, 1 / aspect, cropEngine?.adjustedHeight ?? fixedHeight(for: selectedShot))
+        return CGSize(width: height * aspect, height: height)
+    }
+
+    func advanceAutoPan(now: TimeInterval, width: CGFloat) -> CGFloat {
+        let dt = autoPanLastTick > 0 ? min(0.1, max(0, now - autoPanLastTick)) : 0
+        autoPanLastTick = now
+        let width = min(1, max(0, width))
+        let travel = 1 - width
+        if travel > 0.0001, now > autoPanPauseUntil {
+            autoPanPhase += CGFloat(shotComposer.config.autoPanSpeed) * 3 * autoPanDirection * CGFloat(dt)
+            if autoPanPhase >= 1 {
+                autoPanPhase = 1; autoPanDirection = -1; autoPanPauseUntil = now + Self.autoPanPauseDuration
+            } else if autoPanPhase <= 0 {
+                autoPanPhase = 0; autoPanDirection = 1; autoPanPauseUntil = now + Self.autoPanPauseDuration
+            }
+        }
+        return width / 2 + autoPanPhase * travel
+    }
+
+    func selectProgramBuffer(rendered: CVPixelBuffer?, crop: CropEngine.CropRect? = nil) -> CVPixelBuffer? {
+        if let rendered { lastGoodProgramBuffer = rendered; lastGoodProgramCrop = crop }
+        if isProgramHolding != (rendered == nil) { isProgramHolding = rendered == nil }
+        return lastGoodProgramBuffer
+    }
+
+    func renderProgramFrame(crop: CropEngine.CropRect, timestamp: Double,
+                            render: () async throws -> CVPixelBuffer) async -> CVPixelBuffer? {
+        let generation = captureGeneration
+        let detectionGeneration = detectionFrames.generation
+        let epoch = commands.epoch
+        let running = isRunning
+        let result: Result<CVPixelBuffer, Error>
+        do { result = .success(try await render()) } catch { result = .failure(error) }
+        guard generation == captureGeneration, detectionGeneration == detectionFrames.generation,
+              epoch == commands.epoch, running == isRunning else { return nil }
+        switch result {
+        case .success(let buffer): return selectProgramBuffer(rendered: buffer, crop: crop)
+        case .failure(let error):
+            cancelOperatorMotion()
+            programOutput.recordDroppedFrame(timestamp: timestamp, reason: "Crop processing failed: \(error.localizedDescription)")
+            return selectProgramBuffer(rendered: nil)
+        }
+    }
+
     func startCapture() async throws {
+        try Task.checkCancellation()
+        cancelOperatorMotion()
+        commands.setTrackingOwnership(false)
+        lastGoodProgramBuffer = nil
+        lastGoodProgramCrop = nil
+        croppedFrameBuffer = nil
+        isProgramHolding = false
         let sourceTitle = preferredInputSource.title
         Self.logger.notice("Starting capture from \(sourceTitle, privacy: .public)")
         captureGeneration &+= 1
         invalidateDetection()
         frameProcessingGate.reset()
         programOutput.start()
+        sourcePixelWidth = 0
+        sourcePixelHeight = 0
+        captureProfileStatus = "Configuring capture…"
 
         if preferredInputSource == .validationClip {
             do {
@@ -646,7 +952,10 @@ final class CameraManager: NSObject, ObservableObject {
         }
         
         // Check authorization
+        let generation = captureGeneration
         let authorized = await checkAuthorization()
+        try Task.checkCancellation()
+        guard generation == captureGeneration else { throw CancellationError() }
         guard authorized else {
             Self.logger.error("Camera authorization denied")
             error = .authorizationDenied
@@ -669,6 +978,8 @@ final class CameraManager: NSObject, ObservableObject {
             programOutput.stop()
             throw error
         }
+        try Task.checkCancellation()
+        guard generation == captureGeneration else { throw CancellationError() }
         Self.logger.notice("Capture session configured")
         
         // Start running
@@ -695,6 +1006,17 @@ final class CameraManager: NSObject, ObservableObject {
     
     /// Stop the capture session
     func stopCapture() {
+        sessionStartTask?.cancel()
+        sessionStartTask = nil
+        isStartingSession = false
+        cancelOperatorMotion()
+        commands.setTrackingOwnership(false)
+        cropEngine?.clearZoomAdjustment()
+        lastTrackingCrop = nil
+        lastGoodProgramBuffer = nil
+        lastGoodProgramCrop = nil
+        croppedFrameBuffer = nil
+        isProgramHolding = false
         Self.logger.notice("Stopping capture")
         captureGeneration &+= 1
         invalidateDetection()
@@ -709,6 +1031,9 @@ final class CameraManager: NSObject, ObservableObject {
         if captureSession.isRunning {
             captureSession.stopRunning()
         }
+        configuredCaptureDevice = nil
+        configuredCaptureFormat = nil
+        configuredCaptureSize = nil
         programOutput.stop()
         isRunning = false
         activeInputSource = preferredInputSource
@@ -723,6 +1048,11 @@ final class CameraManager: NSObject, ObservableObject {
 
     /// Hold a wide safety shot while keeping the output path active.
     func returnToWide() {
+        cancelOperatorMotion()
+        commands.setTrackingOwnership(false)
+        cropEngine?.clearZoomAdjustment()
+        lastTrackingCrop = nil
+        controlStatus = nil
         guard let cropEngine else { return }
         cancelDetection()
         invalidateDetection()
@@ -752,6 +1082,8 @@ final class CameraManager: NSObject, ObservableObject {
 
     /// Hand control back to the tracker after a manual wide hold.
     func resumeTracking() {
+        cancelOperatorMotion()
+        commands.setTrackingOwnership(true)
         activeMode = .autoTracking
         cropEngine?.resetToFullFrame(aspect: shotComposer.normalizedAspect)
         shotComposer.reset()
@@ -763,6 +1095,8 @@ final class CameraManager: NSObject, ObservableObject {
     }
 
     func lockTarget(personID: UUID) {
+        cropEngine?.clearZoomAdjustment()
+        lastTrackingCrop = nil
         invalidateDetection(clearTracks: false)
         // Selection made — leave discovery and begin acquisition. Cropping
         // stays wide until the gallery is ready (ShotComposer promotes
@@ -781,6 +1115,7 @@ final class CameraManager: NSObject, ObservableObject {
     /// retarget on the preview instead, so an accidental click can't drop a
     /// healthy lock.
     func beginDetection() {
+        guard activeMode != .autoPan && activeMode != .manualCrop else { return }
         if case .tracking = shotComposer.lockState { return }
         if case .acquiring = shotComposer.lockState { return }
         detectionDiscoveryActive = true
@@ -812,7 +1147,9 @@ final class CameraManager: NSObject, ObservableObject {
     /// armed (Detect flow) or while directly re-acquiring from HOLD /
     /// WIDE-WAITING.
     func selectSubject(at point: CGPoint) {
+        guard activeMode != .autoPan && activeMode != .manualCrop else { return }
         guard detectionDiscoveryActive || canDirectlyReacquire else { return }
+        commands.setTrackingOwnership(true)
         invalidateDetection(clearTracks: false)
         pendingTapPoint = point
         pendingTapIsRetarget = false
@@ -832,7 +1169,9 @@ final class CameraManager: NSObject, ObservableObject {
     /// pending tap priority over the lock state, so the next frame scans around
     /// the held point exactly as a first selection would.
     func retargetSubject(at point: CGPoint) {
+        guard activeMode != .autoPan && activeMode != .manualCrop else { return }
         guard shotComposer.manualLockedTargetID != nil else { return }
+        commands.setTrackingOwnership(true)
         invalidateDetection(clearTracks: false)
         pendingTapPoint = point
         pendingTapIsRetarget = true
@@ -843,6 +1182,9 @@ final class CameraManager: NSObject, ObservableObject {
     /// Differs from `returnToWide()` which snaps — this animates so the
     /// operator gets a soft pull-back when tapping "unlock" on the lock pill.
     func clearManualTargetLock() {
+        cancelOperatorMotion()
+        commands.setTrackingOwnership(false)
+        cropEngine?.clearZoomAdjustment()
         invalidateDetection()
         activeMode = .wide
         detectionDiscoveryActive = false
@@ -860,7 +1202,11 @@ final class CameraManager: NSObject, ObservableObject {
     ///   one-shot opportunity (the throttled gallery refresh scan) must only
     ///   fire when the answer is true, or the opportunity would burn on a
     ///   frame whose detection is skipped by `scheduleDetectionIfDue`.
-    private func currentDetectionPlan(detectionRunsThisFrame: Bool) -> PersonDetector.DetectionRequestPlan {
+    func currentDetectionPlan(detectionRunsThisFrame: Bool) -> PersonDetector.DetectionRequestPlan {
+        // Pan and Manual are deterministic picture modes. A retained lock is
+        // only eligibility for an explicit future Track command, not a reason
+        // to keep scanning its last ROI or running identity recovery now.
+        if activeMode == .autoPan || activeMode == .manualCrop { return .off }
         // A pending tap takes priority: scan a ROI around it to acquire.
         if let tap = pendingTapPoint {
             return PersonDetector.DetectionRequestPlan(
@@ -1018,6 +1364,11 @@ final class CameraManager: NSObject, ObservableObject {
     }
 
     private func configureFramingBindings() {
+        cropEngine?.$hasZoomAdjustment.removeDuplicates().dropFirst()
+            .sink { [weak self] _ in self?.objectWillChange.send() }.store(in: &cancellables)
+        cropEngine?.$isZoomLimited.removeDuplicates().dropFirst()
+            .sink { [weak self] _ in self?.objectWillChange.send() }.store(in: &cancellables)
+
         shotComposer.$config
             .map(\.frameProfile)
             .removeDuplicates()
@@ -1033,9 +1384,12 @@ final class CameraManager: NSObject, ObservableObject {
             .removeDuplicates()
             .sink { [weak self] format in
                 guard let self else { return }
+                if self.isRunning && self.activeInputSource == .liveCamera {
+                    self.captureProfileStatus = "\(format == .webcam ? "Webcam" : "Stage") capture profile applies on the next session start."
+                }
                 if format == .webcam,
                    self.activeMode == .manualCrop || self.activeMode == .autoPan {
-                    self.activeMode = (self.manualLockedTargetID != nil) ? .autoTracking : .wide
+                    self.setOperationMode((self.manualLockedTargetID != nil) ? .autoTracking : .wide)
                 }
             }
             .store(in: &cancellables)
@@ -1152,9 +1506,23 @@ final class CameraManager: NSObject, ObservableObject {
             // all crop modes (the floor is applied in CropEngine.setTargetCrop)
             // and corrects the ML agent's internal clamp to the same numbers.
             let sourceHeight = Int(bufferHeight)
+            let sourceWidth = Int(bufferWidth)
+            if sourceWidth != sourcePixelWidth || sourceHeight != sourcePixelHeight {
+                sourcePixelWidth = sourceWidth
+                sourcePixelHeight = sourceHeight
+                if activeInputSource == .liveCamera, let expected = configuredCaptureSize {
+                    let requested = "\(expected.width)×\(expected.height)"
+                    let actual = "\(sourceWidth)×\(sourceHeight)"
+                    if sourceWidth == expected.width && sourceHeight == expected.height {
+                        captureProfileStatus = "Delivered \(actual) at \(ShowStandard.activeOrCurrent.title). \(configuredCaptureReason?.description ?? "")"
+                    } else {
+                        captureProfileStatus = "Driver delivered \(actual) after \(requested) was requested; crop quality follows delivered pixels."
+                        Self.logger.warning("Capture delivery mismatch: requested \(requested, privacy: .public), delivered \(actual, privacy: .public)")
+                    }
+                }
+            }
             if sourceHeight != lastFloorSourceHeight {
                 lastFloorSourceHeight = sourceHeight
-                sourcePixelHeight = sourceHeight
                 let floor = CropEngine.QualityFloor.forSource(height: sourceHeight)
                 cropEngine?.qualityFloor = floor
                 // The composer needs the same number so it can floor the crop
@@ -1297,31 +1665,16 @@ final class CameraManager: NSObject, ObservableObject {
         // (pull-back to wide on hold expiry; resume tracking on re-acq).
         // pixelBuffer is passed so the composer can capture face signatures
         // for re-acquisition.
-        let lockOutcome = shotComposer.tick(
-            detections: detectedPersons,
-            timestamp: CACurrentMediaTime(),
-            pixelBuffer: detectionIsFresh ? observation.frame?.pixelBuffer : nil,
-            isFresh: detectionIsFresh,
-            observationID: observation.frame?.observationID,
-            observationTimestamp: observation.frame?.capturedAt
-        )
-        switch lockOutcome {
-        case .noChange:
-            break
-        case .pullBackToWide:
-            activeMode = .wide
-            boostFramingTransition()
-            programOutput.noteDiagnostics("lock lost, pulled back to wide")
-        case .resumeTracking:
-            activeMode = .autoTracking
-            boostFramingTransition()
-            programOutput.noteDiagnostics("subject re-acquired")
-        case .acquired:
-            // Gallery ready → lock promoted to tracking (green box). Start
-            // framing the subject and snap toward them quickly.
-            activeMode = .autoTracking
-            boostFramingTransition()
-            programOutput.noteDiagnostics("subject locked, tracking")
+        if activeMode != .autoPan && activeMode != .manualCrop {
+            let lockOutcome = shotComposer.tick(
+                detections: detectedPersons,
+                timestamp: CACurrentMediaTime(),
+                pixelBuffer: detectionIsFresh ? observation.frame?.pixelBuffer : nil,
+                isFresh: detectionIsFresh,
+                observationID: observation.frame?.observationID,
+                observationTimestamp: observation.frame?.capturedAt
+            )
+            applyLockOutcome(lockOutcome)
         }
 
         // Steady Follow band exit: while holding, the composer emits no target
@@ -1345,29 +1698,6 @@ final class CameraManager: NSObject, ObservableObject {
             ? nil
             : shotComposer.primaryPerson(from: detectedPersons)
 
-        // Crop dimensions in normalized [0,1] space for the active preset+aspect.
-        // Single source of truth for both manualCropRect and the auto-pan range.
-        func manualCropSize() -> CGSize {
-            let aspect = shotComposer.normalizedAspect
-            let baseHeight: CGFloat
-            switch shotComposer.config.shotPreset {
-            case .wide: baseHeight = 1.0
-            case .fullBody: baseHeight = 0.8
-            case .waistUp: baseHeight = 0.5
-            }
-            var cropHeight = baseHeight
-            var cropWidth = cropHeight * aspect
-            if cropWidth > 1.0 {
-                cropWidth = 1.0
-                cropHeight = cropWidth / aspect
-            }
-            if cropHeight > 1.0 {
-                cropHeight = 1.0
-                cropWidth = cropHeight * aspect
-            }
-            return CGSize(width: cropWidth, height: cropHeight)
-        }
-
         func manualCropRect(center: CGPoint) -> CropEngine.CropRect {
             let size = manualCropSize()
             let originX = center.x - size.width / 2.0
@@ -1379,10 +1709,11 @@ final class CameraManager: NSObject, ObservableObject {
             ).clamped()
         }
 
-        var outputPixelBuffer = pixelBuffer
+        var outputPixelBuffer: CVPixelBuffer?
         var composeDuration: TimeInterval = 0
         var cropDuration: TimeInterval = 0
         if let cropEngine {
+            advanceShotMove(now: CACurrentMediaTime())
             switch activeMode {
             case .wide:
                     // Drive the spring toward the wide VIEW. Return to Wide
@@ -1415,9 +1746,11 @@ final class CameraManager: NSObject, ObservableObject {
                                 isFresh: detectionIsFresh,
                                 observationTimestamp: observation.frame?.capturedAt
                             ) {
+                                lastTrackingCrop = idealCrop
                                 cropEngine.setTargetCrop(idealCrop)
                             }
                         } else {
+                            if let lastTrackingCrop { cropEngine.setTargetCrop(lastTrackingCrop) }
                             frameLog("🔍 DEBUG: No persons detected, holding last position")
                         }
                     }
@@ -1426,102 +1759,27 @@ final class CameraManager: NSObject, ObservableObject {
                     let idealCrop = manualCropRect(center: manualCropPoint)
                     cropEngine.setTargetCrop(idealCrop)
                 case .autoPan:
-                    // Auto-pan drives the crop with deterministic constant-velocity
-                    // motion, NOT the subject-tracking spring (jumpToTarget below
-                    // snaps the visible crop to the phase each frame, so there is no
-                    // velocity-proportional lag and the dwell is exactly
-                    // autoPanPauseDuration).
-                    //
-                    // autoPanPhase is a normalized 0..1 sweep position, remapped onto
-                    // the VISIBLE center range [halfW, 1-halfW] — the only range over
-                    // which the crop actually moves before clamped() pins it. This
-                    // removes the "dead" edge travel that made the camera sit frozen
-                    // for tens of seconds at low speed: the reverse + pause now fire
-                    // the instant the camera reaches the true visible edge, at any
-                    // speed/preset.
-                    let now = CACurrentMediaTime()
-                    let dt = autoPanLastTick > 0 ? min(now - autoPanLastTick, 0.1) : 0
-                    autoPanLastTick = now
-
-                    let cropWidth = manualCropSize().width
-                    let halfW = cropWidth / 2.0
-                    let travel = max(0.0, 1.0 - cropWidth)   // (1 - halfW) - halfW
-
-                    if travel <= 0.0001 {
-                        // Crop fills the width: no horizontal room. Hold center, don't
-                        // advance/flip (avoids thrash and a lingering pause state).
-                        autoPanPauseUntil = 0
-                        cropEngine.setTargetCrop(manualCropRect(center: CGPoint(x: 0.5, y: shotComposer.config.autoPanHeight)))
-                        cropEngine.jumpToTarget()
-                    } else {
-                        if now > autoPanPauseUntil {
-                            // Constant phase velocity throughout the sweep.
-                            // autoPanSpeed (Slow 0.01 / Normal 0.02 / Fast 0.03)
-                            // is phase units per second * 3, and the phase maps
-                            // 1:1 onto the VISIBLE center range above — so the
-                            // multiplier IS the sweep speed: Slow crosses the
-                            // visible travel in ~33 s, Normal ~17 s, Fast ~11 s.
-                            // The old ×9 predates this visible-range mapping and
-                            // was compensating for dead edge travel it no longer
-                            // exists; at ×9 even Slow swept in ~11 s, which read
-                            // as a fast pendulum rather than a cinematic pan.
-                            let rate = CGFloat(shotComposer.config.autoPanSpeed) * 3.0
-                            autoPanPhase += rate * autoPanDirection * CGFloat(dt)
-                            if autoPanPhase >= 1.0 {
-                                autoPanPhase = 1.0
-                                autoPanDirection = -1.0
-                                autoPanPauseUntil = now + Self.autoPanPauseDuration
-                            } else if autoPanPhase <= 0.0 {
-                                autoPanPhase = 0.0
-                                autoPanDirection = 1.0
-                                autoPanPauseUntil = now + Self.autoPanPauseDuration
-                            }
-                        }
-                        // Map normalized phase onto the visible center range.
-                        let centerX = halfW + autoPanPhase * travel
-                        let panCenter = CGPoint(x: centerX, y: shotComposer.config.autoPanHeight)
-                        cropEngine.setTargetCrop(manualCropRect(center: panCenter))
-                        // Zero spring lag: visible crop tracks the phase exactly.
-                        cropEngine.jumpToTarget()
-                    }
+                    let size = manualCropSize()
+                    let legal = CropEngine.CropRect(center: .init(x: 0.5, y: 0.5), size: size)
+                        .clampedToQualityFloor(cropEngine.qualityFloor).clamped()
+                    let centerX = advanceAutoPan(now: CACurrentMediaTime(), width: legal.size.width)
+                    cropEngine.placePan(center: CGPoint(x: centerX, y: shotComposer.config.autoPanHeight), baseSize: size)
                 }
             composeDuration = CACurrentMediaTime() - composeStart
             Self.signposter.endInterval("compose", composeInterval)
             programOutput.recordLatency(stage: .compose, duration: composeDuration)
 
             frameLog("🔍 DEBUG: About to call renderCrop...")
-            do {
-                let cropStart = CACurrentMediaTime()
-                let snapshot = cropEngine.tickInterpolation()
-                // Render off the MainActor: the 4K Lanczos downscale no longer
-                // holds the thread the capture gate waits on. Snapshot first
-                // (MainActor), then await the serial render queue.
-                let renderGeneration = detectionFrames.generation
-                mainActiveTime += CACurrentMediaTime() - mainSegmentStart
-                let croppedBuffer = try await cropEngine.renderCrop(
-                    pixelBuffer,
-                    crop: snapshot.crop,
-                    outputSize: snapshot.outputSize
-                )
-                mainSegmentStart = CACurrentMediaTime()
-                guard sessionGeneration == captureGeneration,
-                      renderGeneration == detectionFrames.generation, isRunning else {
-                    Self.signposter.endInterval("captureFrame", captureInterval)
-                    return
-                }
-                cropDuration = CACurrentMediaTime() - cropStart
-                programOutput.recordLatency(stage: .cropRender, duration: cropDuration)
-                cropEngine.publishRenderStats(renderTime: cropDuration)
-                frameLog("🔍 DEBUG: renderCrop returned successfully")
-                outputPixelBuffer = croppedBuffer
-            } catch {
-                mainSegmentStart = CACurrentMediaTime()
-                Self.logger.error("Crop processing failed: \(error.localizedDescription, privacy: .public)")
-                programOutput.recordDroppedFrame(
-                    timestamp: timestampSeconds,
-                    reason: "Crop processing failed: \(error.localizedDescription)"
-                )
+            let cropStart = CACurrentMediaTime()
+            let snapshot = cropEngine.tickInterpolation()
+            mainActiveTime += CACurrentMediaTime() - mainSegmentStart
+            outputPixelBuffer = await renderProgramFrame(crop: snapshot.crop, timestamp: timestampSeconds) {
+                try await cropEngine.renderCrop(pixelBuffer, crop: snapshot.crop, outputSize: snapshot.outputSize)
             }
+            mainSegmentStart = CACurrentMediaTime()
+            cropDuration = CACurrentMediaTime() - cropStart
+            programOutput.recordLatency(stage: .cropRender, duration: cropDuration)
+            cropEngine.publishRenderStats(renderTime: cropDuration)
             frameLog("🔍 DEBUG: Crop processing complete")
         } else {
             composeDuration = CACurrentMediaTime() - composeStart
@@ -1529,9 +1787,8 @@ final class CameraManager: NSObject, ObservableObject {
             programOutput.recordLatency(stage: .compose, duration: composeDuration)
         }
 
-        // A failed render can also resume after a stop/retarget. Never send
-        // its fallback source frame into the replacement session.
-        guard sessionGeneration == captureGeneration, isRunning else {
+        // A retired render is dropped. A failed current render holds the last good program.
+        guard sessionGeneration == captureGeneration, isRunning, let outputPixelBuffer else {
             Self.signposter.endInterval("captureFrame", captureInterval)
             return
         }
@@ -1557,8 +1814,7 @@ final class CameraManager: NSObject, ObservableObject {
         // half-rate gate (`previewPublishTick`) existed only to amortise that
         // expensive display path, which no longer exists. `outputPixelBuffer`
         // is the crop pool's output surface (every mode renders through
-        // processCrop; the raw capture buffer passes through only when no
-        // CropEngine exists);
+        // processCrop; failures hold the prior rendered surface);
         // holding it in the published property keeps the pool from re-vending it
         // while on screen. The wide pane was already published above, pre-crop.
         croppedFrameBuffer = outputPixelBuffer
@@ -1619,6 +1875,9 @@ final class CameraManager: NSObject, ObservableObject {
         invalidateDetection()
         guard activeInputSource == .validationClip || isRunning else { return }
 
+        cancelOperatorMotion()
+        commands.setTrackingOwnership(false)
+        cropEngine?.clearZoomAdjustment()
         clipPlaybackTask = nil
         programOutput.updateCaptureStatus(isRunning: false)
         programOutput.stop()
@@ -1792,6 +2051,8 @@ final class CameraManager: NSObject, ObservableObject {
     /// (see reassertConfiguredFormatIfNeeded).
     private var configuredCaptureDevice: AVCaptureDevice?
     private var configuredCaptureFormat: AVCaptureDevice.Format?
+    private var configuredCaptureSize: (width: Int, height: Int)?
+    private var configuredCaptureReason: CaptureProfilePolicy.Reason?
     private var configuredMinFrameDuration: CMTime?
     private var configuredMaxFrameDuration: CMTime?
 
@@ -1801,11 +2062,19 @@ final class CameraManager: NSObject, ObservableObject {
         try device.lockForConfiguration()
         defer { device.unlockForConfiguration() }
         
-        // Find best format (4K or best available)
-        guard let format = findBest4KFormat(for: device) ?? findBestAvailableFormat(for: device) else {
+        let profile: CaptureProfilePolicy.Profile = shotComposer.config.cinematicFormat == .webcam ? .webcam : .stage
+        let candidates = device.formats.map { format in
+            let dims = CMVideoFormatDescriptionGetDimensions(format.formatDescription)
+            return CaptureProfilePolicy.Candidate(
+                width: Int(dims.width), height: Int(dims.height),
+                frameRateRanges: format.videoSupportedFrameRateRanges.map { $0.minFrameRate...$0.maxFrameRate }
+            )
+        }
+        guard let selection = CaptureProfilePolicy.select(candidates, profile: profile, showRate: Config.targetFrameRate) else {
             error = .unsupportedFormat
             throw CameraError.unsupportedFormat
         }
+        let format = device.formats[selection.index]
         
         device.activeFormat = format
 
@@ -1818,6 +2087,9 @@ final class CameraManager: NSObject, ObservableObject {
         // when the session starts (see reassertConfiguredFormatIfNeeded).
         configuredCaptureDevice = device
         configuredCaptureFormat = format
+        configuredCaptureSize = (Int(dims.width), Int(dims.height))
+        configuredCaptureReason = selection.reason
+        captureProfileStatus = "Requested \(dims.width)×\(dims.height) at \(ShowStandard.activeOrCurrent.title): \(selection.reason.description). Waiting for delivered frame."
 
         if dims.height > 0 {
             let sourceAspect = CGFloat(dims.width) / CGFloat(dims.height)
@@ -1883,67 +2155,6 @@ final class CameraManager: NSObject, ObservableObject {
         }
     }
     
-    private func findBest4KFormat(for device: AVCaptureDevice) -> AVCaptureDevice.Format? {
-        device.formats.first { format in
-            let dimensions = CMVideoFormatDescriptionGetDimensions(format.formatDescription)
-            
-            // Check if resolution matches 4K (3840x2160)
-            guard dimensions.width == Config.targetWidth,
-                  dimensions.height == Config.targetHeight else {
-                return false
-            }
-            
-            // Check if format supports our target frame rate
-            let frameRateRanges = format.videoSupportedFrameRateRanges
-            let supportsTargetFrameRate = frameRateRanges.contains { range in
-                range.minFrameRate <= Config.targetFrameRate &&
-                range.maxFrameRate >= Config.targetFrameRate
-            }
-            
-            return supportsTargetFrameRate
-        }
-    }
-    
-    /// Fallback format choice, used only when `findBest4KFormat` found no exact
-    /// 3840×2160 format at the show standard's rate. Cameras that satisfy that
-    /// exact match (the show rig) never reach this function.
-    ///
-    /// Preference order is shape-first, because the pipeline crops to 16:9
-    /// regardless: pixels above and below a widescreen region are captured,
-    /// carried through detection and the GPU crop, and then discarded. A
-    /// slightly smaller 16:9 format therefore delivers the same program output
-    /// for less work — and makes the operator's input pane match the program
-    /// pane instead of appearing squarer.
-    private func findBestAvailableFormat(for device: AVCaptureDevice) -> AVCaptureDevice.Format? {
-        // All formats, highest pixel count first. Every tier below picks the
-        // largest format meeting its criteria.
-        let sortedFormats = device.formats.sorted { format1, format2 in
-            let dims1 = CMVideoFormatDescriptionGetDimensions(format1.formatDescription)
-            let dims2 = CMVideoFormatDescriptionGetDimensions(format2.formatDescription)
-            return dims1.width * dims1.height > dims2.width * dims2.height
-        }
-
-        // 16:9 within a tolerance tight enough to exclude DCI 4K (4096×2160 is
-        // 1.896, noticeably wider) while accepting genuine 16:9 modes.
-        func isWidescreen(_ format: AVCaptureDevice.Format) -> Bool {
-            let dims = CMVideoFormatDescriptionGetDimensions(format.formatDescription)
-            guard dims.height > 0 else { return false }
-            let aspect = Double(dims.width) / Double(dims.height)
-            return abs(aspect - 16.0 / 9.0) < 0.02
-        }
-
-        func supportsShowFrameRate(_ format: AVCaptureDevice.Format) -> Bool {
-            format.videoSupportedFrameRateRanges.contains { range in
-                range.minFrameRate <= Config.targetFrameRate &&
-                range.maxFrameRate >= Config.targetFrameRate
-            }
-        }
-
-        // Tiered rather than a blunt "16:9 always wins", so a camera whose only
-        // widescreen mode is tiny still ends up on something sensible.
-        return sortedFormats.first { isWidescreen($0) && supportsShowFrameRate($0) }
-            ?? sortedFormats.first { supportsShowFrameRate($0) }
-    }
 }
 
 extension CameraManager {

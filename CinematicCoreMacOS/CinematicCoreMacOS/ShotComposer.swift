@@ -622,9 +622,8 @@ final class ShotComposer: ObservableObject {
         let width: CGFloat
     }
 
-    /// Non-nil ⇔ holding. Mutated ONLY on Steady Following state transitions
-    /// (hold-enter / hold-exit / reset) — never per frame. The lines stay
-    /// static while holding precisely because this isn't re-derived per frame.
+    /// Non-nil ⇔ holding. The band stays fixed against detection noise; an
+    /// operator size move scales its width to the visible program crop.
     @Published private(set) var steadyBand: SteadyBand?
 
     /// Two-state Steady Following machine. `following` emits targets every
@@ -908,6 +907,8 @@ final class ShotComposer: ObservableObject {
     private var recoveryVisibilityRevision: UInt64 = 0
     private var pendingReacquisition: UUID?
     private var lockGeneration: UInt64 = 0
+    /// TEST-ONLY: token captured by an asynchronous identity job.
+    var identityGenerationForTesting: UInt64 { lockGeneration }
     private var fallbackObservationID: UInt64 = 0
     private var lastGalleryObservationID: UInt64?
     /// Capture time of the newest observation admitted to recovery evidence.
@@ -928,6 +929,34 @@ final class ShotComposer: ObservableObject {
         lastGalleryRefreshAttemptAt = 0
         // In-flight jobs retain their slot until they finish; generation guards
         // discard their results without allowing unbounded replacement work.
+    }
+
+    /// Pause identity decisions when an operator takes the program into a
+    /// deterministic mode. Preserve the lock for a later explicit Track request,
+    /// but reject any asynchronous gallery/reacquisition result from before it.
+    func suspendIdentityWork() {
+        invalidateIdentityWork()
+    }
+
+    /// Completion gate shared by asynchronous identity work and lifecycle
+    /// tests. Retired Pan-era results cannot update recovery evidence.
+    @discardableResult
+    func finishReacquisitionScoring(
+        generation: UInt64,
+        visibilityRevision: UInt64,
+        observationID: UInt64,
+        scores: [ReacquisitionScore]
+    ) -> Bool {
+        reacquisitionBatchInFlight = false
+        guard lockGeneration == generation,
+              recoveryVisibilityRevision == visibilityRevision else { return false }
+        switch lockState {
+        case .hold, .wideWaiting:
+            pendingReacquisition = reacquisitionEvidence.consider(
+                observationID: observationID, scores: scores)
+            return true
+        default: return false
+        }
     }
 
     /// Backward-compatible accessor: returns the currently-locked UUID
@@ -1402,15 +1431,12 @@ final class ShotComposer: ObservableObject {
             let completedScores = scores
             guard let strong = self else { return }
             await MainActor.run {
-                strong.reacquisitionBatchInFlight = false
-                guard strong.lockGeneration == generation,
-                      strong.recoveryVisibilityRevision == visibilityRevision else { return }
-                switch strong.lockState {
-                case .hold, .wideWaiting:
-                    strong.pendingReacquisition = strong.reacquisitionEvidence.consider(
-                        observationID: observationID, scores: completedScores)
-                default: break
-                }
+                strong.finishReacquisitionScoring(
+                    generation: generation,
+                    visibilityRevision: visibilityRevision,
+                    observationID: observationID,
+                    scores: completedScores
+                )
             }
         }
     }
@@ -1510,6 +1536,8 @@ final class ShotComposer: ObservableObject {
         // repeatedly on the frame path when detections drop).
         if hasActiveTarget { hasActiveTarget = false }
         if activeTargetID != nil { activeTargetID = nil }
+        lastSubjectHeight = nil
+        visibleZoomHeight = nil
         currentComputedCrop = nil
         currentTrackedBounds = nil
         frameStateRevision &+= 1
@@ -1536,6 +1564,8 @@ final class ShotComposer: ObservableObject {
     /// gallery reaches `readyThreshold` the FSM promotes to `tracking` (green
     /// box) and cropping begins. Accuracy/consistency over instant lock.
     func lockTarget(_ targetID: UUID) {
+        lastSubjectHeight = nil
+        visibleZoomHeight = nil
         acquisitionFeedback = nil
         acquisitionLastSeenAt = CACurrentMediaTime()
         Self.logger.info("LOCK-STATE old=\(self.lockStateName, privacy: .public) new=acquiring reason=operator_select target=\(String(targetID.uuidString.prefix(8)), privacy: .public)")
@@ -1595,6 +1625,40 @@ final class ShotComposer: ObservableObject {
         config.outputAspectRatio / sourcePixelAspect
     }
 
+    private var lastSubjectHeight: CGFloat?
+    private var visibleZoomHeight: CGFloat?
+
+    func setVisibleZoomHeight(_ height: CGFloat?) {
+        visibleZoomHeight = height
+        if let height, let band = steadyBand {
+            let updated = SteadyBand(centerX: band.centerX, width: height * normalizedAspect * config.steadyBandWidth)
+            if updated != band { steadyBand = updated }
+        }
+    }
+
+    func reapplyFraming() {
+        visibleZoomHeight = nil
+        lastAppliedFramingFingerprint = nil
+    }
+
+    func destinationHeight(for preset: OperatorCommand.Preset) -> CGFloat? {
+        guard let subjectHeight = lastSubjectHeight else { return nil }
+        var destination = config
+        switch preset {
+        case .stage(let shot): destination.shotPreset = shot
+        case .webcam(let shot): destination.webcamPreset = shot
+        }
+        return composedHeight(subjectHeight: subjectHeight, config: destination)
+    }
+
+    private func composedHeight(subjectHeight: CGFloat, config: Config) -> CGFloat {
+        let tuning = framingTuning(for: config)
+        let desired = subjectHeight * config.activeSubjectHeightFraction
+        let height = max(qualityFloorHeightFraction,
+                         min(tuning.maximumCropHeight, max(desired, tuning.minimumCropHeight, qualityFloorHeightFraction)))
+        return min(height, 1, 1 / normalizedAspect)
+    }
+
     private func composeFromTrackedBounds(
         _ trackedBounds: CGRect,
         subjectBounds: CGRect,
@@ -1622,24 +1686,9 @@ final class ShotComposer: ObservableObject {
         // known, so setTargetCrop's own clamp becomes a no-op double-guard for
         // composer crops instead of silently re-shaping them.
         setZoomLimited(desiredHeight < qualityFloorHeightFraction)
-        var cropHeight = max(desiredHeight, tuning.minimumCropHeight, qualityFloorHeightFraction)
-        // Wide is the widest CROP, not the full picture — Return to Wide is
-        // the uncropped view. Cap the preset so it stays visibly cropped.
-        cropHeight = min(cropHeight, tuning.maximumCropHeight)
-        // The floor always wins over the cap (degenerate zoom safety).
-        cropHeight = max(cropHeight, qualityFloorHeightFraction)
-        var cropWidth = cropHeight * aspect
-
-        // Frame-fit while preserving 16:9. If either dimension overflows, shrink
-        // both proportionally.
-        if cropWidth > 1.0 {
-            cropWidth = 1.0
-            cropHeight = cropWidth / aspect
-        }
-        if cropHeight > 1.0 {
-            cropHeight = 1.0
-            cropWidth = cropHeight * aspect
-        }
+        lastSubjectHeight = subjectBounds.height
+        let cropHeight = composedHeight(subjectHeight: subjectBounds.height, config: config)
+        let cropWidth = cropHeight * aspect
 
         let centerX = subjectBounds.midX
         let originX = centerX - cropWidth / 2.0
@@ -1820,8 +1869,16 @@ final class ShotComposer: ObservableObject {
             }
         }
 
-        let clampedCrop = clampCropToFrame(stabilized)
-        lastEmittedCropSize = clampedCrop.size
+        lastEmittedCropSize = clampCropToFrame(stabilized).size
+        if let height = visibleZoomHeight {
+            var center = stabilized.center
+            if config.cinematicFormat == .webcam || config.shotPreset == .waistUp {
+                center.y = stabilized.origin.y + stabilized.size.height - height / 2
+            }
+            stabilized = .init(center: center, size: CGSize(width: height * normalizedAspect, height: height))
+        }
+        let clampedCrop = visibleZoomHeight == nil ? clampCropToFrame(stabilized) :
+            stabilized.clampedToQualityFloor(.init(minCropHeightFraction: qualityFloorHeightFraction)).clamped()
         currentComputedCrop = clampedCrop
         frameStateRevision &+= 1
 
@@ -2032,19 +2089,21 @@ final class ShotComposer: ObservableObject {
         return CGRect(x: originX, y: originY, width: width, height: height)
     }
 
-    private var framingTuning: FramingTuning {
+    private var framingTuning: FramingTuning { framingTuning(for: config) }
+
+    private func framingTuning(for config: Config) -> FramingTuning {
         switch config.cinematicFormat {
         case .webcam:
-            return webcamFramingTuning
+            return webcamFramingTuning(for: config)
         case .stage:
-            return stageFramingTuning
+            return stageFramingTuning(for: config)
         }
     }
 
     /// Close-range framing tuned for a video call: low headroom, low minimum
     /// crop height, and tight side padding (single near subject, no stage
     /// context to preserve).
-    private var webcamFramingTuning: FramingTuning {
+    private func webcamFramingTuning(for config: Config) -> FramingTuning {
         switch config.webcamPreset {
         case .wide:
             return FramingTuning(
@@ -2073,7 +2132,7 @@ final class ShotComposer: ObservableObject {
         }
     }
 
-    private var stageFramingTuning: FramingTuning {
+    private func stageFramingTuning(for config: Config) -> FramingTuning {
         switch (config.frameProfile, config.shotPreset) {
         case (.livestream, .wide):
             return FramingTuning(

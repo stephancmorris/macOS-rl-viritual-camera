@@ -10,8 +10,8 @@
 #          --apple-id "stephancmorris@gmail.com" --team-id "EPZDEPSV69" \
 #          --password "<app-specific-password>"
 #
-# Usage:  ./build_release.sh
-# Output: build_out/Alfie.dmg  (notarized + stapled, ready to share)
+# Usage:  ALFIE_RELEASE_OUT=build_release_3 ALFIE_DMG_NAME=AlfieBeta.dmg ./build_release.sh
+# Output: $ALFIE_RELEASE_OUT/$ALFIE_DMG_NAME (notarized + stapled)
 
 set -euo pipefail
 
@@ -25,14 +25,22 @@ DEV_ID="Developer ID Application: Stephan Morris (EPZDEPSV69)"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 cd "$SCRIPT_DIR"
 
-OUT="build_out"
+OUT="${ALFIE_RELEASE_OUT:-build_out}"
+DMG_NAME="${ALFIE_DMG_NAME:-$APP_NAME.dmg}"
+[[ "$DMG_NAME" == "${DMG_NAME##*/}" && "$DMG_NAME" == *.dmg ]] || {
+    echo "DMG name must be a .dmg filename" >&2
+    exit 1
+}
 ARCHIVE="$OUT/$APP_NAME.xcarchive"
 EXPORT_DIR="$OUT/export"
 APP="$EXPORT_DIR/$APP_NAME.app"
 ZIP="$OUT/$APP_NAME.zip"
-DMG="$OUT/$APP_NAME.dmg"
+DMG="$OUT/$DMG_NAME"
 
 mkdir -p "$OUT"
+if [[ ! -f "$OUT/ExportOptions.plist" ]]; then
+    cp build_out/ExportOptions.plist "$OUT/ExportOptions.plist"
+fi
 SOURCE_FINGERPRINT="$(python3 scripts/source_fingerprint.py)"
 printf '%s\n' "$SOURCE_FINGERPRINT" > "$OUT/source-fingerprint.txt"
 

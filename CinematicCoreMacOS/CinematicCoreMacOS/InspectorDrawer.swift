@@ -193,7 +193,22 @@ struct InspectorDrawer: View {
             }
 
             row("Source Resolution") {
-                valueText(cameraManager.selectedCamera?.maxResolution ?? "—", monospaced: true)
+                valueText(cameraManager.sourcePixelHeight > 0
+                    ? "\(cameraManager.sourcePixelWidth)×\(cameraManager.sourcePixelHeight) delivered"
+                    : "Waiting for frame", monospaced: true)
+            }
+
+            Text(cameraManager.captureProfileStatus)
+                .font(.caption2)
+                .foregroundStyle(.white.opacity(0.65))
+                .fixedSize(horizontal: false, vertical: true)
+
+            if let capability = cameraManager.framingCapability {
+                row("Crop Geometry") {
+                    valueText(capability.enlargement > 1.000001
+                        ? String(format: "%.2f× pixel enlargement", Double(capability.enlargement))
+                        : "Native/downsampled", monospaced: true)
+                }
             }
 
             row("Color") {
