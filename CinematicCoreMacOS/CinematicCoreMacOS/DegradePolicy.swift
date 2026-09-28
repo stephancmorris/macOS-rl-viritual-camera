@@ -63,6 +63,7 @@ nonisolated struct DegradePolicy: Sendable {
     private var overloadedWindows = 0
     private var healthyWindows = 0
     private var windowIndex = 0
+    private var unsupportedReasons: [Reason] = []
 
     init(thresholds: Thresholds = .init()) { self.thresholds = thresholds }
 
@@ -75,12 +76,13 @@ nonisolated struct DegradePolicy: Sendable {
             let transition = change(to: .normal, reasons: [.recovering])
             overloadedWindows = 0
             healthyWindows = 0
+            unsupportedReasons = []
             return decision(reasons: [], candidateStale: candidateStale, transition: transition)
         }
         // Unsupported is latched until the operator chooses a single input.
         // A later healthy sample cannot silently re-admit the pair.
         if level == .unsupported {
-            return decision(reasons: [.programBudgetFailed], candidateStale: candidateStale, transition: nil)
+            return decision(reasons: unsupportedReasons, candidateStale: candidateStale, transition: nil)
         }
 
         var reasons: [Reason] = []
@@ -105,6 +107,7 @@ nonisolated struct DegradePolicy: Sendable {
         if !window.sourceIngestSustainable || !window.programBudgetSustainable {
             overloadedWindows = 0
             healthyWindows = 0
+            unsupportedReasons = reasons
             let transition = change(to: .unsupported, reasons: reasons)
             return decision(reasons: reasons, candidateStale: candidateStale, transition: transition)
         }

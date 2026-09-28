@@ -50,7 +50,12 @@ struct DegradePolicyTests {
         #expect(decision.requiresExplicitSingleChannelAction)
         #expect(decision.takeBlockedByPolicy)
         #expect(decision.reasons.contains(.sourceIngestFailed))
-        for _ in 0..<12 { #expect(policy.update(.init()).level == .unsupported) }
+        for _ in 0..<12 {
+            let latched = policy.update(.init())
+            #expect(latched.level == .unsupported)
+            #expect(latched.reasons.contains(.sourceIngestFailed))
+            #expect(!latched.reasons.contains(.programBudgetFailed))
+        }
         var single = DegradePolicy.Window()
         single.twoInputsActive = false
         #expect(policy.update(single).level == .normal)
