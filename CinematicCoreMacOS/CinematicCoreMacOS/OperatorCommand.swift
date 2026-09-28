@@ -2,9 +2,17 @@ import Foundation
 import CoreGraphics
 import QuartzCore
 
-/// A single input today. This is an address, not a Channel implementation.
+/// An address, not a Channel implementation. Camera commands name a stable
+/// ChannelID bound when the gesture starts; delayed continuations keep that
+/// target and never look up "the currently selected camera" (CHANNEL-CMD).
 struct OperatorCommand {
-    enum Target: Equatable { case cameraA, session }
+    enum Target: Equatable {
+        case channel(ChannelID)
+        case session
+
+        /// The single-camera app's only channel.
+        static let cameraA = Target.channel(.a)
+    }
     enum Origin: Equatable { case operatorUI, safety, automaticRecovery }
     enum Preset: Equatable { case stage(ShotComposer.Config.ShotPreset), webcam(ShotComposer.Config.WebcamPreset) }
     enum ZoomDirection: CGFloat { case pullOut = -1, pushIn = 1 }
@@ -49,9 +57,15 @@ enum CommandResult: Equatable {
 /// manager performs the effects; no second camera pipeline lives here.
 @MainActor
 final class CommandDispatcher {
+    /// The channel this dispatcher admits camera commands for.
+    let channelID: ChannelID
     private(set) var epoch: UInt64 = 0
     private(set) var trackingOwnsControl = false
     private var recentIDs: [UUID] = []
+
+    init(channelID: ChannelID = .a) {
+        self.channelID = channelID
+    }
 
     func rejection(for command: OperatorCommand, now: TimeInterval) -> String? {
         guard command.epoch == epoch else { return "Superseded command" }
@@ -61,7 +75,7 @@ final class CommandDispatcher {
         case .startSession, .stopSession:
             guard command.target == .session else { return "Wrong command target" }
         default:
-            guard command.target == .cameraA else { return "Wrong command target" }
+            guard command.target == .channel(channelID) else { return "Wrong command target" }
         }
         if command.origin == .automaticRecovery { return "Recovery must retain tracking ownership" }
         return nil

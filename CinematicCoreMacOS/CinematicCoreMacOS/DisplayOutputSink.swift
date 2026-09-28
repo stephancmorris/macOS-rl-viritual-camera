@@ -97,7 +97,7 @@ final class DisplayOutputSink: ProgramOutputSink {
 
     var detail: String {
         guard let screen = targetScreen else {
-            return "The selected program display is not present. Plug it in or pick another display in Settings, then the feed falls back to the virtual camera."
+            return "The selected program display is not present. Program output is paused until it is reconnected; Alfie does not move Program to another output during a show."
         }
         let size = screen.frame.size
         return "Clean fullscreen feed on “\(screen.localizedName)” (\(Int(size.width))×\(Int(size.height)) pt). Feed the display's HDMI into an HDMI-to-SDI converter for the ATEM."
@@ -165,8 +165,8 @@ final class DisplayOutputSink: ProgramOutputSink {
     @objc private func screenParametersChanged() {
         let available = isAvailable
         if !available {
-            // Target display vanished (hot-unplug) — close the window and let
-            // ProgramOutputManager re-route (fallback to virtual camera).
+            // Target display vanished (hot-unplug) — close the window. The
+            // manager marks the route missing; it does not re-route mid-show.
             program.teardown()
             lastSentBuffer = nil
             Self.logger.notice("Program display disappeared; closing window and re-routing.")
@@ -191,7 +191,7 @@ final class DisplayOutputSink: ProgramOutputSink {
                 id: "display.mode",
                 title: "Program Display · Mode",
                 status: "Missing",
-                detail: "The selected program display is not connected. Output will fall back to the virtual camera.",
+                detail: "The selected program display is not connected. Program output is paused until it returns; choose another destination only while stopped.",
                 level: .warning
             )
         }

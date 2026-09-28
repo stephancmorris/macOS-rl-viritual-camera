@@ -22,6 +22,20 @@ Alfie has two cinematic formats (`ShotComposer.Config.CinematicFormat`), and thi
 
 `ConsolePresentation.resolve(for:)` is the single mapping from format to view. Switching format swaps the whole console, so it is refused while a multi-camera show is running; the operator stops the show first. A single-camera session switches as it does today. A Webcam-mode camera running below the show rate is paced into the output at the show standard, so the virtual camera repeats frames and the existing frame-rate-match bring-up check shows a warning. That is accepted for video calls and never applies to Stage.
 
+## Implementation status (branch `r2/engine`, 28 Sep 2026)
+
+The engine work units exist in code with unit tests; none has run on two real cameras yet, and the Multiview console is not wired to them.
+
+| Unit | Where | Notes |
+| --- | --- | --- |
+| `CHANNEL` | `ShowCoordinator`, `CameraChannel.swift` (`ChannelOutputPort`), `ChannelFrame.swift` | `CameraManager` is the per-channel controller; the show owns the single `ProgramOutputManager`. Revisions: `sourceGeneration` (= `captureGeneration`), `controlEpoch` (= dispatcher epoch), `shotRevision`. |
+| `CHANNEL-CMD` | `OperatorCommand.Target.channel(ChannelID)`, `ShowCoordinator.makeCommand/dispatch` | Control target + revision; Program needs Edit Live; target changes cancel pending gestures only. |
+| `ROUTER` | `ProgramRouter.swift` | Router-owned ports; monotonic host-clock output timestamps; route-generation stamp at frame start; 0.5 s → labelled 2 s hold → black standby; destination frozen per show (no mid-show fallback). |
+| `DEVICES` | `CaptureDeviceRegistry.swift` | Exclusive leases; no substitute for a missing selection; start/stop on a per-channel serial queue; hot unplug → source missing, explicit `reconnectSource()`. |
+| `SCHEDULER` | `FrameWorkScheduler.swift` | One render + one perception slot, latest-only per channel, Program streak ≤ 2 while Preview waits. |
+| `ADMISSION` | `MultiInputAdmission.swift` | Fingerprinted records; unknown → trial only; unsupported names the bottleneck; certified only via MULTI-QA. |
+| `TAKE` | `ProgramTake.swift`, `ShowCoordinator.take`, `ProgramRouter.commitTake` | Validated at the click; commits on sink acceptance; route-generation-bound requests + 0.5 s guard stop double-click bounce. Output is capture-paced, so validation and commit happen in one MainActor turn. |
+
 ## Existing seams to respect
 
 At this revision `CameraManager` is `@MainActor` and holds one `AVCaptureSession`, `PersonDetector`, `ShotComposer`, `CropEngine`, command dispatcher, latest wide and rendered buffers, last-good crop/buffer, and `ProgramOutputManager`. Its capture delegate has a one-frame `CaptureFrameProcessingGate`, then hops to MainActor. `CropEngine.renderCrop` uses a static serial queue. `OperatorCommand.Target` has only `.cameraA` and `.session`, with one epoch. `ProgramOutputManager` owns a single active display/virtual-camera sink and freezes `ShowStandard`; `DisplayOutputSink` resolves one persisted display ID and can request route fallback. The XPC protocol and extension expose one frame stream. These are extraction points, not two-instance-ready APIs.

@@ -10,8 +10,17 @@ import SwiftUI
 @main
 struct CinematicCoreMacOSApp: App {
     @StateObject private var systemExtensionManager = SystemExtensionActivationManager()
-    @StateObject private var cameraManager = CameraManager()
+    /// Owns the single program output and the channels.
+    @StateObject private var show: ShowCoordinator
+    /// Channel A, the routed single camera the current UI drives.
+    @StateObject private var cameraManager: CameraManager
     @StateObject private var settingsWindowController = SettingsWindowController()
+
+    init() {
+        let show = ShowCoordinator()
+        _show = StateObject(wrappedValue: show)
+        _cameraManager = StateObject(wrappedValue: show.channelA)
+    }
 
     var body: some Scene {
         WindowGroup("Alfie") {

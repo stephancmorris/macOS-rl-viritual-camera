@@ -21,6 +21,14 @@ private final class SendablePixelBufferBox: @unchecked Sendable {
     }
 }
 
+/// Carries the capture session to its channel's serial session executor.
+/// AVCaptureSession's start/stop are documented as callable from any thread;
+/// each channel only ever touches its session from one serial queue there.
+private final class CaptureSessionBox: @unchecked Sendable {
+    nonisolated(unsafe) let value: AVCaptureSession
+    nonisolated init(_ value: AVCaptureSession) { self.value = value }
+}
+
 nonisolated final class CaptureFrameProcessingGate: @unchecked Sendable {
     private let lock = NSLock()
     private var activeLease: UInt64?
@@ -110,6 +118,12 @@ enum CameraError: LocalizedError {
     case noValidationClipSelected
     case invalidValidationClip
     case validationClipPlaybackFailed(String)
+    /// The selected camera belongs to another channel.
+    case deviceInUse(ChannelID)
+    /// The selected camera is not connected. Alfie does not substitute another.
+    case deviceMissing
+    /// No camera chosen for a channel that may not auto-select one.
+    case noDeviceSelected
 
     var errorDescription: String? {
         switch self {
@@ -127,6 +141,12 @@ enum CameraError: LocalizedError {
             return "The selected validation clip does not contain a readable video track"
         case .validationClipPlaybackFailed(let message):
             return "Validation clip playback failed: \(message)"
+        case .deviceInUse(let owner):
+            return "This camera is already used by \(owner.cameraLabel)"
+        case .deviceMissing:
+            return "The selected camera is not connected. Reconnect it or choose another camera."
+        case .noDeviceSelected:
+            return "Choose a camera for this input"
         }
     }
 }
@@ -224,9 +244,82 @@ final class CameraManager: NSObject, ObservableObject {
     /// Routes the processed program feed to the currently active output sink.
     /// Program Display is a fullscreen clean feed on a selected display (e.g.
     /// for an HDMI→SDI converter into an ATEM).
-    let programOutput = ProgramOutputManager(
-        sinks: [VirtualCameraOutputSink(), DisplayOutputSink()]
-    )
+    /// The show's single program output. Owned by ShowCoordinator and shared;
+    /// a channel never creates its own. UI reads show-level output status here.
+    let programOutput: ProgramOutputManager
+
+    /// This channel's identity and its seam to the show: the routed channel's
+    /// port is `programOutput` itself; any other channel's port is unrouted and
+    /// cannot touch the output (see CameraChannel.swift).
+    let channelID: ChannelID
+    let outputPort: any ChannelOutputPort
+
+    /// Discrete shot-intent revision (see ChannelFrame.swift). Increments on
+    /// admitted shot-changing commands and lock-phase transitions; ordinary
+    /// tracking motion does not change it.
+    private(set) var shotRevision: UInt64 = 0
+    private var lastShotPhase: RecoveryState.Phase = .inactive
+
+    /// The most recent program frame this channel rendered, with the
+    /// revisions it was made under. Plain storage (not published): written
+    /// once per frame, read by routing / Take.
+    private(set) var latestRenderedFrame: RenderedChannelFrame?
+
+    /// Program frames this channel produced (new renders and repeats) since
+    /// launch. Plain counter, sampled per diagnostics window by admission to
+    /// measure a Preview channel whose telemetry is not in the show log.
+    private(set) var renderedFrameCount: UInt64 = 0
+
+    /// Capture rate configured on the device (nil before configuration or
+    /// for a validation clip).
+    private(set) var configuredCaptureFPS: Double?
+
+    /// This channel's part of an admission fingerprint.
+    var admissionInput: AdmissionFingerprint.Input {
+        let mode: String
+        switch activeMode {
+        case .wide: mode = "wide"
+        case .autoTracking: mode = "track"
+        case .manualCrop: mode = "manual"
+        case .autoPan: mode = "pan"
+        }
+        return AdmissionFingerprint.Input(
+            channel: channelID.letter,
+            deviceModelID: selectedCamera?.modelID,
+            deliveredWidth: sourcePixelWidth > 0 ? sourcePixelWidth : nil,
+            deliveredHeight: sourcePixelHeight > 0 ? sourcePixelHeight : nil,
+            captureFPS: configuredCaptureFPS,
+            captureProfile: shotComposer.config.cinematicFormat == .webcam ? "webcam" : "stage",
+            mode: mode)
+    }
+    private(set) var repeatedFrameCount: UInt64 = 0
+
+    // MARK: Device ownership (DEVICES)
+
+    /// Show-owned leases. nil for a standalone single-camera manager (tests,
+    /// previews), which keeps the historical auto-select behaviour.
+    weak var deviceRegistry: CaptureDeviceRegistry?
+
+    /// Show-owned fair admission for render and perception work (SCHEDULER).
+    /// nil for a standalone manager, which renders as before.
+    weak var workScheduler: FrameWorkScheduler?
+    private(set) var deviceLease: CaptureDeviceRegistry.Lease?
+
+    /// The claimed device disappeared mid-session. The generation is retired
+    /// and frames stop (the router holds, then sends standby); recovery needs
+    /// an explicit `reconnectSource()`. Changes rarely, so it is published.
+    @Published private(set) var sourceMissing = false
+    private var disconnectObserver: NSObjectProtocol?
+
+    /// Per-channel serial executor for blocking session calls, so starting or
+    /// stopping one camera never blocks the MainActor or the other channel.
+    private let sessionQueue: DispatchQueue
+
+    var revisions: ChannelRevisions {
+        ChannelRevisions(sourceGeneration: captureGeneration,
+                         controlEpoch: commands.epoch,
+                         shotRevision: shotRevision)
+    }
 
     /// Single-camera setup check (PREFLIGHT). Observes programOutput's closed
     /// diagnostics windows only; owned here so it outlives the inspector.
@@ -363,7 +456,7 @@ final class CameraManager: NSObject, ObservableObject {
         personDetector.flushImageCaches()
         // Marked in the diagnostics CSV so a flush can be lined up against the
         // heap and frame-rate columns when reviewing a session.
-        programOutput.noteDiagnostics("image cache flush")
+        outputPort.noteDiagnostics("image cache flush")
     }
 
     /// Start a detection if none is running and `due` says this frame holds a
@@ -399,14 +492,24 @@ final class CameraManager: NSObject, ObservableObject {
             // session/target generation and mutate the detector before the
             // frame store gets its post-work rejection chance.
             guard self.detectionFrames.generation == generation else { return }
+            // Vision is admitted fairly across tracking channels. A superseded
+            // or cancelled request skips this detection slot (latest-only).
+            let scheduler = self.workScheduler
+            var permit: FrameWorkScheduler.Permit?
+            if let scheduler {
+                guard let granted = await scheduler.acquire(.perception, for: self.channelID) else { return }
+                permit = granted
+            }
+            defer { if let permit { scheduler?.release(permit) } }
+            guard self.detectionFrames.generation == generation else { return }
             let persons = await self.personDetector.processFrame(box.pixelBuffer, plan: plan)
             let frame = DetectionFrame(observationID: id, capturedAt: capturedAt,
                 sourceTimestamp: sourceTimestamp, pixelBuffer: box.pixelBuffer, persons: persons,
                 queueWait: self.personDetector.stats.lastQueueWait,
                 detectionDuration: self.personDetector.stats.lastDetectionTime)
             guard self.detectionFrames.publish(frame, generation: generation) else { return }
-            self.programOutput.recordDetectionTiming(queueWait: frame.queueWait, visionWall: frame.detectionDuration)
-            self.programOutput.recordLatency(stage: .detection, duration: frame.detectionDuration)
+            self.outputPort.recordDetectionTiming(queueWait: frame.queueWait, visionWall: frame.detectionDuration)
+            self.outputPort.recordLatency(stage: .detection, duration: frame.detectionDuration)
         }
     }
 
@@ -548,7 +651,29 @@ final class CameraManager: NSObject, ObservableObject {
     
     // MARK: - Initialization
     
-    override init() {
+    /// Single-camera convenience: channel A, routed, with its own output.
+    /// Used by tests and previews; the app builds channels via ShowCoordinator.
+    override convenience init() {
+        let output = ProgramOutputManager(sinks: [VirtualCameraOutputSink(), DisplayOutputSink()])
+        self.init(channelID: .a, programOutput: output, outputPort: output)
+    }
+
+    /// - Parameters:
+    ///   - programOutput: the show's single output, shared by every channel.
+    ///   - routed: true for a channel feeding the output directly; false
+    ///     channels get an unrouted port and cannot start, stop or send to it.
+    convenience init(channelID: ChannelID, programOutput: ProgramOutputManager, routed: Bool) {
+        self.init(channelID: channelID, programOutput: programOutput,
+                  outputPort: routed ? programOutput : UnroutedChannelOutput(channelID: channelID))
+    }
+
+    /// Designated: the show (ShowCoordinator / ProgramRouter) supplies the port.
+    init(channelID: ChannelID, programOutput: ProgramOutputManager, outputPort: any ChannelOutputPort) {
+        self.channelID = channelID
+        self.programOutput = programOutput
+        self.outputPort = outputPort
+        self.commands = CommandDispatcher(channelID: channelID)
+        self.sessionQueue = DispatchQueue(label: "com.alfie.capture-session.\(channelID.letter)", qos: .userInitiated)
         // Initialize crop engine (Task 2.2 - GFX-01)
         self.cropEngine = CropEngine()
         
@@ -650,7 +775,7 @@ final class CameraManager: NSObject, ObservableObject {
     }
     
     /// Request camera permissions and start the capture session
-    let commands = CommandDispatcher()
+    let commands: CommandDispatcher
     @Published private(set) var controlStatus: String?
     @Published private(set) var isStartingSession = false
     @Published private(set) var isProgramHolding = false
@@ -768,7 +893,7 @@ final class CameraManager: NSObject, ObservableObject {
 
     func makeCommand(_ action: OperatorCommand.Action) -> OperatorCommand {
         let target: OperatorCommand.Target
-        switch action { case .startSession, .stopSession: target = .session; default: target = .cameraA }
+        switch action { case .startSession, .stopSession: target = .session; default: target = .channel(channelID) }
         return .init(target: target, epoch: commands.epoch, expiry: CACurrentMediaTime() + 2, action: action)
     }
 
@@ -795,6 +920,13 @@ final class CameraManager: NSObject, ObservableObject {
             }
         }
         commands.accept(command)
+        switch command.action {
+        case .selectSubject, .unlock, .resumeTracking, .setMode, .selectPreset,
+             .beginZoom, .moveManualCenter, .returnToWide:
+            shotRevision &+= 1
+        case .detect, .cancelDetect, .endZoom, .startSession, .stopSession:
+            break
+        }
         switch command.action {
         case .beginZoom: break
         default:
@@ -831,6 +963,25 @@ final class CameraManager: NSObject, ObservableObject {
         }
         return .accepted
     }
+
+    /// Drop UI gestures that have not been admitted yet (armed Detect, a tap
+    /// waiting for its ROI scan). Called when the control target moves away
+    /// from this channel. Already-admitted moves and running work continue.
+    func cancelPendingOperatorGestures() {
+        detectionDiscoveryActive = false
+        pendingTapPoint = nil
+        pendingTapIsRetarget = false
+        tapPending = false
+    }
+
+    #if DEBUG
+    /// Test seam: lets unit tests exercise command admission without a camera.
+    func setRunningForTesting(_ running: Bool) { isRunning = running }
+    /// Test seam: a rendered frame as if processFrame had produced it.
+    func setLatestRenderedFrameForTesting(_ frame: RenderedChannelFrame?) { latestRenderedFrame = frame }
+    /// Test seam: mark the source missing as a hot unplug would.
+    func setSourceMissingForTesting(_ missing: Bool) { sourceMissing = missing }
+    #endif
 
     func cancelOperatorMotion() {
         commands.invalidateMotion()
@@ -925,7 +1076,7 @@ final class CameraManager: NSObject, ObservableObject {
         case .success(let buffer): return selectProgramBuffer(rendered: buffer, crop: crop)
         case .failure(let error):
             cancelOperatorMotion()
-            programOutput.recordDroppedFrame(timestamp: timestamp, reason: "Crop processing failed: \(error.localizedDescription)", stage: .renderFailed)
+            outputPort.recordDroppedFrame(timestamp: timestamp, reason: "Crop processing failed: \(error.localizedDescription)", stage: .renderFailed)
             return selectProgramBuffer(rendered: nil)
         }
     }
@@ -941,9 +1092,10 @@ final class CameraManager: NSObject, ObservableObject {
         let sourceTitle = preferredInputSource.title
         Self.logger.notice("Starting capture from \(sourceTitle, privacy: .public)")
         captureGeneration &+= 1
+        latestRenderedFrame = nil
         invalidateDetection()
         frameProcessingGate.reset()
-        programOutput.start()
+        outputPort.start()
         sourcePixelWidth = 0
         sourcePixelHeight = 0
         captureProfileStatus = "Configuring capture…"
@@ -952,7 +1104,7 @@ final class CameraManager: NSObject, ObservableObject {
             do {
                 try await startValidationClipPlayback()
             } catch {
-                programOutput.stop()
+                outputPort.stop()
                 throw error
             }
             return
@@ -966,7 +1118,7 @@ final class CameraManager: NSObject, ObservableObject {
         guard authorized else {
             Self.logger.error("Camera authorization denied")
             error = .authorizationDenied
-            programOutput.stop()
+            outputPort.stop()
             throw CameraError.authorizationDenied
         }
         Self.logger.notice("Camera authorized")
@@ -982,16 +1134,30 @@ final class CameraManager: NSObject, ObservableObject {
         do {
             try await configureSession()
         } catch {
-            programOutput.stop()
+            releaseDevice()
+            outputPort.stop()
             throw error
         }
         try Task.checkCancellation()
         guard generation == captureGeneration else { throw CancellationError() }
         Self.logger.notice("Capture session configured")
         
-        // Start running
-        await MainActor.run {
-            captureSession.startRunning()
+        // Start running on this channel's session executor: startRunning()
+        // blocks, and must never block the MainActor or the other channel.
+        let session = CaptureSessionBox(captureSession)
+        await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in
+            sessionQueue.async { @Sendable in
+                session.value.startRunning()
+                continuation.resume()
+            }
+        }
+        // A Stop during startup retired this generation: the late start must
+        // not revive it.
+        guard generation == captureGeneration else {
+            sessionQueue.async { @Sendable in session.value.stopRunning() }
+            throw CancellationError()
+        }
+        do {
             // macOS has no .inputPriority preset, and the session's default
             // .high preset re-configures the device's activeFormat (4K →
             // 1080p) DURING startRunning(), silently discarding the format
@@ -1003,10 +1169,13 @@ final class CameraManager: NSObject, ObservableObject {
             activeInputSource = .liveCamera
             if isRunning {
                 Self.logger.notice("Capture started successfully")
-                programOutput.updateCaptureStatus(isRunning: true)
+                sourceMissing = false
+                observeDisconnect()
+                outputPort.updateCaptureStatus(isRunning: true)
             } else {
                 Self.logger.warning("Session not running after startRunning()")
-                programOutput.stop()
+                releaseDevice()
+                outputPort.stop()
             }
         }
     }
@@ -1026,6 +1195,7 @@ final class CameraManager: NSObject, ObservableObject {
         isProgramHolding = false
         Self.logger.notice("Stopping capture")
         captureGeneration &+= 1
+        latestRenderedFrame = nil
         invalidateDetection()
         cancelDetection()
         clipPlaybackTask?.cancel()
@@ -1034,14 +1204,16 @@ final class CameraManager: NSObject, ObservableObject {
         if trainingDataRecorder.isRecording {
             Task { await trainingDataRecorder.stopRecording() }
         }
-        programOutput.updateCaptureStatus(isRunning: false)
-        if captureSession.isRunning {
-            captureSession.stopRunning()
-        }
+        outputPort.updateCaptureStatus(isRunning: false)
+        workScheduler?.cancelWaiting(for: channelID)
+        stopSessionAsync()
+        stopObservingDisconnect()
+        releaseDevice()
+        sourceMissing = false
         configuredCaptureDevice = nil
         configuredCaptureFormat = nil
         configuredCaptureSize = nil
-        programOutput.stop()
+        outputPort.stop()
         isRunning = false
         activeInputSource = preferredInputSource
         activeMode = .wide
@@ -1444,12 +1616,12 @@ final class CameraManager: NSObject, ObservableObject {
         }
 
         if captureSession.isRunning {
-            captureSession.stopRunning()
+            stopSessionAsync()
         }
 
         error = nil
         isRunning = true
-        programOutput.recordSourceIdentity(DiagnosticsSessionIdentity.Source(
+        outputPort.recordSourceIdentity(DiagnosticsSessionIdentity.Source(
             inputKind: "Validation clip",
             deviceName: validationClipURL.lastPathComponent,
             belowShowRate: false))
@@ -1460,7 +1632,7 @@ final class CameraManager: NSObject, ObservableObject {
         currentFrameBuffer = nil
         croppedFrameBuffer = nil
         validationClipStatus = "Preparing \(validationClipURL.lastPathComponent)…"
-        programOutput.updateCaptureStatus(isRunning: true)
+        outputPort.updateCaptureStatus(isRunning: true)
 
         clipPlaybackTask?.cancel()
         let playbackGeneration = captureGeneration
@@ -1507,11 +1679,14 @@ final class CameraManager: NSObject, ObservableObject {
 
         let captureInterval = Self.signposter.beginInterval("captureFrame")
         let captureStart = CACurrentMediaTime()
+        // Stamp the route generation now: if roles change while this frame
+        // renders, the router refuses it on arrival.
+        let frameRouteGeneration = outputPort.routeGeneration
         var mainActiveTime: TimeInterval = 0
         var mainSegmentStart = captureStart
         flushImageCachesIfDue(now: captureStart)
 
-        programOutput.recordInputFrame(timestamp: timestampSeconds)
+        outputPort.recordInputFrame(timestamp: timestampSeconds)
 
         // Publish the wide (left) pane's raw pixels *before* any processing so
         // the operator sees the live frame at the earliest possible instant,
@@ -1541,7 +1716,7 @@ final class CameraManager: NSObject, ObservableObject {
             if sourceWidth != sourcePixelWidth || sourceHeight != sourcePixelHeight {
                 sourcePixelWidth = sourceWidth
                 sourcePixelHeight = sourceHeight
-                programOutput.recordDeliveredDimensions(width: sourceWidth, height: sourceHeight)
+                outputPort.recordDeliveredDimensions(width: sourceWidth, height: sourceHeight)
                 if activeInputSource == .liveCamera, let expected = configuredCaptureSize {
                     let requested = "\(expected.width)×\(expected.height)"
                     let actual = "\(sourceWidth)×\(sourceHeight)"
@@ -1599,17 +1774,17 @@ final class CameraManager: NSObject, ObservableObject {
         // too — PAN-HITCH compares exactly those against detection-on runs.
         // The first frame that runs Vision is marked with a `detection start`
         // note, so time under detection load can still be read from the CSV.
-        if programOutput.diagnosticsFileName == nil {
+        if outputPort.diagnosticsFileName == nil {
             let bundle = Bundle.main
             let version = bundle.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "unknown"
             let build = bundle.object(forInfoDictionaryKey: "CFBundleVersion") as? String ?? "unknown"
             let recordedFingerprint = bundle.object(forInfoDictionaryKey: "AlfieSourceFingerprint") as? String
             let fingerprint = recordedFingerprint.flatMap { $0.isEmpty ? nil : $0 } ?? "unrecorded"
-            programOutput.beginDiagnosticsSessionIfNeeded(note:
+            outputPort.beginDiagnosticsSessionIfNeeded(note:
                 "capture start; app=\(version)(\(build)); source_fingerprint=\(fingerprint); input=\(activeInputSource.title); pixels=\(Int(bufferWidth))x\(Int(bufferHeight)); show_fps=\(ShowStandard.activeOrCurrent.frameRate); detection_interval=\(DeveloperFlags.detectionFrameInterval); smoothing=\(shotComposer.config.smoothingFactor); band=\(shotComposer.config.steadyBandWidth)")
         }
         if detectionPlan.runsVision {
-            programOutput.noteDetectionStartIfNeeded()
+            outputPort.noteDetectionStartIfNeeded()
         }
         // Hand the matcher the current operator lock so it can bind that track
         // first with a relaxed threshold (PersonDetector.swift assignTracks).
@@ -1639,8 +1814,8 @@ final class CameraManager: NSObject, ObservableObject {
                 sourceTimestamp: timestampSeconds, pixelBuffer: pixelBuffer, persons: persons,
                 queueWait: personDetector.stats.lastQueueWait, detectionDuration: personDetector.stats.lastDetectionTime)
             detectionFrames.publish(frame, generation: generation)
-            programOutput.recordDetectionTiming(queueWait: frame.queueWait, visionWall: frame.detectionDuration)
-            programOutput.recordLatency(stage: .detection, duration: frame.detectionDuration)
+            outputPort.recordDetectionTiming(queueWait: frame.queueWait, visionWall: frame.detectionDuration)
+            outputPort.recordLatency(stage: .detection, duration: frame.detectionDuration)
         } else {
             scheduleDetectionIfDue(pixelBuffer: pixelBuffer, sourceTimestamp: timestampSeconds,
                 plan: detectionPlan, due: detectionDue)
@@ -1661,7 +1836,7 @@ final class CameraManager: NSObject, ObservableObject {
                 lockTarget(personID: picked.id)   // → .acquiring, leaves discovery
                 lastSubjectROIBox = picked.boundingBox
                 if wasRetarget {
-                    programOutput.noteDiagnostics("operator re-targeted subject")
+                    outputPort.noteDiagnostics("operator re-targeted subject")
                 }
             } else if !wasRetarget {
                 // Scan found no one at the tap — re-arm discovery so the
@@ -1690,7 +1865,7 @@ final class CameraManager: NSObject, ObservableObject {
         }
         Self.signposter.endInterval("detection", detectionInterval)
         if let observation = observation.frame {
-            programOutput.recordObservationAge(CACurrentMediaTime() - observation.capturedAt)
+            outputPort.recordObservationAge(CACurrentMediaTime() - observation.capturedAt)
         }
 
         let composeInterval = Self.signposter.beginInterval("compose")
@@ -1727,7 +1902,7 @@ final class CameraManager: NSObject, ObservableObject {
            shotComposer.steadyBand == nil,
            lastObservedSteadyBand != nil {
             boostFramingTransition()
-            programOutput.noteDiagnostics("steady band exit")
+            outputPort.noteDiagnostics("steady band exit")
         }
         lastObservedSteadyBand = shotComposer.steadyBand
 
@@ -1804,24 +1979,30 @@ final class CameraManager: NSObject, ObservableObject {
                 }
             composeDuration = CACurrentMediaTime() - composeStart
             Self.signposter.endInterval("compose", composeInterval)
-            programOutput.recordLatency(stage: .compose, duration: composeDuration)
+            outputPort.recordLatency(stage: .compose, duration: composeDuration)
 
             frameLog("🔍 DEBUG: About to call renderCrop...")
             let cropStart = CACurrentMediaTime()
             let snapshot = cropEngine.tickInterpolation()
             mainActiveTime += CACurrentMediaTime() - mainSegmentStart
+            let scheduler = workScheduler
+            let channel = channelID
             outputPixelBuffer = await renderProgramFrame(crop: snapshot.crop, timestamp: timestampSeconds) {
-                try await cropEngine.renderCrop(pixelBuffer, crop: snapshot.crop, outputSize: snapshot.outputSize)
+                // The render slot is shared across channels; wait for this
+                // channel's fair turn (immediate with one camera).
+                let permit = await scheduler?.acquire(.render, for: channel)
+                defer { if let permit { scheduler?.release(permit) } }
+                return try await cropEngine.renderCrop(pixelBuffer, crop: snapshot.crop, outputSize: snapshot.outputSize)
             }
             mainSegmentStart = CACurrentMediaTime()
             cropDuration = CACurrentMediaTime() - cropStart
-            programOutput.recordLatency(stage: .cropRender, duration: cropDuration)
+            outputPort.recordLatency(stage: .cropRender, duration: cropDuration)
             cropEngine.publishRenderStats(renderTime: cropDuration)
             frameLog("🔍 DEBUG: Crop processing complete")
         } else {
             composeDuration = CACurrentMediaTime() - composeStart
             Self.signposter.endInterval("compose", composeInterval)
-            programOutput.recordLatency(stage: .compose, duration: composeDuration)
+            outputPort.recordLatency(stage: .compose, duration: composeDuration)
         }
 
         // A retired render is dropped. A failed current render holds the last good program.
@@ -1855,22 +2036,44 @@ final class CameraManager: NSObject, ObservableObject {
         // holding it in the published property keeps the pool from re-vending it
         // while on screen. The wide pane was already published above, pre-crop.
         croppedFrameBuffer = outputPixelBuffer
+
+        // Acquisition, hold, recovery and unlock transitions are discrete shot
+        // changes: a frame rendered before one must not be taken after it.
+        let phase = recoveryState.phase
+        if phase != lastShotPhase {
+            lastShotPhase = phase
+            shotRevision &+= 1
+        }
+        renderedFrameCount &+= 1
+        if isProgramHolding { repeatedFrameCount &+= 1 }
+        latestRenderedFrame = RenderedChannelFrame(
+            channelID: channelID,
+            revisions: revisions,
+            sourceTimestamp: timestampSeconds,
+            processingStartedAt: captureStart,
+            renderedAt: CACurrentMediaTime(),
+            crop: lastGoodProgramCrop ?? cropEngine?.currentCrop ?? .fullFrame,
+            outputSize: cropEngine?.config.outputSize ?? .zero,
+            isRepeat: isProgramHolding,
+            pixelBuffer: outputPixelBuffer)
+
         // isProgramHolding is set by selectProgramBuffer for this frame: true
         // means this send repeats the last good render (telemetry only).
-        programOutput.sendFrame(outputPixelBuffer, timestamp: timestampSeconds, isRepeat: isProgramHolding)
+        outputPort.submitFrame(outputPixelBuffer, timestamp: timestampSeconds, isRepeat: isProgramHolding,
+                               routeGeneration: frameRouteGeneration)
 
         let detectionDuration = observation.frame?.detectionDuration ?? 0
         let totalDuration = CACurrentMediaTime() - captureStart
         mainActiveTime += CACurrentMediaTime() - mainSegmentStart
-        programOutput.recordLatency(stage: .mainActor, duration: mainActiveTime)
-        programOutput.recordLatency(stage: .total, duration: totalDuration)
+        outputPort.recordLatency(stage: .mainActor, duration: mainActiveTime)
+        outputPort.recordLatency(stage: .total, duration: totalDuration)
         Self.signposter.endInterval("captureFrame", captureInterval)
 
         let gateDrops = frameProcessingGate.droppedFrameCount
-        programOutput.recordGateDropTotal(gateDrops)
-        programOutput.recordFramePathCounts(detectedPersons: detectedPersons.count)
+        outputPort.recordGateDropTotal(gateDrops)
+        outputPort.recordFramePathCounts(detectedPersons: detectedPersons.count)
         if let cropEngine {
-            programOutput.recordPictureQuality(
+            outputPort.recordPictureQuality(
                 sourceHeight: Int(bufferHeight),
                 cropHeightFraction: Double(cropEngine.currentCrop.size.height),
                 outputHeight: Int(cropEngine.config.outputSize.height)
@@ -1918,8 +2121,8 @@ final class CameraManager: NSObject, ObservableObject {
         commands.setTrackingOwnership(false)
         cropEngine?.clearZoomAdjustment()
         clipPlaybackTask = nil
-        programOutput.updateCaptureStatus(isRunning: false)
-        programOutput.stop()
+        outputPort.updateCaptureStatus(isRunning: false)
+        outputPort.stop()
         isRunning = false
         activeInputSource = preferredInputSource
         activeMode = .wide
@@ -2017,9 +2220,15 @@ final class CameraManager: NSObject, ObservableObject {
         // to match the preset resolution, clobbering the manually chosen 4K format.
         
         // Find camera to use
-        guard let camera = findCameraToUse() else {
-            error = .noCameraAvailable
-            throw CameraError.noCameraAvailable
+        let camera: AVCaptureDevice
+        if let registry = deviceRegistry {
+            camera = try claimDevice(from: registry)
+        } else {
+            guard let found = findCameraToUse() else {
+                error = .noCameraAvailable
+                throw CameraError.noCameraAvailable
+            }
+            camera = found
         }
 
         // Add camera input
@@ -2054,6 +2263,127 @@ final class CameraManager: NSObject, ObservableObject {
         self.videoOutput = output
     }
     
+    // MARK: Device leases and session executor (DEVICES)
+
+    /// Resolve and exclusively claim this channel's device. Never substitutes
+    /// another camera for a missing selection; only the single-camera first
+    /// run (channel A, nothing chosen yet) may auto-select a free device.
+    private func claimDevice(from registry: CaptureDeviceRegistry) throws -> AVCaptureDevice {
+        let present = AVCaptureDevice.DiscoverySession(
+            deviceTypes: [.builtInWideAngleCamera, .external], mediaType: .video, position: .unspecified
+        ).devices.sorted { hasAny4KFormat($0) && !hasAny4KFormat($1) }
+        let resolution = CaptureDeviceRegistry.resolve(
+            selected: selectedCamera?.uniqueID,
+            present: present.map(\.uniqueID),
+            owner: registry.owner(of:),
+            channel: channelID,
+            allowAutoSelect: channelID == .a)
+        switch resolution {
+        case .use(let uniqueID):
+            switch registry.claim(uniqueID, for: channelID) {
+            case .success(let lease):
+                deviceLease = lease
+                guard let device = present.first(where: { $0.uniqueID == uniqueID }) else {
+                    throw CameraError.deviceMissing
+                }
+                return device
+            case .failure(.inUse(let owner)):
+                error = .deviceInUse(owner)
+                throw CameraError.deviceInUse(owner)
+            case .failure(.missing):
+                error = .deviceMissing
+                throw CameraError.deviceMissing
+            }
+        case .missing:
+            error = .deviceMissing
+            throw CameraError.deviceMissing
+        case .inUse(let owner):
+            error = .deviceInUse(owner)
+            throw CameraError.deviceInUse(owner)
+        case .noneSelected:
+            error = .noDeviceSelected
+            throw CameraError.noDeviceSelected
+        }
+    }
+
+    private func releaseDevice() {
+        if let lease = deviceLease { deviceRegistry?.release(lease) }
+        deviceLease = nil
+    }
+
+    /// Stop the session on this channel's executor without blocking.
+    private func stopSessionAsync() {
+        let session = CaptureSessionBox(captureSession)
+        sessionQueue.async { @Sendable in
+            if session.value.isRunning { session.value.stopRunning() }
+        }
+    }
+
+    private func observeDisconnect() {
+        stopObservingDisconnect()
+        guard let device = configuredCaptureDevice else { return }
+        disconnectObserver = NotificationCenter.default.addObserver(
+            forName: AVCaptureDevice.wasDisconnectedNotification, object: device, queue: .main
+        ) { [weak self] _ in
+            MainActor.assumeIsolated { self?.handleSourceLost() }
+        }
+    }
+
+    private func stopObservingDisconnect() {
+        if let disconnectObserver { NotificationCenter.default.removeObserver(disconnectObserver) }
+        disconnectObserver = nil
+    }
+
+    /// The claimed device vanished (hot unplug). Retire the generation, stop
+    /// the session and mark the source missing. The output keeps running: the
+    /// router holds the last good frame, then sends standby. The lease is kept
+    /// so no other channel can take the device when it returns, and nothing
+    /// restarts until the operator asks (`reconnectSource()`).
+    func handleSourceLost() {
+        guard isRunning, activeInputSource == .liveCamera, !sourceMissing else { return }
+        Self.logger.warning("Capture device disconnected on \(self.channelID.cameraLabel, privacy: .public)")
+        captureGeneration &+= 1
+        latestRenderedFrame = nil
+        lastGoodProgramBuffer = nil
+        lastGoodProgramCrop = nil
+        cancelOperatorMotion()
+        invalidateDetection()
+        frameProcessingGate.reset()
+        stopSessionAsync()
+        sourceMissing = true
+        outputPort.noteDiagnostics("\(channelID.cameraLabel) source missing")
+    }
+
+    /// Explicit Restart / Reclaim after a hot unplug: reconfigure the same
+    /// claimed device under a new generation, without restarting the output.
+    /// Stays missing (and throws) if the device is still absent.
+    func reconnectSource() async throws {
+        guard sourceMissing, let lease = deviceLease else { return }
+        guard deviceRegistry?.isPresent(lease.uniqueID) ?? true else { throw CameraError.deviceMissing }
+        captureGeneration &+= 1
+        let generation = captureGeneration
+        frameProcessingGate.reset()
+        try await configureSession()
+        guard generation == captureGeneration else { throw CancellationError() }
+        let session = CaptureSessionBox(captureSession)
+        await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in
+            sessionQueue.async { @Sendable in
+                session.value.startRunning()
+                continuation.resume()
+            }
+        }
+        guard generation == captureGeneration else {
+            sessionQueue.async { @Sendable in session.value.stopRunning() }
+            throw CancellationError()
+        }
+        reassertConfiguredFormatIfNeeded()
+        if captureSession.isRunning {
+            sourceMissing = false
+            observeDisconnect()
+            outputPort.noteDiagnostics("\(channelID.cameraLabel) source reconnected")
+        }
+    }
+
     private func findCameraToUse() -> AVCaptureDevice? {
         // Use selected camera if available
         if let selected = selectedCamera,
@@ -2130,13 +2460,14 @@ final class CameraManager: NSObject, ObservableObject {
         configuredCaptureFormat = format
         configuredCaptureSize = (Int(dims.width), Int(dims.height))
         configuredCaptureReason = selection.reason
+        configuredCaptureFPS = selection.frameRate
         // Webcam mode may run below the show rate (see CaptureProfilePolicy);
         // say the real capture rate rather than implying the show standard.
         configuredCaptureRateLabel = selection.reason == .webcamBelowShowRate
             ? String(format: "%g fps (show standard %@)", selection.frameRate, ShowStandard.activeOrCurrent.title)
             : ShowStandard.activeOrCurrent.title
         captureProfileStatus = "Requested \(dims.width)×\(dims.height) at \(configuredCaptureRateLabel): \(selection.reason.description). Waiting for delivered frame."
-        programOutput.recordSourceIdentity(DiagnosticsSessionIdentity.Source(
+        outputPort.recordSourceIdentity(DiagnosticsSessionIdentity.Source(
             inputKind: "Live camera",
             deviceName: device.localizedName,
             deviceModelID: device.modelID,
@@ -2226,7 +2557,7 @@ extension CameraManager {
 }
 
 @MainActor
-private final class VirtualCameraOutputSink: ProgramOutputSink {
+final class VirtualCameraOutputSink: ProgramOutputSink {
     let route: ProgramOutputManager.Route = .virtualCamera
     private static let logger = Logger(subsystem: "com.alfie", category: "VirtualCameraOutput")
     private static let signposter = OSSignposter(logger: logger)
@@ -2528,7 +2859,7 @@ extension CameraManager: AVCaptureVideoDataOutputSampleBufferDelegate {
             Task(priority: .userInitiated) { @MainActor in
                 defer { self.frameProcessingGate.finish(frameLease) }
                 guard self.frameProcessingGate.isCurrent(frameLease) else { return }
-                self.programOutput.recordMainActorHop(CACurrentMediaTime() - enqueueTime)
+                self.outputPort.recordMainActorHop(CACurrentMediaTime() - enqueueTime)
                 await self.processFrame(
                     pixelBuffer: sendableBuffer.pixelBuffer,
                     timestampSeconds: timestampSeconds
@@ -2546,7 +2877,7 @@ extension CameraManager: AVCaptureVideoDataOutputSampleBufferDelegate {
         latencyLog("avcapture-drop (system overload upstream of processing gate)")
         let timestampSeconds = CMSampleBufferGetPresentationTimeStamp(sampleBuffer).seconds
         Task(priority: .userInitiated) { @MainActor in
-            self.programOutput.recordDroppedFrame(
+            self.outputPort.recordDroppedFrame(
                 timestamp: timestampSeconds,
                 reason: "AVCapture dropped a frame before processing.",
                 stage: .captureUpstream

@@ -704,6 +704,7 @@ final class ProgramOutputManager: ObservableObject {
 
     func stop() {
         isCaptureRunning = false
+        sessionRoute = nil
         sinks.forEach {
             $0.updateCaptureStatus(isRunning: false)
             $0.disconnect()
@@ -747,6 +748,7 @@ final class ProgramOutputManager: ObservableObject {
         isCaptureRunning = isRunning
         if !isRunning {
             previousActiveSink?.updateCaptureStatus(isRunning: false)
+            sessionRoute = nil
         }
         refreshRoutingDecision()
         if isRunning {
@@ -759,11 +761,18 @@ final class ProgramOutputManager: ObservableObject {
     /// re-send of the last good render, so repeats are never counted as new
     /// frames.
     func sendFrame(_ pixelBuffer: CVPixelBuffer, timestamp: Double, isRepeat: Bool = false) {
+        sendFrameAccepted(pixelBuffer, timestamp: timestamp, isRepeat: isRepeat)
+    }
+
+    /// Same as `sendFrame`, reporting whether the active route's sink accepted
+    /// the frame. A Take commits only on acceptance.
+    @discardableResult
+    func sendFrameAccepted(_ pixelBuffer: CVPixelBuffer, timestamp: Double, isRepeat: Bool = false) -> Bool {
         counters.routed += 1
         guard let activeSink else {
             counters.noRoute += 1
             refreshPublishedStatsIfDue()
-            return
+            return false
         }
 
         rawLastFrameSize = CGSize(
@@ -779,7 +788,7 @@ final class ProgramOutputManager: ObservableObject {
                 reason: "Active output route did not accept the frame.",
                 stage: .handoffRefused
             )
-            return
+            return false
         }
         if let sendDuration = activeSink.lastFrameSendDuration {
             recordLatency(stage: .xpcSend, duration: sendDuration)
@@ -787,6 +796,7 @@ final class ProgramOutputManager: ObservableObject {
         counters.handoffAccepted += 1
         if isRepeat { counters.repeated += 1 }
         refreshPublishedStatsIfDue()
+        return true
     }
 
     func recordDroppedFrame(timestamp: Double, reason: String, stage: DropStage) {
@@ -945,19 +955,28 @@ final class ProgramOutputManager: ObservableObject {
         sinks.first { $0.route == route }
     }
 
+    /// The destination frozen when the show started. While it runs, a missing
+    /// endpoint is a destination fault: the route goes inactive until that
+    /// exact endpoint returns. Alfie never moves Program to another output on
+    /// its own, and a destination change applies to the next show.
+    private var sessionRoute: Route?
+
     private func refreshRoutingDecision() {
         let previousRoute = activeRoute
-        let preferredSink = sink(for: preferredRoute)
         let resolvedRoute: Route?
-        if let preferredSink, preferredSink.isAvailable {
+        if isCaptureRunning, let sessionRoute {
+            resolvedRoute = sink(for: sessionRoute)?.isAvailable == true ? sessionRoute : nil
+        } else if let preferredSink = sink(for: preferredRoute), preferredSink.isAvailable {
             resolvedRoute = preferredRoute
         } else if let fallbackSink = sink(for: .virtualCamera), fallbackSink.isAvailable {
+            // Only when choosing a destination at start, never mid-show.
             resolvedRoute = .virtualCamera
         } else {
             resolvedRoute = nil
         }
 
         activeRoute = isCaptureRunning ? resolvedRoute : nil
+        if isCaptureRunning, sessionRoute == nil { sessionRoute = activeRoute }
 
         if previousRoute != activeRoute {
             if let previousRoute, let previousSink = sink(for: previousRoute) {
