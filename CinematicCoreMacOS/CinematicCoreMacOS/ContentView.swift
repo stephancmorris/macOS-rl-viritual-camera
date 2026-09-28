@@ -52,7 +52,7 @@ struct ContentView: View {
                     manualLockedTargetID: cameraManager.manualLockedTargetID,
                     acquiringTargetID: cameraManager.shotComposer.acquiringTargetID,
                     trackedSubjectRect: cameraManager.shotComposer.displayedTrackedBounds,
-                    isRecovering: cameraManager.shotComposer.isHolding || cameraManager.shotComposer.isWideWaiting,
+                    isRecovering: cameraManager.recoveryState.isRecovering,
                     isZoomLimited: cameraManager.isZoomLimited,
                     steadyBand: cameraManager.shotComposer.steadyBand,
                     framingTitle: cameraManager.framingTitle,
@@ -169,7 +169,7 @@ struct ContentView: View {
         if cameraManager.activeMode == .manualCrop {
             return { point in cameraManager.dispatch(cameraManager.makeCommand(.moveManualCenter(point))) }
         }
-        if cameraManager.canDirectlyReacquire {
+        if cameraManager.recoveryState.allowsDirectSelection {
             return { point in cameraManager.dispatch(cameraManager.makeCommand(.selectSubject(point))) }
         }
         return nil

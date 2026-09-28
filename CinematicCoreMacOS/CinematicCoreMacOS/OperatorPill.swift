@@ -10,6 +10,12 @@ import SwiftUI
 
 struct OperatorPill: View {
     @ObservedObject var cameraManager: CameraManager
+    let controlTarget: ControlTarget
+
+    init(cameraManager: CameraManager, controlTarget: ControlTarget = .singleCamera) {
+        self.cameraManager = cameraManager
+        self.controlTarget = controlTarget
+    }
 
     private var isWebcam: Bool {
         cameraManager.shotComposer.config.cinematicFormat == .webcam
@@ -35,6 +41,9 @@ struct OperatorPill: View {
 
     var body: some View {
         HStack(spacing: 0) {
+            if controlTarget != .singleCamera {
+                targetChip
+            }
             lockStateSection
             divider
             detectButton
@@ -65,7 +74,8 @@ struct OperatorPill: View {
         .background(pillBackground)
         .overlay(
             RoundedRectangle(cornerRadius: 22, style: .continuous)
-                .strokeBorder(Color.white.opacity(0.12), lineWidth: 0.5)
+                .strokeBorder(controlTarget.isEditingLive ? Color(red: 1, green: 0.27, blue: 0.23) : Color.white.opacity(0.12),
+                              lineWidth: controlTarget.isEditingLive ? 1 : 0.5)
         )
         .overlay(alignment: .top) {
             if let feedback = operatorFeedback {
@@ -80,6 +90,24 @@ struct OperatorPill: View {
         }
         .shadow(color: .black.opacity(0.55), radius: 30, x: 0, y: 18)
         .shadow(color: .black.opacity(0.35), radius: 60, x: 0, y: 30)
+        // The live app has no channel command binding yet. Gallery target
+        // states remain visual until CHANNEL-CMD provides one.
+        .allowsHitTesting(controlTarget == .singleCamera)
+    }
+
+    private var targetChip: some View {
+        Text(controlTarget.compactChipTitle ?? "")
+        .font(.system(size: 10, weight: .bold, design: .monospaced))
+        .foregroundStyle(.white)
+        .lineLimit(1)
+        .padding(.horizontal, 4)
+        .padding(.vertical, 7)
+        .background(controlTarget.isEditingLive
+                    ? Color(red: 0.6, green: 0.1, blue: 0.1)
+                    : Color(red: 0.1, green: 0.38, blue: 0.25),
+                    in: RoundedRectangle(cornerRadius: 8))
+        .padding(.horizontal, 2)
+        .accessibilityLabel(controlTarget.chipTitle ?? "")
     }
 
     private var pillBackground: some View {
@@ -99,6 +127,7 @@ struct OperatorPill: View {
 
     private var lockStateSection: some View {
         let state = lockState
+        let label = displayedLockLabel
         return Button(action: lockStateAction) {
             ZStack {
                 HStack(spacing: 8) {
@@ -106,7 +135,7 @@ struct OperatorPill: View {
                         .fill(state.dotColor)
                         .frame(width: 7, height: 7)
                         .shadow(color: state.dotColor.opacity(0.8), radius: state.hasGlow ? 6 : 0)
-                    Text(state.label)
+                    Text(label)
                         .font(.system(size: 12, weight: .medium))
                         .foregroundStyle(.white.opacity(state.labelOpacity))
                 }
@@ -118,6 +147,8 @@ struct OperatorPill: View {
                             Text(state.label)
                                 .font(.system(size: 12, weight: .medium))
                         }
+                        Text("Resume")
+                            .font(.system(size: 12, weight: .medium))
                     }
                 }
                 .hidden()
@@ -129,7 +160,16 @@ struct OperatorPill: View {
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
-        .disabled(!state.isInteractive)
+        .disabled(!state.isInteractive || cameraManager.recoveryState.action == .none ||
+                  (cameraManager.recoveryState.action == .pickSubject &&
+                   (cameraManager.activeMode == .autoPan || cameraManager.activeMode == .manualCrop)))
+    }
+
+    private var displayedLockLabel: String {
+        switch lockState {
+        case .awaitingTap, .tapPending: return lockState.label
+        default: return cameraManager.recoveryState.statusLabel
+        }
     }
 
     private var lockState: LockState {
@@ -151,11 +191,13 @@ struct OperatorPill: View {
     }
 
     private func lockStateAction() {
-        switch lockState {
-        case .locked, .recovering, .waiting:
+        switch cameraManager.recoveryState.action {
+        case .none: break
+        case .unlock: cameraManager.dispatch(cameraManager.makeCommand(.unlock))
+        case .resume: cameraManager.dispatch(cameraManager.makeCommand(.resumeTracking))
+        case .pickSubject:
             cameraManager.dispatch(cameraManager.makeCommand(.unlock))
-        case .idle, .awaitingTap, .tapPending, .acquiring:
-            break
+            cameraManager.dispatch(cameraManager.makeCommand(.detect))
         }
     }
 
@@ -355,7 +397,7 @@ struct OperatorPill: View {
         return Button {
             cameraManager.dispatch(cameraManager.makeCommand(.returnToWide))
         } label: {
-            Text("Return to Wide")
+            Text(controlTarget.camera.map { "Return \($0) to Wide" } ?? "Return to Wide")
                 .font(.system(size: 12, weight: isOn ? .semibold : .medium))
                 .foregroundStyle(.white.opacity(isOn ? 1.0 : (enabled ? 0.86 : 0.32)))
                 .padding(.horizontal, 10)

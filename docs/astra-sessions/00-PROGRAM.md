@@ -1,4 +1,6 @@
-# [PROGRAM] Next: zoom → channels → speech → hardware
+# [PROGRAM] R1 dependable single camera → R2 Program / Preview
+
+**25 September 2026 supersession:** [ALFIE_MULTICAMERA_SPEC.md](../ALFIE_MULTICAMERA_SPEC.md) is the current R2 authority. Two inputs, one output, explicit Take. Speech and hardware below are historical future concepts, deferred until R1 and R2 validate. Design readiness is not release sign-off.
 
 **Astra role:** design reader only. Do not implement from this file. Do not open a PR. Use it to refuse work that belongs in a later session.
 
@@ -8,7 +10,7 @@
 
 ## One-sentence program
 
-Alfie stays a volunteer church-booth operator. After digital zoom works as a shot move, prove two isolated cameras, let the operator speak eight commands, then move a cheap linear actuator that yaws an existing tripod.
+Alfie stays a volunteer church-booth operator. Complete dependable single-camera operation, then prove two isolated cameras with one Program output and a prepared Preview shot. Broader Mac App Store launch has a separate distribution gate.
 
 ## Sequence and gates
 
@@ -16,14 +18,14 @@ Alfie stays a volunteer church-booth operator. After digital zoom works as a sho
 | --- | --- | --- | --- |
 | S1 | Command dispatcher + zoom | — | Channels, speech, hardware |
 | S2 | Channel extraction, two sessions, one routed output | S1 zoom feels right one-handed | Sunday A/B UI, second HDMI, second CMIO device |
-| S3 | A/B pill + two Program Displays | S2 dual-capture proof + DECIDE Q1/Q6 | Third channel, virtual-camera A/B/C, Blackmagic SDI |
+| S3 | Program/Preview console and explicit Take; one Program Display or CMIO route | R2 routing and command contracts tested | Second output, third channel, virtual-camera A/B/C, SDI |
 | S4 | Offline speech → same dispatcher | Command layer stable | LLM crop policy, spoken Stop, physical motion by voice |
 | S5 | HardwareLink USB/simulator, e-stop | S2 ownership + HARDWARE-OPTIONS read | Motor motion, image servo |
 | S6 | One-axis jog/goto on the real actuator | S5 green + parts on bench | Closed-loop visual yaw |
 | S7 | Hybrid physical yaw + digital zoom/fine pan | S6 stop-distance measured | IK, multi-axis head, tripod replacement |
 | DOCS | Spec/README match shipping behavior | After each landed session | Rewriting historical Phase 1 docs |
 
-S4 may be *designed* after S1 while S2/S3 proceed. It must not delay S2 or S3. Hardware stays last in the product sequence.
+S4–S7 remain deferred until R1 and R2 validation. Do not start them from this historical sequence table.
 
 ## What is already true in the tree
 

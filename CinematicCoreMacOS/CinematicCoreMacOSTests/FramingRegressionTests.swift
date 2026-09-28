@@ -96,6 +96,23 @@ struct FramingRegressionTests {
         #expect(manager.currentDetectionPlan(detectionRunsThisFrame: true).mode == .off)
     }
 
+    @Test func returnToWideRetiresResumeAndClearsRecoveryEligibility() {
+        let manager = CameraManager()
+        let subjectID = UUID()
+        manager.shotComposer.lockTarget(subjectID)
+        manager.shotComposer.forceTrackingForTesting()
+        let staleResume = manager.makeCommand(.resumeTracking)
+
+        manager.returnToWide()
+
+        #expect(manager.recoveryState.phase == .inactive)
+        #expect(!manager.recoveryState.canResume)
+        #expect(manager.recoveryState.statusLabel == "Pick subject")
+        #expect(manager.commands.rejection(for: staleResume, now: 0) == "Superseded command")
+        manager.resumeTracking()
+        #expect(manager.activeMode == .wide)
+    }
+
     @Test func panReentryPreservesSweepPhaseWithoutAdvancingWhileInactive() {
         let manager = CameraManager()
         manager.shotComposer.config.autoPanSpeed = 0.03
@@ -584,6 +601,77 @@ struct FramingRegressionTests {
         composer.config.frameProfile = profile
         composer.config.shotPreset = preset
         return try #require(composer.compose(person: subject)?.size.height)
+    }
+
+    private func stagePerson(y: CGFloat, height: CGFloat) -> PersonDetector.DetectedPerson {
+        PersonDetector.DetectedPerson(
+            id: UUID(), boundingBox: CGRect(x: 0.4, y: y, width: 0.2, height: height),
+            confidence: 0.95, timestamp: 0, poseKeypoints: nil,
+            faceBoundingBox: nil, faceLandmarkRatios: nil
+        )
+    }
+
+    @Test(arguments: [ShotComposer.Config.ShotPreset.fullBody, .waistUp])
+    func stageHeadroomUsesFloorAdjustedOutputHeight(preset: ShotComposer.Config.ShotPreset) throws {
+        let composer = ShotComposer()
+        composer.config.shotPreset = preset
+        composer.config.steadyFollowingEnabled = false
+        composer.qualityFloorHeightFraction = 0.65
+        let subject = stagePerson(y: 0.45, height: 0.20)
+
+        let crop = try #require(composer.compose(person: subject))
+        let headroom = (crop.origin.y + crop.size.height - subject.boundingBox.maxY) / crop.size.height
+        #expect(abs(crop.size.height - 0.65) < 0.0001)
+        #expect(abs(headroom - composer.config.headroom(for: preset)) < 0.0001)
+        #expect(crop.origin.y <= subject.boundingBox.minY)
+    }
+
+    @Test func editingHeadroomMovesAStationaryWaistUpShot() throws {
+        let composer = ShotComposer()
+        composer.config.shotPreset = .waistUp
+        composer.config.steadyFollowingEnabled = false
+        composer.qualityFloorHeightFraction = 0.65
+        let subject = stagePerson(y: 0.45, height: 0.20)
+        let first = try #require(composer.compose(person: subject))
+
+        composer.config.waistUpHeadroom = 0.15
+        let changed = try #require(composer.compose(person: subject))
+        #expect(changed.origin.y > first.origin.y)
+        #expect(abs((changed.origin.y + changed.size.height - subject.boundingBox.maxY) / changed.size.height - 0.15) < 0.0001)
+    }
+
+    @Test func fullBodyKeepsFeetWhenRequestedHeadroomBarelyFits() throws {
+        let composer = ShotComposer()
+        composer.config.shotPreset = .fullBody
+        composer.config.steadyFollowingEnabled = false
+        // A close subject plus the 85% context-shot cap leaves less space
+        // than the requested headroom and shoe margin combined.
+        let subject = stagePerson(y: 0.1, height: 0.80)
+        let crop = try #require(composer.compose(person: subject))
+        #expect(crop.origin.y <= subject.boundingBox.minY + 0.0001)
+        #expect(crop.origin.y + crop.size.height >= subject.boundingBox.maxY - 0.0001)
+    }
+
+    @Test func stageHeadroomPersistsSeparatelyAndResets() throws {
+        let suite = "AlfieHeadroomTests.\(UUID().uuidString)"
+        let defaults = try #require(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+
+        var edited = ShotComposer.Config()
+        edited.setHeadroom(0.12, for: .fullBody, defaults: defaults)
+        edited.setHeadroom(0.18, for: .waistUp, defaults: defaults)
+        var restored = ShotComposer.Config()
+        restored.restoreStageHeadroom(from: defaults)
+        #expect(abs(restored.fullBodyHeadroom - 0.12) < 0.0001)
+        #expect(abs(restored.waistUpHeadroom - 0.18) < 0.0001)
+
+        restored.setHeadroom(0.90, for: .waistUp, defaults: defaults)
+        #expect(restored.waistUpHeadroom == ShotComposer.Config.stageHeadroomRange.upperBound)
+        restored.resetStageHeadroom(defaults: defaults)
+        var reset = ShotComposer.Config()
+        reset.restoreStageHeadroom(from: defaults)
+        #expect(reset.fullBodyHeadroom == ShotComposer.Config.defaultFullBodyHeadroom)
+        #expect(reset.waistUpHeadroom == ShotComposer.Config.defaultWaistUpHeadroom)
     }
 
     @Test func stagePresetNamesDescribeTheActiveFormat() {

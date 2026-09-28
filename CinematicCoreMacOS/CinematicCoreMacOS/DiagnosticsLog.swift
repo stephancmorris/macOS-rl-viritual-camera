@@ -19,6 +19,210 @@ import AppKit
 import Foundation
 import OSLog
 
+// MARK: - Metric definitions
+//
+// Every number Alfie records names the pipeline stage it measures, its unit,
+// the window it covers and where it comes from. The CSV header and every row
+// are generated from `DiagnosticsLog.columns`, so a column cannot exist
+// without a definition, and the per-session manifest carries the same table.
+//
+// These types live in this file (not a new one) because DiagnosticsLog.swift
+// is also compiled into the CMIO extension target alongside
+// ProgramOutputManager.swift; nothing here may reference app-only types.
+
+/// Pipeline stage a metric belongs to, in frame order.
+nonisolated enum MetricStage: String, Codable, Sendable, CaseIterable {
+    /// Row bookkeeping: time, window length, window kind.
+    case session
+    /// Process-wide: thermal, CPU, threads, memory.
+    case system
+    /// AVCapture dropped the frame before Alfie's delegate received it.
+    case captureUpstream = "capture_upstream"
+    /// The capture delegate received the frame (admitted + gate-skipped).
+    case delivered
+    /// The frame passed the one-frame processing gate and entered processFrame.
+    case admitted
+    /// Vision detection work and observation freshness.
+    case detection
+    /// Crop render on the admitted frame.
+    case render
+    /// What the crop is sampling (picture-quality context).
+    case picture
+    /// A program frame was offered to the output manager.
+    case routed
+    /// The active route's sink accepted (or refused) the frame.
+    case handoff
+    /// An accepted handoff that re-sent the last good render (HOLD).
+    case repeated
+    /// Physical or consumer presentation. Not observable from the app.
+    case presented
+    /// Cost of the diagnostics themselves.
+    case instrumentation
+}
+
+/// Definition of one recorded number.
+nonisolated struct MetricColumn: Codable, Equatable, Sendable {
+    let name: String
+    let stage: MetricStage
+    let unit: String
+    let window: String
+    let provenance: String
+}
+
+/// Kind of CSV row. `partial` is the window Stop flushed early.
+nonisolated enum DiagnosticsWindowKind: String, Codable, Sendable {
+    case full
+    case partial
+    case marker
+}
+
+/// Session-relative frame counts per stage. Plain value type: the frame path
+/// increments fields on a stored copy; a window is the difference of two
+/// snapshots.
+nonisolated struct PipelineCounters: Equatable, Sendable {
+    var admitted = 0
+    var gateSkipped: UInt64 = 0
+    var captureDropped = 0
+    var renderFailed = 0
+    var routed = 0
+    var noRoute = 0
+    var handoffAccepted = 0
+    var handoffRefused = 0
+    var repeated = 0
+
+    /// Frames the capture delegate received: admitted plus gate-skipped.
+    var delivered: UInt64 { UInt64(admitted) &+ gateSkipped }
+
+    /// Field-wise difference, for one window. Counters only grow within a
+    /// session, so a smaller later value means a reset; report it as zero.
+    func since(_ earlier: PipelineCounters) -> PipelineCounters {
+        func diff(_ now: Int, _ then: Int) -> Int { max(0, now - then) }
+        return PipelineCounters(
+            admitted: diff(admitted, earlier.admitted),
+            gateSkipped: gateSkipped >= earlier.gateSkipped ? gateSkipped - earlier.gateSkipped : 0,
+            captureDropped: diff(captureDropped, earlier.captureDropped),
+            renderFailed: diff(renderFailed, earlier.renderFailed),
+            routed: diff(routed, earlier.routed),
+            noRoute: diff(noRoute, earlier.noRoute),
+            handoffAccepted: diff(handoffAccepted, earlier.handoffAccepted),
+            handoffRefused: diff(handoffRefused, earlier.handoffRefused),
+            repeated: diff(repeated, earlier.repeated))
+    }
+}
+
+/// Everything ProgramOutputManager measured for one window. System columns
+/// (thermal, CPU, threads) are sampled by DiagnosticsLog when the row is
+/// written.
+nonisolated struct DiagnosticsWindow: Equatable, Sendable {
+    var kind: DiagnosticsWindowKind = .full
+    var windowSeconds: Double = 0
+    var footprintMB: Double = 0
+    var sourceHeight = 0
+    var cropHeightFraction: Double = 0
+    var upscale: Double = 0
+    var hopMeanMS: Double = 0
+    var hopMaxMS: Double = 0
+    var queueMeanMS: Double = 0
+    var queueMaxMS: Double = 0
+    var visionMeanMS: Double = 0
+    var visionMaxMS: Double = 0
+    var frameMeanMS: Double = 0
+    var frameMaxMS: Double = 0
+    var detections = 0
+    var mainMeanMS: Double = 0
+    var mainMaxMS: Double = 0
+    var observationMeanMS: Double = 0
+    var observationMaxMS: Double = 0
+    var processedInputFPS: Double = 0
+    var window = PipelineCounters()
+    var totals = PipelineCounters()
+    var emitMS: Double = 0
+
+    var detectorFPS: Double { windowSeconds > 0 ? Double(detections) / windowSeconds : 0 }
+    var handoffFPS: Double { windowSeconds > 0 ? Double(window.handoffAccepted) / windowSeconds : 0 }
+}
+
+/// Process-wide sample taken when a row is written.
+nonisolated struct DiagnosticsSystemSample: Equatable, Sendable {
+    var thermal: String
+    var lowPower: Bool
+    var cpuCores: Double
+    var threads: Int
+}
+
+/// Who and what a diagnostics session measured. Written into the session
+/// manifest so every number can be traced to a build, a source and a route.
+nonisolated struct DiagnosticsSessionIdentity: Codable, Equatable, Sendable {
+    struct Build: Codable, Equatable, Sendable {
+        var appVersion: String
+        var buildNumber: String
+        var sourceFingerprint: String
+        var osVersion: String
+        var machineModel: String
+    }
+
+    struct Source: Codable, Equatable, Sendable {
+        /// "Live camera" or "Validation clip".
+        var inputKind: String
+        var deviceName: String?
+        var deviceModelID: String?
+        /// "stage" or "webcam" (CaptureProfilePolicy profile).
+        var captureProfile: String?
+        var requestedWidth: Int?
+        var requestedHeight: Int?
+        /// Capture rate Alfie configured on the device.
+        var configuredCaptureFPS: Double?
+        /// CaptureProfilePolicy selection reason, as text.
+        var captureSelectionReason: String?
+        /// Webcam mode running below the show rate (`webcamBelowShowRate`).
+        var belowShowRate: Bool
+        /// Dimensions of the frames actually delivered (may differ from requested).
+        var deliveredWidth: Int?
+        var deliveredHeight: Int?
+
+        static let unrecorded = Source(inputKind: "unrecorded", belowShowRate: false)
+    }
+
+    struct Output: Codable, Equatable, Sendable {
+        var route: String?
+        var showStandard: String
+        var showFPS: Double
+        /// The route's own playout clock, if it has one.
+        var playoutFPS: Double?
+        /// What "handoff" means on this route and why presentation is unknown.
+        var presentation: String
+    }
+
+    var build: Build
+    var source: Source
+    var output: Output
+}
+
+/// Sidecar JSON written next to each session's CSVs.
+nonisolated struct DiagnosticsManifest: Codable, Equatable, Sendable {
+    static let currentSchemaVersion = 2
+
+    struct Closing: Codable, Equatable, Sendable {
+        var endedAt: String
+        var note: String
+        var windowsWritten: Int
+        var partialWindowFlushed: Bool
+        /// MainActor time spent aggregating rows (excludes the async file write).
+        var emitMeanMS: Double
+        var emitMaxMS: Double
+    }
+
+    var schemaVersion = currentSchemaVersion
+    var csvFile: String
+    var memoryFile: String
+    var startedAt: String
+    var identity: DiagnosticsSessionIdentity
+    var columns: [MetricColumn]
+    /// Stages Alfie cannot observe; their numbers are reported as unknown.
+    var unobservable: [String]
+    var closing: Closing?
+}
+
 // MARK: - Off-main file appender
 
 /// Serial, off-MainActor file appender.
@@ -55,6 +259,16 @@ private final class DiagnosticsFileWriter: @unchecked Sendable {
         queue.async { @Sendable in
             guard let handle = self.handle else { return }
             try? handle.write(contentsOf: Data(line.utf8))
+        }
+    }
+
+    /// Write a whole small file (the session manifest), replacing any previous
+    /// version. Same serial queue, so it never races the CSV appends.
+    func replace(url: URL, data: Data) {
+        queue.async { @Sendable in
+            try? FileManager.default.createDirectory(
+                at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
+            try? data.write(to: url, options: .atomic)
         }
     }
 
@@ -113,20 +327,83 @@ final class DiagnosticsLog {
         NSWorkspace.shared.open(directory)
     }
 
-    /// Column order. `elapsed_s` is the column to sort by when hunting the
-    /// onset; `thermal` is the column that confirms or kills the throttling
-    /// hypothesis without needing `sudo powermetrics`.
-    static let header = """
-        elapsed_s,clock,thermal,low_power,cpu_cores,cpu_pct,threads,\
-        source_h,crop_h_frac,upscale,footprint_mb,\
-        hop_mean_ms,hop_max_ms,queue_mean_ms,queue_max_ms,vision_mean_ms,vision_max_ms,\
-        frame_wall_mean_ms,frame_wall_max_ms,\
-        detections,frames_window,frames_total,out_drops_window,out_drops_total,\
-        gate_drops_window,gate_drops_total,\
-        main_active_mean_ms,main_active_max_ms,observation_age_mean_ms,observation_age_max_ms,\
-        processed_input_fps,detector_fps,handoff_fps,window_s,note
+    /// Column order and definitions. `elapsed_s` is the column to sort by when
+    /// hunting the onset; `thermal` is the column that confirms or kills the
+    /// throttling hypothesis without needing `sudo powermetrics`. Existing
+    /// column names are kept so older spreadsheets still line up by name; the
+    /// old mixed `out_drops_*` columns are now split by stage.
+    nonisolated static let columns: [MetricColumn] = {
+        let row = "row window (~5 s; see window_s)"
+        let rowMean = "row window, mean over frames"
+        let rowMax = "row window, max over frames"
+        let atClose = "instant at row close"
+        let total = "cumulative since capture start"
+        let lastFrame = "last admitted frame in the row window"
+        func c(_ name: String, _ stage: MetricStage, _ unit: String, _ window: String, _ provenance: String) -> MetricColumn {
+            MetricColumn(name: name, stage: stage, unit: unit, window: window, provenance: provenance)
+        }
+        return [
+            c("elapsed_s", .session, "s", atClose, "host monotonic clock since the capture's first processed frame; the 'detection start' note marks when Vision load began"),
+            c("clock", .session, "HH:mm:ss", atClose, "local wall clock"),
+            c("window_kind", .session, "full|partial|marker", row, "partial = window flushed early by Stop; marker = event row with no measurements"),
+            c("thermal", .system, "state", atClose, "ProcessInfo.thermalState"),
+            c("low_power", .system, "yes|no", atClose, "ProcessInfo.isLowPowerModeEnabled"),
+            c("cpu_cores", .system, "CPU-seconds per second", row, "task_info thread times, differenced across the window"),
+            c("cpu_pct", .system, "%", row, "cpu_cores × 100 (Activity Monitor scale)"),
+            c("threads", .system, "count", atClose, "task_threads"),
+            c("source_h", .picture, "px", lastFrame, "delivered capture buffer height"),
+            c("crop_h_frac", .picture, "fraction of source height", lastFrame, "CropEngine current crop"),
+            c("upscale", .picture, "×", lastFrame, "output height ÷ (source_h × crop_h_frac)"),
+            c("footprint_mb", .system, "MB", atClose, "task_vm_info phys_footprint"),
+            c("hop_mean_ms", .admitted, "ms", rowMean, "capture callback enqueue → MainActor frame start"),
+            c("hop_max_ms", .admitted, "ms", rowMax, "capture callback enqueue → MainActor frame start"),
+            c("queue_mean_ms", .detection, "ms", rowMean, "detection dispatch queue wait"),
+            c("queue_max_ms", .detection, "ms", rowMax, "detection dispatch queue wait"),
+            c("vision_mean_ms", .detection, "ms", rowMean, "Vision request wall time"),
+            c("vision_max_ms", .detection, "ms", rowMax, "Vision request wall time"),
+            c("frame_wall_mean_ms", .admitted, "ms", rowMean, "processFrame wall time incl. awaited off-main render"),
+            c("frame_wall_max_ms", .admitted, "ms", rowMax, "processFrame wall time incl. awaited off-main render"),
+            c("detections", .detection, "count", row, "Vision runs completed"),
+            c("frames_window", .handoff, "frames", row, "frames the active route's sink accepted (includes repeats)"),
+            c("frames_total", .handoff, "frames", total, "frames the active route's sink accepted (includes repeats)"),
+            c("handoff_refused_window", .handoff, "frames", row, "frames the active route's sink refused"),
+            c("handoff_refused_total", .handoff, "frames", total, "frames the active route's sink refused"),
+            c("gate_drops_window", .delivered, "frames", row, "delivered frames skipped by the one-frame processing gate"),
+            c("gate_drops_total", .delivered, "frames", total, "delivered frames skipped by the one-frame processing gate"),
+            c("main_active_mean_ms", .admitted, "ms", rowMean, "MainActor busy time per admitted frame"),
+            c("main_active_max_ms", .admitted, "ms", rowMax, "MainActor busy time per admitted frame"),
+            c("observation_age_mean_ms", .detection, "ms", rowMean, "detection capture → consumption by the composer"),
+            c("observation_age_max_ms", .detection, "ms", rowMax, "detection capture → consumption by the composer"),
+            c("processed_input_fps", .admitted, "fps", "rolling 2 s at row close", "source PTS of admitted frames"),
+            c("detector_fps", .detection, "fps", row, "detections ÷ window_s"),
+            c("handoff_fps", .handoff, "fps", row, "frames_window ÷ window_s; host handoff, not presentation"),
+            c("window_s", .session, "s", row, "host monotonic length of this window"),
+            c("delivered_window", .delivered, "frames", row, "admitted_window + gate_drops_window"),
+            c("admitted_window", .admitted, "frames", row, "frames that entered processFrame"),
+            c("capture_dropped_window", .captureUpstream, "frames", row, "AVCapture didDrop callbacks (lost before delivery)"),
+            c("capture_dropped_total", .captureUpstream, "frames", total, "AVCapture didDrop callbacks (lost before delivery)"),
+            c("render_failed_window", .render, "frames", row, "crop renders that failed (HOLD re-sends last good)"),
+            c("render_failed_total", .render, "frames", total, "crop renders that failed (HOLD re-sends last good)"),
+            c("routed_window", .routed, "frames", row, "program frames offered to the output manager"),
+            c("no_route_window", .routed, "frames", row, "program frames produced while no output route was active"),
+            c("repeated_window", .repeated, "frames", row, "accepted handoffs that re-sent the last good render"),
+            c("repeated_total", .repeated, "frames", total, "accepted handoffs that re-sent the last good render"),
+            c("presented_fps", .presented, "fps", row, "always 'unknown': display compositor and virtual-camera consumer do not report presentation"),
+            c("diag_emit_ms", .instrumentation, "ms", row, "MainActor time to aggregate this row (file write is async, excluded)"),
+            c("note", .session, "text", row, "operator / pipeline markers since the previous row"),
+        ]
+    }()
 
-        """
+    nonisolated static var header: String {
+        columns.map(\.name).joined(separator: ",") + "\n"
+    }
+
+    /// What is never observable from inside the app, recorded in every manifest.
+    nonisolated static let alwaysUnobservable = [
+        "ATEM / downstream switcher acquisition, cadence and tally",
+        "physical display scan-out time",
+        "end-to-end glass-to-glass latency",
+    ]
 
     /// Columns for the memory-growth file.
     ///
@@ -192,12 +469,21 @@ final class DiagnosticsLog {
 
     // MARK: Session lifecycle
 
-    func beginSession(note: String) {
+    private var manifest: DiagnosticsManifest?
+    private var manifestURL: URL?
+    private var windowsWritten = 0
+    private var partialWindowFlushed = false
+    private var emitSumMS: Double = 0
+    private var emitMaxMS: Double = 0
+
+    private static let isoFormatter = ISO8601DateFormatter()
+
+    func beginSession(note: String, identity: DiagnosticsSessionIdentity? = nil) {
         guard !isOpen else { return }
         let stamp = Self.fileStampFormatter.string(from: Date())
         let name = "alfie_soak_\(stamp).csv"
         let url = Self.directory.appendingPathComponent(name)
-        // Same folder, same timestamp, so the pair from one run is obvious.
+        // Same folder, same timestamp, so the set from one run is obvious.
         let memoryName = "alfie_memory_\(stamp).csv"
         let memoryURL = Self.directory.appendingPathComponent(memoryName)
 
@@ -212,6 +498,28 @@ final class DiagnosticsLog {
         currentFileName = name
         pendingNotes = []
         pendingMemoryNotes = []
+        windowsWritten = 0
+        partialWindowFlushed = false
+        emitSumMS = 0
+        emitMaxMS = 0
+
+        if let identity {
+            let manifest = DiagnosticsManifest(
+                csvFile: name,
+                memoryFile: memoryName,
+                startedAt: Self.isoFormatter.string(from: Date()),
+                identity: identity,
+                columns: Self.columns,
+                unobservable: Self.alwaysUnobservable + [identity.output.presentation])
+            let manifestURL = Self.directory.appendingPathComponent("alfie_session_\(stamp).json")
+            self.manifest = manifest
+            self.manifestURL = manifestURL
+            writeManifest()
+        } else {
+            manifest = nil
+            manifestURL = nil
+        }
+
         // Marker row up front so the file is never empty and never undated,
         // even if the session dies before the first 5 s window closes.
         appendMarkerRow(note)
@@ -227,29 +535,44 @@ final class DiagnosticsLog {
         pendingNotes = []
         pendingMemoryNotes = []
         appendMarkerRow(closing)
+        if manifest != nil {
+            manifest?.closing = DiagnosticsManifest.Closing(
+                endedAt: Self.isoFormatter.string(from: Date()),
+                note: note,
+                windowsWritten: windowsWritten,
+                partialWindowFlushed: partialWindowFlushed,
+                emitMeanMS: windowsWritten > 0 ? emitSumMS / Double(windowsWritten) : 0,
+                emitMaxMS: emitMaxMS)
+            writeManifest()
+        }
         isOpen = false
         currentFileName = nil
+        manifest = nil
+        manifestURL = nil
         writer.close()
         memoryWriter.close()
+    }
+
+    private func writeManifest() {
+        guard let manifest, let manifestURL else { return }
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
+        guard let data = try? encoder.encode(manifest) else { return }
+        writer.replace(url: manifestURL, data: data)
     }
 
     /// A row carrying only the timing/thermal columns and a note. Measurement
     /// columns are left empty so these markers don't distort a chart of the
     /// real windows.
     private func appendMarkerRow(_ text: String) {
-        let elapsed = CACurrentMediaTime() - sessionStart
         let processInfo = ProcessInfo.processInfo
-        let emptyMeasurements = String(repeating: ",", count: Self.header.trimmingCharacters(in: .whitespacesAndNewlines).split(separator: ",").count - 4)
-        let row = String(
-            format: "%.1f,%@,%@,%@%@%@\n",
-            elapsed,
-            Self.clockFormatter.string(from: Date()),
-            Self.thermalStateName(processInfo.thermalState),
-            processInfo.isLowPowerModeEnabled ? "yes" : "no",
-            emptyMeasurements,
-            Self.csvEscaped(text)
-        )
-        writer.append(row)
+        let fields = Self.markerFields(
+            elapsed: CACurrentMediaTime() - sessionStart,
+            clock: Self.clockFormatter.string(from: Date()),
+            thermal: Self.thermalStateName(processInfo.thermalState),
+            lowPower: processInfo.isLowPowerModeEnabled,
+            note: text)
+        writer.append(fields.joined(separator: ",") + "\n")
     }
 
     /// Record a marker (capture start, lock acquired, route change) to appear in
@@ -262,73 +585,118 @@ final class DiagnosticsLog {
 
     // MARK: Row emission
 
-    /// One row per soak window. All values are already computed by
-    /// `ProgramOutputManager.emitSoakLineIfDue` — nothing is measured here.
-    func appendRow(
-        sourceHeight: Int,
-        cropHeightFraction: Double,
-        upscale: Double,
-        footprintMB: Double,
-        hopMeanMS: Double,
-        hopMaxMS: Double,
-        queueMeanMS: Double,
-        queueMaxMS: Double,
-        visionMeanMS: Double,
-        visionMaxMS: Double,
-        frameMeanMS: Double,
-        frameMaxMS: Double,
-        detections: Int,
-        framesWindow: Int,
-        framesTotal: Int,
-        outDropsWindow: Int,
-        outDropsTotal: Int,
-        gateDropsWindow: UInt64,
-        gateDropsTotal: UInt64,
-        mainMeanMS: Double, mainMaxMS: Double,
-        observationMeanMS: Double, observationMaxMS: Double,
-        processedInputFPS: Double, detectorFPS: Double, handoffFPS: Double, windowSeconds: Double
-    ) {
+    /// One row per soak window. All pipeline values are computed by
+    /// `ProgramOutputManager.emitSoakLineIfDue`; only the process-wide system
+    /// sample (thermal, CPU, threads) is taken here.
+    func appendRow(_ window: DiagnosticsWindow) {
         guard isOpen else { return }
 
         let now = CACurrentMediaTime()
-        let elapsed = now - sessionStart
         let processInfo = ProcessInfo.processInfo
         let noteField = pendingNotes.isEmpty ? "" : pendingNotes.joined(separator: "; ")
         pendingNotes = []
 
         // Average CPU over this window. `cores` is CPU-seconds per wall second —
         // 1.0 means one core saturated, 3.5 means three and a half cores' worth.
-        // `pct` is the same number as Activity Monitor's % CPU column.
         let cpuNow = Self.processCPUSeconds()
         let cpuWindowSeconds = lastCPUSampleAt > 0 ? now - lastCPUSampleAt : 0
         let cpuCores = cpuWindowSeconds > 0 ? (cpuNow - lastCPUSeconds) / cpuWindowSeconds : 0
         lastCPUSeconds = cpuNow
         lastCPUSampleAt = now
 
-        let row = String(
-            format: "%.1f,%@,%@,%@,%.2f,%.0f,%d,%d,%.4f,%.2f,%.0f,%.2f,%.2f,%.2f,%.2f,%.2f,%.2f,%.2f,%.2f,%d,%d,%d,%d,%d,%llu,%llu,%.2f,%.2f,%.2f,%.2f,%.2f,%.2f,%.2f,%.3f,%@\n",
-            elapsed,
-            Self.clockFormatter.string(from: Date()),
-            Self.thermalStateName(processInfo.thermalState),
-            processInfo.isLowPowerModeEnabled ? "yes" : "no",
-            cpuCores,
-            cpuCores * 100.0,
-            Self.liveThreadCount(),
-            sourceHeight, cropHeightFraction, upscale,
-            footprintMB,
-            hopMeanMS, hopMaxMS,
-            queueMeanMS, queueMaxMS,
-            visionMeanMS, visionMaxMS,
-            frameMeanMS, frameMaxMS,
-            detections,
-            framesWindow, framesTotal,
-            outDropsWindow, outDropsTotal,
-            gateDropsWindow, gateDropsTotal,
-            mainMeanMS, mainMaxMS, observationMeanMS, observationMaxMS,
-            processedInputFPS, detectorFPS, handoffFPS, windowSeconds,
-            Self.csvEscaped(noteField)
-        )
-        writer.append(row)
+        let system = DiagnosticsSystemSample(
+            thermal: Self.thermalStateName(processInfo.thermalState),
+            lowPower: processInfo.isLowPowerModeEnabled,
+            cpuCores: cpuCores,
+            threads: Self.liveThreadCount())
+        let fields = Self.rowFields(
+            elapsed: now - sessionStart,
+            clock: Self.clockFormatter.string(from: Date()),
+            system: system,
+            window: window,
+            note: noteField)
+        writer.append(fields.joined(separator: ",") + "\n")
+
+        windowsWritten += 1
+        if window.kind == .partial { partialWindowFlushed = true }
+        emitSumMS += window.emitMS
+        emitMaxMS = max(emitMaxMS, window.emitMS)
+    }
+
+    /// CSV fields for one measured row, in `columns` order. Pure so tests can
+    /// check it against the column table.
+    nonisolated static func rowFields(
+        elapsed: Double,
+        clock: String,
+        system: DiagnosticsSystemSample,
+        window w: DiagnosticsWindow,
+        note: String
+    ) -> [String] {
+        func f(_ value: Double, _ digits: Int = 2) -> String { String(format: "%.\(digits)f", value) }
+        return [
+            f(elapsed, 1), clock, w.kind.rawValue,
+            system.thermal, system.lowPower ? "yes" : "no",
+            f(system.cpuCores), f(system.cpuCores * 100, 0), String(system.threads),
+            String(w.sourceHeight), f(w.cropHeightFraction, 4), f(w.upscale), f(w.footprintMB, 0),
+            f(w.hopMeanMS), f(w.hopMaxMS),
+            f(w.queueMeanMS), f(w.queueMaxMS),
+            f(w.visionMeanMS), f(w.visionMaxMS),
+            f(w.frameMeanMS), f(w.frameMaxMS),
+            String(w.detections),
+            String(w.window.handoffAccepted), String(w.totals.handoffAccepted),
+            String(w.window.handoffRefused), String(w.totals.handoffRefused),
+            String(w.window.gateSkipped), String(w.totals.gateSkipped),
+            f(w.mainMeanMS), f(w.mainMaxMS),
+            f(w.observationMeanMS), f(w.observationMaxMS),
+            f(w.processedInputFPS), f(w.detectorFPS), f(w.handoffFPS), f(w.windowSeconds, 3),
+            String(w.window.delivered), String(w.window.admitted),
+            String(w.window.captureDropped), String(w.totals.captureDropped),
+            String(w.window.renderFailed), String(w.totals.renderFailed),
+            String(w.window.routed), String(w.window.noRoute),
+            String(w.window.repeated), String(w.totals.repeated),
+            "unknown",
+            f(w.emitMS, 3),
+            csvEscaped(note),
+        ]
+    }
+
+    /// CSV fields for a marker row: time, kind, thermal and note; every
+    /// measurement column empty.
+    nonisolated static func markerFields(
+        elapsed: Double, clock: String, thermal: String, lowPower: Bool, note: String
+    ) -> [String] {
+        columns.map { column in
+            switch column.name {
+            case "elapsed_s": return String(format: "%.1f", elapsed)
+            case "clock": return clock
+            case "window_kind": return DiagnosticsWindowKind.marker.rawValue
+            case "thermal": return thermal
+            case "low_power": return lowPower ? "yes" : "no"
+            case "note": return csvEscaped(note)
+            default: return ""
+            }
+        }
+    }
+
+    /// Build and host identity for the manifest.
+    nonisolated static func currentBuildIdentity() -> DiagnosticsSessionIdentity.Build {
+        let bundle = Bundle.main
+        let fingerprint = (bundle.object(forInfoDictionaryKey: "AlfieSourceFingerprint") as? String)
+            .flatMap { $0.isEmpty || $0.hasPrefix("$(") ? nil : $0 } ?? "unrecorded"
+        return DiagnosticsSessionIdentity.Build(
+            appVersion: bundle.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "unknown",
+            buildNumber: bundle.object(forInfoDictionaryKey: "CFBundleVersion") as? String ?? "unknown",
+            sourceFingerprint: fingerprint,
+            osVersion: ProcessInfo.processInfo.operatingSystemVersionString,
+            machineModel: machineModel())
+    }
+
+    nonisolated static func machineModel() -> String {
+        var size = 0
+        guard sysctlbyname("hw.model", nil, &size, nil, 0) == 0, size > 0 else { return "unknown" }
+        var buffer = [CChar](repeating: 0, count: size)
+        guard sysctlbyname("hw.model", &buffer, &size, nil, 0) == 0 else { return "unknown" }
+        return String(cString: buffer)
     }
 
     /// One row per soak window in the memory file. Counts are pushed in by the

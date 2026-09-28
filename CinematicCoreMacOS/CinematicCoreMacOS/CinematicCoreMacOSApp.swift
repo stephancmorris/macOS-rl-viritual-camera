@@ -48,5 +48,11 @@ struct CinematicCoreMacOSApp: App {
                 controller: settingsWindowController
             )
         }
+
+        #if DEBUG
+        // Multiview component gallery (Window menu), gated inside the scene by
+        // DeveloperFlags.exposeMultiviewGallery. Not compiled into Release.
+        MultiviewGalleryScene()
+        #endif
     }
 }

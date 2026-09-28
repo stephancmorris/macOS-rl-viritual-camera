@@ -26,6 +26,17 @@ For each row, mark pass/fail, the timecode of any defect, and whether it appeare
 7. During an active move, use a segmented preset, then start another move and use **Return to Wide**. Each action should cancel the earlier destination. Return to Wide should show the uncropped safety view, clear the subject lock, and permit a fresh Push in. Check focus loss and Stop also end an active move; restart capture before continuing.
 8. Repeat the core sequence at every show rate the installation will use. Note any step, breathing, black edge, soft image, stale program frame, or delayed response with a timecode and the route where it occurred. Judge slow intentional travel separately from frame skips or input-to-program lag.
 
+## Recovery controls (RECOVERY-UI)
+
+The pill's lock control reads the composer state: **Pick subject**, **Acquiring…**, **Locked**, **Recovering** (10-second HOLD), **Searching** (wide, waiting for the subject), or **Resume**. See the recovery section of `docs/ALFIE_ENGINEERING_SPEC.md` for the rules.
+
+1. Lock a subject (Detect → tap → Crop). The control reads **Locked**; tapping it unlocks.
+2. Hide the subject. Within HOLD the control reads **Recovering** and the program keeps the last crop for 10 s, then widens and reads **Searching**. Let the subject return: tracking resumes without any tap.
+3. Lock again, then choose **Manual** or **Auto Pan** (tracking loses ownership). The control should read **Resume** while the subject's face gallery is ready. Tap **Resume**: tracking takes over again, same subject, no jump to someone else.
+4. Tap a subject and switch to Manual while the control still reads **Acquiring…** (before Locked). Resume must **not** be offered, because there is no ready subject evidence yet. Record what the control shows (expected **Acquiring…** or **Pick subject**) and that tapping it never re-locks without Detect.
+5. **Return to Wide**, then look at the control: no Resume is offered (the lock and its gallery are cleared). Any Resume created before Wide must do nothing.
+6. At 1280 points, confirm the longest label (Pick subject / Acquiring… / Resume) does not push any pill control off screen.
+
 ## Failure and physical-route checks
 
 - For a render-error injection build, first establish a known program frame, then trigger a crop-render failure. The program pane and selected output should hold that same last successfully rendered frame; no raw wide source frame should leak through. On startup without a good frame, no invented program frame should appear. Record hold duration and recovery behavior. This requires an injection hook or debugger and is not reproduced by unplugging a camera.
@@ -43,5 +54,6 @@ For each row, mark pass/fail, the timecode of any defect, and whether it appeare
 | Recovery and Manual authority |  |  |  |
 | Pan sweep, dwells, zero travel |  |  |  |
 | Preset, Return to Wide, focus, Stop cancellation |  |  |  |
+| Recovery labels, Resume with / without a ready subject, post-Wide |  |  |  |
 | Render-failure last-good frame |  |  |  |
 | Physical output and show rate |  |  |  |

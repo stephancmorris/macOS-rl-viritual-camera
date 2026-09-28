@@ -76,4 +76,10 @@ enum DeveloperFlags {
     /// mask whether that fix actually worked, so the flush stays off while the
     /// before/after soak is run. Set to 30 only to A/B it back.
     nonisolated static let imageCacheFlushInterval: TimeInterval = 0
+
+    /// Exposes the Multiview component gallery window (scenario picker plus
+    /// one section per console component, all driven by `FakeConsoleModel`).
+    /// The gallery is compiled only in DEBUG builds, so this flag has no
+    /// effect in Release; it never touches the live pipeline.
+    nonisolated static let exposeMultiviewGallery = true
 }

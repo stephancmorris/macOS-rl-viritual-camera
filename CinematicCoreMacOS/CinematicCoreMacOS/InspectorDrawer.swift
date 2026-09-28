@@ -31,6 +31,11 @@ struct InspectorDrawer: View {
                     sourceSection
                     compositionSection
                     outputSection
+                    PipelineStagesSection(programOutput: cameraManager.programOutput)
+                    SetupCheckSection(
+                        check: cameraManager.setupCheck,
+                        output: cameraManager.programOutput,
+                        isCaptureRunning: cameraManager.isRunning)
                     modulesSection
                     diagnosticsSection
                 }
@@ -499,6 +504,184 @@ struct InspectorDrawer: View {
         let logsURL = AlfieDiagnosticsLog.fileURL.deletingLastPathComponent()
         try? FileManager.default.createDirectory(at: logsURL, withIntermediateDirectories: true)
         NSWorkspace.shared.open(logsURL)
+    }
+}
+
+/// Per-stage frame counts for the last closed diagnostics window (~5 s) and
+/// the session. Observes ProgramOutputManager directly; its published values
+/// change at most every 0.5 s, and only while this drawer is open.
+struct PipelineStagesSection: View {
+    @ObservedObject var programOutput: ProgramOutputManager
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Text("PIPELINE STAGES")
+                .font(.system(size: 9, weight: .semibold, design: .monospaced))
+                .tracking(1.6)
+                .foregroundStyle(.white.opacity(0.42))
+                .padding(.bottom, 6)
+
+            if let window = programOutput.lastPipelineWindow {
+                let totals = programOutput.pipelineTotals
+                Text(String(format: "Last %@ window · %.1f s", window.kind == .partial ? "partial" : "full", window.windowSeconds))
+                    .font(.system(size: 11, weight: .medium))
+                    .foregroundStyle(.white.opacity(0.5))
+                    .padding(.bottom, 4)
+                stageRow("Delivered", fps(Double(window.window.delivered), window), total: Int(totals.delivered))
+                stageRow("Admitted", fps(Double(window.window.admitted), window), total: totals.admitted)
+                stageRow("Handoff accepted", fps(Double(window.window.handoffAccepted), window), total: totals.handoffAccepted)
+                stageRow("Repeated (HOLD)", count(window.window.repeated), total: totals.repeated)
+                stageRow("Presented", "unknown", total: nil)
+                stageRow("Capture dropped", count(window.window.captureDropped), total: totals.captureDropped)
+                stageRow("Gate skipped", count(Int(window.window.gateSkipped)), total: Int(totals.gateSkipped))
+                stageRow("Render failed", count(window.window.renderFailed), total: totals.renderFailed)
+                stageRow("Handoff refused", count(window.window.handoffRefused), total: totals.handoffRefused)
+                stageRow("No route", count(window.window.noRoute), total: totals.noRoute)
+                Text("Handoff is when the route accepted the frame; when the display or virtual-camera consumer shows it is not reported to Alfie.")
+                    .font(.system(size: 10.5))
+                    .foregroundStyle(.white.opacity(0.42))
+                    .fixedSize(horizontal: false, vertical: true)
+                    .padding(.top, 6)
+            } else {
+                Text("No window closed yet. Counts appear about 5 s after capture starts.")
+                    .font(.system(size: 11.5))
+                    .foregroundStyle(.white.opacity(0.5))
+            }
+        }
+    }
+
+    private func fps(_ frames: Double, _ window: DiagnosticsWindow) -> String {
+        guard window.windowSeconds > 0 else { return "–" }
+        return String(format: "%.1f fps", frames / window.windowSeconds)
+    }
+
+    private func count(_ value: Int) -> String { String(value) }
+
+    private func stageRow(_ label: String, _ value: String, total: Int?) -> some View {
+        HStack {
+            Text(label)
+                .font(.system(size: 12, weight: .medium))
+                .foregroundStyle(.white.opacity(0.7))
+            Spacer(minLength: 12)
+            Text(value)
+                .font(.system(size: 12, weight: .medium, design: .monospaced))
+                .foregroundStyle(.white.opacity(0.92))
+            Text(total.map { "Σ \($0)" } ?? "")
+                .font(.system(size: 11, design: .monospaced))
+                .foregroundStyle(.white.opacity(0.4))
+                .frame(width: 72, alignment: .trailing)
+        }
+        .padding(.vertical, 4)
+    }
+}
+
+/// Runs the single-camera setup check and shows its provisional verdict with
+/// the measured reasons. The check only observes the running pipeline.
+struct SetupCheckSection: View {
+    @ObservedObject var check: SetupCheck
+    let output: ProgramOutputManager
+    let isCaptureRunning: Bool
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text("SETUP CHECK")
+                .font(.system(size: 9, weight: .semibold, design: .monospaced))
+                .tracking(1.6)
+                .foregroundStyle(.white.opacity(0.42))
+
+            switch check.phase {
+            case .idle:
+                caption(String(format: "Measures this source and output route for about %.0f s while it runs. Nothing is changed.", check.approximateDuration))
+                runButton("Run setup check")
+            case .warmingUp:
+                progress("Warming up…")
+            case .sampling(let collected, let needed):
+                progress("Measuring · window \(collected + 1) of \(needed)")
+            case .finished(let report):
+                result(report)
+                runButton("Run again")
+            case .cancelled(let reason):
+                caption(reason)
+                runButton("Run again")
+            }
+        }
+    }
+
+    private func caption(_ text: String) -> some View {
+        Text(text)
+            .font(.system(size: 11.5))
+            .foregroundStyle(.white.opacity(0.6))
+            .fixedSize(horizontal: false, vertical: true)
+    }
+
+    private func runButton(_ title: String) -> some View {
+        Button(title) { check.start(output: output, isCaptureRunning: isCaptureRunning) }
+            .controlSize(.small)
+            .disabled(!isCaptureRunning)
+            .help(isCaptureRunning ? "Sample the running pipeline" : "Start capture first")
+    }
+
+    private func progress(_ text: String) -> some View {
+        HStack(spacing: 8) {
+            ProgressView().controlSize(.small)
+            Text(text)
+                .font(.system(size: 12, weight: .medium))
+                .foregroundStyle(.white.opacity(0.8))
+            Spacer()
+            Button("Cancel") { check.cancel() }
+                .controlSize(.small)
+        }
+    }
+
+    private func verdictColor(_ verdict: CapabilityVerdict) -> Color {
+        switch verdict {
+        case .supported: return Color(red: 0.19, green: 0.82, blue: 0.35)
+        case .limited: return Color(red: 1.0, green: 0.62, blue: 0.04)
+        case .unverified: return Color.white.opacity(0.55)
+        }
+    }
+
+    @ViewBuilder
+    private func result(_ report: CapabilityReport) -> some View {
+        let m = report.measured
+        HStack(spacing: 8) {
+            Text(report.verdict.title.uppercased())
+                .font(.system(size: 9.5, weight: .semibold, design: .monospaced))
+                .tracking(1.2)
+                .foregroundStyle(verdictColor(report.verdict))
+                .padding(.horizontal, 9)
+                .padding(.vertical, 4)
+                .overlay(Capsule().strokeBorder(verdictColor(report.verdict).opacity(0.5), lineWidth: 1))
+            Text(report.context.source)
+                .font(.system(size: 11))
+                .foregroundStyle(.white.opacity(0.5))
+                .lineLimit(1)
+        }
+        Text(String(format: "Delivered %.1f fps · handoff %.1f fps · %.1f ms/frame · %.1f%% skipped · %.0f s measured",
+                    m.deliveredFPS, m.handoffFPS, m.frameWallMeanMS, m.gateSkipRatio * 100, m.seconds))
+            .font(.system(size: 11, design: .monospaced))
+            .foregroundStyle(.white.opacity(0.75))
+            .fixedSize(horizontal: false, vertical: true)
+        ForEach(report.reasons) { reason in
+            HStack(alignment: .firstTextBaseline, spacing: 6) {
+                Image(systemName: icon(reason.kind))
+                    .font(.system(size: 10))
+                    .foregroundStyle(reason.kind == .limit ? verdictColor(.limited) : .white.opacity(0.5))
+                Text(reason.message)
+                    .font(.system(size: 11.5))
+                    .foregroundStyle(.white.opacity(0.8))
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+        }
+        caption(CapabilityReport.disclaimer)
+    }
+
+    private func icon(_ kind: CapabilityReason.Kind) -> String {
+        switch kind {
+        case .limit: return "exclamationmark.triangle.fill"
+        case .unknown: return "questionmark.circle"
+        case .note: return "info.circle"
+        }
     }
 }
 

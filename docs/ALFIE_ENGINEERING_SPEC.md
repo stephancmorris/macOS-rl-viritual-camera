@@ -266,7 +266,13 @@ During hold / wideWaiting, `primaryPerson()` is nil. CameraManager applies `pull
 
 **Retarget:** press-and-hold on the wide pane while locked. A miss leaves the current subject on air.
 
-**Resume Tracking** as a dedicated pill button is **not** shipped. `resumeTracking()` exists on `CameraManager` and is not wired to the pill (T2).
+### Recovery controls and retained identity (R1)
+
+The pill reflects the composer state: inactive says **Pick subject**; acquiring says **Acquiring…**; tracking says **Locked**; the 10-second HOLD says **Recovering**; and wideWaiting says **Searching**. HOLD keeps the last program crop for its full 10 seconds, then the composer pulls back to wide while preserving its face gallery. This timer and the face matcher are unchanged.
+
+**Resume** is an explicit operator command. It may grant tracking authority only while the current composer state retains usable subject evidence: a ready gallery bound to the tracked subject in tracking/HOLD, or a ready retained gallery in wideWaiting. A track UUID without a ready gallery can continue its current lock, but it is not sufficient to restart recovery after ownership was revoked. Resume does not select a new person or bypass acquisition; wideWaiting stays wide until the existing matcher confirms the returning subject. If ownership was revoked and that evidence is absent, the control reads **Pick subject** and the operator must select someone through Detect/tap. A healthy, still-owned lock continues to read **Locked** even while its gallery is filling. Resume never changes Pan or Manual mode implicitly; the operator must explicitly request it.
+
+**Return to Wide** is an explicit release. It clears the composer lock and retained gallery, revokes tracking ownership, and leaves no Resume candidate. A later attempt to resume a command created before Wide is rejected by the command epoch; a newly created Resume without retained evidence is also rejected. Asynchronous recovery results are admitted only for the current composer lock generation and visibility revision, with fresh observations, and only while tracking owns control. Pan, Manual and explicit Wide retire that work. Automatic HOLD expiry to wideWaiting retains ownership so recovery may continue under the same lock.
 
 ---
 
@@ -430,7 +436,7 @@ Latency stages recorded: detection, compose, cropRender, xpcSend, total, mainAct
 
 ## 12. Diagnostics and tests
 
-Soak CSV (sandbox `Documents/CinematicCore/Diagnostics/`): footprint, hop/queue/vision, gate drops, observation age, processed / detector / handoff fps, plus a memory file (heap vs external IOSurface).
+Diagnostics (sandbox `Documents/CinematicCore/Diagnostics/`, METRICS schema 2): per capture, a manifest `alfie_session_<stamp>.json` (build and source fingerprint, OS, machine, source device/profile/requested and delivered size, configured capture rate and selection reason, route, show standard, what each route's handoff means, the column definitions and what is not observable), a soak CSV with one row per ~5 s window, and a memory CSV for the same windows. Every CSV column is defined in `DiagnosticsLog.columns` with its stage (capture upstream → delivered → admitted → detection → render → routed → handoff → repeated → presented), unit, window and provenance. Losses are counted per stage (AVCapture drop, gate skip, render failure, route refusal, no route) and HOLD repeats separately from new frames. `presented_fps` is always `unknown`: neither the Program Display compositor nor the virtual-camera client reports presentation. Recording starts on the capture's first processed frame (a `detection start` note marks Vision load), windows close on time even during a stall, and Stop flushes the last window as `partial`. `CinematicCoreMacOS/scripts/diagnostics_report.py` summarises a session as Markdown; release evidence runbooks live in `reports/release-1/`.
 
 `imageCacheFlushInterval = 0` (off). Autorelease is drained per work item.
 
@@ -488,6 +494,8 @@ Session briefs (implementation prompts) live in `docs/astra-sessions/`. This sec
 
 ### 14.3 S2 — Channel extraction (two cameras, one output)
 
+**25 September 2026 design authority:** [ALFIE_MULTICAMERA_SPEC.md](ALFIE_MULTICAMERA_SPEC.md) defines the current work-unit sequence, frame contracts and gates. The historical S2 scope below is an architectural overview, not a single implementation assignment.
+
 **Missing today:** second session, second detector/composer/engine, channel-addressed commands, output moved out of `CameraManager`, fair render scheduler.
 
 **Must implement:**
@@ -505,20 +513,20 @@ Session briefs (implementation prompts) live in `docs/astra-sessions/`. This sec
 
 **Done when:** two real devices; A tracks while B pans/zooms; one routed output; A survives B’s death.
 
-### 14.4 S3 — Sunday multi-input
+### 14.4 S3 — Program / Preview (supersedes dual-output design)
 
-**Missing today:** one global `ProgramDisplaySelection`; dual pane assumes one input + one program.
+**Design authority:** [ALFIE_MULTICAMERA_SPEC.md](ALFIE_MULTICAMERA_SPEC.md). The single-camera application has not yet implemented these R2 contracts.
 
 **Must implement:**
 
-1. Compact A/B on the pill (mode + health). C hidden until budget passes.
-2. Panes show **only the selected channel** (its wide + its program).
-3. Two `DisplayOutputSink` instances with **explicit display IDs**. Persist A and B separately.
-4. Unplug B’s display must not steal A’s window.
-5. Badge `B · to ATEM input 2` — not On Air tally.
-6. Return to Wide / presets / zoom act on the selected channel.
+1. Two independent camera channels; Preview controls never implicitly change Program.
+2. Right pane shows routed Program; left shows the prepared rendered Preview, with an explicit wide-source selection view.
+3. Exactly one output route: one Program Display or one CMIO feed to the downstream receiver.
+4. Explicit atomic Take exchanges Program/Preview only with an eligible current frame.
+5. Program labels describe Alfie's submitted feed, not downstream ATEM tally.
+6. Return to Wide / presets / zoom capture the visibly controlled channel; live edits require explicit selection.
 
-**Blocked on human DECIDE:** Q1 (fixed dual HDMI vs one Take) and Q6 (Mac, cards, displays).
+**Resolved:** one feed with Take. Hardware combinations and sustainable limits require the measured R2 matrix; unknown hardware is not certified.
 
 **Do not implement:** Alfie A/B virtual devices, Desktop Video SDI, video wall.
 
@@ -600,13 +608,13 @@ Update `ALFIE_SPEC.md` / `README.md` when a session is operator-accepted. Brief:
 | --- | --- | --- |
 | `CommandDispatcher` | S1 (done) | S3 targeting, S4 voice, S5/S7 estop |
 | `Channel` + show coordinator | S2 | S3 outputs, S5 link binding |
-| `OutputRouter` + per-endpoint displays | S2 stub / S3 complete | Sunday ATEM |
+| `ProgramRouter` + one output route | R2 routing / Take work | Sunday ATEM |
 | `HardwareLink` | S5 | S6/S7 |
 | Hybrid controller | S7 | — |
 
 ### 14.11 Explicitly out of the current roadmap
 
-Third 4K input as a promise, multiple CMIO devices, Blackmagic SDK SDI, NDI, cloud speech, multi-axis robotics, RL as default controller, Mac App Store.
+Third input, multiple CMIO devices, direct Blackmagic SDK SDI, NDI, cloud speech, multi-axis robotics and RL as default controller. Mac App Store preparation is in R2 with separate distribution/privacy/compatibility gates; an iOS port is not included.
 
 ---
 

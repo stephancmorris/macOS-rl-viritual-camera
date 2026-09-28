@@ -354,6 +354,62 @@ final class ShotComposer: ObservableObject {
         /// Operator-facing shot style.
         var shotPreset: ShotPreset = .wide
 
+        /// Clear space above the detected head as a fraction of the finished
+        /// program crop. The quality floor may make the crop much taller than
+        /// the requested preset, so this must be measured against the final
+        /// crop height rather than the person's bounding box.
+        static let defaultFullBodyHeadroom: CGFloat = 0.07
+        static let defaultWaistUpHeadroom: CGFloat = 0.06
+        static let stageHeadroomRange: ClosedRange<CGFloat> = 0.02...0.20
+        private static let fullBodyHeadroomKey = "stageFullBodyHeadroom"
+        private static let waistUpHeadroomKey = "stageWaistUpHeadroom"
+
+        var fullBodyHeadroom: CGFloat = defaultFullBodyHeadroom
+        var waistUpHeadroom: CGFloat = defaultWaistUpHeadroom
+
+        func headroom(for preset: ShotPreset) -> CGFloat {
+            switch preset {
+            case .wide: return 0
+            case .fullBody: return Self.clampedHeadroom(fullBodyHeadroom)
+            case .waistUp: return Self.clampedHeadroom(waistUpHeadroom)
+            }
+        }
+
+        mutating func setHeadroom(_ value: CGFloat, for preset: ShotPreset,
+                                  defaults: UserDefaults = .standard) {
+            let value = Self.clampedHeadroom(value)
+            switch preset {
+            case .wide: return
+            case .fullBody:
+                fullBodyHeadroom = value
+                defaults.set(Double(value), forKey: Self.fullBodyHeadroomKey)
+            case .waistUp:
+                waistUpHeadroom = value
+                defaults.set(Double(value), forKey: Self.waistUpHeadroomKey)
+            }
+        }
+
+        mutating func resetStageHeadroom(defaults: UserDefaults = .standard) {
+            fullBodyHeadroom = Self.defaultFullBodyHeadroom
+            waistUpHeadroom = Self.defaultWaistUpHeadroom
+            defaults.removeObject(forKey: Self.fullBodyHeadroomKey)
+            defaults.removeObject(forKey: Self.waistUpHeadroomKey)
+        }
+
+        mutating func restoreStageHeadroom(from defaults: UserDefaults = .standard) {
+            if let number = defaults.object(forKey: Self.fullBodyHeadroomKey) as? NSNumber {
+                fullBodyHeadroom = Self.clampedHeadroom(CGFloat(number.doubleValue))
+            }
+            if let number = defaults.object(forKey: Self.waistUpHeadroomKey) as? NSNumber {
+                waistUpHeadroom = Self.clampedHeadroom(CGFloat(number.doubleValue))
+            }
+        }
+
+        private static func clampedHeadroom(_ value: CGFloat) -> CGFloat {
+            guard value.isFinite else { return defaultWaistUpHeadroom }
+            return min(stageHeadroomRange.upperBound, max(stageHeadroomRange.lowerBound, value))
+        }
+
         /// Vertical framing: chest-up or waist-up. Anchors the crop's top edge
         /// to the top of the tracked subject (plus a small headroom) and
         /// extends downward by a fraction of the subject's height.
@@ -517,6 +573,8 @@ final class ShotComposer: ObservableObject {
         let shotFraming: Config.ShotFraming
         let cinematicFormat: Config.CinematicFormat
         let webcamPreset: Config.WebcamPreset
+        let fullBodyHeadroom: CGFloat
+        let waistUpHeadroom: CGFloat
     }
 
     private var currentFramingFingerprint: FramingFingerprint {
@@ -525,7 +583,9 @@ final class ShotComposer: ObservableObject {
             shotPreset: config.shotPreset,
             shotFraming: config.shotFraming,
             cinematicFormat: config.cinematicFormat,
-            webcamPreset: config.webcamPreset
+            webcamPreset: config.webcamPreset,
+            fullBodyHeadroom: config.fullBodyHeadroom,
+            waistUpHeadroom: config.waistUpHeadroom
         )
     }
 
@@ -1676,8 +1736,8 @@ final class ShotComposer: ObservableObject {
         // subject height (head to feet), not the focused torso region, so a
         // standing speaker produces a true chest-up or waist-up shot.
         let subjectTop = subjectBounds.maxY
-        let headroom = subjectBounds.height * tuning.cropHeadroomMultiplier
-        let cropTop = min(1.0, subjectTop + headroom)
+        let webcamHeadroom = subjectBounds.height * tuning.cropHeadroomMultiplier
+        let webcamCropTop = min(1.0, subjectTop + webcamHeadroom)
 
         // Use the active format's height fraction (stage preset or webcam preset).
         let desiredHeight = subjectBounds.height * config.activeSubjectHeightFraction
@@ -1695,22 +1755,31 @@ final class ShotComposer: ObservableObject {
 
         let originY: CGFloat
         let isTightShot: Bool
-        if config.cinematicFormat == .stage,
-           config.shotPreset == .wide || config.shotPreset == .fullBody {
-            // Context shots (crop is several times the subject's height):
-            // center vertically on the subject. Head-down anchoring here hangs
-            // the subject at the top of the frame and fills the bottom with
-            // audience/stage floor.
+        if config.cinematicFormat == .stage, config.shotPreset == .wide {
+            // Wide retains its stage-context composition.
             originY = subjectBounds.midY - (cropHeight / 2.0)
             isTightShot = false
+        } else if config.cinematicFormat == .stage {
+            // Place the head at the selected percentage of the actual output
+            // height. A hard quality floor enlarges the crop below the head
+            // instead of adding half of that enlargement above it.
+            let headroom = cropHeight * config.headroom(for: config.shotPreset)
+            var bottom = subjectTop + headroom - cropHeight
+            if config.shotPreset == .fullBody {
+                // Keep the shoes and a little floor visible when the physical
+                // frame and crop height permit the full person to fit.
+                if cropHeight >= subjectBounds.height {
+                    let availableMargin = cropHeight - subjectBounds.height
+                    let feetMargin = min(subjectBounds.height * tuning.cropLowerMarginMultiplier,
+                                         availableMargin)
+                    bottom = min(bottom, subjectBounds.minY - feetMargin)
+                }
+            }
+            originY = bottom
+            isTightShot = true
         } else {
-            // Tight shots: center the final crop on the *desired* region's
-            // vertical center. When cropHeight == desiredHeight this is
-            // exactly the top-anchored head-with-headroom framing; when a
-            // floor expanded the crop (or the frame-fit shrank it) the
-            // difference is distributed symmetrically, so the subject stays
-            // centered instead of pinned to the top.
-            originY = cropTop - (desiredHeight / 2.0) - (cropHeight / 2.0)
+            // Webcam composition retains its existing close-range framing.
+            originY = webcamCropTop - (desiredHeight / 2.0) - (cropHeight / 2.0)
             isTightShot = true
         }
 

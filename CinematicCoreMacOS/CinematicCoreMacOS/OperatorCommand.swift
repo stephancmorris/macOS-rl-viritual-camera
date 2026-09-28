@@ -11,7 +11,7 @@ struct OperatorCommand {
     enum Action {
         case detect, cancelDetect
         case selectSubject(CGPoint, retarget: Bool = false)
-        case unlock, setMode(CameraManager.OperationMode), selectPreset(Preset)
+        case unlock, resumeTracking, setMode(CameraManager.OperationMode), selectPreset(Preset)
         case beginZoom(ZoomDirection)
         case endZoom
         case moveManualCenter(CGPoint)

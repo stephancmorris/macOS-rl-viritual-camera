@@ -77,6 +77,14 @@ final class DisplayOutputSink: ProgramOutputSink {
     /// Free-running display; deliberately no genlock and no rate-match check.
     var playoutFrameRate: Double? { nil }
 
+    /// Handoff here is assigning the IOSurface to the program window's layer.
+    /// The window server composites it on its own schedule and reports nothing
+    /// back, so presentation stays unknown (measuring the display link is the
+    /// SCREEN-LINK card, not this sink).
+    var presentationObservability: String {
+        "Program Display: handoff = IOSurface assigned to the program window's layer; the compositor does not report when it is shown"
+    }
+
     var summary: String {
         guard let screen = targetScreen else {
             return "No program display is connected. Select a display in Settings."

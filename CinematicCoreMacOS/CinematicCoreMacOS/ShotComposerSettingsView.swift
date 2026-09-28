@@ -76,6 +76,22 @@ struct ShotComposerSettingsView: View {
                 .foregroundStyle(.secondary)
         }
 
+        if shotComposer.config.cinematicFormat == .stage {
+            Section("Stage Headroom") {
+                stageHeadroomControl("Full Body", preset: .fullBody)
+                stageHeadroomControl("Waist Up", preset: .waistUp)
+
+                Text("Clear space above the head, as a percentage of the output shot. The camera's quality limit can still make a distant person look small.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+
+                Button("Reset Headroom to Defaults") {
+                    shotComposer.config.resetStageHeadroom()
+                }
+                .disabled(!shotComposer.config.isEnabled)
+            }
+        }
+
         Section("Auto-Framing Feel") {
             LiquidTuningSwitch(
                 selection: Binding(
@@ -112,6 +128,28 @@ struct ShotComposerSettingsView: View {
                     .foregroundStyle(.secondary)
             }
         }
+    }
+
+    @ViewBuilder
+    private func stageHeadroomControl(_ title: String,
+                                      preset: ShotComposer.Config.ShotPreset) -> some View {
+        HStack {
+            Text(title)
+            Spacer()
+            Text(String(format: "%.0f%%", shotComposer.config.headroom(for: preset) * 100))
+                .foregroundStyle(.secondary)
+                .monospacedDigit()
+        }
+
+        Slider(
+            value: Binding(
+                get: { Double(shotComposer.config.headroom(for: preset)) },
+                set: { shotComposer.config.setHeadroom(CGFloat($0), for: preset) }
+            ),
+            in: Double(ShotComposer.Config.stageHeadroomRange.lowerBound)...Double(ShotComposer.Config.stageHeadroomRange.upperBound),
+            step: 0.01
+        )
+        .disabled(!shotComposer.config.isEnabled)
     }
 
     /// Tuning knobs that change live but are too subtle for an everyday operator.

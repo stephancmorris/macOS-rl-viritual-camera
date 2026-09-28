@@ -1,118 +1,17 @@
-# [S3] Usable multi-input — A/B pill + two Program Displays
+# [S3] Usable two-input Program / Stage console
 
-**Astra role:** coding agent. Implement only after S2’s dual-capture proof is real.  
-**Trello:** https://trello.com/c/Ck2EP2Yg  
-**Depends on:** S2 Channel + DECIDE Q1 (feeds) and Q6 (rig).  
-**Unblocks:** Sunday two-camera booth use. Speech channel addressing (`Alfie, camera two, …`).
+**Status:** implementation brief subordinate to [the R2 Program / Stage design](../ALFIE_MULTICAMERA_SPEC.md). The old fixed A/B feeds, two Program Displays, two HDMI cables, and “no Take” workflow are superseded. **Trello:** https://trello.com/c/Ck2EP2Yg and the R2 `ADMISSION`, `TAKE`, `CONSOLE`, `DEGRADE`, `MULTI-QA` cards. Begin only after the S2 channel/router boundaries and A-only equivalence are real; R1's full release and R2 hardware gates still govern any release claim.
 
-## Prompt (paste this file as the whole prompt)
+The church topology is one Alfie Program Display **or** the existing single virtual camera into one ATEM input. Alfie runs Camera A and Camera B internally. Program is the channel currently routed to that one feed; Stage is the other channel with a rendered preview. The ATEM continues to handle external audio. Alfie has no ATEM tally, so label the feed `Program to ATEM`, not `On Air`.
 
-You are implementing Alfie Session 3: make two channels operator-usable for a church ATEM, with fixed independent program feeds.
+Implement a serialized Take that checks an already current legal, fresh, non-held Stage render at click. If no such render exists, reject immediately; `Preparing` disables Take and never arms a future cut. An accepted click reserves that exact packet, revalidates source generation/revision and output readiness at the next output tick, and expires within two frame periods if no sink acceptance occurs. Sink acceptance exchanges Program/Stage roles and the Program UI snapshot together; it is not physical ATEM acknowledgement. The output clock continues monotonically. A pending transaction rejects if the staged preset/mode/source changes, another Take completes, the source faults, or the packet expires. Ongoing zoom and pan may be taken once a frame reflecting the current move intent is ready; ordinary interpolation frames do not each create a new shot revision. Never make a Stage tap perform Take. Do not silently Take B after A fault.
 
-This is IMPLEMENTATION. Do not start S4 speech, S5 hardware, a third channel, multiple virtual cameras, or Blackmagic Desktop Video SDI.
+Build the one-hand 1280-point console around two rendered pictures: the router's actual Program output and the Stage candidate. Keep the wide-source tap overlay accessible for Stage Detect. Show role letter, mode, shot, health and Take readiness in the main view; long camera names may truncate. Put Stage controls on the pill, with Take visibly distinct. With two channels, Stage is always the other channel; A/B selection cannot target live Program. An explicit persistent `Editing live A/B` state enables commands and taps on Program; exiting it or a successful Take returns control to the new Stage. Keep the existing preset ladder, one-rung Push/Pull, mode ownership, Return to Wide and HOLD policy independently per channel. The inspector shows distinct devices, actual delivered formats/rates, output destination, freshness and rejection reasons. Avoid a four-pane wall and an added permanent toolbar.
 
-If S2 is not in the tree (no `Channel` / `ShowCoordinator` / routing moved out of `CameraManager`), stop and say so. Do not re-extract S2 inside this session.
+Admission probes the actual A/B devices and capture profiles at the frozen show standard. Unknown pairs are labelled trial; certified pairs require the recorded matrix and soak. Sustained overload sheds optional work with truthful state; no hidden 30 fps output, stale Take, unsafe crop or identity relaxation. Test deterministic races with fake clocks/devices/sinks, then the real hardware matrix and 60-minute two-input moving-subject soak. Capture the downstream ATEM picture and verify the Program pane matches it. Exercise B fail/start/unplug, A unplug while live, output disconnect, display reconnect, sleep/wake, Take during both one-rung and pan motion, rapid Take, queued command after Preview selection change, and route timestamp continuity.
 
-## Why this session exists
+A missing program destination is a route fault. Do not auto-map a Program Display to the operator screen, another display, or a second cable. An intentional route change is a stopped-show setup action; reattach of the exact selected endpoint may resume only after explicit readiness checks. The single virtual camera may be chosen as the configured route, but it is not a failover that silently changes destination mid-show. Persist preferred devices and output destination for setup, never an automatic live Take on launch.
 
-S2 proves two pipelines. Sunday still needs a volunteer to drive B without cutting A, and two physical pictures into the ATEM. Selection is **control**, not a cut.
+Acceptance: a volunteer prepares B while A's picture continues to the one ATEM input, then presses Take and sees B there at the next legal output transition; A becomes Stage without losing its mode or identity. Preview actions never alter Program. Live actions have an unmistakable indicator. Faults cannot auto-switch cameras or destinations. `MULTI-QA` records exact machines, OS, devices, formats, output route and results; successful design or unit tests alone do not certify a pair.
 
-## Locked church workflow (DECIDE Q1 default = A)
-
-```
-Camera A ──▶ Channel A ──▶ Program Display A ──▶ HDMI ──▶ converter ──▶ ATEM input 1
-Camera B ──▶ Channel B ──▶ Program Display B ──▶ HDMI ──▶ converter ──▶ ATEM input 2
-Operator window stays on the Mac’s built-in (or a third) screen
-```
-
-- Clicking B changes **control target and preview**. A keeps tracking. A’s cable stays A.
-- Right-pane badge: `B · to ATEM input 2`. Not `On Air`. Alfie has no ATEM tally.
-- Return to Wide, Manual, presets, push/pull act on the **visibly selected** channel.
-- Never remap a disconnected output onto the other channel’s display.
-- A missing physical route stays missing. Virtual camera is not an ATEM failover.
-
-### Alternative (only if Stephan explicitly chose DECIDE Q1 = B)
-
-One HDMI/virtual-camera program. Keep control vs Take separate. Permit Take only after a fresh render of the incoming channel. This is not the default.
-
-## What is true after S2
-
-- Two channels, one router, one CMIO device, one Program Display endpoint (proof).
-- `ProgramDisplaySelection` is still conceptually one persisted display unless S2 already parameterized it. Today’s shipping code (pre-S2) uses one UserDefaults key and `DisplayOutputSink` resolves a single `targetDisplayID`.
-- Operator window is a 50/50 wide | program split.
-
-## Goal
-
-Volunteer-usable two-camera Alfie:
-
-1. Compact **A / B** (and disabled/hidden **C**) in the pill — mode + health dots, not another toolbar.
-2. Dual panes show **only the selected channel**: left = that channel’s wide, right = that channel’s actual rendered program.
-3. Two `DisplayOutputSink` instances, each with an **explicit endpoint** (display ID). Kill the one global preference as the only mapping.
-4. Per-route health in the inspector: connected, size, refresh, last frame age.
-5. One-click recovery (Return to Wide, unlock) on the selected channel.
-6. Qualify physical delivery at the ATEM **before** enabling C. C stays hidden or disabled until the budget and topology pass.
-
-## UI rules
-
-- Do not turn the booth into a video wall of all inputs.
-- Do not put channel chrome in a menu.
-- Verify the pill at 1280-pt width with `A|B`, Push in / Pull out, and long camera names. No scrolling pill.
-- Label both panes and the pill with the selected channel letter.
-- Voice (S4) must name a channel once more than one is running. You do not implement speech here; keep `Command.target` explicit so S4 can say `camera two`.
-
-## Output architecture
-
-```
-OutputRouter
-  ├── ProgramDisplaySink(endpoint: displayA)  ← Channel A frames only
-  ├── ProgramDisplaySink(endpoint: displayB)  ← Channel B frames only
-  └── VirtualCameraSink (optional / fallback for the *selected* or a dedicated channel — do not steal a display)
-```
-
-- Extend `DisplayOutputSink` to take endpoint configuration in `init` / `connect`. No singleton “the” program display.
-- Persist `channelA.displayID` and `channelB.displayID` separately.
-- If display B unplugs: tear down sink B, show fault on B, leave sink A fullscreen on display A.
-- Operator window must refuse to go on a display that is claimed as a program endpoint.
-- Bring-up checks: each program display should be 1920×1080 at the show rate (50 Hz for the church 1080p50 path). Matching Hz is necessary, not sufficient — this is still T1a’s human confirmation.
-
-## Performance
-
-Same budgets as S2, now with two display presents. Two 1080p50 CALayer presents are cheap compared with two 4K captures. Do not add extra SwiftUI @Published 50 Hz previews; keep the IOSurface layer path.
-
-Do not enable Channel C in this session.
-
-## Files
-
-- `DisplayOutputSink.swift`, `ProgramOutputManager.swift`, `ProgramDisplaySelection`
-- `ShowCoordinator` / output router from S2
-- `OperatorPill.swift`, `ContentView.swift`, `CropPreviewView.swift`
-- Inspector source / output sections
-- Settings: two display pickers, labeled A and B
-- Tests: endpoint isolation (unplug B does not move A’s window); Take is absent in the default church layout
-
-## Acceptance
-
-- Volunteer can lock and track on A, switch control to B, set B to Auto Pan, and A’s ATEM input keeps showing A’s crop.
-- Both Program Displays stay on their assigned screens across control switches.
-- Unplug of B’s HDMI display does not move A’s program window.
-- Return to Wide on B does not wide A.
-- Pill remains readable at 1280 pt.
-- No second virtual camera. No C.
-
-## Out of scope
-
-- Alfie A/B/C CMIO devices (later, OBS-centered)
-- Direct Desktop Video SDI
-- Speech UI (mic toggle is S4)
-- Hardware Arm STOP (S7)
-- Video wall
-
-## Human gate (not Astra)
-
-Stephan must list, on the DECIDE card or in chat:
-
-- Mac model / chip / RAM
-- Capture devices and delivered formats
-- Which physical displays are ATEM-bound vs operator
-
-Until that list exists, implement the software mapping and refuse to “enable C.”
+Out of scope: second Program Display/HDMI feed, second virtual-camera device, Channel C, direct SDI, speech, hardware motion, T5a easing rewrite, and Mac App Store approval. Store/platform/privacy work remains a separate gate.

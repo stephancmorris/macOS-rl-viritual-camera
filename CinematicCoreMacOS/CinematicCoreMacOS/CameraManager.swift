@@ -228,6 +228,10 @@ final class CameraManager: NSObject, ObservableObject {
         sinks: [VirtualCameraOutputSink(), DisplayOutputSink()]
     )
 
+    /// Single-camera setup check (PREFLIGHT). Observes programOutput's closed
+    /// diagnostics windows only; owned here so it outlives the inspector.
+    let setupCheck = SetupCheck()
+
     /// Processed program frame for the program (right) operator pane, published
     /// as the crop pool's output `CVPixelBuffer`. Same zero-copy IOSurface
     /// display path as `currentFrameBuffer`. Retaining this property retains the
@@ -562,6 +566,7 @@ final class CameraManager: NSObject, ObservableObject {
            let fmt = ShotComposer.Config.CinematicFormat(rawValue: raw) {
             shotComposer.config.cinematicFormat = fmt
         }
+        shotComposer.config.restoreStageHeadroom()
 
         configureFramingBindings()
         applyFrameProfile(shotComposer.config.frameProfile)
@@ -781,6 +786,7 @@ final class CameraManager: NSObject, ObservableObject {
             }
         }
         if case .setMode(.autoTracking) = command.action, manualLockedTargetID == nil { return .rejected("Select a subject first") }
+        if case .resumeTracking = command.action, !recoveryState.canResume { return .rejected("Pick subject") }
         if activeMode == .autoPan || activeMode == .manualCrop {
             switch command.action {
             case .detect, .selectSubject:
@@ -803,6 +809,7 @@ final class CameraManager: NSObject, ObservableObject {
         case .selectSubject(let point, let retarget):
             if retarget { retargetSubject(at: point) } else { selectSubject(at: point) }
         case .unlock: clearManualTargetLock()
+        case .resumeTracking: resumeTracking()
         case .setMode(let mode): setOperationMode(mode)
         case .selectPreset(let preset): selectPreset(preset)
         case .beginZoom(let direction): beginZoom(direction)
@@ -918,7 +925,7 @@ final class CameraManager: NSObject, ObservableObject {
         case .success(let buffer): return selectProgramBuffer(rendered: buffer, crop: crop)
         case .failure(let error):
             cancelOperatorMotion()
-            programOutput.recordDroppedFrame(timestamp: timestamp, reason: "Crop processing failed: \(error.localizedDescription)")
+            programOutput.recordDroppedFrame(timestamp: timestamp, reason: "Crop processing failed: \(error.localizedDescription)", stage: .renderFailed)
             return selectProgramBuffer(rendered: nil)
         }
     }
@@ -1080,12 +1087,15 @@ final class CameraManager: NSObject, ObservableObject {
         return .widest(aspect: shotComposer.normalizedAspect)
     }
 
-    /// Hand control back to the tracker after a manual wide hold.
+    /// An explicit operator command may restore the retained lock's authority.
     func resumeTracking() {
+        guard recoveryState.canResume else { return }
+        if commands.trackingOwnsControl && activeMode == .autoTracking { return }
+        let wasHolding = shotComposer.isHolding
         cancelOperatorMotion()
         commands.setTrackingOwnership(true)
         activeMode = .autoTracking
-        cropEngine?.resetToFullFrame(aspect: shotComposer.normalizedAspect)
+        if !wasHolding { cropEngine?.resetToFullFrame(aspect: shotComposer.normalizedAspect) }
         shotComposer.reset()
         cinematicAgent.reset()
 
@@ -1137,9 +1147,26 @@ final class CameraManager: NSObject, ObservableObject {
     /// "I lost my green box" states (amber recovering / cyan idle after an
     /// acquire timeout), and a volunteer must be able to tap themselves to
     /// regain the lock in one gesture.
-    var canDirectlyReacquire: Bool {
-        shotComposer.isWideWaiting || shotComposer.isHolding
+    var recoveryState: RecoveryState {
+        let phase: RecoveryState.Phase
+        let galleryReady: Bool
+        switch shotComposer.lockState {
+        case .inactive:
+            phase = .inactive; galleryReady = false
+        case .acquiring(_, let gallery, _):
+            phase = .acquiring; galleryReady = gallery.isReady
+        case .tracking(_, let gallery):
+            phase = .tracking; galleryReady = gallery.isReady
+        case .hold(_, let gallery, _):
+            phase = .hold; galleryReady = gallery.isReady
+        case .wideWaiting(let gallery):
+            phase = .wideWaiting; galleryReady = gallery.isReady
+        }
+        return RecoveryState(phase: phase, galleryReady: galleryReady,
+                             trackingOwnsControl: commands.trackingOwnsControl)
     }
+
+    var canDirectlyReacquire: Bool { recoveryState.allowsDirectSelection }
 
     /// Operator tapped a point on the preview to pick a subject. Stored for a
     /// one-shot ROI scan on the next frame; the scan finds the single person
@@ -1422,6 +1449,10 @@ final class CameraManager: NSObject, ObservableObject {
 
         error = nil
         isRunning = true
+        programOutput.recordSourceIdentity(DiagnosticsSessionIdentity.Source(
+            inputKind: "Validation clip",
+            deviceName: validationClipURL.lastPathComponent,
+            belowShowRate: false))
         activeInputSource = .validationClip
         activeMode = .wide
         shotComposer.reset(clearManualLock: true)
@@ -1510,11 +1541,12 @@ final class CameraManager: NSObject, ObservableObject {
             if sourceWidth != sourcePixelWidth || sourceHeight != sourcePixelHeight {
                 sourcePixelWidth = sourceWidth
                 sourcePixelHeight = sourceHeight
+                programOutput.recordDeliveredDimensions(width: sourceWidth, height: sourceHeight)
                 if activeInputSource == .liveCamera, let expected = configuredCaptureSize {
                     let requested = "\(expected.width)×\(expected.height)"
                     let actual = "\(sourceWidth)×\(sourceHeight)"
                     if sourceWidth == expected.width && sourceHeight == expected.height {
-                        captureProfileStatus = "Delivered \(actual) at \(ShowStandard.activeOrCurrent.title). \(configuredCaptureReason?.description ?? "")"
+                        captureProfileStatus = "Delivered \(actual) at \(configuredCaptureRateLabel). \(configuredCaptureReason?.description ?? "")"
                     } else {
                         captureProfileStatus = "Driver delivered \(actual) after \(requested) was requested; crop quality follows delivered pixels."
                         Self.logger.warning("Capture delivery mismatch: requested \(requested, privacy: .public), delivered \(actual, privacy: .public)")
@@ -1562,17 +1594,22 @@ final class CameraManager: NSObject, ObservableObject {
             )
         }
         let detectionPlan = currentDetectionPlan(detectionRunsThisFrame: detectionDue)
-        // The diagnostics CSV starts on the first frame that actually runs
-        // Vision, not at capture start — the progressive lag only appears under
-        // detection load, so `elapsed_s` should read as time under load.
-        if detectionPlan.runsVision, programOutput.diagnosticsFileName == nil {
+        // The diagnostics CSV starts on the first processed frame, so runs with
+        // detection off (Auto Pan, Manual, an unlocked wide shot) are recorded
+        // too — PAN-HITCH compares exactly those against detection-on runs.
+        // The first frame that runs Vision is marked with a `detection start`
+        // note, so time under detection load can still be read from the CSV.
+        if programOutput.diagnosticsFileName == nil {
             let bundle = Bundle.main
             let version = bundle.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "unknown"
             let build = bundle.object(forInfoDictionaryKey: "CFBundleVersion") as? String ?? "unknown"
             let recordedFingerprint = bundle.object(forInfoDictionaryKey: "AlfieSourceFingerprint") as? String
             let fingerprint = recordedFingerprint.flatMap { $0.isEmpty ? nil : $0 } ?? "unrecorded"
             programOutput.beginDiagnosticsSessionIfNeeded(note:
-                "detection start; app=\(version)(\(build)); source_fingerprint=\(fingerprint); input=\(activeInputSource.title); pixels=\(Int(bufferWidth))x\(Int(bufferHeight)); show_fps=\(ShowStandard.activeOrCurrent.frameRate); detection_interval=\(DeveloperFlags.detectionFrameInterval); smoothing=\(shotComposer.config.smoothingFactor); band=\(shotComposer.config.steadyBandWidth)")
+                "capture start; app=\(version)(\(build)); source_fingerprint=\(fingerprint); input=\(activeInputSource.title); pixels=\(Int(bufferWidth))x\(Int(bufferHeight)); show_fps=\(ShowStandard.activeOrCurrent.frameRate); detection_interval=\(DeveloperFlags.detectionFrameInterval); smoothing=\(shotComposer.config.smoothingFactor); band=\(shotComposer.config.steadyBandWidth)")
+        }
+        if detectionPlan.runsVision {
+            programOutput.noteDetectionStartIfNeeded()
         }
         // Hand the matcher the current operator lock so it can bind that track
         // first with a relaxed threshold (PersonDetector.swift assignTracks).
@@ -1818,7 +1855,9 @@ final class CameraManager: NSObject, ObservableObject {
         // holding it in the published property keeps the pool from re-vending it
         // while on screen. The wide pane was already published above, pre-crop.
         croppedFrameBuffer = outputPixelBuffer
-        programOutput.sendFrame(outputPixelBuffer, timestamp: timestampSeconds)
+        // isProgramHolding is set by selectProgramBuffer for this frame: true
+        // means this send repeats the last good render (telemetry only).
+        programOutput.sendFrame(outputPixelBuffer, timestamp: timestampSeconds, isRepeat: isProgramHolding)
 
         let detectionDuration = observation.frame?.detectionDuration ?? 0
         let totalDuration = CACurrentMediaTime() - captureStart
@@ -2053,6 +2092,8 @@ final class CameraManager: NSObject, ObservableObject {
     private var configuredCaptureFormat: AVCaptureDevice.Format?
     private var configuredCaptureSize: (width: Int, height: Int)?
     private var configuredCaptureReason: CaptureProfilePolicy.Reason?
+    /// "1080p50", or "30 fps (show standard 1080p50)" for a Webcam fallback.
+    private var configuredCaptureRateLabel = ShowStandard.activeOrCurrent.title
     private var configuredMinFrameDuration: CMTime?
     private var configuredMaxFrameDuration: CMTime?
 
@@ -2089,7 +2130,22 @@ final class CameraManager: NSObject, ObservableObject {
         configuredCaptureFormat = format
         configuredCaptureSize = (Int(dims.width), Int(dims.height))
         configuredCaptureReason = selection.reason
-        captureProfileStatus = "Requested \(dims.width)×\(dims.height) at \(ShowStandard.activeOrCurrent.title): \(selection.reason.description). Waiting for delivered frame."
+        // Webcam mode may run below the show rate (see CaptureProfilePolicy);
+        // say the real capture rate rather than implying the show standard.
+        configuredCaptureRateLabel = selection.reason == .webcamBelowShowRate
+            ? String(format: "%g fps (show standard %@)", selection.frameRate, ShowStandard.activeOrCurrent.title)
+            : ShowStandard.activeOrCurrent.title
+        captureProfileStatus = "Requested \(dims.width)×\(dims.height) at \(configuredCaptureRateLabel): \(selection.reason.description). Waiting for delivered frame."
+        programOutput.recordSourceIdentity(DiagnosticsSessionIdentity.Source(
+            inputKind: "Live camera",
+            deviceName: device.localizedName,
+            deviceModelID: device.modelID,
+            captureProfile: profile == .webcam ? "webcam" : "stage",
+            requestedWidth: Int(dims.width),
+            requestedHeight: Int(dims.height),
+            configuredCaptureFPS: selection.frameRate,
+            captureSelectionReason: selection.reason.description,
+            belowShowRate: selection.reason == .webcamBelowShowRate))
 
         if dims.height > 0 {
             let sourceAspect = CGFloat(dims.width) / CGFloat(dims.height)
@@ -2108,19 +2164,21 @@ final class CameraManager: NSObject, ObservableObject {
             Self.logger.debug("\(range.minFrameRate, privacy: .public) to \(range.maxFrameRate, privacy: .public) fps")
         }
         
-        // Set both limits to the selected show's exact duration. Assigning a
+        // Set both limits to the selected rate's exact duration. Assigning a
         // range's endpoints (for example 30...60) only leaves a rate limit; it
-        // does not configure 50/59.94/60 as the active capture cadence.
-        guard let showRateRange = format.videoSupportedFrameRateRanges.first(where: { range in
-            range.minFrameRate <= Config.targetFrameRate && range.maxFrameRate >= Config.targetFrameRate
+        // does not configure 50/59.94/60 as the active capture cadence. The
+        // selected rate is the show rate, except a Webcam-mode fallback.
+        let captureRate = selection.frameRate
+        guard let rateRange = format.videoSupportedFrameRateRanges.first(where: { range in
+            range.minFrameRate <= captureRate && range.maxFrameRate >= captureRate
         }) else {
-            Self.logger.error("No frame-rate range supports the \(Config.targetFrameRate, privacy: .public) fps show standard")
+            Self.logger.error("No frame-rate range supports the selected \(captureRate, privacy: .public) fps capture rate")
             error = .unsupportedFormat
             throw CameraError.unsupportedFormat
         }
-        Self.logger.notice("Using frame-rate range supporting the \(Config.targetFrameRate, privacy: .public) fps show standard")
-        let duration = ShowStandard.captureDuration(target: Config.targetFrameRate,
-            minimum: showRateRange.minFrameRate, maximum: showRateRange.maxFrameRate)
+        Self.logger.notice("Using frame-rate range supporting \(captureRate, privacy: .public) fps (show standard \(Config.targetFrameRate, privacy: .public) fps)")
+        let duration = ShowStandard.captureDuration(target: captureRate,
+            minimum: rateRange.minFrameRate, maximum: rateRange.maxFrameRate)
         device.activeVideoMinFrameDuration = duration
         device.activeVideoMaxFrameDuration = duration
 
@@ -2490,7 +2548,8 @@ extension CameraManager: AVCaptureVideoDataOutputSampleBufferDelegate {
         Task(priority: .userInitiated) { @MainActor in
             self.programOutput.recordDroppedFrame(
                 timestamp: timestampSeconds,
-                reason: "AVCapture dropped a frame before processing."
+                reason: "AVCapture dropped a frame before processing.",
+                stage: .captureUpstream
             )
         }
     }

@@ -74,3 +74,8 @@ CinematicCoreMacOS/CinematicCoreMacOS.xcodeproj/ROADMAP.md
 CinematicCoreMacOS/CinematicCoreMacOS.xcodeproj/NewRoadmap.md
 CinematicCoreMacOS/CinematicCoreMacOS.xcodeproj/ROADMAP.md
 AlfieMVP.md
+
+# --- Local Alfie build output (release artifacts in build_out/ stay tracked) ---
+CinematicCoreMacOS/build_*/
+CinematicCoreMacOS/build_*.log
+!CinematicCoreMacOS/build_out/

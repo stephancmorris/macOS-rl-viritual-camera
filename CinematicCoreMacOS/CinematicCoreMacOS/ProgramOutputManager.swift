@@ -126,6 +126,9 @@ protocol ProgramOutputSink: AnyObject {
     /// rate to the extension over XPC); Program Display is compositor-timed,
     /// so it reports nil and relies on the display-mode check instead.
     var playoutFrameRate: Double? { get }
+    /// What an accepted `sendFrame` means on this route, and why presentation
+    /// beyond it is (or is not) observable. Recorded in the diagnostics manifest.
+    var presentationObservability: String { get }
     var onStateChange: (() -> Void)? { get set }
 
     func connect()
@@ -142,6 +145,9 @@ extension ProgramOutputSink {
     var reconnectStatus: String? { nil }
     var bringUpChecks: [OutputBringUpCheck] { [] }
     var playoutFrameRate: Double? { nil }
+    var presentationObservability: String {
+        "\(route.title): handoff = the route accepted the frame; when the downstream consumer shows it is not reported to Alfie"
+    }
     func reconnect() {}
 }
 
@@ -175,6 +181,17 @@ final class ProgramOutputManager: ObservableObject {
                 return "Main actor work"
             }
         }
+    }
+
+    /// Where a frame was lost. Each stage has its own diagnostics counter;
+    /// `droppedFrames` (HUD) stays the sum across stages.
+    enum DropStage {
+        /// AVCapture dropped it before Alfie's delegate received it.
+        case captureUpstream
+        /// The crop render failed; HOLD re-sends the last good frame instead.
+        case renderFailed
+        /// The active route's sink refused it.
+        case handoffRefused
     }
 
     struct StageLatency: Identifiable {
@@ -303,7 +320,9 @@ final class ProgramOutputManager: ObservableObject {
     // settings window is open. The published snapshots are refreshed from this
     // raw state by `refreshPublishedStatsIfDue()` at most every
     // `statsRefreshInterval` seconds.
-    private var rawFramesSent: Int = 0
+    /// Session-relative frame counts per pipeline stage (see MetricStage).
+    /// `counters.handoffAccepted` is what the HUD calls "frames sent".
+    private var counters = PipelineCounters()
     private var rawDroppedFrames: Int = 0
     private var rawLastFrameSize: CGSize?
     private var rawLastFrameTimestamp: Double?
@@ -315,8 +334,8 @@ final class ProgramOutputManager: ObservableObject {
     // MARK: Soak diagnostics (progressive-lag localization)
     //
     // Raw accumulators for the [SOAK] line, written per frame (plain vars,
-    // never published) and emitted every `soakEmitEveryNRefreshes` stats
-    // refreshes (~5 s). The three curves separate the progressive-lag
+    // never published) and emitted once `soakWindowSeconds` (~5 s) have
+    // elapsed, checked on every stats refresh and by a 1 Hz watchdog. The three curves separate the progressive-lag
     // hypotheses: growing hopLag with flat visionWall → MainActor/SwiftUI
     // accumulation; growing footprint with flat lags → memory-pressure leak;
     // all flat in a clip soak but lag on the live rig → hardware path.
@@ -349,17 +368,33 @@ final class ProgramOutputManager: ObservableObject {
         rawObservationCount += 1
     }
 
-    private var statsRefreshCounter: Int = 0
-    private let soakEmitEveryNRefreshes = 10
 
     /// Cumulative capture-gate drop count, pushed in from CameraManager. This is
     /// the metric that actually tracks progressive lag: because the gate admits
     /// a frame only when the previous frame has completed, a slowing pipeline shows up as
     /// *skipped* frames, not as growing hop lag on the ones that got through.
-    private var rawGateDropTotal: UInt64 = 0
-    private var lastEmittedGateDropTotal: UInt64 = 0
-    private var lastEmittedFramesSent: Int = 0
-    private var lastEmittedDroppedFrames: Int = 0
+    private var rawGateDropTotal: UInt64 {
+        get { counters.gateSkipped }
+        set { counters.gateSkipped = newValue }
+    }
+    /// Counters at the previous row, so each row reports its own window.
+    private var lastEmittedCounters = PipelineCounters()
+
+    /// Identity of the source being measured, pushed by CameraManager when it
+    /// configures capture and when the first frames arrive. Recorded in the
+    /// session manifest; reset on `start()`.
+    private var sourceIdentity = DiagnosticsSessionIdentity.Source.unrecorded
+
+    /// Per-stage totals and the last closed window, for the inspector. Both
+    /// are republished at most once per row (~5 s) or stats refresh (0.5 s),
+    /// never per frame.
+    @Published private(set) var pipelineTotals = PipelineCounters()
+    @Published private(set) var lastPipelineWindow: DiagnosticsWindow?
+
+    /// Closes diagnostics windows on time even when no frames arrive (a full
+    /// stall would otherwise produce no rows at all). 1 Hz, capture-only.
+    private var windowWatchdog: Timer?
+    private static let soakWindowSeconds: TimeInterval = 5
 
     /// Per-session CSV of the same numbers as the `[SOAK]` line, for after-the-
     /// fact analysis in a spreadsheet. Written off-MainActor, one row per soak
@@ -422,7 +457,7 @@ final class ProgramOutputManager: ObservableObject {
         guard let baseline = gateDropBaseline else {
             gateDropBaseline = total
             rawGateDropTotal = 0
-            lastEmittedGateDropTotal = 0
+            lastEmittedCounters.gateSkipped = 0
             return
         }
         rawGateDropTotal = total &- baseline
@@ -461,35 +496,38 @@ final class ProgramOutputManager: ObservableObject {
     }
 
     private func emitSoakLineIfDue(force: Bool = false) {
-        statsRefreshCounter += 1
-        guard force || statsRefreshCounter % soakEmitEveryNRefreshes == 0 else { return }
         let now = CACurrentMediaTime()
-        let windowDuration = lastSoakTime > 0 ? now - lastSoakTime : 0
+        // No window is open until the diagnostics session (or a previous row)
+        // stamps its start; before that there is nothing to report.
+        guard lastSoakTime > 0 else { return }
+        guard force || now - lastSoakTime >= Self.soakWindowSeconds else { return }
+        let windowDuration = now - lastSoakTime
         lastSoakTime = now
+
         let hopMean = rawHopLagCount > 0 ? rawHopLagSum / Double(rawHopLagCount) : 0
         let qwMean = rawDetectionCount > 0 ? rawQueueWaitSum / Double(rawDetectionCount) : 0
         let vwMean = rawDetectionCount > 0 ? rawVisionWallSum / Double(rawDetectionCount) : 0
         let frMean = rawFrameCount > 0 ? rawFrameSum / Double(rawFrameCount) : 0
-        // Gate drops are reported as "this window / cumulative" — the per-window
-        // number is what climbs as the pipeline degrades.
-        let gateDropsWindow = rawGateDropTotal &- lastEmittedGateDropTotal
-        lastEmittedGateDropTotal = rawGateDropTotal
-        let framesWindow = rawFramesSent - lastEmittedFramesSent
-        lastEmittedFramesSent = rawFramesSent
-        let outDropsWindow = rawDroppedFrames - lastEmittedDroppedFrames
-        lastEmittedDroppedFrames = rawDroppedFrames
+        // Every count is reported as "this window / cumulative" — the
+        // per-window number is what climbs as the pipeline degrades.
+        let window = counters.since(lastEmittedCounters)
+        lastEmittedCounters = counters
 
         // Same numbers, two destinations: Console for watching live, CSV for
         // charting afterwards. The CSV row is built here so both come from one
         // set of accumulators and can never disagree.
         let sourceLines = Double(rawSourceHeight) * rawCropHeightFraction
         let upscale = sourceLines > 0 ? Double(rawOutputHeight) / sourceLines : 0
+        let footprint = Self.currentFootprintMB()
 
-        diagnosticsLog.appendRow(
+        var row = DiagnosticsWindow(
+            // `force` is only passed by Stop: the window closed early.
+            kind: force ? .partial : .full,
+            windowSeconds: windowDuration,
+            footprintMB: footprint,
             sourceHeight: rawSourceHeight,
             cropHeightFraction: rawCropHeightFraction,
             upscale: upscale,
-            footprintMB: Self.currentFootprintMB(),
             hopMeanMS: hopMean * 1000,
             hopMaxMS: rawHopLagMax * 1000,
             queueMeanMS: qwMean * 1000,
@@ -499,21 +537,19 @@ final class ProgramOutputManager: ObservableObject {
             frameMeanMS: frMean * 1000,
             frameMaxMS: rawFrameMax * 1000,
             detections: rawDetectionCount,
-            framesWindow: framesWindow,
-            framesTotal: rawFramesSent,
-            outDropsWindow: outDropsWindow,
-            outDropsTotal: rawDroppedFrames,
-            gateDropsWindow: gateDropsWindow,
-            gateDropsTotal: rawGateDropTotal,
             mainMeanMS: rawMainCount > 0 ? rawMainSum / Double(rawMainCount) * 1000 : 0,
             mainMaxMS: rawMainMax * 1000,
             observationMeanMS: rawObservationCount > 0 ? rawObservationSum / Double(rawObservationCount) * 1000 : 0,
             observationMaxMS: rawObservationMax * 1000,
             processedInputFPS: measuredInputFPS,
-            detectorFPS: windowDuration > 0 ? Double(rawDetectionCount) / windowDuration : 0,
-            handoffFPS: windowDuration > 0 ? Double(framesWindow) / windowDuration : 0,
-            windowSeconds: windowDuration
-        )
+            window: window,
+            totals: counters)
+        // Instrumentation overhead: MainActor time spent aggregating this row.
+        // The CSV append itself is async on the writer queue.
+        row.emitMS = (CACurrentMediaTime() - now) * 1000
+        diagnosticsLog.appendRow(row)
+        lastPipelineWindow = row
+        pipelineTotals = counters
 
         // Second row, second file: the memory-growth investigation. Same window,
         // same cadence, so the two CSVs line up row for row on `elapsed_s`.
@@ -522,19 +558,24 @@ final class ProgramOutputManager: ObservableObject {
             dropTimestamps: dropTimestamps.count,
             inputTimestamps: inputFrameTimestamps.count,
             detectedPersons: rawDetectedPersonCount,
-            framesTotal: rawFramesSent
+            framesTotal: counters.handoffAccepted
         )
 
         let line = String(
-            format: "[SOAK] footprint=%.0fMB hopLag=%.1f/%.1fms queueWait=%.1f/%.1fms visionWall=%.1f/%.1fms frames=%d outDrops=%d gateDrops=%llu/%llu",
-            Self.currentFootprintMB(),
+            format: "[SOAK] footprint=%.0fMB hopLag=%.1f/%.1fms queueWait=%.1f/%.1fms visionWall=%.1f/%.1fms delivered=%llu admitted=%d handoff=%d refused=%d repeated=%d renderFailed=%d captureDropped=%d gateDrops=%llu/%llu",
+            footprint,
             hopMean * 1000, rawHopLagMax * 1000,
             qwMean * 1000, rawQueueWaitMax * 1000,
             vwMean * 1000, rawVisionWallMax * 1000,
-            rawFramesSent, rawDroppedFrames,
-            gateDropsWindow, rawGateDropTotal
+            window.delivered, window.admitted, counters.handoffAccepted, counters.handoffRefused,
+            window.repeated, window.renderFailed, window.captureDropped,
+            window.gateSkipped, counters.gateSkipped
         )
         logger.notice("\(line, privacy: .public)")
+        resetWindowAccumulators()
+    }
+
+    private func resetWindowAccumulators() {
         rawHopLagSum = 0; rawHopLagMax = 0; rawHopLagCount = 0
         rawQueueWaitSum = 0; rawQueueWaitMax = 0
         rawVisionWallSum = 0; rawVisionWallMax = 0
@@ -542,6 +583,35 @@ final class ProgramOutputManager: ObservableObject {
         rawFrameSum = 0; rawFrameMax = 0; rawFrameCount = 0
         rawMainSum = 0; rawMainMax = 0; rawMainCount = 0
         rawObservationSum = 0; rawObservationMax = 0; rawObservationCount = 0
+    }
+
+    /// Push the identity of the source being measured (device, profile,
+    /// requested format, configured capture rate and why it was chosen).
+    func recordSourceIdentity(_ source: DiagnosticsSessionIdentity.Source) {
+        sourceIdentity = source
+    }
+
+    /// Push the dimensions actually delivered by the source. Called when they
+    /// change, not per frame.
+    func recordDeliveredDimensions(width: Int, height: Int) {
+        sourceIdentity.deliveredWidth = width
+        sourceIdentity.deliveredHeight = height
+    }
+
+    /// Identity for the manifest: build, the source CameraManager pushed, and
+    /// the active route with what its handoff means.
+    func currentSessionIdentity() -> DiagnosticsSessionIdentity {
+        let standard = ShowStandard.activeOrCurrent
+        return DiagnosticsSessionIdentity(
+            build: DiagnosticsLog.currentBuildIdentity(),
+            source: sourceIdentity,
+            output: DiagnosticsSessionIdentity.Output(
+                route: activeRoute?.title,
+                showStandard: standard.title,
+                showFPS: standard.frameRate,
+                playoutFPS: activePlayoutFrameRate,
+                presentation: activeSink?.presentationObservability
+                    ?? "no active route: nothing is handed off or presented"))
     }
 
     init(sinks: [any ProgramOutputSink] = []) {
@@ -566,7 +636,11 @@ final class ProgramOutputManager: ObservableObject {
         lastFrameTimestamp = nil
         lastDropTimestamp = nil
         lastDropReason = nil
-        rawFramesSent = 0
+        counters = PipelineCounters()
+        lastEmittedCounters = PipelineCounters()
+        pipelineTotals = PipelineCounters()
+        lastPipelineWindow = nil
+        sourceIdentity = .unrecorded
         rawDroppedFrames = 0
         rawLastFrameSize = nil
         rawLastFrameTimestamp = nil
@@ -578,29 +652,30 @@ final class ProgramOutputManager: ObservableObject {
         stageLatencies = []
         inputFrameTimestamps = []
         measuredInputFPS = 0
-        lastEmittedGateDropTotal = 0
-        lastEmittedFramesSent = 0
-        lastEmittedDroppedFrames = 0
-        statsRefreshCounter = 0
-        rawGateDropTotal = 0
         gateDropBaseline = nil
+        detectionStartNoted = false
+        resetWindowAccumulators()
+        // [SOAK] windows run from capture start; the CSV joins at detection
+        // start (see beginDiagnosticsSessionIfNeeded), which restarts the window.
+        lastSoakTime = CACurrentMediaTime()
+        startWindowWatchdog()
         sinks.forEach { $0.connect() }
         refreshRoutingDecision()
 
-        // NOTE: the diagnostics CSV deliberately does NOT start here. It starts
-        // on the first frame that actually runs Vision — see
-        // `beginDiagnosticsSessionIfNeeded`.
+        // NOTE: the diagnostics CSV does not start here. It starts on the
+        // capture's first processed frame, once the source identity and
+        // delivered size are known — see `beginDiagnosticsSessionIfNeeded`.
         diagnosticsFileName = nil
     }
 
     /// Open the diagnostics CSV if it isn't already open. Called from the frame
-    /// path once detection actually starts running.
+    /// path on the first processed frame of a capture.
     ///
-    /// Detection start, not capture start, is the zero point: the progressive
-    /// lag only appears under detection load, so measuring elapsed time from
-    /// here means `elapsed_s` reads directly as "time under load" and the ~4:35
-    /// onset can be compared across runs without subtracting however long the
-    /// operator spent lining up the shot first.
+    /// The zero point used to be the first Vision frame, which meant a run with
+    /// detection off (Auto Pan, Manual) produced no CSV at all. Now every
+    /// capture is recorded from its first frame, and `noteDetectionStartIfNeeded`
+    /// marks when detection load begins, so "time under load" is still the
+    /// difference between that marker and later rows.
     ///
     /// Idempotent — `DiagnosticsLog.beginSession` ignores repeat calls, so this
     /// is safe to call per frame. Once open it stays open for the rest of the
@@ -608,20 +683,23 @@ final class ProgramOutputManager: ObservableObject {
     func beginDiagnosticsSessionIfNeeded(note: String) {
         guard diagnosticsFileName == nil else { return }
         lastSoakTime = CACurrentMediaTime()
-        rawHopLagSum = 0; rawHopLagMax = 0; rawHopLagCount = 0
-        rawQueueWaitSum = 0; rawQueueWaitMax = 0
-        rawVisionWallSum = 0; rawVisionWallMax = 0; rawDetectionCount = 0
-        rawFrameSum = 0; rawFrameMax = 0; rawFrameCount = 0
-        rawMainSum = 0; rawMainMax = 0; rawMainCount = 0
-        rawObservationSum = 0; rawObservationMax = 0; rawObservationCount = 0
-        lastEmittedFramesSent = rawFramesSent
-        lastEmittedDroppedFrames = rawDroppedFrames
-        lastEmittedGateDropTotal = rawGateDropTotal
+        resetWindowAccumulators()
+        lastEmittedCounters = counters
         diagnosticsLog.beginSession(
             note: note + "; thermal="
-                + DiagnosticsLog.thermalStateName(ProcessInfo.processInfo.thermalState)
+                + DiagnosticsLog.thermalStateName(ProcessInfo.processInfo.thermalState),
+            identity: currentSessionIdentity()
         )
         diagnosticsFileName = diagnosticsLog.currentFileName
+    }
+
+    private var detectionStartNoted = false
+
+    /// Mark the first frame that runs Vision in this capture, once.
+    func noteDetectionStartIfNeeded() {
+        guard !detectionStartNoted, diagnosticsFileName != nil else { return }
+        detectionStartNoted = true
+        diagnosticsLog.note("detection start")
     }
 
     func stop() {
@@ -631,12 +709,29 @@ final class ProgramOutputManager: ObservableObject {
             $0.disconnect()
         }
         activeRoute = nil
-        // Final flush so the HUD shows the session's closing numbers rather
-        // than whatever the last coalesced refresh happened to capture.
+        stopWindowWatchdog()
+        // Final flush so the HUD shows the session's closing numbers and the
+        // CSV gets the partial last window (marked `partial`) rather than
+        // losing up to 5 s of data.
         refreshPublishedStatsIfDue(force: true)
+        lastSoakTime = 0
         diagnosticsLog.endSession(note: "capture stop")
         diagnosticsFileName = nil
         ShowStandard.endSession()
+    }
+
+    private func startWindowWatchdog() {
+        windowWatchdog?.invalidate()
+        let timer = Timer(timeInterval: 1, repeats: true) { [weak self] _ in
+            MainActor.assumeIsolated { self?.refreshPublishedStatsIfDue() }
+        }
+        RunLoop.main.add(timer, forMode: .common)
+        windowWatchdog = timer
+    }
+
+    private func stopWindowWatchdog() {
+        windowWatchdog?.invalidate()
+        windowWatchdog = nil
     }
 
     /// Record an operator- or pipeline-level marker in the diagnostics CSV. It
@@ -660,8 +755,13 @@ final class ProgramOutputManager: ObservableObject {
         refreshStatuses()
     }
 
-    func sendFrame(_ pixelBuffer: CVPixelBuffer, timestamp: Double) {
+    /// Offer a program frame to the active route. `isRepeat` marks a HOLD
+    /// re-send of the last good render, so repeats are never counted as new
+    /// frames.
+    func sendFrame(_ pixelBuffer: CVPixelBuffer, timestamp: Double, isRepeat: Bool = false) {
+        counters.routed += 1
         guard let activeSink else {
+            counters.noRoute += 1
             refreshPublishedStatsIfDue()
             return
         }
@@ -676,18 +776,25 @@ final class ProgramOutputManager: ObservableObject {
         if !didSend {
             recordDroppedFrame(
                 timestamp: timestamp,
-                reason: "Active output route did not accept the frame."
+                reason: "Active output route did not accept the frame.",
+                stage: .handoffRefused
             )
             return
         }
         if let sendDuration = activeSink.lastFrameSendDuration {
             recordLatency(stage: .xpcSend, duration: sendDuration)
         }
-        rawFramesSent += 1
+        counters.handoffAccepted += 1
+        if isRepeat { counters.repeated += 1 }
         refreshPublishedStatsIfDue()
     }
 
-    func recordDroppedFrame(timestamp: Double, reason: String) {
+    func recordDroppedFrame(timestamp: Double, reason: String, stage: DropStage) {
+        switch stage {
+        case .captureUpstream: counters.captureDropped += 1
+        case .renderFailed: counters.renderFailed += 1
+        case .handoffRefused: counters.handoffRefused += 1
+        }
         rawDroppedFrames += 1
         rawLastDropTimestamp = timestamp
         rawLastDropReason = reason
@@ -716,6 +823,7 @@ final class ProgramOutputManager: ObservableObject {
     /// timestamp. Accumulate only (frame path — no @Published mutation here);
     /// `measuredInputFPS` is rebuilt by the coalesced refresh.
     func recordInputFrame(timestamp: Double) {
+        counters.admitted += 1
         // A backwards timestamp means the source restarted (e.g. a looping
         // validation clip); start the window over rather than mixing epochs.
         if let last = inputFrameTimestamps.last, timestamp < last {
@@ -758,7 +866,8 @@ final class ProgramOutputManager: ObservableObject {
         guard force || now - lastStatsRefresh >= statsRefreshInterval else { return }
         lastStatsRefresh = now
 
-        framesSent = rawFramesSent
+        framesSent = counters.handoffAccepted
+        pipelineTotals = counters
         droppedFrames = rawDroppedFrames
         dropRatePerMinute = Double(dropTimestamps.count)
         lastFrameSize = rawLastFrameSize
