@@ -1,0 +1,73 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Alfie operator guide · Beta 1.0 build 4</title>
+  <style>
+    :root { color-scheme: dark; font: 16px/1.55 system-ui, -apple-system, sans-serif; background: #10151c; color: #e9f1f6; }
+    body { max-width: 900px; margin: auto; padding: 32px 24px 80px; }
+    h1, h2 { line-height: 1.2; }
+    h1 { font-size: 2.4rem; margin-bottom: .25rem; }
+    h2 { margin-top: 2.7rem; border-top: 1px solid #354352; padding-top: 1.2rem; }
+    a { color: #82d8ff; }
+    .sub { color: #a9bac8; }
+    .notice { border-left: 4px solid #e8b45b; background: #27303a; padding: 12px 18px; margin: 26px 0; }
+    ol li, ul li { margin: .5rem 0; }
+    table { border-collapse: collapse; width: 100%; }
+    th, td { text-align: left; border-bottom: 1px solid #354352; padding: .65rem; vertical-align: top; }
+    th { color: #b9d7e8; }
+    code { background: #26323f; padding: .1em .35em; border-radius: 4px; }
+    @media print { :root { color-scheme: light; background: white; color: black; } a { color: #064d78; } }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>Alfie operator guide</h1>
+    <p class="sub">Beta 1.0 · build 4 · current single-camera window</p>
+    <div class="notice">Source-checked draft. The steps and labels below need a candidate walk on the actual rig. The two-input Multiview workflow is still integration work and is not described as available here.</div>
+  </header>
+
+  <main>
+    <h2>Before starting</h2>
+    <ol>
+      <li>Connect one camera or capture device. In the inspector, choose it under <strong>Source → Camera</strong>; use <strong>Refresh devices</strong> if needed.</li>
+      <li>Open <strong>Settings → Composer</strong> and choose <strong>Stage</strong> for a distant stage subject or <strong>Webcam</strong> for a close video-call subject. Choose the shot preset there or in the running pill.</li>
+      <li>Open <strong>Settings → Output</strong>. Select the <strong>Show Standard</strong> and <strong>Preferred Route</strong> (Virtual Camera or Program Display), then check the route's bring-up status. A display/switcher must be checked at its own input; an Alfie handoff count is not proof of presentation.</li>
+      <li>Press <strong>Start session</strong>. Approve camera and virtual-camera extension prompts if the Mac presents them. If a prompt is refused, resolve it in System Settings and try again; installation on a clean Mac is not yet rig-verified.</li>
+    </ol>
+    <p><strong>Capture rate:</strong> Stage requires a camera format at the exact show rate and does not silently choose a slower rate. Webcam prefers that rate, but can use its fastest suitable HD format below it when none matches. The inspector shows the delivered size and capture-profile reason. Confirm downstream cadence separately.</p>
+
+    <h2>Frame a subject</h2>
+    <ol>
+      <li>Press <strong>Detect</strong>, then click the intended person in the wide source view. <strong>Cancel</strong> backs out before selection; <strong>Acquiring…</strong> means Alfie is gathering evidence.</li>
+      <li>When the pill shows <strong>Locked</strong>, press <strong>Crop</strong> if needed. Stage has its shot preset ladder; Webcam has its own Wide/Tight choices.</li>
+      <li><strong>+ Push in</strong> and <strong>− Pull out</strong> move one shot rung per tap. There is no hold-to-zoom control. A limited zoom message means the requested crop cannot be made safely from the source pixels.</li>
+      <li><strong>Manual</strong> moves the crop centre by clicking the picture. <strong>Auto Pan</strong> sweeps the crop. These modes own geometry while active; select Crop to return to tracking when a valid lock remains.</li>
+    </ol>
+
+    <h2>When tracking is lost</h2>
+    <table>
+      <thead><tr><th>Pill label</th><th>Meaning and operator action</th></tr></thead>
+      <tbody>
+        <tr><td>Pick subject</td><td>No usable retained identity. Press Detect and tap the subject, or tap directly during recovery when offered.</td></tr>
+        <tr><td>Acquiring…</td><td>Alfie is collecting a lock; wait or cancel the Detect flow.</td></tr>
+        <tr><td>Locked</td><td>Tracking has authority over the crop.</td></tr>
+        <tr><td>Recovering</td><td>During the 10-second subject HOLD, Alfie keeps the last good framing while looking for the same subject. You can tap a different person deliberately.</td></tr>
+        <tr><td>Searching</td><td>After HOLD, Alfie waits wide for the retained subject. Do not assume it has a new lock.</td></tr>
+        <tr><td>Resume</td><td>Available only with retained subject evidence. Press it to request tracking again; if evidence is gone, the action falls back to Pick subject. Resume does not switch a Manual/Pan mode silently.</td></tr>
+      </tbody>
+    </table>
+    <p><strong>Return to Wide</strong> shows the uncropped source and clears the lock; an old Resume cannot reactivate it. Use it when unsure of the subject, then pick a person again. <strong>Stop session</strong> ends capture and releases the virtual camera; the stopped screen offers Start session. The menu's Stop Session shortcut is ⌘⌥⇧S.</p>
+
+    <h2>Check health and report a problem</h2>
+    <ul>
+      <li>Open the right-side <strong>Inspector → Pipeline stages</strong> for delivered, admitted, render, handoff and loss measurements. Downstream presented FPS is unknown to Alfie.</li>
+      <li><strong>Inspector → Setup check</strong> is a short provisional check of the current source and route; it is not a hardware certification or 60-minute soak.</li>
+      <li>Find the files through <strong>Settings → Output → Diagnostics → Open in Finder</strong>. Each session has <code>alfie_session_*.json</code>, <code>alfie_soak_*.csv</code> and <code>alfie_memory_*.csv</code> in the sandboxed Documents/CinematicCore/Diagnostics folder.</li>
+      <li>For support, record the build/source fingerprint from the manifest, Mac/macOS, camera/capture device, delivered size/rate, show standard, output route, and exact steps. Review filenames, device names and notes before sharing diagnostic files.</li>
+    </ul>
+    <p>The current project deployment target is macOS 26.2. Lower-OS support, the two-input operator console, downstream output cadence and on-rig recovery are not verified for this guide. See the <a href="../../reports/release-1/README.md">R1 evidence runbooks</a> and <a href="screenshot-checklist.md">candidate screenshot checklist</a>.</p>
+  </main>
+</body>
+</html>
