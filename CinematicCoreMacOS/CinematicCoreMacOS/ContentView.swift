@@ -15,6 +15,8 @@ struct ContentView: View {
     @ObservedObject var cameraManager: CameraManager
     @ObservedObject var systemExtensionManager: SystemExtensionActivationManager
     @ObservedObject var settingsWindowController: SettingsWindowController
+    /// The show; drives the Multiview console when it is enabled.
+    let show: ShowCoordinator?
 
     @State private var showError = false
     @State private var inspectorOpen = false
@@ -28,11 +30,22 @@ struct ContentView: View {
     init(
         cameraManager: CameraManager,
         systemExtensionManager: SystemExtensionActivationManager,
-        settingsWindowController: SettingsWindowController
+        settingsWindowController: SettingsWindowController,
+        show: ShowCoordinator? = nil
     ) {
         self.cameraManager = cameraManager
         self.systemExtensionManager = systemExtensionManager
         self.settingsWindowController = settingsWindowController
+        self.show = show
+    }
+
+    /// Multiview console only in Stage format, behind the developer flag, and
+    /// only while capture runs (ConsolePresentation: Webcam keeps this view).
+    private var multiviewShow: ShowCoordinator? {
+        guard DeveloperFlags.useMultiviewConsole, cameraManager.isRunning, let show else { return nil }
+        let profile: CaptureProfilePolicy.Profile =
+            cameraManager.shotComposer.config.cinematicFormat == .webcam ? .webcam : .stage
+        return ConsolePresentation.resolve(for: profile) == .multiview ? show : nil
     }
 
     var body: some View {
@@ -41,7 +54,10 @@ struct ContentView: View {
             LiquidGlassBackdrop()
 
             // Layer 1: dual feed (or stopped screen) fills the window
-            if cameraManager.isRunning {
+            if let show = multiviewShow {
+                LiveMultiviewConsole(show: show)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+            } else if cameraManager.isRunning {
                 CropPreviewView(
                     originalFrame: cameraManager.currentFrameBuffer,
                     croppedFrame: cameraManager.croppedFrameBuffer,
@@ -69,8 +85,9 @@ struct ContentView: View {
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
             }
 
-            // Layer 2: floating overlays — only while running
-            if cameraManager.isRunning {
+            // Layer 2: floating overlays — only while running (the Multiview
+            // console carries its own pill and status)
+            if cameraManager.isRunning, multiviewShow == nil {
                 IdentityStackOverlay(
                     cameraManager: cameraManager,
                     elapsedSeconds: elapsedSeconds

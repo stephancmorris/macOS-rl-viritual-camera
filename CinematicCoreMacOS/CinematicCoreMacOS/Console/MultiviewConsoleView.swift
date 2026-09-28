@@ -20,6 +20,10 @@ struct MultiviewConsoleView<Strip: View, Pill: View>: View {
     let strip: Strip
     /// Bottom-centred, 12 pt from the window bottom.
     let pill: Pill
+    /// Live pane pictures. nil in the gallery, which draws placeholders.
+    var panePicture: ((PaneModel) -> AnyView)?
+    /// Show-level controls at the right of the header (live console only).
+    var headerTrailing: AnyView?
 
     init(
         snapshot: ConsoleSnapshot,
@@ -43,17 +47,10 @@ struct MultiviewConsoleView<Strip: View, Pill: View>: View {
                 header
                     .place(layout.header)
 
-                ProgramPreviewPane(
-                    model: .preview(from: snapshot),
-                    onPaneView: actions.setPaneView,
-                    onReconnect: actions.reconnect)
+                pane(.preview(from: snapshot))
                     .place(layout.previewPane)
 
-                ProgramPreviewPane(
-                    model: .program(from: snapshot),
-                    onPaneView: actions.setPaneView,
-                    onReconnect: actions.reconnect,
-                    onDoneEditing: { actions.setEditLive(false) })
+                pane(.program(from: snapshot))
                     .place(layout.programPane)
 
                 NextShotPanel(status: .make(snapshot, availability: availability))
@@ -76,6 +73,24 @@ struct MultiviewConsoleView<Strip: View, Pill: View>: View {
         .frame(minWidth: MultiviewLayout.minimumSize.width, minHeight: MultiviewLayout.minimumSize.height)
     }
 
+    @ViewBuilder
+    private func pane(_ model: PaneModel) -> some View {
+        if let panePicture {
+            ProgramPreviewPane(
+                model: model,
+                onPaneView: actions.setPaneView,
+                onReconnect: actions.reconnect,
+                onDoneEditing: { actions.setEditLive(false) }
+            ) { panePicture(model) }
+        } else {
+            ProgramPreviewPane(
+                model: model,
+                onPaneView: actions.setPaneView,
+                onReconnect: actions.reconnect,
+                onDoneEditing: { actions.setEditLive(false) })
+        }
+    }
+
     private var header: some View {
         HStack(spacing: 12) {
             Text("ALFIE")
@@ -86,6 +101,7 @@ struct MultiviewConsoleView<Strip: View, Pill: View>: View {
                 .font(ConsoleStyle.label(11))
                 .foregroundStyle(.white.opacity(0.55))
             Spacer()
+            if let headerTrailing { headerTrailing }
         }
         .padding(.horizontal, MultiviewLayout.sideInset)
     }

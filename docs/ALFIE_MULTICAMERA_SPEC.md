@@ -24,7 +24,7 @@ Alfie has two cinematic formats (`ShotComposer.Config.CinematicFormat`), and thi
 
 ## Implementation status (branch `r2/engine`, 28 Sep 2026)
 
-The engine work units exist in code with unit tests; none has run on two real cameras yet, and the Multiview console is not wired to them.
+The engine work units exist in code with unit tests; none has run on two real cameras yet. The Multiview console is wired to them (`Console/LiveConsole.swift`) behind `DeveloperFlags.useMultiviewConsole` (off by default), in Stage format while capture runs: live snapshot at ≤15 Hz, rendered pane pictures, Source view with Detect taps through the show's control-target binding, pill bound to the control target, Take / Edit Live / reconnect / Stop show, header controls to add or remove Cam B and measure the pair. Not yet wired: input-tile thumbnails, SHOW-SETUP on the stopped screen, admission / reconnect detail in the inspector.
 
 | Unit | Where | Notes |
 | --- | --- | --- |

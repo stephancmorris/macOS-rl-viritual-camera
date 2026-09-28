@@ -27,7 +27,8 @@ struct CinematicCoreMacOSApp: App {
             ContentView(
                 cameraManager: cameraManager,
                 systemExtensionManager: systemExtensionManager,
-                settingsWindowController: settingsWindowController
+                settingsWindowController: settingsWindowController,
+                show: show
             )
         }
         .windowStyle(.hiddenTitleBar)
@@ -43,7 +44,8 @@ struct CinematicCoreMacOSApp: App {
             CommandMenu("Session") {
                 Button("Stop Session") {
                     cameraManager.programOutput.noteDiagnostics("stopped via hotkey")
-                    cameraManager.stopCapture()
+                    // Show-level Stop: stops every input, not just camera A.
+                    show.stopShow()
                 }
                 .keyboardShortcut("s", modifiers: [.command, .option, .shift])
                 .disabled(!cameraManager.isRunning)

@@ -765,8 +765,9 @@ final class CameraManager: NSObject, ObservableObject {
         
         availableCameras = cameraDevices
         
-        // Auto-select first 4K camera, or first available
-        if selectedCamera == nil {
+        // Auto-select first 4K camera, or first available — channel A only.
+        // Any other input needs an explicit camera choice (DEVICES).
+        if selectedCamera == nil, channelID == .a {
             selectedCamera = cameraDevices.first { $0.supports4K } ?? cameraDevices.first
             if let selected = selectedCamera {
                 Self.logger.notice("Selected camera: \(selected.name, privacy: .public)")

@@ -66,8 +66,12 @@ struct OperatorPill: View {
             zoomButtons
             divider
             returnToWideButton
-            divider
-            stopSessionButton
+            // In the Multiview console Stop is show-level and lives in the
+            // header ("Stop show"); a channel's pill never stops the show.
+            if controlTarget == .singleCamera {
+                divider
+                stopSessionButton
+            }
         }
         .padding(.horizontal, 6)
         .padding(.vertical, 6)
@@ -90,9 +94,6 @@ struct OperatorPill: View {
         }
         .shadow(color: .black.opacity(0.55), radius: 30, x: 0, y: 18)
         .shadow(color: .black.opacity(0.35), radius: 60, x: 0, y: 30)
-        // The live app has no channel command binding yet. Gallery target
-        // states remain visual until CHANNEL-CMD provides one.
-        .allowsHitTesting(controlTarget == .singleCamera)
     }
 
     private var targetChip: some View {

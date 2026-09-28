@@ -82,4 +82,11 @@ enum DeveloperFlags {
     /// The gallery is compiled only in DEBUG builds, so this flag has no
     /// effect in Release; it never touches the live pipeline.
     nonisolated static let exposeMultiviewGallery = true
+
+    /// Shows the Multiview console (Preview / Program / Take / inputs) in
+    /// Stage format while capture runs, driven by the live ShowCoordinator,
+    /// instead of the single-camera wide + program layout. Off by default
+    /// until two-camera rig testing; Webcam format always keeps the
+    /// single-camera view.
+    nonisolated static let useMultiviewConsole = false
 }
