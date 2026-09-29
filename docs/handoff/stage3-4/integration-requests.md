@@ -62,15 +62,47 @@ Call the manual-revoking coordinator boundary before camera actions, Return to W
 
 ## Voice dispatch and transcript integration
 
-`ShowCoordinator.swift` should expose a command factory that binds an explicitly named channel with `.voice` origin while enforcing the utterance-time target revision and Program Edit Live rule:
+`ShowCoordinator.swift` needs one **synchronous MainActor** voice boundary. The current public `makeCommand`/`dispatch` pair cannot safely accept voice: `makeCommand` binds at final text rather than utterance start, and `dispatch` has no voice origin, manual generation, session/mute generation, or start-token check. `VoiceCommandAdapter` now returns a `BoundVoiceCommand` but intentionally does not dispatch it.
 
 ```swift
-func makeVoiceCommand(_ action: OperatorCommand.Action,
-                      target: ChannelID,
-                      expectedControlRevision: UInt64) -> ShowCommand?
+// Proposed ShowCoordinator.swift additions, after the privacy and authority
+// decisions. Keep all reads, token validation, command creation and dispatch
+// in one MainActor turn with no await or queued closure between them.
+private(set) var voiceAdapter: VoiceCommandAdapter
+private(set) var voiceSessionGeneration: UInt64
+private(set) var voiceMuteGeneration: UInt64
+private(set) var voiceMuted: Bool
+
+func voiceSnapshot(now: TimeInterval) -> VoiceWorldSnapshot {
+    VoiceWorldSnapshot(now: now, sessionGeneration: voiceSessionGeneration,
+        muteGeneration: voiceMuteGeneration, running: showIsRunning,
+        muted: voiceMuted, controlTargetRevision: controlTargetRevision,
+        program: programChannel, preview: previewChannel, controlTarget: controlTarget,
+        aRevisions: channel(.a)?.revisions, bRevisions: channel(.b)?.revisions,
+        aSourceMissing: channel(.a)?.sourceMissing ?? true,
+        bSourceMissing: channel(.b)?.sourceMissing ?? true,
+        aSubjectLocked: channel(.a)?.hasLockedSubject ?? false,
+        bSubjectLocked: channel(.b)?.hasLockedSubject ?? false)
+}
+
+func dispatchVoice(_ pending: VoiceCommandAdapter.Pending,
+                   format: VoiceCommandAdapter.Format,
+                   now: TimeInterval) -> CommandResult {
+    switch voiceAdapter.prepareDispatch(pending, world: voiceSnapshot(now: now), format: format) {
+    case .failure(let reason): return .rejected(reason.message)
+    case .success(let bound):
+        guard bound.target == previewChannel, bound.target == pending.token.start.preview,
+              let camera = channel(bound.target) else { return .rejected("Preview changed") }
+        let command = camera.makeCommand(bound.action, origin: .voice)
+        return dispatch(ShowCommand(command: command,
+                                    controlTargetRevision: pending.token.start.controlTargetRevision))
+    }
+}
 ```
 
-Call `VoiceCommandAdapter.manualCommandOccurred()` before every subsequent manual action, especially Return to Wide. A later approved speech stack supplies only final transcripts with IDs and a stated confidence scale through `SpeechTranscriptSource`. No microphone, audio retention, recognizer, entitlement, or UI mute control should be added until the speech/privacy decision.
+`showIsRunning` and `hasLockedSubject` above are proposed read-only accessors; use the actual show lifecycle and lock state when integrating. Add `CameraManager.makeCommand(_:origin:)` or an equivalent coordinator factory so the origin is `.voice` and cannot be forged as `.operatorUI`. Route **every** manual camera command through `voiceAdapter.manualCommandOccurred()` first, every Return to Wide (including voice-origin Wide) through `returnToWideOccurred()`, Take through `operatorTakeOccurred()`, mute transitions through `muteChanged()`, and Stop through `stopOccurred()`. Bump show session generation on restart and mute generation on every mute transition. Bind utterance IDs and `voiceSnapshot` when recognition starts, then pass only final text through `accept`; never synthesize a start token at final text. The coordinator must own the adapter so no alternate `dispatch` path can bypass this gate. These hooks require a later approved speech stack and privacy decision. No microphone, audio retention, recognizer, entitlement, or UI mute control is in this branch.
+
+The adapter retains at most `capacity` start tokens, pending commands, and recently finalized IDs each. Exact deduplication beyond this bounded window requires the transcript source to guarantee session-unique utterance IDs; that contract must be checked when a recognizer is selected.
 
 ## Hardware integration
 

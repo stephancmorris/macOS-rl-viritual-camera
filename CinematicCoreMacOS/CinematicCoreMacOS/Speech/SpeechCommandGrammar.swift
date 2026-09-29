@@ -7,7 +7,9 @@ nonisolated enum VoiceIntent: Equatable, Sendable {
 }
 nonisolated enum SpeechRejection: Error, Equatable, Sendable {
     case noWakePrefix, unrecognized, subjectNotLocked, lowConfidence, duplicateUtterance
-    case cancelledByManualCommand, targetUnavailable
+    case cancelledByManualCommand, targetUnavailable, missingUtteranceStart
+    case invalidToken, muted, stopped, sessionChanged, roleChanged, targetRebound
+    case sourceChanged, expired, cancelledByWide, cancelledByTake, cancelledByMute
     var message: String {
         switch self {
         case .subjectNotLocked: return "Pick a subject."
@@ -17,6 +19,17 @@ nonisolated enum SpeechRejection: Error, Equatable, Sendable {
         case .duplicateUtterance: return "Already handled."
         case .cancelledByManualCommand: return "Cancelled by manual control."
         case .targetUnavailable: return "Camera unavailable."
+        case .missingUtteranceStart: return "Utterance start missing."
+        case .invalidToken: return "Voice context invalid."
+        case .muted, .cancelledByMute: return "Voice is muted."
+        case .stopped: return "Show stopped."
+        case .sessionChanged: return "Show session changed."
+        case .roleChanged: return "Camera roles changed."
+        case .targetRebound: return "Control target changed."
+        case .sourceChanged: return "Camera changed."
+        case .expired: return "Voice command expired."
+        case .cancelledByWide: return "Cancelled by Return to Wide."
+        case .cancelledByTake: return "Cancelled by Take."
         }
     }
 }
