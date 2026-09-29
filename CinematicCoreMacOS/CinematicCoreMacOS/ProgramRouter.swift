@@ -85,7 +85,9 @@ final class ProgramRouter {
     /// What the Program pane and status should say about the routed output.
     var programStatus: ConsoleSnapshot.ProgramOutput {
         switch state {
-        case .idle, .routed:
+        case .idle:
+            return .waiting
+        case .routed:
             return .routed
         case .holding(let since):
             let remaining = max(0, Self.holdDuration - (clock() - since))

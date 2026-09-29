@@ -20,6 +20,9 @@ struct CinematicCoreMacOSApp: App {
         let show = ShowCoordinator()
         _show = StateObject(wrappedValue: show)
         _cameraManager = StateObject(wrappedValue: show.channelA)
+        #if DEBUG
+        DebugLaunchHooks.startWindowDumps()
+        #endif
     }
 
     var body: some Scene {

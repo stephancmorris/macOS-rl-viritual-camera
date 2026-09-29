@@ -986,6 +986,42 @@ final class CameraManager: NSObject, ObservableObject {
     func setSourceIdentityForTesting(_ source: DiagnosticsSessionIdentity.Source) { recordSourceIdentity(source) }
     #endif
 
+    // MARK: Render stats ([RENDER] line, every 5 s)
+
+    /// Frames that reached the end of processFrame: published to the panes
+    /// and router, or discarded (retired session, stopped, no render). One
+    /// line per channel every 5 s, so a console showing no picture can be
+    /// told apart from a pipeline producing none.
+    private var renderStats = (published: 0, discarded: 0, lastLogAt: 0.0)
+
+    private func logRenderStatsIfDue(_ buffer: CVPixelBuffer?) {
+        let now = CACurrentMediaTime()
+        guard now - renderStats.lastLogAt >= 5 else { return }
+        renderStats.lastLogAt = now
+        let level = buffer.map(Self.sampledLevel) ?? -1
+        Self.logger.notice("[RENDER] ch=\(self.channelID.letter, privacy: .public) published=\(self.renderStats.published) discarded=\(self.renderStats.discarded) mode=\(String(describing: self.activeMode), privacy: .public) level=\(level, format: .fixed(precision: 1)) running=\(self.isRunning) cropped=\(self.croppedFrameBuffer != nil)")
+        renderStats.published = 0
+        renderStats.discarded = 0
+    }
+
+    /// Mean of 64 sampled bytes of the first plane; ~0 means a black frame.
+    private nonisolated static func sampledLevel(_ buffer: CVPixelBuffer) -> Double {
+        CVPixelBufferLockBaseAddress(buffer, .readOnly)
+        defer { CVPixelBufferUnlockBaseAddress(buffer, .readOnly) }
+        let planar = CVPixelBufferIsPlanar(buffer)
+        guard let base = planar ? CVPixelBufferGetBaseAddressOfPlane(buffer, 0) : CVPixelBufferGetBaseAddress(buffer) else { return -1 }
+        let rowBytes = planar ? CVPixelBufferGetBytesPerRowOfPlane(buffer, 0) : CVPixelBufferGetBytesPerRow(buffer)
+        let height = planar ? CVPixelBufferGetHeightOfPlane(buffer, 0) : CVPixelBufferGetHeight(buffer)
+        let bytes = base.assumingMemoryBound(to: UInt8.self)
+        var total = 0.0
+        for i in 0..<64 {
+            let row = (i / 8) * max(1, height / 8) + max(1, height / 16)
+            let column = (i % 8) * max(1, rowBytes / 8) + max(1, rowBytes / 16)
+            total += Double(bytes[min(row, height - 1) * rowBytes + min(column, rowBytes - 1)])
+        }
+        return total / 64
+    }
+
     /// This channel's source as last configured, kept even while it is not
     /// Program (the output port drops identity from non-Program channels).
     private(set) var sourceIdentity: DiagnosticsSessionIdentity.Source?
@@ -2028,6 +2064,8 @@ final class CameraManager: NSObject, ObservableObject {
 
         // A retired render is dropped. A failed current render holds the last good program.
         guard sessionGeneration == captureGeneration, isRunning, let outputPixelBuffer else {
+            renderStats.discarded += 1
+            logRenderStatsIfDue(nil)
             Self.signposter.endInterval("captureFrame", captureInterval)
             return
         }
@@ -2082,6 +2120,8 @@ final class CameraManager: NSObject, ObservableObject {
         // means this send repeats the last good render (telemetry only).
         outputPort.submitFrame(outputPixelBuffer, timestamp: timestampSeconds, isRepeat: isProgramHolding,
                                routeGeneration: frameRouteGeneration)
+        renderStats.published += 1
+        logRenderStatsIfDue(outputPixelBuffer)
 
         let detectionDuration = observation.frame?.detectionDuration ?? 0
         let totalDuration = CACurrentMediaTime() - captureStart
@@ -2532,7 +2572,8 @@ final class CameraManager: NSObject, ObservableObject {
         }
         Self.logger.notice("Using frame-rate range supporting \(captureRate, privacy: .public) fps (show standard \(Config.targetFrameRate, privacy: .public) fps)")
         let duration = ShowStandard.captureDuration(target: captureRate,
-            minimum: rateRange.minFrameRate, maximum: rateRange.maxFrameRate)
+            minimum: rateRange.minFrameRate, maximum: rateRange.maxFrameRate,
+            minDuration: rateRange.minFrameDuration, maxDuration: rateRange.maxFrameDuration)
         device.activeVideoMinFrameDuration = duration
         device.activeVideoMaxFrameDuration = duration
 

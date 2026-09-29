@@ -17,6 +17,10 @@ nonisolated struct MultiviewLayout: Equatable, Sendable {
     static let sideInset: CGFloat = 24
     static let centreGutter: CGFloat = 32
     static let headerHeight: CGFloat = 52
+    /// Clears the window's traffic lights (hidden title bar).
+    static let headerLeadingInset: CGFloat = 84
+    /// Clears the inspector handle pinned top-right.
+    static let headerTrailingInset: CGFloat = 64
     static let panesTop: CGFloat = 64
     static let barGap: CGFloat = 12
     static let barHeight: CGFloat = 70

@@ -32,6 +32,15 @@ struct OutputRateRegressionTests {
         #expect(CMTimeCompare(duration, ShowStandard.p5994.frameDuration) == 0)
     }
 
+    @Test func captureDurationStaysInsideASingleRateRange() {
+        // Logitech Brio 300: "30 fps" is one exact range, 1000000/30000030 s.
+        let exact = CMTime(value: 1_000_000, timescale: 30_000_030)
+        let duration = ShowStandard.captureDuration(
+            target: 30.00003, minimum: 30.00003, maximum: 30.00003,
+            minDuration: exact, maxDuration: exact)
+        #expect(CMTimeCompare(duration, exact) == 0)
+    }
+
     @Test func activeStandardStaysFrozenUntilTheNextSession() {
         ShowStandard.endSession()
         defer { ShowStandard.endSession() }

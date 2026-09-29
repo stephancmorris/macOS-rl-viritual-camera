@@ -29,7 +29,7 @@ final class LiveShowSetupModel: ObservableObject {
 
     @Published private(set) var setup: ShowSetupModel
 
-    private let show: ShowCoordinator
+    let show: ShowCoordinator
     private let defaults: UserDefaults
     private let startChannelA: @MainActor () async -> Void
     private var cancellables = Set<AnyCancellable>()
@@ -189,6 +189,11 @@ struct LiveShowSetup: View {
 
     var body: some View {
         ShowSetupView(model: model.setup, actions: model.actions)
+            #if DEBUG
+            .task { [model] in
+                await DebugLaunchHooks.autostartIfRequested(model) { model.show.channelA.availableCameras }
+            }
+            #endif
     }
 }
 

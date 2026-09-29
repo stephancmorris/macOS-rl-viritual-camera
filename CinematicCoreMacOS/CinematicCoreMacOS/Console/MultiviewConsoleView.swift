@@ -103,7 +103,10 @@ struct MultiviewConsoleView<Strip: View, Pill: View>: View {
             Spacer()
             if let headerTrailing { headerTrailing }
         }
-        .padding(.horizontal, MultiviewLayout.sideInset)
+        // The window has a hidden title bar: the traffic lights sit over the
+        // header's left end and the inspector handle over its right end.
+        .padding(.leading, MultiviewLayout.headerLeadingInset)
+        .padding(.trailing, MultiviewLayout.headerTrailingInset)
     }
 }
 

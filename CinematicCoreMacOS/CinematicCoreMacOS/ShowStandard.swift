@@ -65,9 +65,19 @@ nonisolated enum ShowStandard: String, CaseIterable, Identifiable {
     }
 
     /// Exact selection within a supported device range, not its endpoints.
-    static func captureDuration(target: Double, minimum: Double, maximum: Double) -> CMTime {
+    ///
+    /// Pass the range's own durations when you have them: rounding 1/rate
+    /// can land just outside a single-rate range (a Brio's "30 fps" is
+    /// 30.00003, and 1/30.00003 at timescale 60000 rounds to 30.015 fps), and
+    /// AVFoundation raises an exception rather than an error for that. The
+    /// result is clamped into [minDuration, maxDuration].
+    static func captureDuration(target: Double, minimum: Double, maximum: Double,
+                                minDuration: CMTime? = nil, maxDuration: CMTime? = nil) -> CMTime {
         let rate = min(max(target, minimum), maximum)
-        return matching(frameRate: rate)?.frameDuration ?? CMTime(seconds: 1 / rate, preferredTimescale: 60000)
+        var duration = matching(frameRate: rate)?.frameDuration ?? CMTime(seconds: 1 / rate, preferredTimescale: 60000)
+        if let minDuration, minDuration.isValid, CMTimeCompare(duration, minDuration) < 0 { duration = minDuration }
+        if let maxDuration, maxDuration.isValid, CMTimeCompare(duration, maxDuration) > 0 { duration = maxDuration }
+        return duration
     }
 
     /// The persisted selection, defaulting to 1080p50 (the historical default,

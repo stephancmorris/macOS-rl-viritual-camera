@@ -22,6 +22,7 @@ import Combine
 import CoreGraphics
 import CoreVideo
 import Foundation
+import OSLog
 import QuartzCore
 import SwiftUI
 
@@ -133,12 +134,30 @@ final class LiveConsoleModel: ObservableObject, ConsoleActions {
     func refresh() {
         updateRates()
         measurePairIfUnmeasured()
+        logConsoleStatsIfDue()
         let target = show.channel(show.controlTarget)
         let failure = ChannelID.allCases.compactMap { show.channel($0)?.error?.localizedDescription }.first
         let next = LiveConsoleSnapshot.make(
             show: show, paneView: paneView, rates: rates,
             note: message ?? target?.controlStatus ?? failure)
         if next != snapshot { snapshot = next }
+    }
+
+    private static let logger = Logger(subsystem: "com.alfie", category: "Console")
+    private var refreshCount = 0
+    private var lastStatsLogAt: TimeInterval = 0
+
+    /// [CONSOLE] line every 5 s: proves the ≤15 Hz refresh is running and
+    /// what the console believes (roles, router state, rates).
+    private func logConsoleStatsIfDue() {
+        refreshCount += 1
+        let now = CACurrentMediaTime()
+        guard now - lastStatsLogAt >= 5 else { return }
+        lastStatsLogAt = now
+        let rateText = ChannelID.allCases.compactMap { id in rates[id].map { "\(id.letter)=\(String(format: "%.1f", $0))" } }
+            .joined(separator: " ")
+        Self.logger.notice("[CONSOLE] refreshes=\(self.refreshCount) program=\(self.show.programChannel.letter, privacy: .public) preview=\(self.show.previewChannel?.letter ?? "-", privacy: .public) router=\(String(describing: self.show.router.state), privacy: .public) sent=\(self.show.router.lastSentBuffer != nil) rates=\(rateText, privacy: .public)")
+        refreshCount = 0
     }
 
     private func updateRates() {
