@@ -275,7 +275,8 @@ struct LiveMultiviewConsole: View {
     private var console: some View {
         let snapshot = model.snapshot
         var view = MultiviewConsoleView(snapshot: snapshot, actions: model) {
-            InputStripView(snapshot: snapshot, actions: model)
+            InputStripView(snapshot: snapshot, actions: model,
+                           tilePicture: { [model] id in LiveTilePicture.make(id: id, show: model.show) })
         } pill: {
             pill(for: snapshot)
         }

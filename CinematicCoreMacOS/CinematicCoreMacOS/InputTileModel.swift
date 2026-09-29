@@ -20,6 +20,15 @@ struct InputTileModel: Identifiable {
             case .none: nil
             }
         }
+
+        /// Spoken role; an idle input has none.
+        var spoken: String? {
+            switch self {
+            case .program: "Program"
+            case .preview: "Preview"
+            case .none: nil
+            }
+        }
     }
 
     enum Health {
@@ -34,6 +43,18 @@ struct InputTileModel: Identifiable {
             case .noSignal: "No signal · holding slot"
             }
         }
+
+        /// VoiceOver wording: "50 frames per second", not "50.0".
+        var spoken: String {
+            switch self {
+            case .rate(let value):
+                guard let rate = Double(value) else { return value }
+                let text = rate == rate.rounded() ? String(Int(rate)) : String(format: "%.1f", rate)
+                return "\(text) frames per second"
+            case .unsupported: return "unsupported"
+            case .noSignal: return "no signal, holding slot"
+            }
+        }
     }
 
     let slot: Slot
@@ -46,6 +67,25 @@ struct InputTileModel: Identifiable {
     let renderedImage: NSImage?
 
     var id: String { slot.id }
+    var channel: ChannelID { ChannelID(rawValue: slot.rawValue) ?? .a }
+
+    /// "Cam B, Band side, Preview, Waist Up, 50 frames per second". A dropped
+    /// source still reads its name and role, then "no signal, holding slot".
+    var accessibilityLabel: String {
+        guard isAssigned else { return "Input \(slot.rawValue), not assigned" }
+        let parts: [String?] = [
+            "Cam \(slot.rawValue)", name.isEmpty ? nil : name,
+            role.spoken, shot.isEmpty ? nil : shot, health.spoken,
+        ]
+        return parts.compactMap { $0 }.joined(separator: ", ")
+    }
+
+    var accessibilityHint: String {
+        guard isAssigned else { return "Add a camera in Setup." }
+        return role == .program
+            ? "Program camera. Use Edit Live to change it."
+            : "Cue this camera for Preview. Does not Take."
+    }
 
     init(slot: Slot, isAssigned: Bool, role: Role, name: String, shot: String,
          health: Health, renderedImage: NSImage?) {
