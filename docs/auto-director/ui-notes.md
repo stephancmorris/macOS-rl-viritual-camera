@@ -35,6 +35,7 @@ Proposed next-shot panel layout budget: first-row text 250 pt, mode 130, Pause 6
 | Edit Live | Persistent Program `EDITING LIVE A` banner; director paused, no resume until Done |
 | Later Auto Direct | `AUTO DIRECT · B Waist Up in 3 s` + Cancel / Pin; reason on second row; cancellable countdown only after qualification |
 | Cancelled countdown | `Auto Direct · Paused by you` + Resume; never restarts automatically |
+
 Mode dropdown is deliberate configuration, not an emergency override. Pause/Cancel, Pin/Unpin and context-appropriate Resume are inline, always operable without Details. Return to Wide stays the existing single action on the **current control target**; it does not silently widen Program when controls target Preview. Edit Live remains explicit. Stop show stays in the header. A director pause must never block either control.
 
 Director-ready and manual Take-ready are distinct: show `Take ready · Director waiting for identity` when appropriate; do not reuse R2's disabled reason to impose a new manual policy. Program means Alfie's routed output, not ATEM on-air tally. Proposed `DirectorSection` changes are listed in the authority memo; publish them with route revisions in one snapshot.
