@@ -3,7 +3,15 @@ import SwiftUI
 struct InputTileView: View {
     let model: InputTileModel
     var size = CGSize(width: 299, height: 168)
+    /// Live picture for this tile's channel (the console supplies one that
+    /// samples the channel's rendered output). nil falls back to
+    /// `model.renderedImage`, which the gallery and tests use.
+    var picture: AnyView?
     let onCue: (InputTileModel.Slot) -> Void
+
+    /// Width kept clear at the top right for the future director badge. Not
+    /// drawn yet; nothing else may be placed there.
+    static let directorBadgeReserve: CGFloat = 64
 
     /// Program red 3 pt, Preview green 3 pt, others 1 pt neutral (INPUT-STRIP).
     private var ring: (color: Color, width: CGFloat) {
@@ -18,34 +26,15 @@ struct InputTileView: View {
         Button {
             onCue(model.slot)
         } label: {
-            ZStack(alignment: .bottomLeading) {
+            ZStack {
                 background
 
                 if model.isAssigned {
-                    VStack(alignment: .leading, spacing: 5) {
-                        HStack {
-                            Text("Cam \(model.slot.rawValue)")
-                                .font(.system(size: 13, weight: .semibold))
-                            Spacer(minLength: 4)
-                            if let badge = model.role.badge {
-                                Text(badge)
-                                    .font(.system(size: 10, weight: .bold, design: .monospaced))
-                                    .padding(.horizontal, 6)
-                                    .padding(.vertical, 3)
-                                    .background(badgeColor, in: RoundedRectangle(cornerRadius: 4))
-                            }
-                        }
-                        Text(tileDetail)
-                            .font(.system(size: 11, weight: .medium))
-                            .lineLimit(1)
-                        Text(model.health.title)
-                            .font(.system(size: 10, weight: .semibold, design: .monospaced))
-                            .foregroundStyle(model.healthColor)
+                    VStack(spacing: 0) {
+                        header
+                        Spacer(minLength: 0)
+                        footer
                     }
-                    .foregroundStyle(.white)
-                    .padding(10)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .background(.black.opacity(0.7))
                 } else {
                     VStack(alignment: .leading, spacing: 5) {
                         Text("Input \(model.slot.rawValue) · not assigned")
@@ -55,6 +44,7 @@ struct InputTileView: View {
                     }
                     .foregroundStyle(.white.opacity(0.6))
                     .padding(12)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottomLeading)
                 }
             }
             .frame(width: size.width, height: size.height)
@@ -69,14 +59,60 @@ struct InputTileView: View {
         }
         .buttonStyle(.plain)
         .disabled(!model.isAssigned)
-        .accessibilityLabel(accessibilityTitle)
-        .accessibilityHint(model.isAssigned ? "Cue this camera for Preview. Does not Take." : "Assign a camera in Setup.")
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(model.accessibilityLabel)
+        .accessibilityHint(model.accessibilityHint)
+        .accessibilityAddTraits(.isButton)
+    }
+
+    /// "Cam A" and the role badge, top left. The top right stays clear.
+    private var header: some View {
+        HStack(spacing: 6) {
+            Text("Cam \(model.slot.rawValue)")
+                .font(.system(size: 13, weight: .semibold))
+            if let badge = model.role.badge {
+                Text(badge)
+                    .font(.system(size: 10, weight: .bold, design: .monospaced))
+                    .padding(.horizontal, 6)
+                    .padding(.vertical, 3)
+                    .background(badgeColor, in: RoundedRectangle(cornerRadius: 4))
+            }
+            Spacer(minLength: Self.directorBadgeReserve)
+        }
+        .foregroundStyle(.white)
+        .shadow(color: .black.opacity(0.6), radius: 2)
+        .padding(10)
+    }
+
+    /// Name · shot bottom left, delivered rate or health bottom right. The
+    /// name and shot stay visible when the source drops; the amber health
+    /// line says the slot is holding.
+    private var footer: some View {
+        HStack(alignment: .firstTextBaseline, spacing: 8) {
+            Text(tileDetail)
+                .font(.system(size: 11, weight: .medium))
+                .lineLimit(1)
+                .truncationMode(.tail)
+            Spacer(minLength: 4)
+            Text(model.health.title)
+                .font(.system(size: 10, weight: .semibold, design: .monospaced))
+                .foregroundStyle(model.healthColor)
+                .lineLimit(1)
+                .layoutPriority(1)
+        }
+        .foregroundStyle(.white)
+        .padding(.horizontal, 10)
+        .padding(.vertical, 8)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(.black.opacity(0.7))
     }
 
     private var background: some View {
         ZStack {
             Color(red: 0.08, green: 0.09, blue: 0.11)
-            if let image = model.renderedImage {
+            if let picture {
+                picture
+            } else if let image = model.renderedImage {
                 Image(nsImage: image)
                     .resizable()
                     .aspectRatio(contentMode: .fill)
@@ -85,30 +121,20 @@ struct InputTileView: View {
                 Color.black.opacity(0.55)
             }
         }
+        .frame(width: size.width, height: size.height)
+        .clipped()
     }
 
     private var badgeColor: Color {
         switch model.role {
-        case .program: Color(red: 1, green: 0.27, blue: 0.23)
-        case .preview: Color(red: 0.19, green: 0.75, blue: 0.44)
+        case .program: ConsoleStyle.programRed
+        case .preview: ConsoleStyle.previewGreen
         case .none: .clear
         }
     }
 
-    /// Name and shot stay visible even when the source drops: the slot keeps
-    /// its identity, and the amber health line says it is holding.
     private var tileDetail: String {
         [model.name, model.shot].filter { !$0.isEmpty }.joined(separator: " · ")
-    }
-
-    private var accessibilityTitle: String {
-        guard model.isAssigned else { return "Input \(model.slot.rawValue), not assigned" }
-        let role = switch model.role {
-        case .program: "Program"
-        case .preview: "Preview"
-        case .none: "Input"
-        }
-        return "\(role), Cam \(model.slot.rawValue), \(tileDetail), \(model.health.title)"
     }
 }
 
@@ -116,7 +142,7 @@ private extension InputTileModel {
     var healthColor: Color {
         switch health {
         case .rate: .white.opacity(0.85)
-        case .unsupported, .noSignal: .orange
+        case .unsupported, .noSignal: ConsoleStyle.amber
         }
     }
 }
