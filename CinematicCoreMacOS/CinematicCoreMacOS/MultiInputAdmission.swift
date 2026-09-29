@@ -244,6 +244,10 @@ final class AdmissionRecordStore {
         save(all)
     }
 
+    /// Every stored record by fingerprint key (show setup matches these
+    /// against the chosen cameras before Start).
+    func allRecords() -> [String: Record] { load() }
+
     private func load() -> [String: Record] {
         guard let data = defaults.data(forKey: key),
               let records = try? JSONDecoder().decode([String: Record].self, from: data) else { return [:] }

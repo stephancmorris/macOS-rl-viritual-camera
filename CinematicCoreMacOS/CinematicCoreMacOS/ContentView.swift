@@ -159,12 +159,6 @@ struct ContentView: View {
                 elapsedSeconds = 0
             }
         }
-        .onReceive(NotificationCenter.default.publisher(for: NSApplication.didResignActiveNotification)) { _ in
-            endHeldZooms()
-        }
-        .onReceive(NotificationCenter.default.publisher(for: NSWindow.didResignKeyNotification)) { _ in
-            endHeldZooms()
-        }
         .onChange(of: cameraManager.error != nil) { _, hasError in
             if hasError { showError = true }
         }
@@ -184,15 +178,6 @@ struct ContentView: View {
     /// (the "lost the green box" states) a tap directly re-acquires whoever is
     /// under it — no Detect press needed. In manual-crop mode it repositions
     /// the crop. Otherwise taps are ignored.
-    /// Losing focus mid press-and-hold never delivers the release, so end any
-    /// held zoom — on every input, since the pill may be driving Cam B.
-    private func endHeldZooms() {
-        let channels = show.map { show in ChannelID.allCases.compactMap(show.channel) } ?? [cameraManager]
-        for channel in channels where channel.zoomMoveDirection != nil {
-            channel.dispatch(channel.makeCommand(.endZoom))
-        }
-    }
-
     private var tapPointHandler: ((CGPoint) -> Void)? {
         if cameraManager.activeMode == .autoPan { return nil }
         if cameraManager.detectionDiscoveryActive {

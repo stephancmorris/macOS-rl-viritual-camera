@@ -192,36 +192,13 @@ struct LiveShowSetup: View {
     }
 }
 
-// MARK: - Engine extensions (read-only / setup-only)
-
-extension ShowCoordinator {
-    /// A new show starts from A as Program with no other channel, whatever
-    /// the last show ended on (roles are never restored). Only while every
-    /// channel is stopped.
-    func prepareForNewShow() {
-        guard ChannelID.allCases.allSatisfy({ channel($0).map { !$0.isRunning && !$0.isStartingSession } ?? true })
-        else { return }
-        if programChannel != .a {
-            router.setProgram(.a, expectedRouteGeneration: router.routeGeneration)
-        }
-        for id in ChannelID.allCases where id != .a { removeChannel(id) }
-        setEditLive(false)
-    }
-}
+// MARK: - Engine extensions (read-only)
 
 extension AdmissionRecordStore {
-    /// Every stored record, parsed for show-setup matching.
-    ///
-    /// Stopgap: the store keeps its defaults and key private and has no
-    /// enumeration API, so this reads them by reflection. Replace with a
-    /// store method (`allRecords() -> [String: Record]`) when one exists.
+    /// Every stored record under the current policy, parsed for show-setup
+    /// matching.
     func storedPairRecords() -> [StoredPairRecord] {
-        let mirror = Mirror(reflecting: self)
-        guard let defaults = mirror.descendant("defaults") as? UserDefaults,
-              let key = mirror.descendant("key") as? String,
-              let data = defaults.data(forKey: key),
-              let records = try? JSONDecoder().decode([String: Record].self, from: data) else { return [] }
-        return records.compactMap { key, record in
+        allRecords().compactMap { key, record in
             guard record.policyVersion == AdmissionPolicy.version else { return nil }
             return StoredPairRecord.parse(key: key, status: record.status, measuredAt: record.measuredAt)
         }

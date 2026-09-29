@@ -104,7 +104,24 @@ final class ShowCoordinator: ObservableObject {
     func stopShow() {
         for id in ChannelID.allCases { channels[id]?.stopCapture() }
         editLive = false
+        resetProgramToA()
         retarget()
+    }
+
+    /// A new show starts from A as Program with no other channel, whatever
+    /// the last show ended on (roles are never restored). Only while every
+    /// channel is stopped.
+    func prepareForNewShow() {
+        guard channels.values.allSatisfy({ !$0.isRunning && !$0.isStartingSession }) else { return }
+        resetProgramToA()
+        for id in ChannelID.allCases where id != .a { removeChannel(id) }
+        setEditLive(false)
+    }
+
+    private func resetProgramToA() {
+        if programChannel != .a {
+            router.setProgram(.a, expectedRouteGeneration: router.routeGeneration)
+        }
     }
 
     // MARK: Admission (ADMISSION)

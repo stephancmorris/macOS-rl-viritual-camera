@@ -110,6 +110,17 @@ struct ProgramTakeTests {
         #expect(rig.show.programOutput.currentSessionIdentity().source.deviceName == "Band side")
     }
 
+    @Test func stopShowNeverCarriesRolesIntoTheNextShow() throws {
+        let rig = rig()
+        try prepare(rig.b, rig: rig)
+        #expect(rig.show.take() == .committed(newProgram: .b))
+        rig.show.stopShow()
+        #expect(rig.show.programChannel == .a)
+        rig.show.prepareForNewShow()
+        #expect(rig.show.channel(.b) == nil)
+        #expect(rig.show.previewChannel == nil)
+    }
+
     @Test func staleRenderIsRejected() throws {
         let rig = rig()
         try prepare(rig.b, rig: rig, age: 0.1)                  // > 2 frame periods at 50 fps
