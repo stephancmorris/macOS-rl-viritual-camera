@@ -34,6 +34,22 @@ struct CaptureProfilePolicyTests {
         #expect(webcam?.index == 1)
     }
 
+    @Test func developmentStageFallbackUsesTheWebcamsFastestHDFormat() {
+        let formats = [candidate(1920, 1080, 15, 30), candidate(1280, 720, 15, 30), candidate(3840, 2160, 15, 24)]
+        let choice = CaptureProfilePolicy.select(formats, profile: .stage, showRate: 50, allowStageBelowShowRate: true)
+        #expect(choice?.index == 0)
+        #expect(choice?.reason == .stageBelowShowRate)
+        #expect(choice?.reason.isBelowShowRate == true)
+        #expect(choice?.frameRate == 30)
+    }
+
+    @Test func developmentStageFallbackNeverReplacesAShowRateFormat() {
+        let formats = [candidate(1920, 1080, 15, 30), candidate(1280, 720, 50, 60)]
+        let choice = CaptureProfilePolicy.select(formats, profile: .stage, showRate: 50, allowStageBelowShowRate: true)
+        #expect(choice?.index == 1)
+        #expect(choice?.frameRate == 50)
+    }
+
     // MARK: - Webcam below the show rate
 
     @Test func webcamStillUsesShowRateWhenAnyHDFormatHasIt() {

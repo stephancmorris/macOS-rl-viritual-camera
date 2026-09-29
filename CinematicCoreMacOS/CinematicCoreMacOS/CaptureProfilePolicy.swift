@@ -6,6 +6,9 @@
 // camera) prefers the show rate too, but when the webcam has no format at that
 // rate it falls back to its fastest HD (1080p/720p-class) format and says so,
 // rather than refusing the camera. The virtual camera then runs at that rate.
+// Development builds can give Stage the same fallback
+// (`DeveloperFlags.allowStageBelowShowRate`) so ordinary webcams can stand in
+// for show cameras.
 import Foundation
 
 nonisolated enum CaptureProfilePolicy {
@@ -50,6 +53,11 @@ nonisolated enum CaptureProfilePolicy {
         /// Webcam only: nothing runs at the show rate, so the webcam's fastest
         /// HD format is used at its own rate.
         case webcamBelowShowRate
+        /// Development only: the same fallback for a Stage camera.
+        case stageBelowShowRate
+
+        /// The capture runs slower than the show standard.
+        var isBelowShowRate: Bool { self == .webcamBelowShowRate || self == .stageBelowShowRate }
 
         var description: String {
             switch self {
@@ -57,6 +65,7 @@ nonisolated enum CaptureProfilePolicy {
             case .closestWidescreen: return "preferred size unavailable at show rate; using closest 16:9 format"
             case .closestAspect: return "16:9 unavailable at show rate; using closest compatible format"
             case .webcamBelowShowRate: return "webcam has no format at the show rate; using its fastest HD format"
+            case .stageBelowShowRate: return "camera has no format at the show rate; development build is using its fastest HD format"
             }
         }
     }
@@ -65,16 +74,22 @@ nonisolated enum CaptureProfilePolicy {
         let index: Int
         let reason: Reason
         /// Capture rate to configure. Equals the show rate except for
-        /// `.webcamBelowShowRate`.
+        /// a below-show-rate fallback.
         let frameRate: Double
     }
 
-    static func select(_ candidates: [Candidate], profile: Profile, showRate: Double) -> Selection? {
+    static func select(_ candidates: [Candidate], profile: Profile, showRate: Double,
+                       allowStageBelowShowRate: Bool = false) -> Selection? {
         guard showRate.isFinite, showRate > 0 else { return nil }
         if let selection = selectAtShowRate(candidates, profile: profile, showRate: showRate) {
             return selection
         }
-        return profile == .webcam ? selectWebcamFallback(candidates) : nil
+        switch profile {
+        case .webcam:
+            return selectFastestHD(candidates, reason: .webcamBelowShowRate)
+        case .stage:
+            return allowStageBelowShowRate ? selectFastestHD(candidates, reason: .stageBelowShowRate) : nil
+        }
     }
 
     private static func selectAtShowRate(_ candidates: [Candidate], profile: Profile, showRate: Double) -> Selection? {
@@ -116,7 +131,7 @@ nonisolated enum CaptureProfilePolicy {
     /// Fastest rate first (motion matters more than pixels on a call), then
     /// the size nearest 1080p, then 16:9. HD-class formats are preferred over
     /// larger ones whenever the webcam offers any.
-    private static func selectWebcamFallback(_ candidates: [Candidate]) -> Selection? {
+    private static func selectFastestHD(_ candidates: [Candidate], reason: Reason) -> Selection? {
         let usable = candidates.indices.filter {
             candidates[$0].width > 0 && candidates[$0].height > 0 && candidates[$0].maxFrameRate > 0
         }
@@ -136,6 +151,6 @@ nonisolated enum CaptureProfilePolicy {
             if aDistance != bDistance { return aDistance < bDistance }
             return lhs < rhs
         }) else { return nil }
-        return Selection(index: index, reason: .webcamBelowShowRate, frameRate: bestRate)
+        return Selection(index: index, reason: reason, frameRate: bestRate)
     }
 }

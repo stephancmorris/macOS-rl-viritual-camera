@@ -175,7 +175,14 @@ final class ShowCoordinator: ObservableObject {
     /// Host clock; injectable for tests.
     var clock: () -> TimeInterval = { CACurrentMediaTime() }
 
-    private var framePeriod: TimeInterval { 1 / ShowStandard.activeOrCurrent.frameRate }
+    /// Freshness window for Take: one show-frame period, or one capture
+    /// period when the Preview camera runs below the show rate (a 30 fps
+    /// webcam never renders every 20 ms).
+    private func framePeriod(for channel: CameraManager) -> TimeInterval {
+        let showRate = ShowStandard.activeOrCurrent.frameRate
+        let rate = channel.configuredCaptureFPS.map { min($0, showRate) } ?? showRate
+        return 1 / max(rate, 1)
+    }
 
     /// Bind a Take at the click to the roles and route generation now.
     func makeTakeRequest() -> TakeRequest? {
@@ -190,7 +197,7 @@ final class ShowCoordinator: ObservableObject {
         return TakeRules.inputs(
             frame: channel.latestRenderedFrame, previewChannel: preview, current: channel.revisions,
             sourceMissing: channel.sourceMissing, admission: admissionDecision,
-            now: clock(), framePeriod: framePeriod)
+            now: clock(), framePeriod: framePeriod(for: channel))
     }
 
     /// Hard cut to the prepared Preview. Validates now; never arms a later

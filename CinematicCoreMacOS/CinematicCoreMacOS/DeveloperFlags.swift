@@ -89,4 +89,12 @@ enum DeveloperFlags {
     /// get the R1 single-camera Stage view back. Webcam format always keeps
     /// the single-camera view.
     nonisolated static let useMultiviewConsole = true
+
+    /// DEVELOPMENT ONLY — set false before any release build. Lets Stage
+    /// format use a camera that has no format at the show rate (most webcams
+    /// top out at 30 fps against 1080p50), falling back to its fastest HD
+    /// format the way Webcam format does. The output repeats frames to keep
+    /// the show rate, and setup/admission judge the camera against its own
+    /// rate. Operators would otherwise get "Unsupported format" in Stage.
+    nonisolated static let allowStageBelowShowRate = true
 }

@@ -2462,7 +2462,9 @@ final class CameraManager: NSObject, ObservableObject {
                 frameRateRanges: format.videoSupportedFrameRateRanges.map { $0.minFrameRate...$0.maxFrameRate }
             )
         }
-        guard let selection = CaptureProfilePolicy.select(candidates, profile: profile, showRate: Config.targetFrameRate) else {
+        guard let selection = CaptureProfilePolicy.select(
+            candidates, profile: profile, showRate: Config.targetFrameRate,
+            allowStageBelowShowRate: DeveloperFlags.allowStageBelowShowRate) else {
             error = .unsupportedFormat
             throw CameraError.unsupportedFormat
         }
@@ -2484,7 +2486,7 @@ final class CameraManager: NSObject, ObservableObject {
         configuredCaptureFPS = selection.frameRate
         // Webcam mode may run below the show rate (see CaptureProfilePolicy);
         // say the real capture rate rather than implying the show standard.
-        configuredCaptureRateLabel = selection.reason == .webcamBelowShowRate
+        configuredCaptureRateLabel = selection.reason.isBelowShowRate
             ? String(format: "%g fps (show standard %@)", selection.frameRate, ShowStandard.activeOrCurrent.title)
             : ShowStandard.activeOrCurrent.title
         captureProfileStatus = "Requested \(dims.width)×\(dims.height) at \(configuredCaptureRateLabel): \(selection.reason.description). Waiting for delivered frame."
@@ -2497,7 +2499,7 @@ final class CameraManager: NSObject, ObservableObject {
             requestedHeight: Int(dims.height),
             configuredCaptureFPS: selection.frameRate,
             captureSelectionReason: selection.reason.description,
-            belowShowRate: selection.reason == .webcamBelowShowRate))
+            belowShowRate: selection.reason.isBelowShowRate))
 
         if dims.height > 0 {
             let sourceAspect = CGFloat(dims.width) / CGFloat(dims.height)
