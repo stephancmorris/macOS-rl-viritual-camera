@@ -15,6 +15,9 @@ struct InspectorDrawer: View {
     @ObservedObject var systemExtensionManager: SystemExtensionActivationManager
     @ObservedObject var settingsWindowController: SettingsWindowController
     @Binding var isOpen: Bool
+    /// The show, when the app runs one. With a second input the drawer gains
+    /// a Show section; nil (or a single input) leaves it exactly as before.
+    var show: ShowCoordinator?
 
     @Environment(\.openSettings) private var openSettings
     @State private var showCameraList = false
@@ -28,6 +31,9 @@ struct InspectorDrawer: View {
 
             ScrollView(.vertical, showsIndicators: false) {
                 VStack(alignment: .leading, spacing: 26) {
+                    if let show {
+                        InspectorShowSection(show: show)
+                    }
                     sourceSection
                     compositionSection
                     outputSection

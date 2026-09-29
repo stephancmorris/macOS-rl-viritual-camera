@@ -124,7 +124,8 @@ struct ContentView: View {
                     cameraManager: cameraManager,
                     systemExtensionManager: systemExtensionManager,
                     settingsWindowController: settingsWindowController,
-                    isOpen: $inspectorOpen
+                    isOpen: $inspectorOpen,
+                    show: show
                 )
                 .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .trailing)
                 .transition(.move(edge: .trailing))
