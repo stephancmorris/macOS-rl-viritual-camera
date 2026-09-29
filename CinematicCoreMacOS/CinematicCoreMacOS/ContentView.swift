@@ -77,6 +77,15 @@ struct ContentView: View {
                     onHoldPoint: holdPointHandler
                 )
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
+            } else if DeveloperFlags.useMultiviewConsole, let show,
+                      ConsolePresentation.resolve(
+                        for: cameraManager.shotComposer.config.cinematicFormat == .webcam ? .webcam : .stage
+                      ) == .multiview {
+                // Show setup (SHOW-SETUP) replaces the stopped screen where
+                // the Multiview console applies. Channel A starts through
+                // startCamera() so extension preflight is unchanged.
+                LiveShowSetup(show: show, startChannelA: { await startCamera() })
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
             } else {
                 StoppedScreen(
                     lastSessionEndedAt: lastSessionEndedAt,
