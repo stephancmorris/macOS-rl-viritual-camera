@@ -15,9 +15,10 @@ nonisolated struct DirectorShotPolicy {
             cutOnMotionAllowed: false)
 
         var isValid: Bool {
+            minimumShotDuration.isFinite && maximumShotDuration.isFinite &&
+            wideCadence.isFinite && repetitionWindow.isFinite && maximumMovement.isFinite &&
             minimumShotDuration >= 0 && maximumShotDuration >= minimumShotDuration &&
-            wideCadence > 0 && repetitionWindow >= 0 && maximumMovement >= 0 &&
-            maximumMovement.isFinite
+            wideCadence > 0 && repetitionWindow >= 0 && maximumMovement >= 0
         }
     }
     struct Candidate: Equatable, Sendable {
@@ -40,7 +41,7 @@ nonisolated struct DirectorShotPolicy {
         let now: TimeInterval
     }
     enum Abstention: Equatable, Sendable {
-        case minimumDuration, noEligibleCandidate, repetition, movement, noPreview
+        case invalidInput, minimumDuration, noEligibleCandidate, repetition, movement, noPreview
     }
     enum Decision: Equatable, Sendable {
         case chosen(Candidate, String), abstain(Abstention)
@@ -48,13 +49,19 @@ nonisolated struct DirectorShotPolicy {
 
     static func choose(_ timeline: Timeline, preview: ChannelID,
                        parameters p: Parameters) -> Decision {
-        precondition(p.isValid)
+        guard p.isValid, timeline.now.isFinite, timeline.programStartedAt.isFinite,
+              timeline.lastWideAt.isFinite, timeline.now >= timeline.programStartedAt,
+              timeline.now >= timeline.lastWideAt,
+              timeline.history.allSatisfy({ $0.endedAt.isFinite && $0.endedAt <= timeline.now }) else {
+            return .abstain(.invalidInput)
+        }
         guard timeline.now - timeline.programStartedAt >= p.minimumShotDuration else {
             return .abstain(.minimumDuration)
         }
         let dueWide = timeline.now - timeline.lastWideAt >= p.wideCadence
         let eligible = timeline.candidates.filter { $0.channel == preview && $0.shot != timeline.programShot &&
-            $0.subjectConfidence.isFinite && $0.subjectConfidence >= 0 && $0.subjectConfidence <= 1 }
+            $0.subjectConfidence.isFinite && $0.subjectConfidence >= 0 && $0.subjectConfidence <= 1 &&
+            $0.movement.isFinite && $0.movement >= 0 }
         guard !eligible.isEmpty else { return .abstain(.noPreview) }
         let noRepeat = eligible.filter { candidate in
             !timeline.history.contains { $0.shot == candidate.shot && timeline.now - $0.endedAt < p.repetitionWindow }
@@ -62,11 +69,19 @@ nonisolated struct DirectorShotPolicy {
         guard !noRepeat.isEmpty else { return .abstain(.repetition) }
         let still = noRepeat.filter { p.cutOnMotionAllowed || $0.movement <= p.maximumMovement }
         guard !still.isEmpty else { return .abstain(.movement) }
-        // Stable sort avoids run-to-run changes for equal evidence.
+        // A total order makes the selection independent of candidate input order.
         let sorted = still.sorted {
             if dueWide && $0.isWide != $1.isWide { return $0.isWide }
             if $0.subjectConfidence != $1.subjectConfidence { return $0.subjectConfidence > $1.subjectConfidence }
-            return $0.shot.preset.rawValue < $1.shot.preset.rawValue
+            if $0.shot.preset.rawValue != $1.shot.preset.rawValue {
+                return $0.shot.preset.rawValue < $1.shot.preset.rawValue
+            }
+            if $0.shot.mode.rawValue != $1.shot.mode.rawValue {
+                return $0.shot.mode.rawValue < $1.shot.mode.rawValue
+            }
+            if $0.shot.zoomRung != $1.shot.zoomRung { return $0.shot.zoomRung < $1.shot.zoomRung }
+            if $0.isWide != $1.isWide { return $0.isWide }
+            return $0.movement < $1.movement
         }
         guard let selected = sorted.first else { return .abstain(.noEligibleCandidate) }
         let reason = dueWide && selected.isWide ? "wide cadence" :

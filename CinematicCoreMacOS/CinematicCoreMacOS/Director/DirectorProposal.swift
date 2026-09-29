@@ -78,7 +78,8 @@ nonisolated enum DirectorProposalValidator {
                 reasons.append(.shotChangedByOperator)
             }
         }
-        if !now.isFinite || now < proposal.createdAt || now - proposal.createdAt > maximumAge {
+        if !now.isFinite || !proposal.createdAt.isFinite || !maximumAge.isFinite || maximumAge < 0 ||
+            now < proposal.createdAt || now - proposal.createdAt > maximumAge {
             reasons.append(.expired)
         }
         return reasons.isEmpty ? .valid : .stale(reasons)
@@ -98,12 +99,27 @@ nonisolated struct DirectorReadiness: Equatable, Sendable {
         let maximumMotion: Double
         let cutOnMotionAllowed: Bool
     }
-    enum Reason: Hashable, Sendable { case takeUnavailable, identityUncertain, framingUnsettled, moving }
+    enum Reason: Hashable, Sendable {
+        case takeUnavailable, invalidParameters, invalidEvidence, identityUncertain, framingUnsettled, moving
+    }
     let reasons: [Reason]
     var isReady: Bool { reasons.isEmpty }
     static func evaluate(_ input: Inputs, parameters: Parameters) -> DirectorReadiness {
         var reasons: [Reason] = []
         if !input.take.isEligible { reasons.append(.takeUnavailable) }
+        guard parameters.minimumIdentityConfidence.isFinite,
+              (0...1).contains(parameters.minimumIdentityConfidence),
+              parameters.minimumSettledTime.isFinite, parameters.minimumSettledTime >= 0,
+              parameters.maximumMotion.isFinite, parameters.maximumMotion >= 0 else {
+            reasons.append(.invalidParameters)
+            return .init(reasons: reasons)
+        }
+        guard input.identityConfidence.isFinite, (0...1).contains(input.identityConfidence),
+              input.framingSettledFor.isFinite, input.framingSettledFor >= 0,
+              input.motion.isFinite, input.motion >= 0 else {
+            reasons.append(.invalidEvidence)
+            return .init(reasons: reasons)
+        }
         if input.identityConfidence < parameters.minimumIdentityConfidence { reasons.append(.identityUncertain) }
         if input.framingSettledFor < parameters.minimumSettledTime { reasons.append(.framingUnsettled) }
         if !parameters.cutOnMotionAllowed && input.motion > parameters.maximumMotion { reasons.append(.moving) }

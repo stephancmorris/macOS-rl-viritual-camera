@@ -15,7 +15,9 @@ nonisolated struct DirectorPreferences: Codable, Equatable, Sendable {
         minimumShotDuration: 8, maximumShotDuration: 35, wideCadence: 90,
         repetitionWindow: 20, maximumMovement: 0.1, cutOnMotionAllowed: false)
 
-    enum ValidationError: Error, Equatable { case unsupportedVersion, invalidDuration, invalidMovement }
+    enum ValidationError: Error, Equatable {
+        case unsupportedVersion, invalidDuration, invalidMovement, conflictingConstraints
+    }
     func validated() throws -> DirectorPreferences {
         guard version == Self.currentVersion else { throw ValidationError.unsupportedVersion }
         guard minimumShotDuration.isFinite, maximumShotDuration.isFinite,
@@ -35,7 +37,8 @@ nonisolated struct DirectorPreferences: Codable, Equatable, Sendable {
     static func resolve(_ a: Self, _ b: Self) throws -> Self {
         let a = try a.validated(), b = try b.validated()
         let minimum = max(a.minimumShotDuration, b.minimumShotDuration)
-        let maximum = max(minimum, min(a.maximumShotDuration, b.maximumShotDuration))
+        let maximum = min(a.maximumShotDuration, b.maximumShotDuration)
+        guard minimum <= maximum else { throw ValidationError.conflictingConstraints }
         return Self(version: currentVersion, minimumShotDuration: minimum,
             maximumShotDuration: maximum, wideCadence: min(a.wideCadence, b.wideCadence),
             repetitionWindow: max(a.repetitionWindow, b.repetitionWindow),

@@ -34,4 +34,47 @@ import Testing
         let resolved = try DirectorPreferences.resolve(defaults, defaults)
         #expect(resolved == defaults)
     }
+
+    @Test func invalidPolicyAndClockAbstain() {
+        let candidate = DirectorShotPolicy.Candidate(channel: .b, shot: b, subjectConfidence: 0.9,
+            movement: 0, isWide: false)
+        let timeline = DirectorShotPolicy.Timeline(programShot: a, programStartedAt: 0,
+            lastWideAt: 0, history: [], candidates: [candidate], now: 10)
+        let invalid = DirectorShotPolicy.Parameters(minimumShotDuration: .nan,
+            maximumShotDuration: 35, wideCadence: 90, repetitionWindow: 20,
+            maximumMovement: 0.1, cutOnMotionAllowed: false)
+        #expect(DirectorShotPolicy.choose(timeline, preview: .b, parameters: invalid) == .abstain(.invalidInput))
+        let badClock = DirectorShotPolicy.Timeline(programShot: a, programStartedAt: 0,
+            lastWideAt: 0, history: [], candidates: [candidate], now: .infinity)
+        #expect(DirectorShotPolicy.choose(badClock, preview: .b, parameters: .proposed) == .abstain(.invalidInput))
+        let badMovement = DirectorShotPolicy.Candidate(channel: .b, shot: b, subjectConfidence: 0.9,
+            movement: .nan, isWide: false)
+        let badCandidate = DirectorShotPolicy.Timeline(programShot: a, programStartedAt: 0,
+            lastWideAt: 0, history: [], candidates: [badMovement], now: 10)
+        #expect(DirectorShotPolicy.choose(badCandidate, preview: .b, parameters: .proposed) == .abstain(.noPreview))
+    }
+
+    @Test func tiesResolveIndependentOfCandidateOrder() {
+        let shots = [DirectorShot(preset: .medium, mode: .autoPan, zoomRung: 2),
+            DirectorShot(preset: .medium, mode: .autoTracking, zoomRung: 1),
+            DirectorShot(preset: .medium, mode: .autoTracking, zoomRung: 0)]
+        let candidates = shots.map { DirectorShotPolicy.Candidate(channel: .b, shot: $0,
+            subjectConfidence: 0.9, movement: 0, isWide: false) }
+        func selected(_ values: [DirectorShotPolicy.Candidate]) -> DirectorShotPolicy.Decision {
+            DirectorShotPolicy.choose(.init(programShot: a, programStartedAt: 0,
+                lastWideAt: 0, history: [], candidates: values, now: 10),
+                preview: .b, parameters: .proposed)
+        }
+        #expect(selected(candidates) == selected(candidates.reversed()))
+    }
+
+    @Test func impossiblePreferenceIntersectionIsRejected() throws {
+        let a = DirectorPreferences(version: 1, minimumShotDuration: 20, maximumShotDuration: 30,
+            wideCadence: 90, repetitionWindow: 20, maximumMovement: 0.1, cutOnMotionAllowed: false)
+        let b = DirectorPreferences(version: 1, minimumShotDuration: 1, maximumShotDuration: 10,
+            wideCadence: 90, repetitionWindow: 20, maximumMovement: 0.1, cutOnMotionAllowed: false)
+        #expect(throws: DirectorPreferences.ValidationError.conflictingConstraints) {
+            try DirectorPreferences.resolve(a, b)
+        }
+    }
 }

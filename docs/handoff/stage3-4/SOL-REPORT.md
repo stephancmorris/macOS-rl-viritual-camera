@@ -32,3 +32,6 @@ Per-task totals are baseline plus new tests; the final total was measured by the
 ## What remains
 
 The running app never creates these types. Wiring requires the exact hooks in `integration-requests.md`, Stage 2 two-camera validation, Stephan's decisions, and qualification of any Auto Direct or physical motion path. The replay fixtures are synthetic and cannot establish editorial quality, real source freshness, subject identity accuracy, physical safety, or voice recognition accuracy.
+# Follow-up: AD-VALIDATION — 2026-09-30
+
+Card: https://trello.com/c/nPoIqkTe. Changed `DirectorProposal.swift`, `DirectorShotPolicy.swift`, `DirectorPreferences.swift`, `DirectorProposalTests.swift`, and `DirectorShotPolicyTests.swift`. The validator now rejects malformed clocks and expiry; readiness rejects nonfinite or out-of-range evidence and parameters; policy abstains on invalid timing and gives equal-evidence candidates a total ordering; preference resolution throws when hard duration intervals do not intersect. The policy numbers remain unapproved caller parameters (P1/T1/T2). Targeted tests: 16 passed, 0 failed, 0 skipped (8 distinct test methods executed twice by Xcode). Full `CinematicCoreMacOSTests` target with `CODE_SIGNING_ALLOWED=NO`: 437 passed, 0 failed, 1 skipped (log case count). No running-app integration was changed.
