@@ -982,7 +982,25 @@ final class CameraManager: NSObject, ObservableObject {
     func setLatestRenderedFrameForTesting(_ frame: RenderedChannelFrame?) { latestRenderedFrame = frame }
     /// Test seam: mark the source missing as a hot unplug would.
     func setSourceMissingForTesting(_ missing: Bool) { sourceMissing = missing }
+    /// Test seam: the identity a configured source would have recorded.
+    func setSourceIdentityForTesting(_ source: DiagnosticsSessionIdentity.Source) { recordSourceIdentity(source) }
     #endif
+
+    /// This channel's source as last configured, kept even while it is not
+    /// Program (the output port drops identity from non-Program channels).
+    private(set) var sourceIdentity: DiagnosticsSessionIdentity.Source?
+
+    private func recordSourceIdentity(_ source: DiagnosticsSessionIdentity.Source) {
+        sourceIdentity = source
+        outputPort.recordSourceIdentity(source)
+    }
+
+    /// Called when this channel becomes Program (Take): diagnostics from here
+    /// on name this camera, not the one that was Program at capture start.
+    func publishSourceIdentityToProgramOutput() {
+        guard let sourceIdentity else { return }
+        programOutput.recordSourceIdentity(sourceIdentity)
+    }
 
     func cancelOperatorMotion() {
         commands.invalidateMotion()
@@ -1622,7 +1640,7 @@ final class CameraManager: NSObject, ObservableObject {
 
         error = nil
         isRunning = true
-        outputPort.recordSourceIdentity(DiagnosticsSessionIdentity.Source(
+        recordSourceIdentity(DiagnosticsSessionIdentity.Source(
             inputKind: "Validation clip",
             deviceName: validationClipURL.lastPathComponent,
             belowShowRate: false))
@@ -1717,6 +1735,8 @@ final class CameraManager: NSObject, ObservableObject {
             if sourceWidth != sourcePixelWidth || sourceHeight != sourcePixelHeight {
                 sourcePixelWidth = sourceWidth
                 sourcePixelHeight = sourceHeight
+                sourceIdentity?.deliveredWidth = sourceWidth
+                sourceIdentity?.deliveredHeight = sourceHeight
                 outputPort.recordDeliveredDimensions(width: sourceWidth, height: sourceHeight)
                 if activeInputSource == .liveCamera, let expected = configuredCaptureSize {
                     let requested = "\(expected.width)×\(expected.height)"
@@ -2468,7 +2488,7 @@ final class CameraManager: NSObject, ObservableObject {
             ? String(format: "%g fps (show standard %@)", selection.frameRate, ShowStandard.activeOrCurrent.title)
             : ShowStandard.activeOrCurrent.title
         captureProfileStatus = "Requested \(dims.width)×\(dims.height) at \(configuredCaptureRateLabel): \(selection.reason.description). Waiting for delivered frame."
-        outputPort.recordSourceIdentity(DiagnosticsSessionIdentity.Source(
+        recordSourceIdentity(DiagnosticsSessionIdentity.Source(
             inputKind: "Live camera",
             deviceName: device.localizedName,
             deviceModelID: device.modelID,

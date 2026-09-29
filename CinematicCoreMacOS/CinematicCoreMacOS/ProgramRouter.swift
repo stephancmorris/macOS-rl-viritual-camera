@@ -58,6 +58,10 @@ final class ProgramRouter {
     private var isOutputStarted = false
     private var lastProgramFrameAt: TimeInterval = 0
     private var lastGoodBuffer: CVPixelBuffer?
+    /// The buffer most recently handed to the output — routed, held or
+    /// standby black. The console's Program pane shows this while the router
+    /// is holding or in standby, so it matches what downstream received.
+    private(set) var lastSentBuffer: CVPixelBuffer?
     private var standbyBuffer: CVPixelBuffer?
     private var watchdog: Timer?
     private var faultTicker: Timer?
@@ -100,6 +104,7 @@ final class ProgramRouter {
         state = .idle
         lastProgramFrameAt = 0
         lastGoodBuffer = nil
+        lastSentBuffer = nil
         startWatchdog()
     }
 
@@ -110,6 +115,7 @@ final class ProgramRouter {
         isOutputStarted = false
         state = .idle
         lastGoodBuffer = nil
+        lastSentBuffer = nil
     }
 
     func updateCaptureStatus(_ channel: ChannelID, isRunning: Bool) {
@@ -145,6 +151,7 @@ final class ProgramRouter {
     }
 
     private func send(_ buffer: CVPixelBuffer, isRepeat: Bool) {
+        lastSentBuffer = buffer
         output.sendFrame(buffer, timestamp: nextOutputTimestamp(), isRepeat: isRepeat)
     }
 
@@ -175,6 +182,7 @@ final class ProgramRouter {
         programChannel = channel
         routeGeneration &+= 1
         lastGoodBuffer = frame.pixelBuffer
+        lastSentBuffer = frame.pixelBuffer
         lastProgramFrameAt = clock()
         state = .routed
         stopFaultTicker()

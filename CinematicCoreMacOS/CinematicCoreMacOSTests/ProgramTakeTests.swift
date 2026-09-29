@@ -99,6 +99,17 @@ struct ProgramTakeTests {
         #expect(rig.show.controlTarget == .a)                   // controls return to the new Preview
     }
 
+    @Test func diagnosticsNameTheNewProgramCameraAfterTake() throws {
+        let rig = rig()
+        rig.a.setSourceIdentityForTesting(.init(inputKind: "Live camera", deviceName: "Stage wide", belowShowRate: false))
+        rig.b.setSourceIdentityForTesting(.init(inputKind: "Live camera", deviceName: "Band side", belowShowRate: false))
+        // B's identity is kept on the channel but never reaches the show while B is Preview.
+        #expect(rig.show.programOutput.currentSessionIdentity().source.deviceName == "Stage wide")
+        try prepare(rig.b, rig: rig)
+        #expect(rig.show.take() == .committed(newProgram: .b))
+        #expect(rig.show.programOutput.currentSessionIdentity().source.deviceName == "Band side")
+    }
+
     @Test func staleRenderIsRejected() throws {
         let rig = rig()
         try prepare(rig.b, rig: rig, age: 0.1)                  // > 2 frame periods at 50 fps

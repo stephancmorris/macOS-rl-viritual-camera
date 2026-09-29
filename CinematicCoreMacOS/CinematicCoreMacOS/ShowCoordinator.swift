@@ -204,6 +204,7 @@ final class ShowCoordinator: ObservableObject {
             return .rejected(.outputRefused)
         }
         lastTakeAt = now
+        channel.publishSourceIdentityToProgramOutput()
         editLive = false
         retarget()
         return .committed(newProgram: preview)

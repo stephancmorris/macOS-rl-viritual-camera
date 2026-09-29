@@ -135,6 +135,44 @@ struct LiveConsoleTests {
         #expect(model.snapshot.previewChannel == nil)
     }
 
+    @Test func programPaneFollowsTheChannelWhileRouted() {
+        let show = show()
+        show.channelA.setRunningForTesting(true)
+        // Idle / routed: the Program channel's rendered buffer is what is sent.
+        #expect(LivePanePicture.heldProgramBuffer(show: show) == nil)
+    }
+
+    @Test func unmeasuredPairIsMeasuredOnceBRenders() {
+        let show = show()
+        show.channelA.setRunningForTesting(true)
+        let b = show.addChannel(.b)
+        let model = LiveConsoleModel(show: show)
+        model.refresh()
+        #expect(model.pairCheckText == nil)                      // B not rendering yet
+        b.setRunningForTesting(true)
+        b.setLatestRenderedFrameForTesting(RenderedChannelFrame(
+            channelID: .b, revisions: b.revisions, sourceTimestamp: 1, processingStartedAt: 0,
+            renderedAt: 0, crop: .fullFrame, outputSize: .zero, isRepeat: false,
+            pixelBuffer: ProgramRouter.makeBlackFrame(width: 16, height: 16)!))
+        model.refresh()
+        #expect(model.pairCheckText == "Measuring pair · warming up")
+    }
+
+    @Test func knownPairIsNotMeasuredAgain() {
+        let show = show()
+        show.channelA.setRunningForTesting(true)
+        let b = show.addChannel(.b)
+        b.setRunningForTesting(true)
+        b.setLatestRenderedFrameForTesting(RenderedChannelFrame(
+            channelID: .b, revisions: b.revisions, sourceTimestamp: 1, processingStartedAt: 0,
+            renderedAt: 0, crop: .fullFrame, outputSize: .zero, isRepeat: false,
+            pixelBuffer: ProgramRouter.makeBlackFrame(width: 16, height: 16)!))
+        show.admissionRecords.record(.provisional, for: show.admissionFingerprint())
+        let model = LiveConsoleModel(show: show)
+        model.refresh()
+        #expect(model.pairCheckText == nil)
+    }
+
     @Test func rendersTheLiveConsoleAt1280() throws {
         let show = show()
         show.channelA.setRunningForTesting(true)

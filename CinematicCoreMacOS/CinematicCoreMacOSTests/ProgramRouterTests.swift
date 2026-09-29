@@ -110,6 +110,7 @@ struct ProgramRouterTests {
         #expect(router.programStatus == .holding(standbyIn: 2))
         router.faultTick()
         #expect(sink.sent.last?.buffer === last)          // repeats the last good frame
+        #expect(router.lastSentBuffer === last)           // what the console's Program pane shows
 
         clock.now += ProgramRouter.holdDuration + 0.1
         router.faultTick()
@@ -118,6 +119,7 @@ struct ProgramRouterTests {
         let standby = try #require(sink.sent.last?.buffer)
         #expect(standby !== last)                          // generated black frame
         #expect(CVPixelBufferGetWidth(standby) == 64 && CVPixelBufferGetHeight(standby) == 36)
+        #expect(router.lastSentBuffer === standby)
 
         // Preview frames never fill the gap.
         router.port(for: .b).sendFrame(try buffer(), timestamp: 2)

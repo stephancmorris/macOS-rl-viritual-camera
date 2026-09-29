@@ -84,9 +84,9 @@ enum DeveloperFlags {
     nonisolated static let exposeMultiviewGallery = true
 
     /// Shows the Multiview console (Preview / Program / Take / inputs) in
-    /// Stage format while capture runs, driven by the live ShowCoordinator,
-    /// instead of the single-camera wide + program layout. Off by default
-    /// until two-camera rig testing; Webcam format always keeps the
-    /// single-camera view.
-    nonisolated static let useMultiviewConsole = false
+    /// Stage format, driven by the live ShowCoordinator, instead of the
+    /// single-camera wide + program layout. On for R2 builds; set false to
+    /// get the R1 single-camera Stage view back. Webcam format always keeps
+    /// the single-camera view.
+    nonisolated static let useMultiviewConsole = true
 }

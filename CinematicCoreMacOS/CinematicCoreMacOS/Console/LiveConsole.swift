@@ -20,6 +20,7 @@
 import AppKit
 import Combine
 import CoreGraphics
+import CoreVideo
 import Foundation
 import QuartzCore
 import SwiftUI
@@ -95,15 +96,19 @@ final class LiveConsoleModel: ObservableObject, ConsoleActions {
     private var timer: Timer?
     private var lastCounts: [ChannelID: (count: UInt64, at: TimeInterval)] = [:]
     private var rates: [ChannelID: Double] = [:]
-    private let pairCheck = MultiInputCheck()
+    private let pairCheck: MultiInputCheck
     private var pairCheckSubscription: AnyCancellable?
+    /// Fingerprint key of the last configuration measured automatically, so
+    /// a finished or cancelled check is not restarted for the same setup.
+    private var autoMeasuredKey: String?
 
     static let refreshInterval: TimeInterval = 1.0 / 15.0
 
-    init(show: ShowCoordinator) {
+    init(show: ShowCoordinator, pairCheck: MultiInputCheck? = nil) {
         self.show = show
+        self.pairCheck = pairCheck ?? MultiInputCheck()
         self.snapshot = LiveConsoleSnapshot.make(show: show, paneView: .shot, rates: [:], note: nil)
-        pairCheckSubscription = pairCheck.$phase.sink { [weak self] phase in
+        pairCheckSubscription = self.pairCheck.$phase.sink { [weak self] phase in
             self?.pairCheckText = Self.describe(phase)
         }
     }
@@ -127,6 +132,7 @@ final class LiveConsoleModel: ObservableObject, ConsoleActions {
 
     func refresh() {
         updateRates()
+        measurePairIfUnmeasured()
         let target = show.channel(show.controlTarget)
         let failure = ChannelID.allCases.compactMap { show.channel($0)?.error?.localizedDescription }.first
         let next = LiveConsoleSnapshot.make(
@@ -225,6 +231,19 @@ final class LiveConsoleModel: ObservableObject, ConsoleActions {
         }
     }
 
+    /// SHOW-SETUP: an unmeasured pair is measured as soon as the Preview
+    /// camera renders, once per configuration. A known result (provisional,
+    /// certified or unsupported) is never re-measured automatically.
+    private func measurePairIfUnmeasured() {
+        guard let previewID = show.previewChannel, let preview = show.channel(previewID),
+              preview.isRunning, !preview.sourceMissing, preview.latestRenderedFrame != nil,
+              !pairCheck.phase.isRunning, show.admissionStatus == .unknown else { return }
+        let key = show.admissionFingerprint().key
+        guard key != autoMeasuredKey else { return }
+        autoMeasuredKey = key
+        measurePair()
+    }
+
     var admissionTitle: String? {
         hasSecondInput ? show.admissionStatus.title : nil
     }
@@ -305,12 +324,27 @@ struct LivePanePicture: View {
 
     @ViewBuilder
     static func make(pane: PaneModel, show: ShowCoordinator) -> some View {
-        // Program in standby is black downstream; show exactly that.
-        if let id = pane.channel, let channel = show.channel(id),
-           !(pane.role == .program && show.router.state == .standby) {
+        if pane.role == .program, let sent = heldProgramBuffer(show: show) {
+            // Holding or standby: show exactly the frame downstream received.
+            // It changes only on state changes, so the 15 Hz rebuild suffices.
+            PixelBufferPreviewView(pixelBuffer: sent, aspectFill: true)
+        } else if pane.role == .program, show.router.state == .standby {
+            Color.black
+        } else if let id = pane.channel, let channel = show.channel(id) {
             LivePanePicture(channel: channel, pane: pane, show: show)
         } else {
             Color.black
+        }
+    }
+
+    /// While the router holds or is in standby the Program channel's own
+    /// picture is not what was sent, so Program shows the router's last sent
+    /// buffer (the held frame, or standby black). nil while routed: then the
+    /// channel's rendered buffer is the one being sent, at full rate.
+    static func heldProgramBuffer(show: ShowCoordinator) -> CVPixelBuffer? {
+        switch show.router.state {
+        case .holding, .standby: return show.router.lastSentBuffer
+        case .idle, .routed: return nil
         }
     }
 
