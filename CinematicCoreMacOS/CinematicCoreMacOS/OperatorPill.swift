@@ -8,14 +8,56 @@
 
 import SwiftUI
 
+/// Sends the pill's actions. With a show, every action is bound to the show's
+/// control target at the moment of the gesture (PILL-TARGET); without one it
+/// is today's single-camera path.
+@MainActor
+struct PillCommandSink {
+    let cameraManager: CameraManager
+    let show: ShowCoordinator?
+
+    /// Build and deliver one command now. The pill was drawn for
+    /// `cameraManager`; if the show's control target has since moved to
+    /// another channel (the snapshot lags by up to a refresh), the gesture is
+    /// refused rather than retargeted to a camera the operator did not see.
+    @discardableResult
+    func send(_ action: OperatorCommand.Action) -> CommandResult {
+        guard let show else { return cameraManager.dispatch(cameraManager.makeCommand(action)) }
+        let bound = show.makeCommand(action)
+        guard bound.command.target == .channel(cameraManager.channelID) else {
+            return .rejected("Control target changed")
+        }
+        return show.dispatch(bound)
+    }
+}
+
 struct OperatorPill: View {
+    /// How the target chip is written. Full ("CAM B · PREVIEW") is the default:
+    /// even the widest pill (Edit Live, Stage: 1183 pt) fits the 1280 pt
+    /// console. Compact ("B · PVW") is for hosts too narrow for that, and is
+    /// chosen before any control would be dropped.
+    enum ChipStyle { case full, compact }
+
     @ObservedObject var cameraManager: CameraManager
     let controlTarget: ControlTarget
+    /// The show whose control target every action is bound to. nil keeps the
+    /// single-camera behaviour (Webcam view, non-multiview console).
+    let show: ShowCoordinator?
+    let chipStyle: ChipStyle
 
-    init(cameraManager: CameraManager, controlTarget: ControlTarget = .singleCamera) {
+    init(cameraManager: CameraManager, controlTarget: ControlTarget = .singleCamera,
+         show: ShowCoordinator? = nil, chipStyle: ChipStyle = .full) {
         self.cameraManager = cameraManager
         self.controlTarget = controlTarget
+        self.show = show
+        self.chipStyle = chipStyle
     }
+
+    private var sink: PillCommandSink { PillCommandSink(cameraManager: cameraManager, show: show) }
+
+    /// Stop session belongs to the single-camera view; in a show it is
+    /// "Stop show" in the console header.
+    private var showsStopSession: Bool { show == nil && controlTarget == .singleCamera }
 
     private var isWebcam: Bool {
         cameraManager.shotComposer.config.cinematicFormat == .webcam
@@ -33,8 +75,8 @@ struct OperatorPill: View {
 
     private var zoomButtons: some View {
         HStack(spacing: 4) {
-            ZoomShotButton(cameraManager: cameraManager, direction: .pullOut)
-            ZoomShotButton(cameraManager: cameraManager, direction: .pushIn)
+            ZoomShotButton(cameraManager: cameraManager, sink: sink, controlTarget: controlTarget, direction: .pullOut)
+            ZoomShotButton(cameraManager: cameraManager, sink: sink, controlTarget: controlTarget, direction: .pushIn)
         }
         .padding(.horizontal, 4)
     }
@@ -68,7 +110,7 @@ struct OperatorPill: View {
             returnToWideButton
             // In the Multiview console Stop is show-level and lives in the
             // header ("Stop show"); a channel's pill never stops the show.
-            if controlTarget == .singleCamera {
+            if showsStopSession {
                 divider
                 stopSessionButton
             }
@@ -97,7 +139,7 @@ struct OperatorPill: View {
     }
 
     private var targetChip: some View {
-        Text(controlTarget.compactChipTitle ?? "")
+        Text((chipStyle == .full ? controlTarget.chipTitle : controlTarget.compactChipTitle) ?? "")
         .font(.system(size: 10, weight: .bold, design: .monospaced))
         .foregroundStyle(.white)
         .lineLimit(1)
@@ -161,6 +203,7 @@ struct OperatorPill: View {
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
+        .targetLabel(controlTarget, label)
         .disabled(!state.isInteractive || cameraManager.recoveryState.action == .none ||
                   (cameraManager.recoveryState.action == .pickSubject &&
                    (cameraManager.activeMode == .autoPan || cameraManager.activeMode == .manualCrop)))
@@ -194,11 +237,11 @@ struct OperatorPill: View {
     private func lockStateAction() {
         switch cameraManager.recoveryState.action {
         case .none: break
-        case .unlock: cameraManager.dispatch(cameraManager.makeCommand(.unlock))
-        case .resume: cameraManager.dispatch(cameraManager.makeCommand(.resumeTracking))
+        case .unlock: sink.send(.unlock)
+        case .resume: sink.send(.resumeTracking)
         case .pickSubject:
-            cameraManager.dispatch(cameraManager.makeCommand(.unlock))
-            cameraManager.dispatch(cameraManager.makeCommand(.detect))
+            sink.send(.unlock)
+            sink.send(.detect)
         }
     }
 
@@ -270,9 +313,9 @@ struct OperatorPill: View {
         let highlighted = isDiscovering || isAcquiring
         return Button {
             if isDiscovering {
-                cameraManager.dispatch(cameraManager.makeCommand(.cancelDetect))
+                sink.send(.cancelDetect)
             } else {
-                cameraManager.dispatch(cameraManager.makeCommand(.detect))
+                sink.send(.detect)
             }
         } label: {
             ZStack {
@@ -310,6 +353,7 @@ struct OperatorPill: View {
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
+        .targetLabel(controlTarget, label)
         .disabled(!enabled)
         .help("Detect: tap, then click the subject you want Alfie to follow.")
     }
@@ -321,7 +365,7 @@ struct OperatorPill: View {
         return HStack(spacing: 2) {
             ForEach(ShotComposer.Config.ShotPreset.allCases) { option in
                 shotPresetSegment(option: option, isOn: preset == option) {
-                    cameraManager.dispatch(cameraManager.makeCommand(.selectPreset(.stage(option))))
+                    sink.send(.selectPreset(.stage(option)))
                 }
             }
         }
@@ -350,6 +394,7 @@ struct OperatorPill: View {
                 )
         }
         .buttonStyle(.plain)
+        .targetLabel(controlTarget, option.operatorTitle)
     }
 
     // MARK: - Webcam preset segmented
@@ -359,7 +404,7 @@ struct OperatorPill: View {
         return HStack(spacing: 2) {
             ForEach(ShotComposer.Config.WebcamPreset.allCases) { option in
                 webcamPresetSegment(option: option, isOn: preset == option) {
-                    cameraManager.dispatch(cameraManager.makeCommand(.selectPreset(.webcam(option))))
+                    sink.send(.selectPreset(.webcam(option)))
                 }
             }
         }
@@ -388,6 +433,7 @@ struct OperatorPill: View {
                 )
         }
         .buttonStyle(.plain)
+        .targetLabel(controlTarget, option.operatorTitle)
     }
 
     // MARK: - Return to Wide
@@ -396,9 +442,9 @@ struct OperatorPill: View {
         let isOn = cameraManager.activeMode == .wide
         let enabled = cameraManager.isRunning
         return Button {
-            cameraManager.dispatch(cameraManager.makeCommand(.returnToWide))
+            sink.send(.returnToWide)
         } label: {
-            Text(controlTarget.camera.map { "Return \($0) to Wide" } ?? "Return to Wide")
+            Text(returnToWideTitle)
                 .font(.system(size: 12, weight: isOn ? .semibold : .medium))
                 .foregroundStyle(.white.opacity(isOn ? 1.0 : (enabled ? 0.86 : 0.32)))
                 .padding(.horizontal, 10)
@@ -410,7 +456,12 @@ struct OperatorPill: View {
                 .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
+        .targetLabel(controlTarget, returnToWideTitle)
         .disabled(!enabled)
+    }
+
+    private var returnToWideTitle: String {
+        controlTarget.camera.map { "Return \($0) to Wide" } ?? "Return to Wide"
     }
 
     // MARK: - Crop toggle
@@ -420,7 +471,7 @@ struct OperatorPill: View {
         let hasLock = cameraManager.manualLockedTargetID != nil
         let enabled = cameraManager.isRunning && !isOn && hasLock
         return Button {
-            cameraManager.dispatch(cameraManager.makeCommand(.setMode(.autoTracking)))
+            sink.send(.setMode(.autoTracking))
         } label: {
             HStack(spacing: 7) {
                 Circle()
@@ -441,6 +492,7 @@ struct OperatorPill: View {
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
+        .targetLabel(controlTarget, "Crop")
         .disabled(!enabled)
         .help(hasLock ? "Frame the locked subject." : "Tap a person in the preview to lock a subject first.")
     }
@@ -451,7 +503,7 @@ struct OperatorPill: View {
         let isOn = cameraManager.activeMode == .manualCrop
         let enabled = cameraManager.isRunning && !isOn
         return Button {
-            cameraManager.dispatch(cameraManager.makeCommand(.setMode(.manualCrop)))
+            sink.send(.setMode(.manualCrop))
         } label: {
             HStack(spacing: 7) {
                 Circle()
@@ -472,6 +524,7 @@ struct OperatorPill: View {
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
+        .targetLabel(controlTarget, "Manual")
         .disabled(!enabled)
     }
 
@@ -482,7 +535,7 @@ struct OperatorPill: View {
         // At full width Pan holds its phase; pushing in restores travel.
         let enabled = cameraManager.isRunning && !isOn
         return Button {
-            cameraManager.dispatch(cameraManager.makeCommand(.setMode(.autoPan)))
+            sink.send(.setMode(.autoPan))
         } label: {
             HStack(spacing: 7) {
                 Circle()
@@ -504,6 +557,7 @@ struct OperatorPill: View {
             .help("Sweep the program crop across the stage")
         }
         .buttonStyle(.plain)
+        .targetLabel(controlTarget, "Auto Pan")
         .disabled(!enabled)
     }
 
@@ -511,7 +565,7 @@ struct OperatorPill: View {
 
     private var stopSessionButton: some View {
         Button {
-            cameraManager.dispatch(cameraManager.makeCommand(.stopSession))
+            sink.send(.stopSession)
         } label: {
             HStack(spacing: 7) {
                 RoundedRectangle(cornerRadius: 2, style: .continuous)
@@ -533,15 +587,20 @@ struct OperatorPill: View {
 }
 
 /// A normal button tap starts one complete shot move; release has no effect.
+/// The move, once admitted, belongs to the channel it was sent to: the pill is
+/// rebuilt when the control target changes (`.id`), and that must not cancel
+/// a move already running on the old target.
 private struct ZoomShotButton: View {
     @ObservedObject var cameraManager: CameraManager
+    let sink: PillCommandSink
+    let controlTarget: ControlTarget
     let direction: OperatorCommand.ZoomDirection
     private var title: String { direction == .pushIn ? "+ Push in" : "− Pull out" }
     private var enabled: Bool { cameraManager.isRunning && cameraManager.canBeginZoom(direction) }
 
     var body: some View {
         Button {
-            cameraManager.dispatch(cameraManager.makeCommand(.beginZoom(direction)))
+            sink.send(.beginZoom(direction))
         } label: {
             Text(title)
                 .font(.system(size: 12, weight: .semibold))
@@ -551,8 +610,14 @@ private struct ZoomShotButton: View {
                             in: RoundedRectangle(cornerRadius: 11))
         }
         .buttonStyle(.plain)
+        .targetLabel(controlTarget, direction == .pushIn ? "Push in" : "Pull out")
         .disabled(!enabled)
         .help("Slow zoom to the next shot size.")
-        .onDisappear { cameraManager.cancelOperatorMotion() }
+        .onDisappear {
+            // Single camera: leaving the view stops motion, as before. In a
+            // show, a target change or Take rebuilds the pill; admitted moves
+            // keep running on their own channel.
+            if sink.show == nil { cameraManager.cancelOperatorMotion() }
+        }
     }
 }

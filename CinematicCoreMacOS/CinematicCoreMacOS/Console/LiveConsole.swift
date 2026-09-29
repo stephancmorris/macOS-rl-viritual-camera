@@ -291,7 +291,7 @@ struct LiveMultiviewConsole: View {
             let pillTarget: ControlTarget = snapshot.previewChannel == nil
                 ? .singleCamera
                 : (target.role == .program ? .editingLive(channel: target.channel) : .preview(channel: target.channel))
-            OperatorPill(cameraManager: channel, controlTarget: pillTarget)
+            OperatorPill(cameraManager: channel, controlTarget: pillTarget, show: model.show)
                 .id(target.channel)
         }
     }
