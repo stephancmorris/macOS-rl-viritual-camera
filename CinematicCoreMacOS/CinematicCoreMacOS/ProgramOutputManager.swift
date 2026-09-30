@@ -209,6 +209,10 @@ final class ProgramOutputManager: ObservableObject {
     enum Route: String, CaseIterable, Identifiable {
         case virtualCamera
         case display
+        /// Development only: frames are accepted and sent nowhere, so Take can
+        /// be rehearsed on a one-screen Mac. Present only when the app injects
+        /// a rehearsal sink (DeveloperFlags.allowRehearsalOutput).
+        case rehearsal
 
         var id: String { rawValue }
 
@@ -218,6 +222,8 @@ final class ProgramOutputManager: ObservableObject {
                 return "Virtual Camera"
             case .display:
                 return "Program Display"
+            case .rehearsal:
+                return "Rehearsal · no output"
             }
         }
 
@@ -227,6 +233,8 @@ final class ProgramOutputManager: ObservableObject {
                 return "video.badge.waveform"
             case .display:
                 return "tv"
+            case .rehearsal:
+                return "eye"
             }
         }
     }
@@ -971,6 +979,10 @@ final class ProgramOutputManager: ObservableObject {
         } else if let fallbackSink = sink(for: .virtualCamera), fallbackSink.isAvailable {
             // Only when choosing a destination at start, never mid-show.
             resolvedRoute = .virtualCamera
+        } else if let rehearsalSink = sink(for: .rehearsal), rehearsalSink.isAvailable {
+            // Development builds only (the sink exists only when injected):
+            // with no real destination, rehearse rather than refuse every Take.
+            resolvedRoute = .rehearsal
         } else {
             resolvedRoute = nil
         }

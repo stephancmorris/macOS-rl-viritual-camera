@@ -63,8 +63,9 @@ final class ShowCoordinator: ObservableObject {
     ///   gets the real virtual-camera + Program Display output.
     init(programOutput: ProgramOutputManager? = nil, admissionRecords: AdmissionRecordStore? = nil) {
         self.admissionRecords = admissionRecords ?? AdmissionRecordStore()
+        let rehearsal: [any ProgramOutputSink] = DeveloperFlags.allowRehearsalOutput ? [RehearsalOutputSink()] : []
         let output = programOutput
-            ?? ProgramOutputManager(sinks: [VirtualCameraOutputSink(), DisplayOutputSink()])
+            ?? ProgramOutputManager(sinks: [VirtualCameraOutputSink(), DisplayOutputSink()] + rehearsal)
         self.programOutput = output
         self.router = ProgramRouter(output: output, programChannel: .a)
         let router = self.router
@@ -165,7 +166,10 @@ final class ShowCoordinator: ObservableObject {
                 showFPS: ShowStandard.activeOrCurrent.frameRate,
                 belowShowRate: identity.source.belowShowRate,
                 source: programChannel.cameraLabel,
-                route: identity.output.route),
+                route: identity.output.route,
+                expectsDetection: channels.values.contains {
+                    $0.activeMode == .autoTracking || $0.detectionDiscoveryActive
+                }),
             previewCaptureFPS: channels[preview]?.configuredCaptureFPS)
     }
 

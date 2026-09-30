@@ -60,6 +60,8 @@ enum LiveConsoleSnapshot {
         if let programChannel = show.channel(program), programChannel.sourceMissing,
            show.router.state == .idle || show.router.state == .routed {
             output = .reconnecting
+        } else if show.router.programStatus == .routed, show.programOutput.activeRoute == .rehearsal {
+            output = .rehearsal
         } else {
             output = show.router.programStatus
         }
@@ -274,7 +276,11 @@ final class LiveConsoleModel: ObservableObject, ConsoleActions {
         case .noPreview: return "No Preview camera"
         case .superseded: return "Take ignored: roles changed since the click"
         case .tooSoon: return "Take ignored: too soon after the last Take"
-        case .outputRefused: return "The output did not accept the frame. Program is unchanged."
+        case .outputRefused:
+            guard show.programOutput.activeRoute != nil else {
+                return "No output destination: Program Display needs a second screen and the virtual camera isn't connected. Program is unchanged."
+            }
+            return "The output did not accept the frame. Program is unchanged."
         case .notEligible:
             return TakeAvailability.evaluate(
                 take: show.takeInputs() ?? .ready, program: show.programChannel,

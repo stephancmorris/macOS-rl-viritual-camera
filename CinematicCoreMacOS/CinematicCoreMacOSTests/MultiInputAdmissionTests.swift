@@ -53,6 +53,16 @@ struct PairAdmissionTests {
         #expect(abs(result.previewFPS - 50) < 0.01)
     }
 
+    @Test func pairWithoutDetectionIsJudgedWhenNoInputDetects() {
+        var wideAndPan = context
+        wideAndPan.program.expectsDetection = false
+        let samples = Array(repeating: CapabilitySample(window: window(detections: 0), thermal: .nominal), count: 4)
+        let preview = Array(repeating: PreviewAdmissionSample(windowSeconds: 5, renderedFrames: 250), count: 4)
+        #expect(PairAdmission.evaluate(program: samples, preview: preview, context: wideAndPan).status == .provisional)
+        // Tracking configurations still need the detection load measured.
+        #expect(PairAdmission.evaluate(program: samples, preview: preview, context: context).status == .unknown)
+    }
+
     @Test func captureBottleneck() {
         let result = evaluate(window(admitted: 200, captureDropped: 3))
         guard case .unsupported = result.status else { Issue.record("expected unsupported"); return }

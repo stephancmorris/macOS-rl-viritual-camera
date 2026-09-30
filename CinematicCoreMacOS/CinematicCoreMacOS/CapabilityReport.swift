@@ -94,6 +94,10 @@ nonisolated struct CapabilityContext: Equatable, Sendable {
     var belowShowRate: Bool
     var source: String
     var route: String?
+    /// Whether the measured configuration runs detection at all. Wide / Pan
+    /// / Manual don't, so a sample without detections is complete for them
+    /// (the admission fingerprint includes each input's mode).
+    var expectsDetection: Bool = true
 }
 
 nonisolated struct CapabilityReason: Equatable, Sendable, Identifiable {
@@ -156,7 +160,7 @@ nonisolated struct CapabilityReport: Equatable, Sendable {
             reasons.append(.init(code: "sample.noFrames", kind: .unknown,
                 message: "No frames reached the pipeline during the sample."))
         }
-        if measured.detections == 0 {
+        if measured.detections == 0, context.expectsDetection {
             reasons.append(.init(code: "sample.noDetection", kind: .unknown,
                 message: "Detection did not run during the sample, so its load was not measured. Run the check while tracking or detecting."))
         }

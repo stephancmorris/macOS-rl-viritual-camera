@@ -121,6 +121,27 @@ struct ProgramTakeTests {
         #expect(rig.show.previewChannel == nil)
     }
 
+    @Test func rehearsalOutputLetsTakeCommitWithoutARealDestination() throws {
+        let records = AdmissionRecordStore(defaults: UserDefaults(suiteName: "alfie-rehearsal-\(UUID().uuidString)")!)
+        let show = ShowCoordinator(programOutput: ProgramOutputManager(sinks: [RehearsalOutputSink()]), admissionRecords: records)
+        let b = show.addChannel(.b)
+        show.channelA.outputPort.start()
+        show.channelA.outputPort.updateCaptureStatus(isRunning: true)
+        #expect(show.programOutput.activeRoute == .rehearsal)
+        b.setLatestRenderedFrameForTesting(RenderedChannelFrame(
+            channelID: .b, revisions: b.revisions, sourceTimestamp: 1,
+            processingStartedAt: show.clock(), renderedAt: show.clock(),
+            crop: .fullFrame, outputSize: CGSize(width: 1920, height: 1080), isRepeat: false,
+            pixelBuffer: try buffer()))
+        #expect(show.take() == .committed(newProgram: .b))
+    }
+
+    @Test func noDestinationRefusalSaysWhy() {
+        let show = ShowCoordinator(programOutput: ProgramOutputManager(sinks: []),
+            admissionRecords: AdmissionRecordStore(defaults: UserDefaults(suiteName: "alfie-nodest-\(UUID().uuidString)")!))
+        #expect(LiveConsoleModel.describe(.outputRefused, show: show).hasPrefix("No output destination"))
+    }
+
     @Test func staleRenderIsRejected() throws {
         let rig = rig()
         try prepare(rig.b, rig: rig, age: 0.1)                  // > 2 frame periods at 50 fps

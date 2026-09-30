@@ -97,4 +97,12 @@ enum DeveloperFlags {
     /// the show rate, and setup/admission judge the camera against its own
     /// rate. Operators would otherwise get "Unsupported format" in Stage.
     nonisolated static let allowStageBelowShowRate = true
+
+    /// DEVELOPMENT ONLY — set false before any release build. Adds a
+    /// "Rehearsal · no output" destination that accepts Program frames and
+    /// sends them nowhere. Used when chosen, or at Start when neither Program
+    /// Display (needs a second screen) nor the virtual camera is available,
+    /// so Take can be tried on a one-screen Mac. The Program pane says
+    /// "Rehearsal · no output" rather than "Routed".
+    nonisolated static let allowRehearsalOutput = true
 }

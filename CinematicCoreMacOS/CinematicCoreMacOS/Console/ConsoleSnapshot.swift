@@ -63,6 +63,8 @@ nonisolated struct ConsoleSnapshot: Equatable, Sendable {
         /// Show started; no Program frame has reached the output yet.
         case waiting
         case routed
+        /// Development rehearsal destination: accepted, sent nowhere.
+        case rehearsal
         /// Repeating the last good rendered frame; standby in `standbyIn`
         /// seconds, or nil when no standby timer applies (single-camera HOLD).
         case holding(standbyIn: Int?)

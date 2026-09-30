@@ -91,7 +91,7 @@ nonisolated enum PaneOverlayState: Equatable, Sendable {
 
     static func program(for snapshot: ConsoleSnapshot) -> PaneOverlayState {
         switch snapshot.programOutput {
-        case .waiting, .routed:
+        case .waiting, .routed, .rehearsal:
             return .none
         case .holding(let seconds):
             return .programHold(standbyIn: seconds)
@@ -109,6 +109,7 @@ nonisolated enum PaneOverlayState: Equatable, Sendable {
         switch output {
         case .waiting: return "Waiting for first frame"
         case .routed: return "Routed"
+        case .rehearsal: return "Rehearsal · no output"
         case .holding: return "Holding last good frame"
         case .standby: return "Standby · source missing"
         case .reconnecting: return "Reconnecting · standby"
