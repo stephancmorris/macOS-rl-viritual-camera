@@ -418,7 +418,7 @@ struct LivePanePicture: View {
 }
 
 /// Show-level controls in the console header: second input, pair
-/// measurement, feedback and Stop show.
+/// measurement, feedback and Stop session (stops the whole show).
 struct LiveConsoleHeader: View {
     @ObservedObject var model: LiveConsoleModel
 
@@ -445,9 +445,11 @@ struct LiveConsoleHeader: View {
                 .fixedSize()
                 .disabled(model.secondInputCandidates.isEmpty)
             }
-            Button("Stop show") { model.stopShow() }
-                .controlSize(.small)
-                .tint(ConsoleStyle.programRed)
+            // Show-level stop (every input), in the pill's familiar style.
+            Button { model.stopShow() } label: { StopSessionLabel() }
+                .buttonStyle(.plain)
+                .accessibilityLabel("Stop session")
+                .accessibilityHint("Stops every camera")
         }
     }
 }

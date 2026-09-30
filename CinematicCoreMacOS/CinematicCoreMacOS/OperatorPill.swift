@@ -56,7 +56,7 @@ struct OperatorPill: View {
     private var sink: PillCommandSink { PillCommandSink(cameraManager: cameraManager, show: show) }
 
     /// Stop session belongs to the single-camera view; in a show it is
-    /// "Stop show" in the console header.
+    /// "Stop session" in the console header, which stops the whole show.
     private var showsStopSession: Bool { show == nil && controlTarget == .singleCamera }
 
     private var isWebcam: Bool {
@@ -109,7 +109,7 @@ struct OperatorPill: View {
             divider
             returnToWideButton
             // In the Multiview console Stop is show-level and lives in the
-            // header ("Stop show"); a channel's pill never stops the show.
+            // header ("Stop session"); a channel's pill never stops the show.
             if showsStopSession {
                 divider
                 stopSessionButton
@@ -567,22 +567,30 @@ struct OperatorPill: View {
         Button {
             sink.send(.stopSession)
         } label: {
-            HStack(spacing: 7) {
-                RoundedRectangle(cornerRadius: 2, style: .continuous)
-                    .fill(Color.white.opacity(0.95))
-                    .frame(width: 9, height: 9)
-                Text("Stop session")
-                    .font(.system(size: 12, weight: .semibold))
-                    .foregroundStyle(.white)
-            }
-            .padding(.horizontal, 10)
-            .padding(.vertical, 9)
-            .background(
-                RoundedRectangle(cornerRadius: 14, style: .continuous)
-                    .fill(Color(red: 1.0, green: 0.27, blue: 0.23).opacity(0.92))
-            )
+            StopSessionLabel()
         }
         .buttonStyle(.plain)
+    }
+}
+
+/// The red "Stop session" button face: the single-camera pill's control, and
+/// the Multiview console header's show-level stop (which stops every input).
+struct StopSessionLabel: View {
+    var body: some View {
+        HStack(spacing: 7) {
+            RoundedRectangle(cornerRadius: 2, style: .continuous)
+                .fill(Color.white.opacity(0.95))
+                .frame(width: 9, height: 9)
+            Text("Stop session")
+                .font(.system(size: 12, weight: .semibold))
+                .foregroundStyle(.white)
+        }
+        .padding(.horizontal, 10)
+        .padding(.vertical, 9)
+        .background(
+            RoundedRectangle(cornerRadius: 14, style: .continuous)
+                .fill(Color(red: 1.0, green: 0.27, blue: 0.23).opacity(0.92))
+        )
     }
 }
 
