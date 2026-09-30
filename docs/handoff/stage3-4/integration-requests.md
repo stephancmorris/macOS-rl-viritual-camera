@@ -1,64 +1,52 @@
 # Integration requests after Stage 2 and decisions
 
-These are proposed edits to existing files for a later integration round. None was applied on `s34/sol`.
+Director lifecycle repair review candidate, 30 September 2026. These are **future integration requirements**; no running-app hooks are implemented. All 37 decisions remain OPEN. `decision-review.md` and `event-authority-contract.md` are proposed semantics. The isolated constructor requires `DirectorAuthority(reviewPolicy: .conservative)`; selecting that profile in tests does not install or approve a production policy. The voice and hardware requests below remain separate, unapproved work.
 
-## `CinematicCoreMacOS/CinematicCoreMacOS/ShowCoordinator.swift`
+## Event sources and ownership
 
-Own one `DirectorAuthority` per show and revoke it in the same MainActor turn **before** manual dispatch, operator Take, Edit Live, and Stop. A proposed shape is:
+A future coordinator must own one authority and one `DirectorPreparation` lifecycle, serialize their mutations with the camera effect on MainActor, and retain authority generation history across show Stop/restart. Never reconstruct an active grant from `DirectorPreferences`. Exhaustion is terminal for that authority owner: do not reset its counter to recover. Retired session callbacks must be destroyed before replacing an owner.
 
-```swift
-private(set) var directorAuthority = DirectorAuthority()
+| Future source / owner | Exact foundation event | Ordering and recovery contract |
+| --- | --- | --- |
+| All camera/editorial command ingress / ShowCoordinator, including Wide, subject/shot/mode changes and cue/role edits | `.manualCommand` (or dedicated `.nominationChanged` / `.policyChanged`) | Apply before any admission check, including commands ultimately refused. Consume transition cancellations to retire queued/delayed Director work globally. Existing admitted R2 tracking continues. |
+| Every operator Take ingress / ShowCoordinator | `.operatorTake` | Apply before `makeTakeRequest`/`take` eligibility and output checks. A refused Take still pauses. After a committed Take, snapshot new roles and route. Never retarget old Preview work to new Program. |
+| Edit Live ingress / ShowCoordinator | `.editLive(true/false)` | Enter revokes and pauses before `setEditLive`. Exit removes inhibition only; it does not Resume. |
+| Inspector/navigation and label cosmetics / UI classification | `.navigation`, `.cosmeticEdit` | No revocation. Classify by semantic effect, not pointer focus. No new UI is in this repair. |
+| Bounded nominated-person observations / evidence adapter | `.evidenceAvailable(false/true)` | An explicit temporary unavailable/stale/ambiguous gap removes readiness and preparation eligibility without changing epoch. The snapshot's `evidenceAvailable` must also be false. Current adequate evidence may recover under the same grant; no new identity is inferred. |
+| Declared loss of nominated identity / evidence adapter | `.identityLost(channel)` | Revoke and latch Pause immediately. The adapter must explicitly declare loss based on a separately supplied study/product policy; this foundation invents no timeout, confidence-loss threshold or cross-camera identity association. |
+| Source lifecycle / CameraManager or capture admission owner | `.sourceLoss(channel)`, `.sourceRebound(channel)` | Emit on loss, restart or device rebind, including successful restart. Snapshot the changed `sourceGeneration` before future work is admitted. Recovery does not Resume. |
+| Downstream output lifecycle / output/router owner | `.outputFault` | Revoke and pause before reporting recovered health or dispatching new Director effects. HOLD/standby, raw-output prohibitions and committed Take behavior remain R2-owned. |
+| Pair/workload admission owner | `.admissionLost` | Revoke on loss/invalidation of the exact admitted workload/fingerprint. No simulator result may certify this gate. |
+| Aggregate lifecycle adapter | `.healthRestored` | Supply only after **all** relevant sources, output and admission prerequisites are current. This removes health inhibition, never the Pause latch. |
+| Behavior-affecting settings, role/cue or nomination owner | `.policyChanged`, `.nominationChanged` | Revoke/pause before mutation, increment corresponding revision, then publish one coherent snapshot. Cosmetic labels do not increment behavior revisions. |
+| Show lifecycle / ShowCoordinator | `.stopShow`, `.restart` | Stop retires all work and leaves Off before teardown. Restart remains Off. Neither saved level preferences nor Resume can activate Off. |
+| Explicit available-level enable or Resume / operator through coordinator | `.enable(level)`, `.resume` with `Prerequisites` | Read nominations, current Preview availability, source health, output health and admission in the same turn. All five booleans must be true. A superseding grant gets a new epoch. Enable cannot clear Pause; use explicit Resume. Auto Direct returns `.autoDirectUnqualified`, preserving current level/epoch; never substitute Auto Prepare. |
+| Deferred Pin, if separately chosen | `.pin(channel)`, `.unpin` | Pin retires work and pauses; unpin does not Resume. No Pin UI is added. |
 
-func dispatchManual(_ show: ShowCommand) -> CommandResult {
-    directorAuthority.apply(.manualCommand)
-    return dispatch(show)
-}
+Events and grant prerequisites are trusted adapter inputs, not facts this isolated module can independently discover. Missing or stale snapshots must fail closed. Keep a temporary evidence gap separate from a declared identity loss and from source/output/admission faults.
 
-func operatorTake(_ request: TakeRequest? = nil) -> TakeResult {
-    directorAuthority.apply(.operatorTake)
-    return take(request)
-}
+## Snapshots, requests and final effects
 
-func stopShowWithDirectorRevocation() {
-    directorAuthority.apply(.stopShow)
-    stopShow()
-}
-```
+`DirectorLiveState` must atomically contain authority, stable Program/Preview channel identities, Preview `ChannelRevisions` (source generation, control epoch, discrete shot revision), route generation, source-missing state, policy revision, nomination revision and current sufficient-evidence status. `ShowDirectorWorld` remains an unwired, read-only R2 snapshot bridge: it cannot supply nomination/policy revisions or identity freshness, and its evidence status defaults false. It is **insufficient to authorize preparation**. An eventual evidence adapter must supply bounded immutable observations, their monotonic age, retained nominated identity, confidence, framing settlement and motion, using explicitly selected study parameters. Ordinary renders and tracking interpolation do not increment `shotRevision` or refresh identity evidence.
 
-The actual call sites must route **every** UI/manual command and Take through these wrappers; wrappers alone do not provide safety if old call sites still use `dispatch` or `take`. On Edit Live, call `apply(.editLive(enabled))` before `setEditLive`; on source loss call `apply(.sourceLoss(id))`. Decide A1's pause behavior before exposing Resume. The current `ShowCoordinator.controlTargetRevision` changes on retarget, not every manual action; it cannot replace the director epoch.
+`DirectorProposal.id` identifies shot intent. `DirectorPreparation.Request.id` identifies a particular inert dispatch request, bound to its intent/context, `issuedAt` and caller-supplied maximum age. `propose` explicitly replaces work; it is not an authorization grant. The scheduler must not call it repeatedly to refresh a lease or reapply an already valid composition. Expire requests via `discardExpiredRequest(now:)`, discard refused/failed matching requests via `discard(request)`, and never silently renew them. Replacement and transition cancellations call `retire()` for queued work/composition metadata; they do not jump a crop or revoke R2 tracking ownership.
 
-For a future qualified Auto Direct, add one synchronous MainActor method that validates the director permit against fresh state then invokes the existing `take(request)` with no suspension between them. Reject a consumed permit and never queue a Take from an old frame. This is required because `TakeRequest` currently binds roles and route generation but no director authority or shot revision.
+At enqueue check `DirectorPreparation.validate(request, live: snapshot, now: clock)`, which uses `.prepare` context authority and the request lease rather than the intent age. `.propose` authority is insufficient. At the **final effect**, take a fresh snapshot and invoke `DirectorPreparation.commit(request, live: snapshot, now: clock, postRevisions: expectedAcceptedRevisions)` synchronously with the simulated sink effect. It checks current request identity, lease, action-specific authority, Preview ownership, source/control/shot revisions, route, policy/nomination revisions and adequate evidence again. Suggest only authorizes `.propose`; `.take` always refuses. A stale callback must not cancel a replacement request.
 
-## `CinematicCoreMacOS/CinematicCoreMacOS/OperatorCommand.swift`
+A future production integration needs an atomic sink boundary that checks these conditions, admits the actual R2 command, and records its accepted revisions in the same serialized turn with no intervening await. The current foundation `commit` records a **simulated acceptance**, not an asynchronous production command reservation: do not invoke it at enqueue or fabricate acceptance after a rejected sink. The future sink must report the exact accepted post-command source/control/shot revisions, with unchanged source generation and increased control/shot revisions. Verify this against the actual preset/mode sequence before using this API; it may require a single acknowledged preparation action rather than several public dispatch calls.
 
-Add origins only when integration is authorized:
+Only the matching stored receipt may pass `acknowledge(receipt, live:)`. The acknowledged `Composition` binds the accepted post-preparation revisions, so its own preset change does not invalidate it. Duplicate, replacement, old-epoch, role/route/source/policy/nomination and revision-mismatched acknowledgements refuse. ACK may arrive after the dispatch lease if the admitted result and context remain valid; it cannot authorize another effect. `refresh(live:evidence:parameters:)` recomputes readiness from current evidence without renewing the request or reapplying framing. Temporary evidence gaps retain composition metadata while withdrawing readiness; retired contexts cannot return after recovery.
 
-```swift
-enum Origin: Equatable { case operatorUI, safety, automaticRecovery, director, voice }
-```
+## Current Stage 2 incompatibilities
 
-The origin is an audit label, not an authorization grant. `CommandDispatcher.rejection` or the `ShowCoordinator` boundary must check a current director epoch and Preview role for `.director`, and a current manual-command cancellation generation for `.voice`. Voice currently uses the existing `operatorUI` origin because no voice origin exists. Keep Return to Wide and Stop priority above both.
+- `ShowCoordinator.controlTargetRevision` changes on retarget, not every camera/editorial intervention. Its existing `makeCommand`/`dispatch`/`take`/`setEditLive`/Stop call sites provide no universal pre-admission Director revocation boundary. Every ingress path must be accounted for before integration.
+- `CommandDispatcher` in `OperatorCommand.swift` has operator/safety/recovery origins, channel epoch admission and R2 tracking ownership. It has no Director origin, authority epoch, request ID, nomination/policy revisions or final Director check. Origin alone would remain an audit label, never a grant. Its accepted tracking must continue after retiring Director requests.
+- CameraManager exposes no atomic, Director-bound preset acceptance/acknowledgement with expected post revisions and no Director-specific delayed-effect cancellation. Multiple separate commands or async callbacks are not equivalent to one atomic preparation.
+- `TakeRequest` binds roles and route, not Director context. `ShowCoordinator.take` currently validates and commits synchronously. Any future qualified execution permit must be one-shot and checked in that same coordinator turn immediately before the existing Take checks. No permit issuance or automatic Take exists in this repair.
+- `NextShotStatus.DirectorSection` still has `.off/.suggest/.auto`, no distinct Auto Prepare/Auto Direct or active/paused/inhibited state. `section()` is a legacy unwired projection; it is not a complete product status snapshot. UI changes require explicit U1/U2 choices. Director readiness must never disable an otherwise legal manual moving-shot R2 Take.
+- `choosePreparation` selects useful Preview candidates before minimum Program dwell and permits movement; `recommendationDue` is future advisory timing only. Wide reminders and maximum dwell reasons do not authorize cuts. Historical `.proposed` and preference numbers remain unapproved, inconsistent study candidates needing reconciliation after decisions.
 
-## `CinematicCoreMacOS/CinematicCoreMacOS/CameraManager.swift`
-
-Expose an acknowledgement of an accepted director Preview preparation with the resulting `ChannelRevisions`, and a cancellation path for director-owned *future* effects after manual override. Proposed signature:
-
-```swift
-func applyDirectorPreview(_ action: OperatorCommand.Action,
-                          expected: ChannelRevisions,
-                          authorityEpoch: UInt64) -> Result<ChannelRevisions, CommandResult>
-func cancelDirectorContinuations(before authorityEpoch: UInt64)
-```
-
-Validate the epoch and Preview ownership in `ShowCoordinator` immediately before this call. Record the accepted post-command epoch and shot revision; otherwise the proposal validator would mistake its own preparation for operator interference. Do not stop already admitted R2 tracking or jump the current crop on cancellation.
-
-## `CinematicCoreMacOS/CinematicCoreMacOS/Console/NextShotStatus.swift` and `ConsoleSnapshot.swift`
-
-The R2 seam currently has only `.off`, `.suggest`, `.auto` and `NextShotStatus.make` always sets `director: nil`. After AD-UI decisions, split `.auto` into `.autoPrepare` and `.autoDirect`, add requested level, pause/pin reason, proposal identity/shot, and authority epoch to a single snapshot, then publish it atomically with route state. Keep R2 `TakeAvailability` as the manual Take reason; director editorial readiness is separate.
-
-## UI command sites (`OperatorPill.swift`, `ContentView.swift`, and console controls)
-
-Call the manual-revoking coordinator boundary before camera actions, Return to Wide, and Take. Add explicit enable/pause/resume/pin controls only after A1/A2 and AD-UI decisions. Never let a stored preference automatically restore Auto Direct. Show the actual current authority and Preview proposal, not a speculative next cut.
+Integration/rehearsal still requires explicit product choices, the Stage 2 named-rig real-camera/downstream-output matrix and independent Director workload evidence. `origin/r2/sol:reports/release-2/multi-qa.md` still says **Not run**. Synthetic replay is no substitute. Do not enable motion, microphone or Auto Direct as part of these requests.
 
 ## Voice dispatch and transcript integration
 

@@ -11,13 +11,14 @@ import Testing
                                                        movement: 0, isWide: false)
         let early = DirectorShotPolicy.Timeline(programShot: a, programStartedAt: 0,
             lastWideAt: 0, history: [], candidates: [candidate], now: 7)
-        #expect(DirectorShotPolicy.choose(early, preview: .b, parameters: .proposed) == .abstain(.minimumDuration))
+        #expect(DirectorShotPolicy.choosePreparation(early, preview: .b, parameters: .proposed) == .chosen(candidate, "subject evidence"))
+        #expect(!DirectorShotPolicy.recommendationDue(early, parameters: .proposed))
         let repeated = DirectorShotPolicy.Timeline(programShot: a, programStartedAt: 0,
             lastWideAt: 0, history: [.init(shot: b, endedAt: 5)], candidates: [candidate], now: 10)
-        #expect(DirectorShotPolicy.choose(repeated, preview: .b, parameters: .proposed) == .abstain(.repetition))
+        #expect(DirectorShotPolicy.choosePreparation(repeated, preview: .b, parameters: .proposed) == .abstain(.repetition))
         let clear = DirectorShotPolicy.Timeline(programShot: a, programStartedAt: 0,
             lastWideAt: 0, history: [.init(shot: b, endedAt: 5)], candidates: [candidate], now: 26)
-        guard case .chosen(let selected, _) = DirectorShotPolicy.choose(clear, preview: .b, parameters: .proposed) else {
+        guard case .chosen(let selected, _) = DirectorShotPolicy.choosePreparation(clear, preview: .b, parameters: .proposed) else {
             Issue.record("expected candidate"); return
         }
         #expect(selected.shot == b)
@@ -43,15 +44,15 @@ import Testing
         let invalid = DirectorShotPolicy.Parameters(minimumShotDuration: .nan,
             maximumShotDuration: 35, wideCadence: 90, repetitionWindow: 20,
             maximumMovement: 0.1, cutOnMotionAllowed: false)
-        #expect(DirectorShotPolicy.choose(timeline, preview: .b, parameters: invalid) == .abstain(.invalidInput))
+        #expect(DirectorShotPolicy.choosePreparation(timeline, preview: .b, parameters: invalid) == .abstain(.invalidInput))
         let badClock = DirectorShotPolicy.Timeline(programShot: a, programStartedAt: 0,
             lastWideAt: 0, history: [], candidates: [candidate], now: .infinity)
-        #expect(DirectorShotPolicy.choose(badClock, preview: .b, parameters: .proposed) == .abstain(.invalidInput))
+        #expect(DirectorShotPolicy.choosePreparation(badClock, preview: .b, parameters: .proposed) == .abstain(.invalidInput))
         let badMovement = DirectorShotPolicy.Candidate(channel: .b, shot: b, subjectConfidence: 0.9,
             movement: .nan, isWide: false)
         let badCandidate = DirectorShotPolicy.Timeline(programShot: a, programStartedAt: 0,
             lastWideAt: 0, history: [], candidates: [badMovement], now: 10)
-        #expect(DirectorShotPolicy.choose(badCandidate, preview: .b, parameters: .proposed) == .abstain(.noPreview))
+        #expect(DirectorShotPolicy.choosePreparation(badCandidate, preview: .b, parameters: .proposed) == .abstain(.noPreview))
     }
 
     @Test func tiesResolveIndependentOfCandidateOrder() {
@@ -61,7 +62,7 @@ import Testing
         let candidates = shots.map { DirectorShotPolicy.Candidate(channel: .b, shot: $0,
             subjectConfidence: 0.9, movement: 0, isWide: false) }
         func selected(_ values: [DirectorShotPolicy.Candidate]) -> DirectorShotPolicy.Decision {
-            DirectorShotPolicy.choose(.init(programShot: a, programStartedAt: 0,
+            DirectorShotPolicy.choosePreparation(.init(programShot: a, programStartedAt: 0,
                 lastWideAt: 0, history: [], candidates: values, now: 10),
                 preview: .b, parameters: .proposed)
         }
