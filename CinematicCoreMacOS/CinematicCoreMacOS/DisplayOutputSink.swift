@@ -2,10 +2,16 @@
 //  DisplayOutputSink.swift
 //  CinematicCoreMacOS
 //
-//  Program-output route: a borderless, fullscreen, clean-feed window on a
-//  selected display. Feeds an ATEM switcher via the Mac's HDMI port →
-//  HDMI-to-SDI converter. No genlock — the window free-runs at the
-//  compositor's refresh; the downstream ATEM frame-syncs.
+//  "Direct output (HDMI / USB-C)": a borderless, fullscreen, clean-feed window
+//  on the port the ATEM chain is plugged into (Mac HDMI → HDMI-to-SDI
+//  converter → ATEM). Behaves like a camera's HDMI out:
+//  - a port picked explicitly is reserved while this route is selected: it
+//    shows black whenever Alfie is not live, never the Mac desktop;
+//  - at Start the port is switched to the show standard (e.g. 1080p50) for
+//    this app only (macOS restores it if Alfie quits) and kept there until
+//    the route is deselected.
+//  No genlock — the window free-runs at the compositor's refresh; the
+//  downstream ATEM frame-syncs.
 //
 
 import AppKit
@@ -33,6 +39,16 @@ final class DisplayOutputSink: ProgramOutputSink {
 
     private var isCaptureRunning = false
     private var lastError: String?
+    /// This route is the operator's chosen destination.
+    private var isSelected = false
+    private let formatLock = DirectOutputFormatLock()
+
+    /// A port chosen explicitly (not "Automatic") is reserved: it carries
+    /// standby black while Alfie is not live. Automatic never takes over a
+    /// screen that merely happens to be plugged in.
+    private var reservesPort: Bool {
+        UserDefaults.standard.integer(forKey: ProgramDisplaySelection.userDefaultsKey) != 0
+    }
 
     var onStateChange: (() -> Void)?
 
@@ -82,22 +98,25 @@ final class DisplayOutputSink: ProgramOutputSink {
     /// back, so presentation stays unknown (measuring the display link is the
     /// SCREEN-LINK card, not this sink).
     var presentationObservability: String {
-        "Program Display: handoff = IOSurface assigned to the program window's layer; the compositor does not report when it is shown"
+        "Direct output: handoff = IOSurface assigned to the program window's layer; the compositor does not report when it is shown"
     }
 
     var summary: String {
         guard let screen = targetScreen else {
-            return "No program display is connected. Select a display in Settings."
+            return "No output port is connected. Choose the HDMI / USB-C output in Settings."
         }
         if program.isShowing {
-            return "Program feed is fullscreen on “\(screen.localizedName)”."
+            return "Program is live on “\(screen.localizedName)”."
         }
-        return "Program display “\(screen.localizedName)” is ready. Start capture to go fullscreen."
+        if isSelected && reservesPort {
+            return "“\(screen.localizedName)” is reserved: sending black until the show starts."
+        }
+        return "Output port “\(screen.localizedName)” is ready. Start the show to send Program."
     }
 
     var detail: String {
         guard let screen = targetScreen else {
-            return "The selected program display is not present. Program output is paused until it is reconnected; Alfie does not move Program to another output during a show."
+            return "The selected output port is not connected. Program output is paused until it is reconnected; Alfie does not move Program to another output during a show."
         }
         let size = screen.frame.size
         return "Clean fullscreen feed on “\(screen.localizedName)” (\(Int(size.width))×\(Int(size.height)) pt). Feed the display's HDMI into an HDMI-to-SDI converter for the ATEM."
@@ -124,8 +143,19 @@ final class DisplayOutputSink: ProgramOutputSink {
         onStateChange?()
     }
 
+    func setSelected(_ selected: Bool) {
+        guard selected != isSelected else { return }
+        isSelected = selected
+        // Leaving this route hands the port back exactly as it was.
+        if !selected { formatLock.release() }
+        refreshWindowPresence()
+    }
+
     func updateCaptureStatus(isRunning: Bool) {
         isCaptureRunning = isRunning
+        if isRunning, let id = targetDisplayID {
+            formatLock.lock(displayID: id, frameRate: ShowStandard.activeOrCurrent.frameRate)
+        }
         refreshWindowPresence()
     }
 
@@ -149,13 +179,23 @@ final class DisplayOutputSink: ProgramOutputSink {
 
     // MARK: - Window presence
 
-    /// Single source of truth for whether the program window should exist. The
-    /// window is shown iff capture is running and the target screen is present;
-    /// otherwise it is torn down. Called from connect/disconnect, capture-status
-    /// changes, and screen-parameter changes, so no path leaks a window.
+    /// Single source of truth for whether the program window should exist:
+    /// live while capture runs on this route; standby black while this route
+    /// is selected with an explicitly reserved port; otherwise torn down.
+    /// Called from connect/disconnect, selection and capture-status changes,
+    /// and screen-parameter changes, so no path leaks a window.
     private func refreshWindowPresence() {
-        if isCaptureRunning, let screen = targetScreen {
+        guard let screen = targetScreen else {
+            program.teardown()
+            lastSentBuffer = nil
+            return
+        }
+        if isCaptureRunning {
             program.present(on: screen)
+        } else if isSelected && reservesPort {
+            program.present(on: screen)
+            program.showStandby()
+            lastSentBuffer = nil
         } else {
             program.teardown()
             lastSentBuffer = nil
@@ -181,67 +221,41 @@ final class DisplayOutputSink: ProgramOutputSink {
 
     // MARK: - Bring-up check
 
-    /// Static config check: the target display's current mode vs. the show
-    /// standard. Warns when the refresh rate differs from the standard's frame
-    /// rate by more than 0.5 Hz — a cheap correctness gate, not runtime
-    /// telemetry (this route has no playout clock of its own).
+    /// The output port's current format vs. the show standard, including what
+    /// the Start-time format lock did. A config check, not runtime telemetry
+    /// (this route has no playout clock of its own).
     private func displayModeCheck() -> OutputBringUpCheck {
+        let title = "Direct output · Format"
         guard let id = targetDisplayID, let screen = targetScreen else {
             return OutputBringUpCheck(
-                id: "display.mode",
-                title: "Program Display · Mode",
-                status: "Missing",
-                detail: "The selected program display is not connected. Program output is paused until it returns; choose another destination only while stopped.",
-                level: .warning
-            )
+                id: "display.mode", title: title, status: "Missing",
+                detail: "The selected output port is not connected. Program output is paused until it returns; choose another destination only while stopped.",
+                level: .warning)
         }
-
         let standard = ShowStandard.activeOrCurrent
         guard let mode = CGDisplayCopyDisplayMode(id) else {
             return OutputBringUpCheck(
-                id: "display.mode",
-                title: "Program Display · Mode",
-                status: "Present",
-                detail: "“\(screen.localizedName)” is connected. Could not read its current display mode; verify it is set to \(standard.title) in System Settings → Displays.",
-                level: .info
-            )
+                id: "display.mode", title: title, status: "Present",
+                detail: "“\(screen.localizedName)” is connected. Could not read its format; Alfie will try to set \(standard.title) at Start.",
+                level: .info)
         }
-
-        let width = mode.pixelWidth
-        let height = mode.pixelHeight
-        let refresh = mode.refreshRate // Hz; 0 for some internal/variable panels.
-        let target = standard.frameRate
-
-        // A reported refresh of 0 (common on built-in panels) is not a mismatch
-        // signal — treat it as "unknown" rather than warning falsely.
-        let refreshMismatch = refresh > 0 && abs(refresh - target) > 0.5
-        let statusText: String
-        if refresh > 0 {
-            statusText = String(format: "%d×%d @ %.2f Hz", width, height, refresh)
-        } else {
-            statusText = "\(width)×\(height)"
-        }
-
+        let current = DirectOutputFormat.Mode(mode)
+        let statusText = current.title
         let detail: String
         let level: OutputCheckLevel
-        if refreshMismatch {
-            detail = String(
-                format: "“%@” is running at %.2f Hz but the show standard is %@ (%.2f Hz). Set the display's resolution and refresh to %@ in System Settings → Displays.",
-                screen.localizedName, refresh, standard.title, target, standard.title
-            )
+        if DirectOutputFormat.matches(current, frameRate: standard.frameRate) {
+            detail = formatLock.isLocked(displayID: id)
+                ? "“\(screen.localizedName)” is set to \(statusText) for this show; macOS restores its own setting when you switch output or quit Alfie."
+                : "“\(screen.localizedName)” is at \(statusText), matching \(standard.title)."
+            level = .ok
+        } else if let failure = formatLock.lastFailure {
+            detail = "“\(screen.localizedName)” is at \(statusText): \(failure) The ATEM frame-syncs, but motion may judder."
             level = .warning
         } else {
-            detail = "“\(screen.localizedName)” is set to \(statusText). Confirm it matches the show standard (\(standard.title)) in System Settings → Displays."
-            level = .ok
+            detail = "“\(screen.localizedName)” is at \(statusText). Alfie switches it to \(standard.title) when the show starts."
+            level = .info
         }
-
-        return OutputBringUpCheck(
-            id: "display.mode",
-            title: "Program Display · Mode",
-            status: statusText,
-            detail: detail,
-            level: level
-        )
+        return OutputBringUpCheck(id: "display.mode", title: title, status: statusText, detail: detail, level: level)
     }
 }
 
@@ -349,6 +363,11 @@ private final class ProgramDisplayWindowController {
         return true
     }
 
+    /// Black, no picture: what a reserved port carries while Alfie is not live.
+    func showStandby() {
+        contentView.display(nil)
+    }
+
     /// Close and release the window. Idempotent — safe to call when nothing is
     /// up. Clears the layer so no stale surface is held.
     func teardown() {
@@ -359,5 +378,98 @@ private final class ProgramDisplayWindowController {
         window.close()
         self.window = nil
         presentedDisplayID = nil
+    }
+}
+
+// MARK: - Format lock
+
+/// Picking the output format: 1920×1080 pixels at the show rate, preferring a
+/// 1:1 (non-Retina) mode — what an HDMI-to-SDI converter or ATEM expects.
+nonisolated enum DirectOutputFormat {
+    struct Mode: Equatable, Sendable {
+        let width: Int
+        let height: Int
+        let pixelWidth: Int
+        let pixelHeight: Int
+        let refreshRate: Double
+
+        var title: String {
+            refreshRate > 0
+                ? String(format: "%d×%d @ %.2f Hz", pixelWidth, pixelHeight, refreshRate)
+                : "\(pixelWidth)×\(pixelHeight)"
+        }
+
+        init(width: Int, height: Int, pixelWidth: Int, pixelHeight: Int, refreshRate: Double) {
+            self.width = width; self.height = height
+            self.pixelWidth = pixelWidth; self.pixelHeight = pixelHeight
+            self.refreshRate = refreshRate
+        }
+
+        init(_ mode: CGDisplayMode) {
+            self.init(width: mode.width, height: mode.height, pixelWidth: mode.pixelWidth,
+                      pixelHeight: mode.pixelHeight, refreshRate: mode.refreshRate)
+        }
+    }
+
+    /// 0.02 Hz separates 59.94 from 60 while tolerating reported rounding.
+    static func matches(_ mode: Mode, frameRate: Double) -> Bool {
+        mode.pixelWidth == 1920 && mode.pixelHeight == 1080 && abs(mode.refreshRate - frameRate) < 0.02
+    }
+
+    /// Index of the mode to use, or nil if none carries 1080 at the show rate.
+    static func choose(_ modes: [Mode], frameRate: Double) -> Int? {
+        let candidates = modes.indices.filter { matches(modes[$0], frameRate: frameRate) }
+        return candidates.first { modes[$0].width == modes[$0].pixelWidth } ?? candidates.first
+    }
+}
+
+/// Applies the show format to the output port for this app only
+/// (`.forAppOnly`: macOS reverts it if Alfie quits or crashes) and releases it
+/// when the route is deselected. Never touches the operator's own screen:
+/// the target is always the resolved output port.
+@MainActor
+final class DirectOutputFormatLock {
+    private(set) var lockedDisplayID: CGDirectDisplayID?
+    /// Why the last lock could not set the show format, for the bring-up check.
+    private(set) var lastFailure: String?
+    private static let logger = Logger(subsystem: "com.alfie", category: "DisplayOutput")
+
+    func isLocked(displayID: CGDirectDisplayID) -> Bool { lockedDisplayID == displayID }
+
+    func lock(displayID: CGDirectDisplayID, frameRate: Double) {
+        if let locked = lockedDisplayID, locked != displayID { release() }
+        lastFailure = nil
+        if let current = CGDisplayCopyDisplayMode(displayID),
+           DirectOutputFormat.matches(.init(current), frameRate: frameRate) { return }
+
+        let options = [kCGDisplayShowDuplicateLowResolutionModes: kCFBooleanTrue] as CFDictionary
+        let modes = (CGDisplayCopyAllDisplayModes(displayID, options) as? [CGDisplayMode]) ?? []
+        guard let index = DirectOutputFormat.choose(modes.map(DirectOutputFormat.Mode.init), frameRate: frameRate) else {
+            lastFailure = String(format: "the device offers no 1920×1080 mode at %.2f Hz.", frameRate)
+            Self.logger.warning("Direct output: no 1080 mode at \(frameRate, privacy: .public) Hz on display \(displayID)")
+            return
+        }
+        var config: CGDisplayConfigRef?
+        guard CGBeginDisplayConfiguration(&config) == .success, let config else {
+            lastFailure = "macOS refused the display change."
+            return
+        }
+        CGConfigureDisplayWithDisplayMode(config, displayID, modes[index], nil)
+        let result = CGCompleteDisplayConfiguration(config, .forAppOnly)
+        if result == .success {
+            lockedDisplayID = displayID
+            Self.logger.notice("Direct output: set \(DirectOutputFormat.Mode(modes[index]).title, privacy: .public) on display \(displayID)")
+        } else {
+            lastFailure = "macOS refused the display change (\(result.rawValue))."
+            Self.logger.error("Direct output: display change failed \(result.rawValue)")
+        }
+    }
+
+    func release() {
+        guard lockedDisplayID != nil else { return }
+        // App-only changes are not permanent; this returns the port to the
+        // operator's own System Settings format.
+        CGRestorePermanentDisplayConfiguration()
+        lockedDisplayID = nil
     }
 }

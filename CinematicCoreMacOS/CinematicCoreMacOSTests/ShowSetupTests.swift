@@ -232,7 +232,7 @@ struct ShowSetupTests {
         #expect(store.storedPairRecords().isEmpty)
         let failure = reason(.capture, "B delivered 25 fps")
         let fingerprint = AdmissionFingerprint(
-            machineModel: machine.model, osVersion: machine.osVersion, showStandard: "1080p50", route: "Program Display",
+            machineModel: machine.model, osVersion: machine.osVersion, showStandard: "1080p50", route: ProgramOutputManager.Route.display.title,
             inputs: [.init(channel: "A", deviceModelID: wide.modelID, mode: "track"),
                      .init(channel: "B", deviceModelID: side.modelID, mode: "wide")])
         store.record(.unsupported([failure]), for: fingerprint)

@@ -135,6 +135,10 @@ protocol ProgramOutputSink: AnyObject {
     func disconnect()
     func reconnect()
     func updateCaptureStatus(isRunning: Bool)
+    /// Whether this route is the operator's chosen destination (Direct output
+    /// reserves its port while chosen). Called on every routing decision;
+    /// implementations must be idempotent.
+    func setSelected(_ selected: Bool)
     @discardableResult
     func sendFrame(pixelBuffer: CVPixelBuffer, timestamp: Double) -> Bool
 }
@@ -149,6 +153,7 @@ extension ProgramOutputSink {
         "\(route.title): handoff = the route accepted the frame; when the downstream consumer shows it is not reported to Alfie"
     }
     func reconnect() {}
+    func setSelected(_ selected: Bool) {}
 }
 
 @MainActor
@@ -221,7 +226,7 @@ final class ProgramOutputManager: ObservableObject {
             case .virtualCamera:
                 return "Virtual Camera"
             case .display:
-                return "Program Display"
+                return "Direct output (HDMI / USB-C)"
             case .rehearsal:
                 return "Rehearsal · no output"
             }
@@ -987,6 +992,8 @@ final class ProgramOutputManager: ObservableObject {
             resolvedRoute = nil
         }
 
+        for sink in sinks { sink.setSelected(sink.route == preferredRoute) }
+
         activeRoute = isCaptureRunning ? resolvedRoute : nil
         if isCaptureRunning, sessionRoute == nil { sessionRoute = activeRoute }
 
@@ -1157,7 +1164,7 @@ struct ProgramDisplayOption: Identifiable {
     static func current() -> [ProgramDisplayOption] {
         let uiID = ProgramDisplaySelection.alfieUIDisplayID()
         var options: [ProgramDisplayOption] = [
-            ProgramDisplayOption(id: 0, label: "Automatic (first external)")
+            ProgramDisplayOption(id: 0, label: "Automatic (first external · not reserved)")
         ]
         for screen in NSScreen.screens {
             let displayID = ProgramDisplaySelection.displayID(for: screen)
@@ -1165,9 +1172,17 @@ struct ProgramDisplayOption: Identifiable {
             // Spelled out rather than just marked: selecting this display is
             // refused by `resolvedTargetDisplayID()`, because the program window
             // would cover the dashboard it is being driven from.
-            let label = isUI
-                ? "\(screen.localizedName) (Alfie UI — cannot be used)"
-                : screen.localizedName
+            let label: String
+            if isUI {
+                label = "\(screen.localizedName) (Alfie UI — cannot be used)"
+            } else if let mode = CGDisplayCopyDisplayMode(displayID) {
+                // What the converter / ATEM receives now, so the operator can
+                // tell the output port from an ordinary monitor.
+                let rate = mode.refreshRate > 0 ? String(format: " · %.2f Hz", mode.refreshRate) : ""
+                label = "\(screen.localizedName) · \(mode.pixelWidth)×\(mode.pixelHeight)\(rate)"
+            } else {
+                label = screen.localizedName
+            }
             options.append(ProgramDisplayOption(id: Int(displayID), label: label))
         }
         return options
@@ -1220,14 +1235,14 @@ struct ProgramOutputSettingsView<SystemExtensionManager: SystemExtensionStatusPr
             }
 
             if programOutput.configuredRoutes.contains(.display) {
-                Section("Program Display") {
-                    Picker("Display", selection: $programDisplayID) {
+                Section("Direct output (HDMI / USB-C)") {
+                    Picker("Output port", selection: $programDisplayID) {
                         ForEach(availableDisplays) { option in
                             Text(option.label).tag(option.id)
                         }
                     }
 
-                    Text("Enable Focus / Do Not Disturb so notifications can't bleed onto the program feed. Set this display's resolution and refresh to the show standard (e.g. 1080p50) in System Settings → Displays.")
+                    Text("Pick the port your HDMI-to-SDI converter or ATEM is plugged into. A picked port is reserved while this output is selected: it shows black until the show starts, then Program. At Start, Alfie switches it to the show standard (e.g. 1080p50) and macOS restores its own setting when you switch output or quit. Turn on Focus / Do Not Disturb so notifications can't reach the feed.")
                         .font(.caption)
                         .foregroundStyle(.secondary)
                         .fixedSize(horizontal: false, vertical: true)

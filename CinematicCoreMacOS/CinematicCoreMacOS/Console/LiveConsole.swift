@@ -278,7 +278,7 @@ final class LiveConsoleModel: ObservableObject, ConsoleActions {
         case .tooSoon: return "Take ignored: too soon after the last Take"
         case .outputRefused:
             guard show.programOutput.activeRoute != nil else {
-                return "No output destination: Program Display needs a second screen and the virtual camera isn't connected. Program is unchanged."
+                return "No output destination: Direct output has no HDMI / USB-C port connected and the virtual camera isn't connected. Program is unchanged."
             }
             return "The output did not accept the frame. Program is unchanged."
         case .notEligible:

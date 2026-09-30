@@ -409,7 +409,7 @@ struct StoredPairRecord: Equatable {
     var osVersion: String
     /// ShowStandard.title, e.g. "1080p50".
     var showStandard: String
-    /// Route title, e.g. "Program Display"; nil when none was active.
+    /// Route title, e.g. "Direct output (HDMI / USB-C)"; nil when none was active.
     var route: String?
     /// Camera model per channel letter ("?" when the channel had no device).
     var inputs: [String: String]
