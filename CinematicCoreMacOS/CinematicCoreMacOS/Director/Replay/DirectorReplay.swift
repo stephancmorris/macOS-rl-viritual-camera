@@ -219,12 +219,14 @@ nonisolated struct DirectorReplay {
                     history: history, candidates: [candidate], now: now)
                 if case .chosen(let choice, let reason) = DirectorShotPolicy.choose(timeline,
                     preview: preview, parameters: parameters) {
-                    pending = DirectorProposal(target: preview, preview: preview, shot: choice.shot,
+                    if let proposal = DirectorProposal(target: preview, preview: preview, shot: choice.shot,
                         reason: reason, authorityEpoch: authority.epoch,
-                        revisions: channel.revisions, routeGeneration: route, createdAt: now)
-                    proposalID += 1; pendingID = proposalID
-                    labelled += 1
-                    if !channel.intended { wrong += 1 }
+                        revisions: channel.revisions, routeGeneration: route, createdAt: now) {
+                        pending = proposal
+                        proposalID += 1; pendingID = proposalID
+                        labelled += 1
+                        if !channel.intended { wrong += 1 }
+                    }
                 }
             }
             if authority.paused && pending != nil { pausedProposals += 1 }

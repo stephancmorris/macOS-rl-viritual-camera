@@ -2,14 +2,14 @@ import Testing
 @testable import Alfie
 
 @MainActor struct DirectorProposalTests {
-    @Test func staleDimensions() {
+    @Test func staleDimensions() throws {
         var authority = DirectorAuthority()
         authority.apply(.enable(.autoPrepare))
         let revisions = ChannelRevisions(sourceGeneration: 1, controlEpoch: 2, shotRevision: 3)
         let shot = DirectorShot(preset: .waistUp, mode: .autoTracking, zoomRung: 1)
-        let p = DirectorProposal(target: .b, preview: .b, shot: shot, reason: "subject",
+        let p = try #require(DirectorProposal(target: .b, preview: .b, shot: shot, reason: "subject",
                                  authorityEpoch: authority.epoch, revisions: revisions,
-                                 routeGeneration: 4, createdAt: 10)
+                                 routeGeneration: 4, createdAt: 10))
         let good = DirectorLiveState(authority: authority, program: .a, preview: .b,
                                      revisions: revisions, routeGeneration: 4, sourceMissing: false)
         #expect(DirectorProposalValidator.validate(p, against: good, now: 11, maximumAge: 2) == .valid)
@@ -26,7 +26,14 @@ import Testing
                                       .shotChangedByOperator, .targetBecameProgram, .sourceMissing, .expired]))
     }
 
-    @Test func malformedProposalTimeAndExpiryFailClosed() {
+    @Test func proposalForANonPreviewChannelIsRefusedNotACrash() {
+        let revisions = ChannelRevisions(sourceGeneration: 1, controlEpoch: 1, shotRevision: 1)
+        let shot = DirectorShot(preset: .wide, mode: .manualCrop, zoomRung: 0)
+        #expect(DirectorProposal(target: .a, preview: .b, shot: shot, reason: "program", authorityEpoch: 0,
+                                 revisions: revisions, routeGeneration: 0, createdAt: 0) == nil)
+    }
+
+    @Test func malformedProposalTimeAndExpiryFailClosed() throws {
         var authority = DirectorAuthority()
         authority.apply(.enable(.autoPrepare))
         let revisions = ChannelRevisions(sourceGeneration: 1, controlEpoch: 1, shotRevision: 1)
@@ -34,12 +41,12 @@ import Testing
             revisions: revisions, routeGeneration: 1, sourceMissing: false)
         let shot = DirectorShot(preset: .wide, mode: .manualCrop, zoomRung: 0)
         for createdAt in [Double.nan, Double.infinity, -Double.infinity] {
-            let proposal = DirectorProposal(target: .b, preview: .b, shot: shot, reason: "test",
-                authorityEpoch: authority.epoch, revisions: revisions, routeGeneration: 1, createdAt: createdAt)
+            let proposal = try #require(DirectorProposal(target: .b, preview: .b, shot: shot, reason: "test",
+                authorityEpoch: authority.epoch, revisions: revisions, routeGeneration: 1, createdAt: createdAt))
             #expect(DirectorProposalValidator.validate(proposal, against: live, now: 5, maximumAge: 2) == .stale([.expired]))
         }
-        let proposal = DirectorProposal(target: .b, preview: .b, shot: shot, reason: "test",
-            authorityEpoch: authority.epoch, revisions: revisions, routeGeneration: 1, createdAt: 4)
+        let proposal = try #require(DirectorProposal(target: .b, preview: .b, shot: shot, reason: "test",
+            authorityEpoch: authority.epoch, revisions: revisions, routeGeneration: 1, createdAt: 4))
         for maximumAge in [Double.nan, Double.infinity, -Double.infinity, -1] {
             #expect(DirectorProposalValidator.validate(proposal, against: live, now: 5, maximumAge: maximumAge) == .stale([.expired]))
         }

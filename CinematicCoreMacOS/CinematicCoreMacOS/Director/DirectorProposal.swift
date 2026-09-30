@@ -17,10 +17,12 @@ nonisolated struct DirectorProposal: Equatable, Sendable {
     let routeGeneration: UInt64
     let createdAt: TimeInterval
 
-    init(target: ChannelID, preview: ChannelID, shot: DirectorShot, reason: String,
-         authorityEpoch: UInt64, revisions: ChannelRevisions,
-         routeGeneration: UInt64, createdAt: TimeInterval) {
-        precondition(target == preview, "Director proposals may target Preview only")
+    /// nil unless `target` is the Preview channel: a proposal for Program (or
+    /// any non-Preview input) is refused, never a crash in a live show.
+    init?(target: ChannelID, preview: ChannelID, shot: DirectorShot, reason: String,
+          authorityEpoch: UInt64, revisions: ChannelRevisions,
+          routeGeneration: UInt64, createdAt: TimeInterval) {
+        guard target == preview else { return nil }
         self.target = target; self.shot = shot; self.reason = reason
         self.authorityEpoch = authorityEpoch; self.revisions = revisions
         self.routeGeneration = routeGeneration; self.createdAt = createdAt
