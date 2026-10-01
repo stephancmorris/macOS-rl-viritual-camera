@@ -1,37 +1,31 @@
-# Alfie — Autonomous Live Framing Intelligence Engine
+# Alfie — operator-controlled live framing
 
-An autonomous virtual camera operator for church-stage livestreams. Alfie ingests one fixed wide 4K shot of the stage, finds the active speaker, and publishes a digitally panned and zoomed 1080p50 program crop as a macOS virtual camera (plus a fullscreen Program Display feed for HDMI→converter chains). A volunteer operator can always override it: tap-to-lock a subject, Return to Wide, Resume Tracking.
+Alfie frames camera pictures into one Program feed. The operator chooses the subject and composition. Current Stage code provides Camera A/B Program/Preview, manual Take and deliberate Edit Live; Webcam uses the single-camera workflow. Automatic Director cuts, active-speaker listening, hardware motion and microphone control are not integrated.
 
-## System Architecture
+See the [current candidate operator guide](docs/user-guide/README.md). It is source-checked against `7691e6e`; actual installation, 1280-point walkthrough, screenshots and real-camera/downstream-output qualification remain pending. This README describes implemented code, not a certified rig or released build.
 
-**Input**
-4K video feed (3840×2160) from a stationary camera via a UVC capture card (e.g. Elgato Cam Link 4K). Capture runs at the persisted show standard — default **1080p50**, switchable to 59.94/60.
+## Inputs and framing
 
-**Processing (macOS host app)**
-1. **Perception:** Apple's Vision framework (`VNDetectHumanRectanglesRequest`, `VNDetectHumanBodyPoseRequest`, `VNDetectFaceLandmarksRequest`) on a ≤1080p proxy, off the frame path, scoped to an ROI around the locked subject.
-2. **Control:** `ShotComposer` — deterministic, rule-based framing (tap-to-lock acquisition with a face-signature gallery, Steady Follow hold-band, HOLD → wide → face-print re-acquire). An RL agent exists as scaffolding behind a developer flag and is not the shipping controller.
-3. **Rendering:** Core Image crop-and-scale (Metal-backed `CIContext`) to 1920×1080, rendered off the main thread with critically damped spring interpolation.
+Camera/capture devices supply the delivered resolution and rate. Stage framing benefits from a clean wide 4K source; Webcam supports a closer source. Check actual delivery rather than advertised camera specifications. Capture follows the session show standard: default 1080p50, with 59.94/60 options. The active standard is frozen until Stop/restart.
 
-**Output**
-- **Program Display (default route):** borderless fullscreen window on a chosen display, for an HDMI→SDI converter into an ATEM. Blackmagic Desktop Video SDK integration is *not* implemented; SDI remains deferred.
-- **Virtual Camera:** frames cross XPC as IOSurface IDs to a CoreMediaIO system extension ("Alfie" camera) that drains at the show standard and feeds OBS/ATEM Software Control/Zoom/NDI tools.
+Vision body/pose/face observations support operator-selected subject tracking. ShotComposer provides rule-based framing and recovery; the RL agent remains developer scaffolding. Core Image renders the crop to Program. Detection confidence alone is not qualified identity readiness.
 
-## Hardware Requirements
+With two inputs, prepare Preview without changing Program, then Take explicitly. A successful Take swaps roles. Controls normally target Preview; Edit Live targets Program deliberately. Return to Wide affects the controlled camera, so widening Preview does not widen Program. C/D slots are reserved; three/four live inputs remain separate follow-on work.
 
-- **Host:** Apple Silicon Mac (M1/M2/M3/M4…)
-- **Camera:** 4K-capable camera
-- **Input Device:** Elgato Cam Link 4K or equivalent UVC capture card
+## One routed output
 
-## Development Setup
+- Program Display uses a selected display for HDMI/converter/switcher chains.
+- Virtual Camera uses a local CoreMediaIO system extension and IOSurface/XPC handoff to a compatible receiving client.
 
-1. Install Xcode 15 or later.
-2. Clone the repository.
-3. Open `CinematicCoreMacOS.xcodeproj`.
-4. Select the Alfie app target and build. On first run, approve the system extension installation when macOS prompts.
+These are alternative Program destinations, not a required dual-output feed. Rehearsal output does not prove an external route works. No Blackmagic Desktop Video SDK/SDI integration is implemented. Verify the receiving device independently; app handoff counters are not physical presentation.
 
-## Status
+## Build and verification
 
-Shipping for single-speaker church MVP: capture pipeline, Vision perception, ShotComposer control, Core Image render, CMIO virtual camera + Program Display routes, per-session diagnostics CSVs (memory/latency soak), operator recovery paths. Not yet validated: full-length (60 min) Sunday soak without intervention, and end-to-end latency against the 100–150 ms target on the show rig.
+Use an Apple Silicon Mac and an Xcode/toolchain supporting the project's Swift features and macOS 26.2 deployment target. Open `CinematicCoreMacOS/CinematicCoreMacOS.xcodeproj`; scheme `CinematicCoreMacOS` builds the app named Alfie. Camera permission and system-extension approval depend on the selected input/output workflow. Launching the stopped setup does not by itself start capture.
+
+Current implementation includes framing, manual A/B routing/Take, Multiview and diagnostics. Release qualification remains open: candidate fingerprints, named rigs, sustained single/two-input loads, faults/recovery, install and actual downstream output. Development overrides are not certified production behavior. See [R1 evidence](reports/release-1/README.md) and the [multicamera specification](docs/ALFIE_MULTICAMERA_SPEC.md).
+
+Optional Training Data recording persists person/pose/crop observations and metadata after explicit consent; it is not raw video recording. Session diagnostics are automatic. Review the [current-source privacy audit](docs/privacy/current-source-audit.md) before making storage/retention/export claims.
 
 ## License
 
