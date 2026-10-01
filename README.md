@@ -14,7 +14,7 @@ With two inputs, prepare Preview without changing Program, then Take explicitly.
 
 ## One routed output
 
-- Program Display uses a selected display for HDMI/converter/switcher chains.
+- Direct output (HDMI / USB-C) uses a selected Output port for converter/switcher chains. An explicitly selected port is reserved black before Start; Start requests the show format. Automatic does not reserve a port.
 - Virtual Camera uses a local CoreMediaIO system extension and IOSurface/XPC handoff to a compatible receiving client.
 
 These are alternative Program destinations, not a required dual-output feed. Rehearsal output does not prove an external route works. No Blackmagic Desktop Video SDK/SDI integration is implemented. Verify the receiving device independently; app handoff counters are not physical presentation.

@@ -9,7 +9,7 @@ Use the exact candidate build and named rig. Do not substitute prototype/gallery
 | 3 | Prepare Preview, successful Take role swap, refused Take reason, Edit Live and Done editing. |
 | 4 | Detect selection in controlled Source, correct Shot result, presets, tap zoom, Manual and Pan ownership. |
 | 5 | Composer Basic Stage Headroom; check actual labels and reset values. |
-| 6 | Output route, show standard and physical receiver picture; verify one output and rehearsal warning. |
+| 6 | Direct output route, Output port, black reservation before Start, show-format request and physical receiver picture; verify one output and rehearsal warning. |
 | 7 | Source loss/reconnect/refused Take/Stop controls; verify no silent camera swap. |
 
 Also walk the feedback section: distinguish session CSV/JSON folder from Inspector text-log folder; confirm recording consent must be changed only after Stop recording. With permission, inspect exported artifacts before sharing. Repeat the single-camera Webcam instructions. Walk app at 1280 points; separately render/print this guide. After capture, insert approved PNGs with specific alt text while retaining captions. Do not mark DOCS complete until the actual candidate walkthrough is recorded.
