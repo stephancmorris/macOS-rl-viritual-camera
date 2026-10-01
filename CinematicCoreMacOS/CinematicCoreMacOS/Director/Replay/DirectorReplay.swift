@@ -9,9 +9,13 @@ nonisolated struct DirectorReplay {
             case source(channel: ChannelID, missing: Bool)
             case render(channel: ChannelID)
             case shotChange(channel: ChannelID)
-            case manualCommand, operatorTake, pause, resume, editLive(Bool), stop, fault(ChannelID)
-            case directorAttempt(id: String, delay: TimeInterval, succeeds: Bool)
+            case manualCommand, operatorTake, refusedOperatorTake, pause, resume, editLive(Bool), stop, fault(ChannelID)
+            case directorAttempt(id: String, delay: TimeInterval, succeeds: Bool, acknowledgementDelay: TimeInterval = 0)
             case effect(id: String)
+            case acknowledgement(id: String)
+            case enable(DirectorAuthority.Level), restart, navigation, cosmeticEdit
+            case evidenceGap(Bool), identityLoss(ChannelID), sourceRebind(ChannelID)
+            case outputFault, admissionLoss, healthRestored, policyChange, nominationChange
         }
         let at: TimeInterval
         let action: Action
@@ -39,6 +43,14 @@ nonisolated struct DirectorReplay {
         let duplicateCallbacks: Int
         let failedEffects: Int
         let rejectedAttempts: Int
+        let preparationsCommitted: Int
+        let acknowledgementsAccepted: Int
+        let acknowledgementsRejected: Int
+        let readyEvaluations: Int
+        let staleEffectsCommitted: Int
+        let autoDirectRefusals: Int
+        let finalLevel: DirectorAuthority.Level
+        let finalPaused: Bool
         let clockAnomalies: Int
         let wrongSubjectAttempts: Int
         let labelledSubjectAttempts: Int
@@ -55,17 +67,24 @@ nonisolated struct DirectorReplay {
         var movement = 0.0
         var missing = false
         var lastRenderAt: TimeInterval?
+        var lastEvidenceAt: TimeInterval?
         var revisions = ChannelRevisions(sourceGeneration: 0, controlEpoch: 0, shotRevision: 0)
     }
 
     static func run(_ fixture: Fixture, parameters: DirectorShotPolicy.Parameters,
-                    maximumProposalAge: TimeInterval) -> Report {
+                    maximumProposalAge: TimeInterval, maximumEvidenceAge: TimeInterval, readinessParameters: DirectorReadiness.Parameters) -> Report {
         // Invalid clocks are counted and skipped rather than crashing a replay.
-        var authority = DirectorAuthority()
-        _ = authority.apply(.enable(.autoPrepare))
+        var authority = DirectorAuthority(reviewPolicy: .conservative)
+        _ = authority.apply(.enable(.autoPrepare), prerequisites: .init(nominationsCurrent: true, previewAvailable: true, sourcesHealthy: true, outputHealthy: true, admissionCurrent: true))
         var channels: [ChannelID: Channel] = [.a: Channel(), .b: Channel()]
         var program: ChannelID = .a
         var route: UInt64 = 0
+        var policyRevision: UInt64 = 0, nominationRevision: UInt64 = 0
+        var preparation = DirectorPreparation()
+        var activeRequest: DirectorPreparation.Request?
+        var acknowledgements: [(id: String, due: TimeInterval, receipt: DirectorPreparation.Receipt)] = []
+        var preparationsCommitted = 0, acknowledgementsAccepted = 0, acknowledgementsRejected = 0
+        var readyEvaluations = 0, autoDirectRefusals = 0, staleEffectsCommitted = 0
         var programStartedAt = 0.0
         var lastWideAt = 0.0
         var previousProgram: ChannelID?
@@ -80,39 +99,82 @@ nonisolated struct DirectorReplay {
         var seenAttemptIDs: Set<String> = []
         var completedAttemptIDs: Set<String> = []
         var effects: [(id: String, due: TimeInterval, proposal: DirectorProposal, proposalID: Int,
-                       intended: Bool, succeeds: Bool, sequence: Int)] = []
+                       intended: Bool, succeeds: Bool, sequence: Int, request: DirectorPreparation.Request, acknowledgementDelay: TimeInterval)] = []
         var attempts = 0, takeAttempts = 0, operatorCuts = 0
         var duplicateCallbacks = 0, failedEffects = 0, rejectedAttempts = 0, clockAnomalies = 0
         var wrongAttempts = 0, labelledAttempts = 0
         let validClockConfiguration = fixture.duration.isFinite && fixture.duration > 0 &&
-            maximumProposalAge.isFinite && maximumProposalAge >= 0
+            maximumProposalAge.isFinite && maximumProposalAge >= 0 && maximumEvidenceAge.isFinite && maximumEvidenceAge >= 0
         if !validClockConfiguration { clockAnomalies += 1 }
         let shotA = DirectorShot(preset: .wide, mode: .manualCrop, zoomRung: 0)
         let shotB = DirectorShot(preset: .waistUp, mode: .autoTracking, zoomRung: 1)
         var history: [DirectorShotPolicy.History] = []
+        func currentPrerequisites() -> DirectorAuthority.Prerequisites {
+            .init(nominationsCurrent: true, previewAvailable: channels[program == .a ? .b : .a] != nil,
+                  sourcesHealthy: channels.values.allSatisfy { !$0.missing },
+                  outputHealthy: authority.healthy, admissionCurrent: authority.healthy)
+        }
         func recordStale(_ id: Int, _ reasons: [DirectorProposalValidator.StaleReason]) {
             guard rejectedProposalIDs.insert(id).inserted else { return }
             for reason in reasons { stale[reason, default: 0] += 1 }
         }
         func completeEffect(_ effect: (id: String, due: TimeInterval, proposal: DirectorProposal,
-                                      proposalID: Int, intended: Bool, succeeds: Bool, sequence: Int), at now: TimeInterval) {
+                                      proposalID: Int, intended: Bool, succeeds: Bool, sequence: Int, request: DirectorPreparation.Request, acknowledgementDelay: TimeInterval), at now: TimeInterval) {
             guard completedAttemptIDs.insert(effect.id).inserted else { duplicateCallbacks += 1; return }
             let target = effect.proposal.target
             let live = DirectorLiveState(authority: authority, program: program,
                 preview: program == .a ? .b : .a, revisions: channels[target]?.revisions,
-                routeGeneration: route, sourceMissing: channels[target]?.missing ?? true)
-            let validation = DirectorProposalValidator.validate(effect.proposal, against: live,
-                now: now, maximumAge: maximumProposalAge)
+                routeGeneration: route, sourceMissing: channels[target]?.missing ?? true,
+                policyRevision: policyRevision, nominationRevision: nominationRevision,
+                evidenceAvailable: channels[target]?.present == true && authority.evidenceAvailable &&
+                    channels[target]?.lastEvidenceAt.map { now >= $0 && now - $0 <= maximumEvidenceAge } == true &&
+                    channels[target]?.movement.isFinite == true && (channels[target]?.movement ?? -1) >= 0 &&
+                    channels[target]?.confidence.isFinite == true &&
+                    (channels[target]?.confidence ?? 0) >= readinessParameters.minimumIdentityConfidence &&
+                    readinessParameters.minimumIdentityConfidence.isFinite &&
+                    (0...1).contains(readinessParameters.minimumIdentityConfidence) &&
+                    (0...1).contains(channels[target]?.confidence ?? -1))
+            let validation = preparation.validate(effect.request, live: live, now: now)
             if case .stale(let reasons) = validation {
                 recordStale(effect.proposalID, reasons); rejectedAttempts += 1
-            } else if !effect.succeeds { failedEffects += 1 }
-            else { rejectedAttempts += 1 } // Auto Direct is deliberately unqualified.
+                preparation.discard(effect.request)
+            } else if !effect.succeeds {
+                failedEffects += 1; preparation.discard(effect.request)
+            }
+            else if var revisions = channels[target]?.revisions,
+                    revisions.controlEpoch < UInt64.max, revisions.shotRevision < UInt64.max {
+                revisions.controlEpoch += 1; revisions.shotRevision += 1
+                if let receipt = preparation.commit(effect.request, live: live, now: now, postRevisions: revisions) {
+                    channels[target]?.revisions = revisions
+                    preparationsCommitted += 1
+                    if validation != .valid { staleEffectsCommitted += 1 }
+                    acknowledgements.append((effect.id, now + effect.acknowledgementDelay, receipt))
+                } else { rejectedAttempts += 1 }
+            } else { rejectedAttempts += 1 }
+        }
+        func completeAcknowledgement(_ ack: (id: String, due: TimeInterval, receipt: DirectorPreparation.Receipt)) {
+            let target = ack.receipt.intent.target
+            let live = DirectorLiveState(authority: authority, program: program,
+                preview: program == .a ? .b : .a, revisions: channels[target]?.revisions,
+                routeGeneration: route, sourceMissing: channels[target]?.missing ?? true,
+                policyRevision: policyRevision, nominationRevision: nominationRevision,
+                evidenceAvailable: channels[target]?.present == true)
+            if preparation.acknowledge(ack.receipt, live: live) { acknowledgementsAccepted += 1 }
+            else { acknowledgementsRejected += 1 }
         }
         func flushEffects(before time: TimeInterval, inclusive: Bool = false) {
-            let due = effects.filter { inclusive ? $0.due <= time : $0.due < time }
-                .sorted { $0.due == $1.due ? $0.sequence < $1.sequence : $0.due < $1.due }
-            effects.removeAll { inclusive ? $0.due <= time : $0.due < time }
-            for effect in due { completeEffect(effect, at: effect.due) }
+            // Process effects and ACKs in clock order; an ACK cannot skip a later effect.
+            while true {
+                let effect = effects.filter { inclusive ? $0.due <= time : $0.due < time }
+                    .sorted { $0.due == $1.due ? $0.sequence < $1.sequence : $0.due < $1.due }.first
+                let ack = acknowledgements.filter { inclusive ? $0.due <= time : $0.due < time }
+                    .sorted { $0.due < $1.due }.first
+                if let ack, effect == nil || ack.due < effect!.due {
+                    acknowledgements.removeAll { $0.id == ack.id }; completeAcknowledgement(ack)
+                } else if let effect {
+                    effects.removeAll { $0.id == effect.id }; completeEffect(effect, at: effect.due)
+                } else { break }
+            }
         }
         let valid = fixture.events.enumerated().filter { _, event in
             fixture.duration.isFinite && fixture.duration > 0 && event.at.isFinite &&
@@ -126,23 +188,38 @@ nonisolated struct DirectorReplay {
             let event = indexed.element
             let now = event.at
             flushEffects(before: now)
+            preparation.discardExpiredRequest(now: now)
+            let priorEpoch = authority.epoch
             let priorProgram = program
             var operatorAuthorizedChange = false
             func live(for target: ChannelID) -> DirectorLiveState {
                 DirectorLiveState(authority: authority, program: program,
                     preview: program == .a ? .b : .a, revisions: channels[target]?.revisions,
-                    routeGeneration: route, sourceMissing: channels[target]?.missing ?? true)
+                    routeGeneration: route, sourceMissing: channels[target]?.missing ?? true,
+                policyRevision: policyRevision, nominationRevision: nominationRevision,
+                evidenceAvailable: channels[target]?.present == true && authority.evidenceAvailable &&
+                    channels[target]?.lastEvidenceAt.map { now >= $0 && now - $0 <= maximumEvidenceAge } == true &&
+                    channels[target]?.movement.isFinite == true && (channels[target]?.movement ?? -1) >= 0 &&
+                    channels[target]?.confidence.isFinite == true &&
+                    (channels[target]?.confidence ?? 0) >= readinessParameters.minimumIdentityConfidence &&
+                    readinessParameters.minimumIdentityConfidence.isFinite &&
+                    (0...1).contains(readinessParameters.minimumIdentityConfidence) &&
+                    (0...1).contains(channels[target]?.confidence ?? -1))
             }
             switch event.action {
             case .manualCommand:
                 if pending != nil || !effects.isEmpty { overrides += 1 }
                 _ = authority.apply(.manualCommand)
-            case .operatorTake:
+            case .operatorTake, .refusedOperatorTake:
                 takeAttempts += 1
                 if pending != nil || !effects.isEmpty { overrides += 1 }
                 _ = authority.apply(.operatorTake)
                 let target: ChannelID = program == .a ? .b : .a
-                if channels[target]?.missing == false && channels[target]?.framingReady == true {
+                let refused: Bool
+                if case .refusedOperatorTake = event.action { refused = true } else { refused = false }
+                // Synthetic R2 technical gate, independent of Director settlement/motion.
+                if !refused, channels[target]?.missing == false,
+                   let renderAt = channels[target]?.lastRenderAt, now - renderAt <= maximumProposalAge {
                     if now - programStartedAt < parameters.minimumShotDuration { violations += 1 }
                     if previousProgram == target && now - programStartedAt < parameters.repetitionWindow { oscillations += 1 }
                     history.append(.init(shot: program == .a ? shotA : shotB, endedAt: now))
@@ -152,7 +229,7 @@ nonisolated struct DirectorReplay {
                     if program == .a { lastWideAt = now }
                 }
             case .pause: _ = authority.apply(.pause)
-            case .resume: _ = authority.apply(.resume)
+            case .resume: _ = authority.apply(.resume, prerequisites: currentPrerequisites())
             case .editLive(let enabled): _ = authority.apply(.editLive(enabled))
             case .stop: _ = authority.apply(.stopShow)
             case .fault(let id):
@@ -162,54 +239,84 @@ nonisolated struct DirectorReplay {
             case .source(let id, let missing):
                 channels[id, default: Channel()].missing = missing
                 channels[id, default: Channel()].revisions.sourceGeneration &+= 1
-                if missing { _ = authority.apply(.sourceLoss(id)) }
+                _ = authority.apply(missing ? .sourceLoss(id) : .sourceRebound(id))
             case .render(let id):
                 channels[id, default: Channel()].lastRenderAt = now
             case .shotChange(let id):
                 channels[id, default: Channel()].revisions.shotRevision &+= 1
-            case .directorAttempt(let id, let delay, let succeeds):
+            case .directorAttempt(let id, let delay, let succeeds, let acknowledgementDelay):
                 guard seenAttemptIDs.insert(id).inserted else { rejectedAttempts += 1; break }
                 attempts += 1
                 guard delay.isFinite, delay >= 0, (now + delay).isFinite,
                       now + delay <= fixture.duration, let proposal = pending,
-                      let idOfProposal = pendingID else {
+                      let idOfProposal = pendingID, let request = activeRequest,
+                      acknowledgementDelay.isFinite, acknowledgementDelay >= 0,
+                      (now + delay + acknowledgementDelay).isFinite else {
                     if !delay.isFinite || delay < 0 { clockAnomalies += 1 }
                     rejectedAttempts += 1; break
                 }
-                let result = DirectorProposalValidator.validate(proposal, against: live(for: proposal.target),
-                    now: now, maximumAge: maximumProposalAge)
+                let result = preparation.validate(request, live: live(for: proposal.target), now: now)
                 if case .stale(let reasons) = result {
-                    recordStale(idOfProposal, reasons); pending = nil; pendingID = nil
+                    recordStale(idOfProposal, reasons)
                     rejectedAttempts += 1; break
                 }
                 labelledAttempts += 1
                 let intended = channels[proposal.target]?.intended ?? false
                 if !intended { wrongAttempts += 1 }
-                effects.append((id, now + delay, proposal, idOfProposal, intended, succeeds, indexed.offset))
+                effects.append((id, now + delay, proposal, idOfProposal, intended, succeeds, indexed.offset, request, acknowledgementDelay))
             case .effect(let id):
                 if let effect = effects.first(where: { $0.id == id }) {
                     effects.removeAll { $0.id == id }
                     if now >= effect.due { completeEffect(effect, at: now) }
                     else { clockAnomalies += 1; rejectedAttempts += 1 }
                 } else { duplicateCallbacks += 1 }
+            case .acknowledgement(let id):
+                if let ack = acknowledgements.first(where: { $0.id == id }), now >= ack.due {
+                    acknowledgements.removeAll { $0.id == id }; completeAcknowledgement(ack)
+                } else { acknowledgementsRejected += 1 }
+            case .enable(let level):
+                let transition = authority.apply(.enable(level), prerequisites: currentPrerequisites())
+                if transition.refusal == .autoDirectUnqualified { autoDirectRefusals += 1 }
+            case .restart: authority.apply(.restart)
+            case .navigation: authority.apply(.navigation)
+            case .cosmeticEdit: authority.apply(.cosmeticEdit)
+            case .evidenceGap(let gap): authority.apply(.evidenceAvailable(!gap))
+            case .identityLoss(let id): authority.apply(.identityLost(id))
+            case .sourceRebind(let id):
+                channels[id]?.revisions.sourceGeneration += 1; authority.apply(.sourceRebound(id))
+            case .outputFault: authority.apply(.outputFault)
+            case .admissionLoss: authority.apply(.admissionLost)
+            case .healthRestored: authority.apply(.healthRestored)
+            case .policyChange: policyRevision += 1; authority.apply(.policyChanged)
+            case .nominationChange: nominationRevision += 1; authority.apply(.nominationChanged)
             case .subject(let id, let present, let confidence, let intended, let ready, let movement):
+                channels[id, default: Channel()].lastEvidenceAt = now
                 channels[id, default: Channel()].present = present
                 channels[id, default: Channel()].confidence = confidence
                 channels[id, default: Channel()].intended = intended
                 channels[id, default: Channel()].framingReady = ready
                 channels[id, default: Channel()].movement = movement
             }
-            if let proposal = pending {
+            if authority.epoch != priorEpoch {
+                if let pendingID, let pending,
+                   case .stale(let reasons) = DirectorProposalValidator.validate(pending,
+                       against: live(for: pending.target), now: pending.createdAt, maximumAge: 0, action: .propose) {
+                    recordStale(pendingID, reasons)
+                }
+                pending = nil; pendingID = nil; activeRequest = nil; preparation.retire()
+            }
+            if let proposal = pending, preparation.composition == nil, preparation.receipt == nil {
                 let result = DirectorProposalValidator.validate(proposal, against: live(for: proposal.target),
-                    now: now, maximumAge: maximumProposalAge)
+                    now: proposal.createdAt, maximumAge: 0, action: .propose)
                 if case .stale(let reasons) = result {
                     if let pendingID { recordStale(pendingID, reasons) }
-                    pending = nil; pendingID = nil
+                    pending = nil; pendingID = nil; activeRequest = nil; preparation.retire()
                 }
             }
+            if !authority.mayPropose { pending = nil; pendingID = nil; activeRequest = nil; preparation.retire() }
             let preview: ChannelID = program == .a ? .b : .a
             if validClockConfiguration, authority.mayPropose, pending == nil, let channel = channels[preview],
-               channel.present && channel.framingReady && !channel.missing,
+               live(for: preview).evidenceAvailable,
                let renderAt = channel.lastRenderAt, now - renderAt <= maximumProposalAge {
                 let candidate = DirectorShotPolicy.Candidate(channel: preview,
                     shot: preview == .b ? shotB : shotA, subjectConfidence: channel.confidence,
@@ -217,17 +324,27 @@ nonisolated struct DirectorReplay {
                 let timeline = DirectorShotPolicy.Timeline(programShot: program == .a ? shotA : shotB,
                     programStartedAt: programStartedAt, lastWideAt: lastWideAt,
                     history: history, candidates: [candidate], now: now)
-                if case .chosen(let choice, let reason) = DirectorShotPolicy.choose(timeline,
+                if case .chosen(let choice, let reason) = DirectorShotPolicy.choosePreparation(timeline,
                     preview: preview, parameters: parameters) {
                     if let proposal = DirectorProposal(target: preview, preview: preview, shot: choice.shot,
                         reason: reason, authorityEpoch: authority.epoch,
-                        revisions: channel.revisions, routeGeneration: route, createdAt: now) {
+                        revisions: channel.revisions, routeGeneration: route, createdAt: now, policyRevision: policyRevision, nominationRevision: nominationRevision) {
                         pending = proposal
+                        activeRequest = preparation.propose(proposal, maximumAge: maximumProposalAge, now: now)
                         proposalID += 1; pendingID = proposalID
                         labelled += 1
                         if !channel.intended { wrong += 1 }
                     }
                 }
+            }
+            let channel = channels[preview] ?? Channel()
+            let evidence = DirectorReadiness.Inputs(take: TakeAvailability(program: program, preview: preview,
+                standard: .p50, reason: channel.missing ? .sourceMissing : nil, takePending: false, editLive: authority.editLive),
+                identityConfidence: channel.confidence,
+                framingSettledFor: channel.framingReady ? readinessParameters.minimumSettledTime : 0,
+                motion: channel.movement)
+            if preparation.refresh(live: live(for: preview), evidence: evidence, parameters: readinessParameters).isReady {
+                readyEvaluations += 1
             }
             if authority.paused && pending != nil { pausedProposals += 1 }
             // There is deliberately no director route mutation: qualification is false.
@@ -246,7 +363,10 @@ nonisolated struct DirectorReplay {
             proposalCount: labelled, directorAttemptCount: attempts, directorCuts: 0,
             operatorTakeAttempts: takeAttempts, operatorCuts: operatorCuts,
             duplicateCallbacks: duplicateCallbacks, failedEffects: failedEffects,
-            rejectedAttempts: rejectedAttempts, clockAnomalies: clockAnomalies,
+            rejectedAttempts: rejectedAttempts, preparationsCommitted: preparationsCommitted,
+            acknowledgementsAccepted: acknowledgementsAccepted, acknowledgementsRejected: acknowledgementsRejected,
+            readyEvaluations: readyEvaluations, staleEffectsCommitted: staleEffectsCommitted, autoDirectRefusals: autoDirectRefusals,
+            finalLevel: authority.level, finalPaused: authority.paused, clockAnomalies: clockAnomalies,
             wrongSubjectAttempts: wrongAttempts, labelledSubjectAttempts: labelledAttempts,
             proposalsMadeWhilePaused: pausedProposals,
             programChangesWithoutAuthority: unauthorized,
