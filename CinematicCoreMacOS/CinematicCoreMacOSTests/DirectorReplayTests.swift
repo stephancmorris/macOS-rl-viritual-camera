@@ -208,3 +208,41 @@ extension DirectorReplayTests {
         #expect(noEvidence.proposalCount == 0)
     }
 }
+
+/// The committed-effect audit judges raw facts at the sink, independently of
+/// DirectorPreparation.validate, so it can catch a stale effect a faulty
+/// validator lets through.
+struct DirectorEffectAuditTests {
+    private let revisions = ChannelRevisions(sourceGeneration: 1, controlEpoch: 2, shotRevision: 3)
+
+    private func effect(epoch: UInt64 = 7, mayPrepare: Bool = true, program: ChannelID = .a, preview: ChannelID = .b,
+                        route: UInt64 = 4, before: ChannelRevisions? = nil, missing: Bool = false,
+                        policy: UInt64 = 0, nomination: UInt64 = 0, age: TimeInterval = 0.1) throws -> DirectorReplay.CommittedEffect {
+        let proposal = try #require(DirectorProposal(target: .b, preview: .b,
+            shot: DirectorShot(preset: .waistUp, mode: .autoTracking, zoomRung: 1), reason: "test",
+            authorityEpoch: 7, revisions: revisions, routeGeneration: 4, createdAt: 10))
+        return .init(proposal: proposal, requestIssuedAt: 10, requestMaximumAge: 0.5, appliedAt: 10 + age,
+                     program: program, preview: preview, routeGeneration: route,
+                     revisionsBefore: before ?? revisions, sourceMissing: missing,
+                     authorityEpoch: epoch, authorityMayPrepare: mayPrepare,
+                     policyRevision: policy, nominationRevision: nomination)
+    }
+
+    @Test func validEffectPassesTheAudit() throws {
+        #expect(DirectorReplay.audit(try effect()).isEmpty)
+    }
+
+    @Test func everyStaleFactIsCaughtIndependently() throws {
+        #expect(DirectorReplay.audit(try effect(epoch: 8)) == [.authorityRevoked])
+        #expect(DirectorReplay.audit(try effect(mayPrepare: false)) == [.authorityRevoked])
+        #expect(DirectorReplay.audit(try effect(route: 5)) == [.routeChanged])
+        #expect(DirectorReplay.audit(try effect(program: .b, preview: .a)) == [.targetBecameProgram])
+        #expect(DirectorReplay.audit(try effect(missing: true)) == [.sourceMissing])
+        #expect(DirectorReplay.audit(try effect(before: .init(sourceGeneration: 2, controlEpoch: 2, shotRevision: 3))) == [.sourceRestarted])
+        #expect(DirectorReplay.audit(try effect(before: .init(sourceGeneration: 1, controlEpoch: 3, shotRevision: 3))) == [.shotChangedByOperator])
+        #expect(DirectorReplay.audit(try effect(policy: 1)) == [.policyChanged])
+        #expect(DirectorReplay.audit(try effect(nomination: 1)) == [.nominationChanged])
+        #expect(DirectorReplay.audit(try effect(age: 0.6)) == [.expired])
+        #expect(DirectorReplay.audit(try effect(age: -1)) == [.expired])
+    }
+}

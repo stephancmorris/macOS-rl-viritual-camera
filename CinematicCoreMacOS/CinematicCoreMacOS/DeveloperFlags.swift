@@ -90,19 +90,30 @@ enum DeveloperFlags {
     /// the single-camera view.
     nonisolated static let useMultiviewConsole = true
 
-    /// DEVELOPMENT ONLY — set false before any release build. Lets Stage
-    /// format use a camera that has no format at the show rate (most webcams
-    /// top out at 30 fps against 1080p50), falling back to its fastest HD
-    /// format the way Webcam format does. The output repeats frames to keep
-    /// the show rate, and setup/admission judge the camera against its own
-    /// rate. Operators would otherwise get "Unsupported format" in Stage.
+    /// DEVELOPMENT ONLY — on in Debug builds, always off in Release. Lets
+    /// Stage format use a camera that has no format at the show rate (most
+    /// webcams top out at 30 fps against 1080p50), falling back to its
+    /// fastest HD format the way Webcam format does. The output repeats
+    /// frames to keep the show rate, and setup/admission judge the camera
+    /// against its own rate. A release build refuses such a camera in Stage
+    /// ("Unsupported format"), as a real show should.
+    #if DEBUG
     nonisolated static let allowStageBelowShowRate = true
+    #else
+    nonisolated static let allowStageBelowShowRate = false
+    #endif
 
-    /// DEVELOPMENT ONLY — set false before any release build. Adds a
+    /// DEVELOPMENT ONLY — on in Debug builds, always off in Release. Adds a
     /// "Rehearsal · no output" destination that accepts Program frames and
-    /// sends them nowhere. Used when chosen, or at Start when neither Program
-    /// Display (needs a second screen) nor the virtual camera is available,
-    /// so Take can be tried on a one-screen Mac. The Program pane says
-    /// "Rehearsal · no output" rather than "Routed".
+    /// sends them nowhere. Used when chosen, or at Start when neither Direct
+    /// output (needs a connected HDMI / USB-C port) nor the virtual camera is
+    /// available, so Take can be tried on a one-screen Mac. The Program pane
+    /// says "Rehearsal · no output" rather than "Routed". Release builds
+    /// never have it, so a missing converter can't silently become a show
+    /// that sends nothing to the ATEM.
+    #if DEBUG
     nonisolated static let allowRehearsalOutput = true
+    #else
+    nonisolated static let allowRehearsalOutput = false
+    #endif
 }

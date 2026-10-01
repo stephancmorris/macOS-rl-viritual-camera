@@ -145,9 +145,19 @@ nonisolated struct DirectorReplay {
                     revisions.controlEpoch < UInt64.max, revisions.shotRevision < UInt64.max {
                 revisions.controlEpoch += 1; revisions.shotRevision += 1
                 if let receipt = preparation.commit(effect.request, live: live, now: now, postRevisions: revisions) {
+                    // Audit the raw world at the sink mutation, independently
+                    // of the validator that guarded the commit above.
+                    let audit = Self.audit(CommittedEffect(
+                        proposal: effect.request.intent, requestIssuedAt: effect.request.issuedAt,
+                        requestMaximumAge: effect.request.maximumAge, appliedAt: now,
+                        program: program, preview: program == .a ? .b : .a, routeGeneration: route,
+                        revisionsBefore: channels[target]?.revisions,
+                        sourceMissing: channels[target]?.missing ?? true,
+                        authorityEpoch: authority.epoch, authorityMayPrepare: authority.mayPrepare,
+                        policyRevision: policyRevision, nominationRevision: nominationRevision))
                     channels[target]?.revisions = revisions
                     preparationsCommitted += 1
-                    if validation != .valid { staleEffectsCommitted += 1 }
+                    if !audit.isEmpty { staleEffectsCommitted += 1 }
                     acknowledgements.append((effect.id, now + effect.acknowledgementDelay, receipt))
                 } else { rejectedAttempts += 1 }
             } else { rejectedAttempts += 1 }
@@ -371,5 +381,50 @@ nonisolated struct DirectorReplay {
             proposalsMadeWhilePaused: pausedProposals,
             programChangesWithoutAuthority: unauthorized,
             wrongSubjectProposals: wrong, labelledSubjectProposals: labelled)
+    }
+
+    // MARK: Independent committed-effect audit
+
+    /// The raw world at the moment a Director preparation mutates a channel,
+    /// captured before the mutation. Judged by `audit`, which shares no code
+    /// with `DirectorPreparation.validate`, so `staleEffectsCommitted` can
+    /// catch a stale effect that a faulty validator let through.
+    struct CommittedEffect: Equatable, Sendable {
+        let proposal: DirectorProposal
+        let requestIssuedAt: TimeInterval
+        let requestMaximumAge: TimeInterval
+        let appliedAt: TimeInterval
+        let program: ChannelID
+        let preview: ChannelID
+        let routeGeneration: UInt64
+        let revisionsBefore: ChannelRevisions?
+        let sourceMissing: Bool
+        let authorityEpoch: UInt64
+        let authorityMayPrepare: Bool
+        let policyRevision: UInt64
+        let nominationRevision: UInt64
+    }
+
+    /// Every way the committed effect was stale; empty means it was valid.
+    static func audit(_ effect: CommittedEffect) -> [DirectorProposalValidator.StaleReason] {
+        let p = effect.proposal
+        var reasons: [DirectorProposalValidator.StaleReason] = []
+        if effect.authorityEpoch != p.authorityEpoch || !effect.authorityMayPrepare { reasons.append(.authorityRevoked) }
+        if effect.routeGeneration != p.routeGeneration { reasons.append(.routeChanged) }
+        if p.target == effect.program || p.target != effect.preview { reasons.append(.targetBecameProgram) }
+        if effect.sourceMissing || effect.revisionsBefore == nil { reasons.append(.sourceMissing) }
+        if let before = effect.revisionsBefore {
+            if before.sourceGeneration != p.revisions.sourceGeneration { reasons.append(.sourceRestarted) }
+            if before.controlEpoch != p.revisions.controlEpoch || before.shotRevision != p.revisions.shotRevision {
+                reasons.append(.shotChangedByOperator)
+            }
+        }
+        if effect.policyRevision != p.policyRevision { reasons.append(.policyChanged) }
+        if effect.nominationRevision != p.nominationRevision { reasons.append(.nominationChanged) }
+        let age = effect.appliedAt - effect.requestIssuedAt
+        if !age.isFinite || age < 0 || !effect.requestMaximumAge.isFinite || age > effect.requestMaximumAge {
+            reasons.append(.expired)
+        }
+        return reasons
     }
 }
