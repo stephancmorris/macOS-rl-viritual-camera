@@ -18,7 +18,7 @@ struct PairCheckPanel: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
             HStack(alignment: .firstTextBaseline, spacing: 12) {
-                Text("PAIR CHECK")
+                Text("PAIR EVIDENCE")
                     .font(ConsoleStyle.label(11))
                     .tracking(1)
                     .foregroundStyle(.white.opacity(0.55))
@@ -54,7 +54,7 @@ struct PairCheckPanel: View {
             RoundedRectangle(cornerRadius: 12).strokeBorder(borderColor, lineWidth: 1)
         }
         .accessibilityElement(children: .contain)
-        .accessibilityLabel("Pair check")
+        .accessibilityLabel("Pair evidence")
     }
 
     private func resultCell(_ row: ShowSetupModel.PairCheckRow) -> some View {
@@ -87,7 +87,8 @@ struct PairCheckPanel: View {
         case .notMeasured: return "circle"
         case .checking: return "circle.dotted"
         case .passed: return "checkmark.circle.fill"
-        case .failed: return "exclamationmark.circle.fill"
+        case .passedPreviously: return "clock.arrow.circlepath"
+        case .failed, .failedPreviously: return "exclamationmark.circle.fill"
         }
     }
 
@@ -96,28 +97,31 @@ struct PairCheckPanel: View {
         case .notMeasured: return .white.opacity(0.45)
         case .checking: return ConsoleStyle.amber
         case .passed: return ConsoleStyle.previewGreen
-        case .failed: return ConsoleStyle.amber
+        case .passedPreviously: return .white.opacity(0.65)
+        case .failed, .failedPreviously: return ConsoleStyle.amber
         }
     }
 
     private func stateTextColor(_ state: ShowSetupModel.RowState) -> Color {
-        if case .failed = state { return ConsoleStyle.amber }
-        return .white.opacity(0.6)
+        switch state {
+        case .failed, .failedPreviously: return ConsoleStyle.amber
+        default: return .white.opacity(0.6)
+        }
     }
 
     private var statusColor: Color {
         switch model.pairCheck {
         case .notRun: return .white.opacity(0.85)
         case .checking: return ConsoleStyle.amber
-        case .pass: return ConsoleStyle.previewGreen
-        case .unsupported: return ConsoleStyle.amber
+        case .historicalPass: return .white.opacity(0.85)
+        case .historicalUnsupported: return ConsoleStyle.amber
         }
     }
 
     private var borderColor: Color {
         switch model.pairCheck {
-        case .unsupported: return ConsoleStyle.amber.opacity(0.5)
-        case .pass: return ConsoleStyle.previewGreen.opacity(0.35)
+        case .historicalUnsupported: return ConsoleStyle.amber.opacity(0.5)
+        case .historicalPass: return ConsoleStyle.neutralBorder
         default: return ConsoleStyle.neutralBorder
         }
     }

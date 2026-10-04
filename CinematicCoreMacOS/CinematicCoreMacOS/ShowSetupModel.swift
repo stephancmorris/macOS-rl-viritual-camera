@@ -9,8 +9,9 @@
 //
 //  The engine can only measure a pair while both channels run, so the pair
 //  check shows the most relevant STORED admission record for this Mac, show
-//  standard, route and pair of camera models. Delivered size and mode are
-//  only known after Start, so they are not part of the match.
+//  standard, route and pair of camera models. This is historical evidence,
+//  not an exact current certification: delivered format/profile/mode must
+//  match the full running admission fingerprint after Start.
 //
 
 import Foundation
@@ -87,17 +88,20 @@ struct ShowSetupModel: Equatable {
     enum RowState: Equatable {
         case notMeasured
         case checking
+        /// A current selection fact (two distinct devices), not a measurement.
         case passed
         case failed(String?)
+        case passedPreviously
+        case failedPreviously(String?)
     }
 
     enum PairCheckResult: Equatable {
         case notRun
         case checking
-        /// A stored provisional (trial) or certified record for this pair.
-        case pass(certified: Bool, measuredAt: Date?)
-        /// A stored measurement failed; the reasons say which.
-        case unsupported([AdmissionReason])
+        /// A compatible historical record, not an exact current measurement.
+        case historicalPass(certified: Bool, measuredAt: Date)
+        /// A compatible historical failure; Start retains its conservative refusal.
+        case historicalUnsupported([AdmissionReason], measuredAt: Date)
     }
 
     // MARK: State
@@ -114,8 +118,12 @@ struct ShowSetupModel: Equatable {
     private(set) var notes: [ChannelID: SlotNote] = [:]
     /// The engine has one capture profile for every channel, set in Settings;
     /// setup shows it per slot, read-only (no per-slot picker yet).
-    var captureProfile: String
-    var machine: Machine
+    var captureProfile: String {
+        didSet { if captureProfile != oldValue { isChecking = false } }
+    }
+    var machine: Machine {
+        didSet { if machine != oldValue { isChecking = false } }
+    }
     /// Stored admission records, parsed (see StoredPairRecord).
     var records: [StoredPairRecord]
     /// A pair measurement is in progress for this exact configuration. Any
@@ -197,6 +205,7 @@ struct ShowSetupModel: Equatable {
     mutating func updateDevices(_ value: [Device]) {
         guard value != devices else { return }
         devices = value
+        isChecking = false
         let present = Set(value.map(\.uniqueID))
         for slot in Self.assignableSlots {
             if let chosen = selection[slot], !present.contains(chosen) {
@@ -264,7 +273,8 @@ struct ShowSetupModel: Equatable {
         return a.uniqueID != b.uniqueID
     }
 
-    /// Stored records for this Mac, standard, route and A/B camera models.
+    /// Compatible history for this Mac, standard, route and A/B camera models.
+    /// This broader match never certifies the current format/profile/mode.
     var matchingRecords: [StoredPairRecord] {
         guard let a = device(for: .a), let b = device(for: .b), hasDistinctPair else { return [] }
         return records.filter {
@@ -280,13 +290,13 @@ struct ShowSetupModel: Equatable {
         let matches = matchingRecords.sorted { $0.measuredAt > $1.measuredAt }
         if let failed = matches.first(where: { if case .unsupported = $0.status { return true } else { return false } }),
            case .unsupported(let reasons) = failed.status {
-            return .unsupported(reasons)
+            return .historicalUnsupported(reasons, measuredAt: failed.measuredAt)
         }
         if let certified = matches.first(where: { $0.status == .certified }) {
-            return .pass(certified: true, measuredAt: certified.measuredAt)
+            return .historicalPass(certified: true, measuredAt: certified.measuredAt)
         }
         if let trial = matches.first(where: { $0.status == .provisional }) {
-            return .pass(certified: false, measuredAt: trial.measuredAt)
+            return .historicalPass(certified: false, measuredAt: trial.measuredAt)
         }
         return .notRun
     }
@@ -299,45 +309,50 @@ struct ShowSetupModel: Equatable {
         switch pairCheck {
         case .notRun: return .notMeasured
         case .checking: return .checking
-        case .pass: return .passed
-        case .unsupported(let reasons):
+        case .historicalPass: return .passedPreviously
+        case .historicalUnsupported(let reasons, _):
             let failing = reasons.filter { PairCheckRow.row(for: $0.bottleneck) == row }
-            return failing.isEmpty ? .passed : .failed(failing.first?.message)
+            return failing.isEmpty ? .passedPreviously : .failedPreviously(failing.first?.message)
         }
     }
 
     /// Rows a stored unsupported result names, in display order.
     var failingRows: [PairCheckRow] {
-        PairCheckRow.allCases.filter { if case .failed = rowState($0) { return true } else { return false } }
+        PairCheckRow.allCases.filter {
+            switch rowState($0) {
+            case .failed, .failedPreviously: return true
+            default: return false
+            }
+        }
     }
 
     // MARK: Copy
 
     var pairCheckTitle: String {
         switch pairCheck {
-        case .notRun: return "A + B at \(standard.title): unknown on this Mac"
+        case .notRun: return "A + B at \(standard.title): current setup unmeasured"
         case .checking: return "Checking A + B at \(standard.title) on this Mac"
-        case .pass(let certified, _):
-            return "A + B hold \(standard.title) on this Mac · \(certified ? "certified" : "trial")"
-        case .unsupported: return "Camera B unsupported at \(standard.title) with Camera A"
+        case .historicalPass(let certified, _):
+            return "Stored A + B record at \(standard.title) · \(certified ? "certified" : "measured trial")"
+        case .historicalUnsupported: return "Stored A + B record at \(standard.title) · unsupported"
         }
     }
 
     var pairCheckDetail: String {
         switch pairCheck {
         case .notRun:
-            return "Alfie measures A + B together right after Start and shows the result in the console header. It will not lower the output rate to make them fit."
+            return "A + B may start as an unmeasured trial. Alfie begins measuring after Start once Preview renders, and shows the result in the console header. It will not lower the output rate to make them fit."
         case .checking:
             return "Measuring both cameras together on this Mac. It will not lower the output rate to make them fit."
-        case .pass(true, _):
-            return "Certified by the 60-minute two-input soak on this exact setup."
-        case .pass(false, let measuredAt):
-            // The card's copy says "Measured now"; a stored record says when.
-            let when = measuredAt.map { "Measured \(Self.dateFormatter.string(from: $0))" } ?? "Measured now"
-            return "\(when), not certified. Certification needs the 60-minute two-input soak on this exact setup."
-        case .unsupported:
+        case .historicalPass(let certified, let measuredAt):
+            let recordedAt = Self.dateFormatter.string(from: measuredAt)
+            let result = certified
+                ? "Certified by a 60-minute two-input soak recorded \(recordedAt)."
+                : "Passing trial measurement recorded \(recordedAt); not certified."
+            return "\(result) Compatible history for these camera models, Mac, OS, standard and route; current delivered format, profile and mode are not yet verified."
+        case .historicalUnsupported(_, let measuredAt):
             let failed = failingRows.map(\.title).joined(separator: ", ")
-            return "Failed: \(failed). \(suggestion)"
+            return "Stored failure recorded \(Self.dateFormatter.string(from: measuredAt)): \(failed). Current delivered format, profile and mode are not yet verified. \(suggestion)"
         }
     }
 
@@ -363,6 +378,8 @@ struct ShowSetupModel: Equatable {
         case .passed:
             return row == .distinctDevices ? "Different cameras" : "Passed"
         case .failed(let message): return message ?? "Failed"
+        case .passedPreviously: return "Passed in stored record"
+        case .failedPreviously(let message): return "Stored failure: \(message ?? "Failed")"
         }
     }
 
@@ -373,6 +390,9 @@ struct ShowSetupModel: Equatable {
         case .checking: return "\(row.title): checking"
         case .passed: return "\(row.title): passed"
         case .failed(let message): return "\(row.title): failed. \(message ?? "")".trimmingCharacters(in: .whitespaces)
+        case .passedPreviously: return "\(row.title): passed in stored record; current setup unmeasured"
+        case .failedPreviously(let message):
+            return "\(row.title): failed in stored record. \(message ?? "") Current setup unmeasured."
         }
     }
 
@@ -386,7 +406,7 @@ struct ShowSetupModel: Equatable {
     /// fails here. An unmeasured pair may start; the console measures it.
     var canStartPair: Bool {
         guard !isRunning, !isChecking, hasDistinctPair else { return false }
-        if case .unsupported = pairCheck { return false }
+        if case .historicalUnsupported = pairCheck { return false }
         return true
     }
 
@@ -404,6 +424,8 @@ struct ShowSetupModel: Equatable {
 /// The store keys records by `AdmissionFingerprint.key`, so the fields are
 /// parsed back from that key.
 struct StoredPairRecord: Equatable {
+    /// Complete key retained even though stopped setup only matches a subset.
+    let fingerprintKey: String
     var policyVersion: Int
     var machineModel: String
     var osVersion: String
@@ -425,6 +447,11 @@ struct StoredPairRecord: Equatable {
             && inputs["A"] == modelA && inputs["B"] == modelB
     }
 
+    /// Exact running evidence remains distinct from compatible setup history.
+    func exactlyMatches(_ fingerprint: AdmissionFingerprint) -> Bool {
+        policyVersion == AdmissionPolicy.version && fingerprintKey == fingerprint.key
+    }
+
     /// Parse `AdmissionFingerprint.key`:
     /// `version|machine|os|standard|route|A:model:WxH@fps:profile:mode|B:…`.
     /// The model ID may itself contain ":", so each input is read from both
@@ -439,7 +466,7 @@ struct StoredPairRecord: Equatable {
             let model = fields[1..<(fields.count - 3)].joined(separator: ":")
             inputs[fields[0]] = model
         }
-        return StoredPairRecord(policyVersion: version, machineModel: parts[1], osVersion: parts[2],
+        return StoredPairRecord(fingerprintKey: key, policyVersion: version, machineModel: parts[1], osVersion: parts[2],
                                 showStandard: parts[3], route: parts[4] == "none" ? nil : parts[4],
                                 inputs: inputs, status: status, measuredAt: measuredAt)
     }
