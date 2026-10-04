@@ -77,6 +77,13 @@ final class LiveShowSetupModel: ObservableObject {
         channelA.$isRunning.combineLatest(channelA.$isStartingSession)
             .sink { [weak self] running, starting in self?.setup.isRunning = running || starting }
             .store(in: &cancellables)
+        // Settings can change the capture profile while the stopped setup remains open.
+        channelA.shotComposer.$config
+            .map { $0.cinematicFormat == .webcam ? "Webcam" : "Stage" }
+            .removeDuplicates()
+            .dropFirst()
+            .sink { [weak self] profile in self?.setup.captureProfile = profile }
+            .store(in: &cancellables)
         // Settings can change the route or standard while setup is showing.
         show.programOutput.$preferredRoute
             .sink { [weak self] route in self?.setup.setOutput(route) }

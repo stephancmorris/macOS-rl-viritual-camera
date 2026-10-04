@@ -1,0 +1,17 @@
+# Stopped setup profile synchronization — 5 October 2026
+
+Card https://trello.com/c/IEivZspd; parent SHOW-SETUP https://trello.com/c/ztw0PPkU. Related historical-evidence truth repair https://trello.com/c/kMmbRuhn. Base `9e07683`, branch `codex/alfie-quality-sprint-2026-10-04`.
+
+LiveShowSetupModel initialized its captureProfile from channel A's ShotComposer configuration but never observed later configuration changes. Changing Stage to Webcam or back in Settings left the setup cards and their VoiceOver label using the old profile. A synchronous config subscription now maps the current format to Stage/Webcam, deduplicates unchanged values and updates only setup.captureProfile. It drops the initial publisher value because initialization already populated it.
+
+The regression uses the actual live model and actual ShotComposer config mutations, parameterized for both initial formats. It verifies transitions in both directions and no profile publication for unrelated preset changes. Stored evidence, device selection, pair-check state, output choice and Start eligibility remain unchanged. An output spy plus session/channel checks prove there is no Start callback, output connection/running/frame call, capture start, diagnostics session or B creation. Tests use isolated defaults, not operator records.
+
+Expected-failing baseline `/private/tmp/alfie-oct5-profile-baseline.xcresult`: **24 passed / 1 failed definitions, 30 passed / 2 failed runs, zero skips**. Both initial-profile cases failed; the existing 24 setup definitions passed.
+
+Final targeted `/private/tmp/alfie-oct5-profile-targeted-final.xcresult`: **59 passed definitions / 66 passed runs, zero failures/skips**. ShowSetupTests 25 definitions/32 runs; LiveConsoleTests 15/15; PairAdmissionTests 11/11; AdmissionRecordTests 8/8. The earlier targeted run had an unmatched `MultiInputAdmissionTests` selector and covered only setup/console (40/47); it is superseded by the explicit nonzero suite counts above.
+
+Complete target `/private/tmp/alfie-oct5-profile-full.xcresult`: **490 passed definitions / 654 passed runs, zero failures, five skipped definitions/runs**. Skips: opt-in instrumentation stress/cadence/investigation; absent consented readiness clips; real two-webcam rig. Counts come from xcresult summary/tests; argument children replace their definition for runs. Bundle-name `-summary.json`, `-tests.json`, `-counts.json` exports retained. Do not add targeted/full snapshots together.
+
+Xcode 26.2 (17C52), arm64 macOS 26.6.2 (25G83). CODE_SIGNING_ALLOWED=NO, serial macOS tests, `/private/tmp/alfie-quality-sprint-dd`. Full command: `xcodebuild test -project CinematicCoreMacOS/CinematicCoreMacOS.xcodeproj -scheme CinematicCoreMacOS -destination 'platform=macOS' -parallel-testing-enabled NO -only-testing:CinematicCoreMacOSTests CODE_SIGNING_ALLOWED=NO -derivedDataPath /private/tmp/alfie-quality-sprint-dd -resultBundlePath /private/tmp/alfie-oct5-profile-full.xcresult`. Root reviewed the independently prepared observer/test patch and no material issue remains.
+
+Files: LiveShowSetup.swift, ShowSetupTests.swift and this report. Historical evidence and Start/Take policies are preserved. No permission/retention/output-policy changes. These are deterministic model regressions; actual rendered card/VoiceOver/operator rehearsal and two-camera qualification remain open. Child enters Human Review, not Done; no merge to main. Primary dirty checkout preserved.

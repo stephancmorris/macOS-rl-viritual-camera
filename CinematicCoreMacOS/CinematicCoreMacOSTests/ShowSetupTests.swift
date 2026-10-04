@@ -12,10 +12,32 @@
 
 #if DEBUG
 import AppKit
+import Combine
+import CoreVideo
 import Foundation
 import SwiftUI
 import Testing
 @testable import Alfie
+
+@MainActor
+private final class SetupProfileOutputSpy: ProgramOutputSink {
+    let route: ProgramOutputManager.Route = .display
+    var isAvailable: Bool { true }
+    var summary: String { "synthetic" }
+    var detail: String { "synthetic" }
+    var lastErrorDescription: String? { nil }
+    var onStateChange: (() -> Void)?
+    private(set) var connectCalls = 0
+    private(set) var runningCalls = 0
+    private(set) var frames = 0
+    func connect() { connectCalls += 1 }
+    func disconnect() {}
+    func updateCaptureStatus(isRunning: Bool) { if isRunning { runningCalls += 1 } }
+    func sendFrame(pixelBuffer: CVPixelBuffer, timestamp: Double) -> Bool {
+        frames += 1
+        return true
+    }
+}
 
 @MainActor
 struct ShowSetupTests {
@@ -414,6 +436,61 @@ struct ShowSetupTests {
         #expect(live.setup.output == .virtualCamera)
         #expect(live.actions.checkPair == nil)
         #expect(!show.channelA.isStartingSession)
+    }
+
+    @Test(arguments: [ShotComposer.Config.CinematicFormat.stage, .webcam])
+    func stoppedLiveSetupTracksCaptureProfileWithoutStartingAnything(initialFormat: ShotComposer.Config.CinematicFormat) async throws {
+        let suiteName = "alfie-setup-profile-\(UUID().uuidString)"
+        let defaults = try #require(UserDefaults(suiteName: suiteName))
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+        defaults.set(ShowStandard.p50.rawValue, forKey: ShowStandard.userDefaultsKey)
+        let store = AdmissionRecordStore(defaults: defaults)
+        store.record(.certified, for: fingerprint(), at: Date(timeIntervalSince1970: 1_000))
+        let sink = SetupProfileOutputSpy()
+        let show = ShowCoordinator(programOutput: ProgramOutputManager(sinks: [sink]), admissionRecords: store)
+        let composer = show.channelA.shotComposer
+        composer.config.cinematicFormat = initialFormat
+        var startCalls = 0
+        let live = LiveShowSetupModel(show: show, defaults: defaults, machine: machine) { startCalls += 1 }
+        #expect(live.setup.captureProfile == initialFormat.title)
+        #expect(live.setup.records.count == 1)
+        let initialRecords = live.setup.records
+        let initialSelection = live.setup.selection
+        let initialEvidence = live.setup.pairCheck
+        let initialAOnly = live.setup.canStartAOnly
+        let initialPair = live.setup.canStartPair
+        let initialOutput = live.setup.output
+        var profiles: [String] = []
+        let subscription = live.$setup.dropFirst().sink { profiles.append($0.captureProfile) }
+        defer { subscription.cancel() }
+
+        // A different framing setting must not republish the profile readout.
+        composer.config.shotPreset = composer.config.shotPreset == .wide ? .fullBody : .wide
+        #expect(profiles.isEmpty)
+        let changedFormat: ShotComposer.Config.CinematicFormat = initialFormat == .stage ? .webcam : .stage
+        composer.config.cinematicFormat = changedFormat
+        #expect(live.setup.captureProfile == changedFormat.title)
+        #expect(profiles == [changedFormat.title])
+        composer.config.shotPreset = composer.config.shotPreset == .wide ? .fullBody : .wide
+        #expect(profiles == [changedFormat.title])
+        composer.config.cinematicFormat = initialFormat
+        #expect(live.setup.captureProfile == initialFormat.title)
+        #expect(profiles == [changedFormat.title, initialFormat.title])
+
+        #expect(live.setup.records == initialRecords)
+        #expect(live.setup.selection == initialSelection)
+        #expect(live.setup.pairCheck == initialEvidence)
+        #expect(live.setup.canStartAOnly == initialAOnly)
+        #expect(live.setup.canStartPair == initialPair)
+        #expect(live.setup.output == initialOutput)
+        await Task.yield()
+        #expect(startCalls == 0)
+        #expect(!live.setup.isRunning)
+        #expect(!show.channelA.isRunning && !show.channelA.isStartingSession)
+        #expect(show.channel(.b) == nil)
+        #expect(show.programOutput.activeRoute == nil)
+        #expect(show.programOutput.diagnosticsFileName == nil)
+        #expect(sink.connectCalls == 0 && sink.runningCalls == 0 && sink.frames == 0)
     }
 
     @Test func aNewShowNeverRestoresTheLastRoles() {
