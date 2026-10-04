@@ -51,12 +51,11 @@ import Testing
         }
     }
 
-    @Test func bindingDeduplicationAndManualCancellation() {
+    @Test func bindingDeduplicationAndManualCancellation() throws {
         let adapter = VoiceCommandAdapter(confidenceFloor: 0.8)
-        let transcript = SpeechFinalTranscript(id: "u1", text: "Alfie, camera two, pan", confidence: 0.9)
-        let start = world(now: 1)
-        guard case .success = adapter.beginUtterance(id: "u1", world: start),
-              case .success(let pending) = adapter.accept(transcript, world: world(now: 1.2)) else {
+        let token = try adapter.beginUtterance(world: world(now: 1)).get()
+        let transcript = SpeechFinalTranscript(id: token.id, text: "Alfie, camera two, pan", confidence: 0.9)
+        guard case .success(let pending) = adapter.accept(transcript, world: world(now: 1.2)) else {
             Issue.record("expected pending"); return
         }
         #expect(pending.target == .b)
@@ -67,8 +66,8 @@ import Testing
         if case .failure(let reason) = adapter.prepareDispatch(pending, world: world(now: 1.3), format: .stage) {
             #expect(reason == .cancelledByManualCommand)
         } else { Issue.record("manual override admitted") }
-        let low = SpeechFinalTranscript(id: "u2", text: "Alfie, detect", confidence: 0.2)
-        _ = adapter.beginUtterance(id: "u2", world: world(now: 2))
+        let lowToken = try adapter.beginUtterance(world: world(now: 2)).get()
+        let low = SpeechFinalTranscript(id: lowToken.id, text: "Alfie, detect", confidence: 0.2)
         if case .success = adapter.accept(low, world: world(now: 2.1)) {
             Issue.record("low confidence accepted")
         }
@@ -88,15 +87,15 @@ import Testing
             aSubjectLocked: true, bSubjectLocked: locked)
     }
 
-    private func pending(_ adapter: VoiceCommandAdapter, id: String = "u",
+    private func pending(_ adapter: VoiceCommandAdapter,
                          text: String = "Alfie, pan") -> VoiceCommandAdapter.Pending? {
-        guard case .success = adapter.beginUtterance(id: id, world: world(now: 1)),
-              case .success(let value) = adapter.accept(.init(id: id, text: text, confidence: 0.95),
+        guard case .success(let token) = adapter.beginUtterance(world: world(now: 1)),
+              case .success(let value) = adapter.accept(.init(id: token.id, text: text, confidence: 0.95),
                 world: world(now: 1.1)) else { return nil }
         return value
     }
 
-    @Test func startSnapshotBindsPreviewAndNamedCamera() {
+    @Test func startSnapshotBindsPreviewAndNamedCamera() throws {
         let named = VoiceCommandAdapter(confidenceFloor: 0.8)
         guard let command = pending(named, text: "Alfie, camera two, pan") else {
             Issue.record("named camera rejected"); return
@@ -109,34 +108,34 @@ import Testing
             Issue.record("utterance dispatched twice")
         }
         let program = VoiceCommandAdapter(confidenceFloor: 0.8)
-        _ = program.beginUtterance(id: "program", world: world(now: 1))
-        #expect(program.accept(.init(id: "program", text: "Alfie, camera one, pan", confidence: 0.95),
+        let programToken = try program.beginUtterance(world: world(now: 1)).get()
+        #expect(program.accept(.init(id: programToken.id, text: "Alfie, camera one, pan", confidence: 0.95),
             world: world(now: 1.1)) == .failure(.targetUnavailable))
         let implicit = VoiceCommandAdapter(confidenceFloor: 0.8)
-        _ = implicit.beginUtterance(id: "implicit", world: world(now: 1, control: .a))
-        #expect(implicit.accept(.init(id: "implicit", text: "Alfie, pan", confidence: 0.95),
+        let implicitToken = try implicit.beginUtterance(world: world(now: 1, control: .a)).get()
+        #expect(implicit.accept(.init(id: implicitToken.id, text: "Alfie, pan", confidence: 0.95),
             world: world(now: 1.1, control: .a)) == .failure(.targetUnavailable))
         let extra = VoiceCommandAdapter(confidenceFloor: 0.8)
-        _ = extra.beginUtterance(id: "extra", world: world(now: 1))
-        #expect(extra.accept(.init(id: "extra", text: "Alfie, camera three, pan", confidence: 0.95),
+        let extraToken = try extra.beginUtterance(world: world(now: 1)).get()
+        #expect(extra.accept(.init(id: extraToken.id, text: "Alfie, camera three, pan", confidence: 0.95),
             world: world(now: 1.1)) == .failure(.targetUnavailable))
     }
 
-    @Test func interveningActionsRevokeAtFinalAndDispatch() {
+    @Test func interveningActionsRevokeAtFinalAndDispatch() throws {
         let cases: [(String, (VoiceCommandAdapter) -> Void, SpeechRejection)] = [
             ("manual", { $0.manualCommandOccurred() }, .cancelledByManualCommand),
             ("wide", { $0.returnToWideOccurred() }, .cancelledByWide),
             ("take", { $0.operatorTakeOccurred() }, .cancelledByTake),
             ("mute", { $0.muteChanged() }, .cancelledByMute),
             ("stop", { $0.stopOccurred() }, .stopped)]
-        for (id, intervene, expected) in cases {
+        for (_, intervene, expected) in cases {
             let beforeFinal = VoiceCommandAdapter(confidenceFloor: 0.8)
-            _ = beforeFinal.beginUtterance(id: id, world: world(now: 1))
+            let token = try beforeFinal.beginUtterance(world: world(now: 1)).get()
             intervene(beforeFinal)
-            #expect(beforeFinal.accept(.init(id: id, text: "Alfie, pan", confidence: 0.9),
+            #expect(beforeFinal.accept(.init(id: token.id, text: "Alfie, pan", confidence: 0.9),
                 world: world(now: 1.1)) == .failure(expected))
             let beforeDispatch = VoiceCommandAdapter(confidenceFloor: 0.8)
-            guard let value = pending(beforeDispatch, id: id) else { Issue.record("missing pending"); continue }
+            guard let value = pending(beforeDispatch) else { Issue.record("missing pending"); continue }
             intervene(beforeDispatch)
             if case .failure(let reason) = beforeDispatch.prepareDispatch(value,
                 world: world(now: 1.2), format: .stage) {
@@ -145,7 +144,7 @@ import Testing
         }
     }
 
-    @Test func liveChangesExpiryAndBoundedDedupe() {
+    @Test func liveChangesExpiryAndBoundedDedupe() throws {
         let changed: [(VoiceWorldSnapshot, SpeechRejection)] = [
             (world(now: 1.2, session: 2), .sessionChanged),
             (world(now: 1.2, mute: 2), .cancelledByMute),
@@ -153,26 +152,155 @@ import Testing
             (world(now: 1.2, program: .b, preview: .a), .roleChanged),
             (world(now: 1.2, sourceGeneration: 2), .sourceChanged),
             (world(now: 4), .expired)]
-        for (index, item) in changed.enumerated() {
+        for item in changed {
             let adapter = VoiceCommandAdapter(confidenceFloor: 0.8, maximumAge: 2)
-            guard let value = pending(adapter, id: "c\(index)") else { Issue.record("missing pending"); continue }
+            guard let value = pending(adapter) else { Issue.record("missing pending"); continue }
             if case .failure(let reason) = adapter.prepareDispatch(value, world: item.0, format: .stage) {
                 #expect(reason == item.1)
             } else { Issue.record("stale token admitted") }
             let finalAdapter = VoiceCommandAdapter(confidenceFloor: 0.8, maximumAge: 2)
-            let finalID = "f\(index)"
-            _ = finalAdapter.beginUtterance(id: finalID, world: world(now: 1))
-            #expect(finalAdapter.accept(.init(id: finalID, text: "Alfie, pan", confidence: 0.9),
+            let token = try finalAdapter.beginUtterance(world: world(now: 1)).get()
+            #expect(finalAdapter.accept(.init(id: token.id, text: "Alfie, pan", confidence: 0.9),
                 world: item.0) == .failure(item.1))
         }
         let adapter = VoiceCommandAdapter(confidenceFloor: 0.8, capacity: 2)
-        for index in 0..<10 {
-            let id = "bounded-\(index)"
-            _ = adapter.beginUtterance(id: id, world: world(now: 1))
-            _ = adapter.accept(.init(id: id, text: "Alfie, detect", confidence: 0.9), world: world(now: 1.1))
+        for _ in 0..<10 {
+            let token = try adapter.beginUtterance(world: world(now: 1)).get()
+            _ = adapter.accept(.init(id: token.id, text: "Alfie, detect", confidence: 0.9), world: world(now: 1.1))
             #expect(adapter.retainedUtteranceCount <= 4)
         }
-        #expect(adapter.accept(.init(id: "orphan", text: "Alfie, detect", confidence: 0.9),
+        let otherAdapter = VoiceCommandAdapter(confidenceFloor: 0.8)
+        let orphan = try otherAdapter.beginUtterance(world: world(now: 1)).get()
+        #expect(adapter.accept(.init(id: orphan.id, text: "Alfie, detect", confidence: 0.9),
             world: world(now: 1.1)) == .failure(.missingUtteranceStart))
+    }
+
+
+    @Test func lateFinalCannotAliasAFreshStartAfterRecentIdentityEviction() throws {
+        let adapter = VoiceCommandAdapter(confidenceFloor: 0.8, capacity: 1)
+        let first = try adapter.beginUtterance(world: world(now: 1)).get()
+        let oldFinal = SpeechFinalTranscript(id: first.id, text: "Alfie, pan", confidence: 0.95)
+        let firstPending = try adapter.accept(oldFinal, world: world(now: 1.1)).get()
+        let firstBound = try adapter.prepareDispatch(firstPending, world: world(now: 1.2), format: .stage).get()
+        #expect(firstBound.utteranceID == first.id)
+
+        let middle = try adapter.beginUtterance(world: world(now: 1.3)).get()
+        _ = try adapter.accept(.init(id: middle.id, text: "Alfie, detect", confidence: 0.95),
+            world: world(now: 1.4)).get() // capacity=1 evicts first from recent IDs.
+        let fresh = try adapter.beginUtterance(world: world(now: 1.5)).get()
+        #expect(Set([first.id, middle.id, fresh.id]).count == 3)
+        #expect(adapter.accept(oldFinal, world: world(now: 1.6)) == .failure(.missingUtteranceStart))
+        let freshPending = try adapter.accept(.init(id: fresh.id, text: "Alfie, manual", confidence: 0.95),
+            world: world(now: 1.6)).get()
+        let freshBound = try adapter.prepareDispatch(freshPending, world: world(now: 1.7), format: .stage).get()
+        #expect(freshBound.utteranceID == fresh.id)
+        guard case .setMode(.manualCrop) = freshBound.action else {
+            Issue.record("old final replaced the fresh command"); return
+        }
+        #expect(adapter.accept(oldFinal, world: world(now: 1.7)) == .failure(.missingUtteranceStart))
+        if case .success = adapter.prepareDispatch(freshPending, world: world(now: 1.7), format: .stage) {
+            Issue.record("fresh identity dispatched twice")
+        }
+    }
+
+    @Test(arguments: [false, true])
+    func oldSessionFinalCannotConsumeANewSessionStart(stopBeforeRestart: Bool) throws {
+        let adapter = VoiceCommandAdapter(confidenceFloor: 0.8, capacity: 1)
+        let old = try adapter.beginUtterance(world: world(now: 1, session: 1)).get()
+        if stopBeforeRestart { adapter.stopOccurred() }
+        let fresh = try adapter.beginUtterance(world: world(now: 1.2, session: 2)).get()
+        #expect(old.id != fresh.id)
+        #expect(old.start.sessionGeneration == 1)
+        #expect(fresh.start.sessionGeneration == 2)
+        #expect(adapter.accept(.init(id: old.id, text: "Alfie, pan", confidence: 0.95),
+            world: world(now: 1.3, session: 2)) == .failure(.missingUtteranceStart))
+        let command = try adapter.accept(.init(id: fresh.id, text: "Alfie, pan", confidence: 0.95),
+            world: world(now: 1.3, session: 2)).get()
+        let bound = try adapter.prepareDispatch(command, world: world(now: 1.4, session: 2), format: .stage).get()
+        #expect(bound.utteranceID == fresh.id)
+    }
+
+    @Test func replacingAdapterCannotReuseIdentityOrConsumeItsCurrentPendingCommand() throws {
+        let oldAdapter = VoiceCommandAdapter(confidenceFloor: 0.8)
+        let old = try oldAdapter.beginUtterance(world: world(now: 1)).get()
+        let oldFinal = SpeechFinalTranscript(id: old.id, text: "Alfie, pan", confidence: 0.95)
+        let oldPending = try oldAdapter.accept(oldFinal, world: world(now: 1.1)).get()
+        // Same show generation, clock and initial counter; the adapter namespace differs.
+        let freshAdapter = VoiceCommandAdapter(confidenceFloor: 0.8)
+        let fresh = try freshAdapter.beginUtterance(world: world(now: 1)).get()
+        #expect(old.id != fresh.id)
+        #expect(freshAdapter.accept(oldFinal, world: world(now: 1.1)) == .failure(.missingUtteranceStart))
+        let freshPending = try freshAdapter.accept(.init(id: fresh.id, text: "Alfie, manual", confidence: 0.95),
+            world: world(now: 1.1)).get()
+        if case .failure(let reason) = freshAdapter.prepareDispatch(oldPending, world: world(now: 1.2), format: .stage) {
+            #expect(reason == .duplicateUtterance)
+        } else { Issue.record("another adapter's pending command admitted") }
+        let bound = try freshAdapter.prepareDispatch(freshPending, world: world(now: 1.2), format: .stage).get()
+        #expect(bound.utteranceID == fresh.id)
+        guard case .setMode(.manualCrop) = bound.action else {
+            Issue.record("another adapter consumed the fresh command"); return
+        }
+    }
+
+    @Test(arguments: ["confidence", "grammar"])
+    func refusedFinalStaysConsumedAfterItsRecentIdentityIsEvicted(refusal: String) throws {
+        let adapter = VoiceCommandAdapter(confidenceFloor: 0.8, capacity: 1)
+        let refused = try adapter.beginUtterance(world: world(now: 1)).get()
+        let expected: SpeechRejection = refusal == "confidence" ? .lowConfidence : .unrecognized
+        let transcript = SpeechFinalTranscript(id: refused.id,
+            text: refusal == "grammar" ? "Alfie, stop" : "Alfie, pan",
+            confidence: refusal == "confidence" ? 0.2 : 0.95)
+        #expect(adapter.accept(transcript, world: world(now: 1.1)) == .failure(expected))
+        let retry = SpeechFinalTranscript(id: refused.id, text: "Alfie, pan", confidence: 0.95)
+        #expect(adapter.accept(retry, world: world(now: 1.1)) == .failure(.duplicateUtterance))
+        let middle = try adapter.beginUtterance(world: world(now: 1.2)).get()
+        _ = try adapter.accept(.init(id: middle.id, text: "Alfie, pan", confidence: 0.95),
+            world: world(now: 1.3)).get()
+        let fresh = try adapter.beginUtterance(world: world(now: 1.4)).get()
+        #expect(adapter.accept(retry, world: world(now: 1.5)) == .failure(.missingUtteranceStart))
+        let command = try adapter.accept(.init(id: fresh.id, text: "Alfie, pan", confidence: 0.95),
+            world: world(now: 1.5)).get()
+        #expect(try adapter.prepareDispatch(command, world: world(now: 1.6), format: .stage).get().utteranceID == fresh.id)
+    }
+
+    #if DEBUG
+    @Test func identitySequenceExhaustionRefusesRatherThanWraps() throws {
+        let adapter = VoiceCommandAdapter(confidenceFloor: 0.8, capacity: 2,
+            testingNextUtteranceSequence: UInt64.max - 1)
+        let penultimate = try adapter.beginUtterance(world: world(now: 1)).get()
+        let last = try adapter.beginUtterance(world: world(now: 1)).get()
+        #expect(penultimate.id != last.id)
+        #expect(adapter.beginUtterance(world: world(now: 1)) == .failure(.invalidToken))
+        #expect(adapter.beginUtterance(world: world(now: 1.1)) == .failure(.invalidToken))
+        let command = try adapter.accept(.init(id: last.id, text: "Alfie, pan", confidence: 0.95),
+            world: world(now: 1.1)).get()
+        #expect(try adapter.prepareDispatch(command, world: world(now: 1.2), format: .stage).get().utteranceID == last.id)
+    }
+    #endif
+
+    @Test func identityUniquenessDoesNotRequireUnboundedRetainedState() throws {
+        let capacity = 2
+        let adapter = VoiceCommandAdapter(confidenceFloor: 0.8, capacity: capacity)
+        var issued = Set<VoiceUtteranceID>()
+        var first: VoiceUtteranceToken?
+        for index in 0..<64 {
+            let time = Double(index) / 100
+            let token = try adapter.beginUtterance(world: world(now: time)).get()
+            if first == nil { first = token }
+            #expect(issued.insert(token.id).inserted)
+            #expect(adapter.retainedUtteranceCount <= 3 * capacity)
+            guard index % 3 != 0 else { continue } // Leave some starts to exercise their eviction.
+            let command = try adapter.accept(.init(id: token.id, text: "Alfie, pan", confidence: 0.95),
+                world: world(now: time)).get()
+            #expect(adapter.retainedUtteranceCount <= 3 * capacity)
+            if index % 3 == 1 {
+                _ = try adapter.prepareDispatch(command, world: world(now: time), format: .stage).get()
+                #expect(adapter.retainedUtteranceCount <= 3 * capacity)
+            }
+        }
+        #expect(issued.count == 64)
+        let evicted = try #require(first)
+        #expect(adapter.accept(.init(id: evicted.id, text: "Alfie, pan", confidence: 0.95),
+            world: world(now: 0.7)) == .failure(.missingUtteranceStart))
     }
 }

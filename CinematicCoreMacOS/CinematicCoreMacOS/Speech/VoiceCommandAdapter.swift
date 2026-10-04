@@ -1,10 +1,22 @@
 import Foundation
 
+/// Minted only by the adapter at utterance start. A source echoes this value
+/// on its final result; recognizer-local names cannot authorize a new start.
+nonisolated struct VoiceUtteranceID: Hashable, Sendable {
+    private let namespace: UUID
+    private let sequence: UInt64
+
+    fileprivate init(namespace: UUID, sequence: UInt64) {
+        self.namespace = namespace
+        self.sequence = sequence
+    }
+}
+
 nonisolated protocol SpeechTranscriptSource {
     func finalTranscripts() -> [SpeechFinalTranscript]
 }
 nonisolated struct SpeechFinalTranscript: Equatable, Sendable {
-    let id: String
+    let id: VoiceUtteranceID
     let text: String
     let confidence: Double
 }
@@ -44,7 +56,7 @@ nonisolated struct VoiceWorldSnapshot: Equatable, Sendable {
 }
 
 nonisolated struct VoiceUtteranceToken: Equatable, Sendable {
-    let id: String
+    let id: VoiceUtteranceID
     let start: VoiceWorldSnapshot
     let manualEpoch: UInt64
     let wideEpoch: UInt64
@@ -54,7 +66,7 @@ nonisolated struct VoiceUtteranceToken: Equatable, Sendable {
 }
 
 nonisolated struct BoundVoiceCommand: Sendable {
-    let utteranceID: String
+    let utteranceID: VoiceUtteranceID
     let target: ChannelID
     let action: OperatorCommand.Action
     let token: VoiceUtteranceToken
@@ -66,7 +78,7 @@ nonisolated struct BoundVoiceCommand: Sendable {
         let token: VoiceUtteranceToken
         let target: ChannelID
         let intent: VoiceIntent
-        var utteranceID: String { token.id }
+        var utteranceID: VoiceUtteranceID { token.id }
     }
     let confidenceFloor: Double
     let maximumAge: TimeInterval
@@ -76,12 +88,16 @@ nonisolated struct BoundVoiceCommand: Sendable {
     private var takeEpoch: UInt64 = 0
     private var muteEpoch: UInt64 = 0
     private var stopEpoch: UInt64 = 0
-    private var starts: [String: VoiceUtteranceToken] = [:]
-    private var startOrder: [String] = []
-    private var pending: [String: Pending] = [:]
-    private var pendingOrder: [String] = []
-    private var seenIDs: Set<String> = []
-    private var seenOrder: [String] = []
+    /// Replacing the adapter always creates a new namespace. Callers cannot
+    /// inject one or reset this allocator to reuse an earlier identity.
+    private let utteranceNamespace = UUID()
+    private var nextUtteranceSequence: UInt64? = 0
+    private var starts: [VoiceUtteranceID: VoiceUtteranceToken] = [:]
+    private var startOrder: [VoiceUtteranceID] = []
+    private var pending: [VoiceUtteranceID: Pending] = [:]
+    private var pendingOrder: [VoiceUtteranceID] = []
+    private var seenIDs: Set<VoiceUtteranceID> = []
+    private var seenOrder: [VoiceUtteranceID] = []
 
     init(confidenceFloor: Double, maximumAge: TimeInterval = 2, capacity: Int = 128) {
         self.confidenceFloor = confidenceFloor
@@ -89,20 +105,33 @@ nonisolated struct BoundVoiceCommand: Sendable {
         self.capacity = capacity
     }
 
+    #if DEBUG
+    /// Test-only exhaustion seam. The production namespace is still freshly
+    /// minted; only the initial counter of this new adapter can be varied.
+    convenience init(confidenceFloor: Double, maximumAge: TimeInterval = 2, capacity: Int = 128,
+                     testingNextUtteranceSequence: UInt64) {
+        self.init(confidenceFloor: confidenceFloor, maximumAge: maximumAge, capacity: capacity)
+        nextUtteranceSequence = testingNextUtteranceSequence
+    }
+    #endif
+
     var retainedUtteranceCount: Int { starts.count + pending.count + seenIDs.count }
 
-    func beginUtterance(id: String, world: VoiceWorldSnapshot) -> Result<VoiceUtteranceToken, SpeechRejection> {
+    /// Start must happen before recognition. The returned identity is the
+    /// only correlation value a later final transcript may supply.
+    func beginUtterance(world: VoiceWorldSnapshot) -> Result<VoiceUtteranceToken, SpeechRejection> {
         guard confidenceFloor.isFinite, (0...1).contains(confidenceFloor),
               maximumAge.isFinite, maximumAge > 0, capacity > 0,
-              !id.isEmpty, world.now.isFinite, world.now >= 0,
+              world.now.isFinite, world.now >= 0,
               world.program == .a || world.program == .b,
               world.preview == .a || world.preview == .b,
               world.preview != world.program else { return .failure(.invalidToken) }
         guard world.running else { return .failure(.stopped) }
         guard !world.muted else { return .failure(.muted) }
-        guard !seenIDs.contains(id), starts[id] == nil, pending[id] == nil else {
-            return .failure(.duplicateUtterance)
-        }
+        guard let sequence = nextUtteranceSequence else { return .failure(.invalidToken) }
+        // Admit UInt64.max once, then refuse further starts rather than wrap.
+        nextUtteranceSequence = sequence == UInt64.max ? nil : sequence + 1
+        let id = VoiceUtteranceID(namespace: utteranceNamespace, sequence: sequence)
         let token = VoiceUtteranceToken(id: id, start: world, manualEpoch: manualEpoch,
             wideEpoch: wideEpoch, takeEpoch: takeEpoch, muteEpoch: muteEpoch, stopEpoch: stopEpoch)
         if startOrder.count == capacity, let evicted = startOrder.first {
@@ -206,7 +235,7 @@ nonisolated struct BoundVoiceCommand: Sendable {
         return nil
     }
 
-    private func remember(_ id: String) {
+    private func remember(_ id: VoiceUtteranceID) {
         if seenOrder.count == capacity, let evicted = seenOrder.first {
             seenOrder.removeFirst(); seenIDs.remove(evicted)
         }
