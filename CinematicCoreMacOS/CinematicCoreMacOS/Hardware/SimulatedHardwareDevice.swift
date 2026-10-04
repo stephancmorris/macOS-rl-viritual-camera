@@ -70,6 +70,9 @@ nonisolated final class SimulatedHardwareDevice: HardwareLink {
     }
     func checkLink() {
         guard let now = observeTime() else { return }
+        checkLink(at: now)
+    }
+    private func checkLink(at now: TimeInterval) {
         guard phase == .connectedDisarmed else { return }
         guard let lastHeartbeat, now - lastHeartbeat < timing.linkLossInterval else {
             revoke(.faulted, reason: HardwareRejection.heartbeatLost.rawValue); return
@@ -172,8 +175,9 @@ nonisolated final class SimulatedHardwareDevice: HardwareLink {
     func receiveWire(_ data: Data) -> [Result<HardwareResponse, HardwareRejection>] {
         checkLink()
         let records = codec.feed(data)
-        let context = negotiation
         let now = observeTime()
+        if let now { checkLink(at: now) }
+        let context = negotiation
         if let context, let now, let index = records.firstIndex(where: {
             guard case .success(.command(let record)) = $0 else { return false }
             return record.type == .estop && record.v == protocolVersion
@@ -230,6 +234,9 @@ nonisolated final class SimulatedHardwareDevice: HardwareLink {
         sequence = record.seq
         guard let now = observeTime(), record.expiresDeviceTime.isFinite,
               record.expiresDeviceTime >= 0 else { return reply(record, .invalidRange) }
+        // Admission can cross the heartbeat deadline between clock samples.
+        checkLink(at: now)
+        guard negotiation == context else { remember(.late); return .failure(.late) }
         guard record.expiresDeviceTime > now else { return reply(record, .late) }
         guard record.expiresDeviceTime <= now + timing.maximumMotionLease else {
             return reply(record, .leaseTooLong)

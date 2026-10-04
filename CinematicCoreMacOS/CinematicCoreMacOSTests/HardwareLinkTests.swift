@@ -339,4 +339,104 @@ import Testing
         #expect(ack.accepted && ack.v == 2 && device.healthy)
     }
 
+    @Test(arguments: [0.3, 0.31])
+    func wireHeartbeatCannotRenewAfterDeadlineCrossesDuringAdmission(effectTime: TimeInterval) throws {
+        var now = 0.0
+        var samples: [TimeInterval] = []
+        let device = SimulatedHardwareDevice(clock: {
+            if !samples.isEmpty { now = samples.removeFirst() }
+            return now
+        })
+        try connect(device)
+        device.heartbeat()
+        let heartbeat = try HardwareWireCodec().encode(record(device, .heartbeat, expiry: 0.4))
+        // Parsing/admission begins before the deadline; its final time sample crosses it.
+        samples = [0.29, 0.29, 0.29, effectTime]
+        #expect(device.receiveWire(heartbeat) == [.failure(.late)])
+        #expect(device.phase == .faulted && device.negotiation == nil && !device.healthy)
+        #expect(device.sequence == 0 && !device.estopLatched)
+        let telemetry = device.telemetry()
+        #expect(telemetry.fault == HardwareRejection.heartbeatLost.rawValue)
+        #expect(!telemetry.driveEnabled)
+    }
+
+    @Test(arguments: [0.3, 0.31])
+    func directHeartbeatCannotRenewAfterDeadlineCrossesDuringAdmission(effectTime: TimeInterval) throws {
+        var now = 0.0
+        var samples: [TimeInterval] = []
+        let device = SimulatedHardwareDevice(clock: {
+            if !samples.isEmpty { now = samples.removeFirst() }
+            return now
+        })
+        try connect(device)
+        device.heartbeat()
+        samples = [0.29, 0.29, 0.29, effectTime]
+        device.heartbeat()
+        #expect(device.phase == .faulted && device.negotiation == nil && !device.healthy)
+        #expect(device.sequence == 0 && !device.estopLatched)
+        let telemetry = device.telemetry()
+        #expect(telemetry.fault == HardwareRejection.heartbeatLost.rawValue)
+        #expect(!telemetry.driveEnabled)
+    }
+
+    @Test func heartbeatsMayRenewJustBeforeDeadline() throws {
+        for wire in [true, false] {
+            var now = 0.0
+            var samples: [TimeInterval] = []
+            let device = SimulatedHardwareDevice(clock: {
+                if !samples.isEmpty { now = samples.removeFirst() }
+                return now
+            })
+            try connect(device)
+            device.heartbeat()
+            let context = try #require(device.negotiation)
+            let heartbeat = try HardwareWireCodec().encode(record(device, .heartbeat, expiry: 0.4))
+            samples = [0.29, 0.29, 0.29, 0.299]
+            if wire {
+                let reply = try #require(device.receiveWire(heartbeat).first).get()
+                #expect(reply.acknowledgement?.accepted == true)
+            } else { device.heartbeat() }
+            #expect(device.sequence == 2 && device.negotiation == context && device.healthy)
+            now = 0.3
+            device.checkLink()
+            #expect(device.phase == .connectedDisarmed && device.healthy)
+            #expect(!device.telemetry().driveEnabled)
+        }
+    }
+
+    @Test(arguments: [0.299, 0.3, 0.31])
+    func priorityEstopUsesCurrentBatchTimeAndSession(effectTime: TimeInterval) throws {
+        var now = 0.0
+        var samples: [TimeInterval] = []
+        let device = SimulatedHardwareDevice(clock: {
+            if !samples.isEmpty { now = samples.removeFirst() }
+            return now
+        })
+        try connect(device)
+        device.heartbeat()
+        let codec = HardwareWireCodec()
+        let heartbeat = try codec.encode(record(device, .heartbeat, seq: 2, expiry: 0.4))
+        let estop = try codec.encode(record(device, .estop, seq: 3, expiry: 0.4))
+        let reset = try codec.encode(record(device, .resetEstop, seq: 4, expiry: 0.4))
+        samples = [0.29, effectTime]
+        let replies = device.receiveWire(heartbeat + estop + reset)
+        if effectTime < 0.3 {
+            #expect(replies.count == 3)
+            #expect(replies[0] == .failure(.estopLatched))
+            #expect(try replies[1].get().acknowledgement?.rejection == .outOfOrder)
+            #expect(replies[2] == .failure(.estopLatched))
+            #expect(device.estopLatched && device.phase == .stopped)
+            #expect(device.negotiation == nil && !device.healthy)
+        } else {
+            #expect(replies == [.failure(.late), .failure(.late), .failure(.late)])
+            #expect(!device.estopLatched && device.phase == .faulted)
+            #expect(device.negotiation == nil && !device.healthy && device.sequence == 0)
+            #expect(device.telemetry().fault == HardwareRejection.heartbeatLost.rawValue)
+            // Local e-stop remains unconditional even after the stream session expires.
+            device.emergencyStop()
+            #expect(device.estopLatched && device.phase == .stopped)
+        }
+        #expect(!device.telemetry().driveEnabled)
+    }
+
 }
