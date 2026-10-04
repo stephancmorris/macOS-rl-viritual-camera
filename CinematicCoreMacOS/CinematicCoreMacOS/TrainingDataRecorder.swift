@@ -11,7 +11,13 @@ import CoreGraphics
 import AppKit
 import OSLog
 
-private actor TrainingDataSessionWriter {
+/// Writer seam for isolated storage and deterministic shutdown tests.
+protocol TrainingDataWriting: Sendable {
+    func write(_ data: Data) async throws -> Int64
+    func close() async throws
+}
+
+actor TrainingDataSessionWriter: TrainingDataWriting {
     private let fileHandle: FileHandle
     private var isClosed = false
 
@@ -60,14 +66,8 @@ final class TrainingDataRecorder: ObservableObject {
     @Published private(set) var stats: RecordingStats = .init()
     @Published private(set) var lastErrorDescription: String?
 
-    @Published var hasUserConsentedToTrainingData: Bool {
-        didSet {
-            UserDefaults.standard.set(
-                hasUserConsentedToTrainingData,
-                forKey: Self.consentDefaultsKey
-            )
-        }
-    }
+    @Published private(set) var hasUserConsentedToTrainingData: Bool
+    @Published private(set) var isStopping: Bool = false
 
     /// When set, this crop is used as the "ideal" label instead of ShotComposer's auto crop
     @Published var manualCropOverride: CropEngine.CropRect?
@@ -160,10 +160,16 @@ final class TrainingDataRecorder: ObservableObject {
     // MARK: - Private State
 
     private var sessionDirectory: URL?
-    private var sessionWriter: TrainingDataSessionWriter?
-    /// In-flight batch writes, removed as each completes so a long recording
-    /// does not keep every finished task until stop (CR-009).
+    private var sessionWriter: (any TrainingDataWriting)?
+    /// Keep only in-flight batches, with a separate tail preserving admission
+    /// order without retaining every completed task for the whole recording.
     private var pendingWriteTasks: [UUID: Task<Int64, Error>] = [:]
+    private var writeTail: Task<Int64, Error>?
+    private var shutdownTask: Task<Void, Never>?
+    private var acceptsObservations = false
+    private let defaults: UserDefaults
+    private let directoryOverride: URL?
+    private let writerFactory: (FileHandle) -> any TrainingDataWriting
     private var frameIndex: Int = 0
     private var sessionStartTime: Date?
     private var buffer: [Data] = []
@@ -175,8 +181,26 @@ final class TrainingDataRecorder: ObservableObject {
         return encoder
     }()
 
-    init(defaults: UserDefaults = .standard) {
+    init(
+        defaults: UserDefaults = .standard,
+        outputDirectory: URL? = nil,
+        writerFactory: @escaping (FileHandle) -> any TrainingDataWriting = {
+            TrainingDataSessionWriter(fileHandle: $0)
+        }
+    ) {
+        self.defaults = defaults
+        self.directoryOverride = outputDirectory
+        self.writerFactory = writerFactory
         self.hasUserConsentedToTrainingData = defaults.bool(forKey: Self.consentDefaultsKey)
+    }
+
+    /// MainActor is the serialized observation-admission boundary. Revocation
+    /// closes admission before returning; previously accepted data is preserved
+    /// and drained by the same shutdown path used by Stop.
+    func setTrainingDataConsent(_ granted: Bool) {
+        if !granted { _ = beginStopping() }
+        hasUserConsentedToTrainingData = granted
+        defaults.set(granted, forKey: Self.consentDefaultsKey)
     }
 
     enum RecorderError: LocalizedError {
@@ -193,6 +217,7 @@ final class TrainingDataRecorder: ObservableObject {
     /// than trapping when the app has no Documents folder (CR-010).
     var outputDirectory: URL {
         get throws {
+            if let directoryOverride { return directoryOverride }
             guard let docs = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first else {
                 throw RecorderError.noDocumentsDirectory
             }
@@ -220,7 +245,7 @@ final class TrainingDataRecorder: ObservableObject {
         composerConfig: ShotComposer.Config,
         detectorConfig: PersonDetector.Config
     ) {
-        guard !isRecording else { return }
+        guard sessionWriter == nil, !isRecording, !isStopping else { return }
         guard hasUserConsentedToTrainingData else {
             lastErrorDescription = "Training data recording requires explicit operator consent."
             Self.logger.error("Training data recording blocked because consent has not been granted")
@@ -232,7 +257,7 @@ final class TrainingDataRecorder: ObservableObject {
         let formatter = DateFormatter()
         formatter.dateFormat = "yyyy-MM-dd_HH-mm-ss"
         let timestamp = formatter.string(from: Date())
-        let id = "session_\(timestamp)"
+        let id = "session_\(timestamp)_\(UUID().uuidString)"
 
         // Create session directory
         let sessionDir: URL
@@ -255,12 +280,13 @@ final class TrainingDataRecorder: ObservableObject {
         }
 
         // Store state
-        sessionWriter = TrainingDataSessionWriter(fileHandle: handle)
+        sessionWriter = writerFactory(handle)
         sessionDirectory = sessionDir
         sessionStartTime = Date()
         frameIndex = 0
         buffer = []
         pendingWriteTasks = [:]
+        writeTail = nil
         stats = .init()
         lastErrorDescription = nil
 
@@ -288,22 +314,38 @@ final class TrainingDataRecorder: ObservableObject {
             )
         )
 
+        acceptsObservations = true
         isRecording = true
         Self.logger.notice("Started recording session: \(id, privacy: .public)")
     }
 
-    /// Stop the current recording session
+    /// Stop and wait for all previously accepted observations to reach disk.
+    /// Concurrent Stop/revoke callers await the same shutdown operation.
     func stopRecording() async {
-        guard isRecording else { return }
-        isRecording = false
+        await beginStopping()?.value
+    }
 
-        // Flush remaining buffer
+    @discardableResult
+    private func beginStopping() -> Task<Void, Never>? {
+        if let shutdownTask { return shutdownTask }
+        guard isRecording else { return nil }
+        // Close the plain gate before Published sends synchronous notifications.
+        acceptsObservations = false
+        isRecording = false
+        isStopping = true
+
         if !buffer.isEmpty {
             let batch = buffer
             buffer = []
             flushBuffer(batch)
         }
 
+        let task = Task { await finalizeRecording() }
+        shutdownTask = task
+        return task
+    }
+
+    private func finalizeRecording() async {
         await finishPendingWrites()
 
         // Finalize metadata
@@ -337,6 +379,9 @@ final class TrainingDataRecorder: ObservableObject {
         sessionDirectory = nil
         sessionStartTime = nil
         pendingMetadata = nil
+        writeTail = nil
+        shutdownTask = nil
+        isStopping = false
 
         Self.logger.notice("Stopped recording. Frames: \(self.stats.framesRecorded)")
     }
@@ -349,7 +394,7 @@ final class TrainingDataRecorder: ObservableObject {
         idealCrop: CropEngine.CropRect?,
         isInterpolating: Bool
     ) {
-        guard isRecording else { return }
+        guard acceptsObservations, isRecording, hasUserConsentedToTrainingData else { return }
 
         // Subsample check
         guard frameIndex % config.subsampleRate == 0 else {
@@ -483,7 +528,7 @@ final class TrainingDataRecorder: ObservableObject {
     }
 
     func deleteAllCompletedSessions() {
-        guard !isRecording else { return }
+        guard sessionWriter == nil, !isRecording, !isStopping else { return }
 
         do {
             let fileManager = FileManager.default
@@ -521,23 +566,26 @@ final class TrainingDataRecorder: ObservableObject {
 
         let combined = batch.reduce(Data()) { $0 + $1 }
 
-        let writeTask = Task {
-            try await writer.write(combined)
-        }
+        // Actor mailboxes do not promise submission order for separate tasks.
+        // Chain each batch so the persisted JSONL keeps admission order.
+        let predecessor = writeTail
         let id = UUID()
-        pendingWriteTasks[id] = writeTask
-
-        Task { @MainActor [weak self] in
-            defer { self?.pendingWriteTasks[id] = nil }
+        let writeTask = Task {
+            defer { pendingWriteTasks[id] = nil }
+            if let predecessor { _ = try? await predecessor.value }
             do {
-                let byteCount = try await writeTask.value
-                self?.stats.fileSizeBytes += byteCount
+                let byteCount = try await writer.write(combined)
+                stats.fileSizeBytes += byteCount
+                return byteCount
             } catch {
-                self?.stats.droppedFrames += batch.count
-                self?.lastErrorDescription = "Failed to write training data: \(error.localizedDescription)"
+                stats.droppedFrames += batch.count
+                lastErrorDescription = "Failed to write training data: \(error.localizedDescription)"
                 Self.logger.error("Failed to write training data: \(error.localizedDescription, privacy: .public)")
+                throw error
             }
         }
+        pendingWriteTasks[id] = writeTask
+        writeTail = writeTask
     }
 
     private func finishPendingWrites() async {
