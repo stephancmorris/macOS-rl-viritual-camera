@@ -28,7 +28,7 @@ The original coding repair commits are present in fresh main ancestry: AD-VALIDA
 
 Evidence added and cards moved from Agent Queue to Human Review: https://trello.com/c/nPoIqkTe, https://trello.com/c/X0OTOpra, https://trello.com/c/AkZj4BJB, https://trello.com/c/owpu13qI. None marked Done. The consent parent has a separate evidence checklist; the connector's 2,048-character description limit prevented appending without truncating its existing acceptance text, so that text was preserved.
 
-Replay lifecycle `307d91f` and independent raw-world effect audit `a89644b` postdate the candidate review finding. The latter independently classifies recorded effect context, but `CommittedEffect` still does not independently record `evidenceAvailable` or active request identity; those rejection reasons currently rely on the preparation validator. Live latency/labelled editorial qualification remains open. Director product choices and live evidence adapters remain open; hardware remains motion-disabled and needs target/firmware/physical stop evidence; voice remains text-only and needs privacy/recognizer choices, session-unique IDs and actual utterance/effect hooks. All 37 product decisions remain OPEN. No synthetic test closes these gates.
+Replay lifecycle `307d91f` and independent raw-world effect audit `a89644b` postdate the candidate review finding. At this original reconciliation, the latter independently classified recorded effect context but did not yet record raw evidence or active request identity; those two reasons relied on the preparation validator. The additional quality tickets below close that isolated accounting gap. Live latency/labelled editorial qualification remains open. Director product choices and live evidence adapters remain open; hardware remains motion-disabled and needs target/firmware/physical stop evidence; voice remained text-only with privacy/recognizer, unique-ID and actual utterance/effect dependencies. The additional ID and Track-lock repairs below close the isolated adapter gaps; privacy/recognizer and running-app hooks remain open. All 37 product decisions remain OPEN. No synthetic test closes these gates.
 
 ## Unit 2 — setup truth
 
@@ -75,3 +75,82 @@ Final periodic cadence `/private/tmp/alfie-quality-u3-cadence-periodic.xcresult`
 ## Changed files
 
 Production: TrainingDataRecorder.swift, RecorderSettingsView.swift, ShowSetupModel.swift, PairCheckPanel.swift, ProgramOutputManager.swift and new LatencySampleWindow.swift. Build membership: CinematicCoreMacOS.xcodeproj/project.pbxproj (shared helper only). Tests: new TrainingDataRecorderTests.swift and LatencySampleWindowTests.swift; ShowSetupTests.swift, DiagnosticsLogTests.swift, InstrumentationInvestigationTests.swift. Documentation: docs/privacy/current-source-audit.md, this report, reports/release-1/instrumentation-investigation.md, metrics-window-2026-10-04.md and synthetic/probe files under metrics-window-evidence. Source commits: Unit 1 bb7e692; Unit 2 1bcb3d6; Unit 3 6e17e3c. All were separately committed and pushed. No merge to main.
+
+
+## Additional quality tickets
+
+Five narrow follow-ups were completed after inspecting current source and searching open/archived board cards. Each coding repair was independently reviewed, committed/pushed separately and verified with targeted and complete unsigned unit-target runs. All eight narrow sprint/follow-up cards are now in Human Review, not Done. Broader foundation/release acceptance remains open.
+
+| Follow-up | Commit | Targeted passed definitions / runs | Full passed definitions / runs | Full skips | Evidence |
+| --- | --- | ---: | ---: | ---: | --- |
+| [Independent replay effect audit](https://trello.com/c/7c873pMF) | `e7a32dd92f1e135b5d955f13d0dbe093aacefef7` | 20 / 55 | 467 / 600 | 5 | [Report](director-effect-audit-2026-10-04.md) |
+| [Guide consent/pair copy](https://trello.com/c/BdCAAOVw) | `31822f6656fb40f3840c2dbcb2fd391703cb0f83` | Source/static only | No new unit run | — | [Report](guide-truth-2026-10-04.md) |
+| [Nonreusable voice identity](https://trello.com/c/ozErn1Oq) | `237d66cc87772d1b0c74c2302d8c12b5c40b498d` | 12 / 14 | 473 / 608 | 5 | [Report](voice-identity-2026-10-04.md) |
+| [Simulator effect clock](https://trello.com/c/jXVfx5xG) | `660a585e35f616071b2110ccd6155cdde38be65c` | 33 / 37 | 477 / 616 | 5 | [Report](hardware-effect-clock-2026-10-04.md) |
+| [Final bound Track lock](https://trello.com/c/Yagzoy0P) | `c3d2e31a9b028f5fc52c8cb65c752262abe8cefd` | 14 / 23 | 479 / 625 | 5 | [Report](voice-track-lock-2026-10-04.md) |
+
+All final coding runs above have zero failed definitions/runs; all follow-up targeted runs have zero skips. Do not sum targeted and full snapshots. Latest complete target: `/private/tmp/alfie-followup-track-full.xcresult`, **479 passed definitions / 625 passed case runs, zero failed, five skipped definitions/runs** (484 total definitions / 630 total runs including skips). Its summary, tree and parsed counts are saved with the bundle-name suffixes. The final source commit is `c3d2e31`; the later consolidated-report commit changes no source/tests. All builds use `CODE_SIGNING_ALLOWED=NO` and a single macOS host.
+
+The latest five skips are the three opt-in instrumentation stress/cadence/investigation studies, absent consented readiness clips and the opt-in real two-webcam test. The instrumentation studies were exercised in the separate original Unit 3 bundles; these final code runs add no new timing or hardware qualification.
+
+Independent replay accounting now captures raw sink evidence and the authoritative request identity before commit clears it. Paired guarded/faulty synthetic execution proves staleEffectsCommitted can actually detect a stale simulated Preview mutation; per-reason counts do not inflate one effect with multiple faults. It still cannot mutate Program, Take or qualify live subject accuracy/override latency.
+
+Voice IDs are minted at real start boundaries in the isolated adapter API, with a fresh private adapter namespace and nonwrapping sequence, rather than trusting caller Strings after bounded dedupe eviction. Finals must echo that ID. Bounded state, stale-world/intervention rules and grammar remain intact. Track additionally rechecks its bound target lock at dispatch, consumes refused commands and leaves other intents eligible without a lock. No recognizer or actual onset/coordinator effect hook was added.
+
+The no-motion simulator now evaluates heartbeat loss using the same sampled time as command effects and batch-priority context. The tests-only baseline proved six deadline-crossing failures: 30 passed/3 failed definitions and31 passed/6 failed runs. The fixed timely controls, existing e-stop/sequence/framing/reconnect behavior and direct local emergencyStop remain intact. No firmware, transport, target or physical stop was qualified.
+
+Guide copy now describes revocation during recording and dated pair history. Static checks pass for16 unique HTML IDs,11 HTML links/assets and7 local Markdown links; the candidate visual/install/1280-point walkthrough is still pending.
+
+The replay's initial fixture-overlap failure and the hardware/Track expected-failing baseline bundles are retained and clearly separated from final passing evidence. Initial Track baseline:13 passed/1 failed definitions,21 passed/2 failed runs; both Preview channels reproduced. No test assertion or timing bound was weakened.
+
+Parent evidence checklists were added without truncating acceptance text. Current replay/voice parent descriptions now distinguish the closed isolated gaps from the remaining product/live integration requirements. Merged foundation cards remain Human Review. No card is marked Done, no PR/merge was made, and the primary checkout's uncommitted files were preserved.
+
+The remaining Spec Ready tickets require real evidence:60-minute named-rig soak, volunteer/clean-Mac installation and extension activation, physical receiving display/downstream cadence, real first-pan hitch reproduction, and one-handed operator zoom rehearsal. Director/voice/hardware integration requires the outstanding product choices and actual final-effect/recognition/target-local safety work. The exact-lossless latency contract still cannot impose a universal count cap on arbitrary same-time bursts without a drop/aggregation decision. No such policy was guessed.
+
+## Complete changed-file manifest
+
+The following files changed relative to fresh base `a89644b865e31d179ab9bee5f41fe25b760d2f34`. Evidence-only correction `648be4601afbea561f69448d21c654fd08b9db85` fixed periodic export/bundle references without source/test changes.
+
+- `CinematicCoreMacOS/CinematicCoreMacOS.xcodeproj/project.pbxproj`
+- `CinematicCoreMacOS/CinematicCoreMacOS/Director/Replay/DirectorReplay.swift`
+- `CinematicCoreMacOS/CinematicCoreMacOS/Hardware/SimulatedHardwareDevice.swift`
+- `CinematicCoreMacOS/CinematicCoreMacOS/LatencySampleWindow.swift`
+- `CinematicCoreMacOS/CinematicCoreMacOS/PairCheckPanel.swift`
+- `CinematicCoreMacOS/CinematicCoreMacOS/ProgramOutputManager.swift`
+- `CinematicCoreMacOS/CinematicCoreMacOS/RecorderSettingsView.swift`
+- `CinematicCoreMacOS/CinematicCoreMacOS/ShowSetupModel.swift`
+- `CinematicCoreMacOS/CinematicCoreMacOS/Speech/VoiceCommandAdapter.swift`
+- `CinematicCoreMacOS/CinematicCoreMacOS/TrainingDataRecorder.swift`
+- `CinematicCoreMacOS/CinematicCoreMacOSTests/DiagnosticsLogTests.swift`
+- `CinematicCoreMacOS/CinematicCoreMacOSTests/DirectorReplayTests.swift`
+- `CinematicCoreMacOS/CinematicCoreMacOSTests/HardwareLinkTests.swift`
+- `CinematicCoreMacOS/CinematicCoreMacOSTests/InstrumentationInvestigationTests.swift`
+- `CinematicCoreMacOS/CinematicCoreMacOSTests/LatencySampleWindowTests.swift`
+- `CinematicCoreMacOS/CinematicCoreMacOSTests/ShowSetupTests.swift`
+- `CinematicCoreMacOS/CinematicCoreMacOSTests/SpeechCommandTests.swift`
+- `CinematicCoreMacOS/CinematicCoreMacOSTests/TrainingDataRecorderTests.swift`
+- `README.md`
+- `docs/handoff/stage3-4/integration-requests.md`
+- `docs/privacy/current-source-audit.md`
+- `docs/user-guide/README.md`
+- `docs/user-guide/index.html`
+- `reports/director-effect-audit-2026-10-04.md`
+- `reports/guide-truth-2026-10-04.md`
+- `reports/hardware-effect-clock-2026-10-04.md`
+- `reports/quality-sprint-2026-10-04.md`
+- `reports/release-1/instrumentation-investigation.md`
+- `reports/release-1/metrics-window-2026-10-04.md`
+- `reports/release-1/metrics-window-evidence/accelerated-stress-after.txt`
+- `reports/release-1/metrics-window-evidence/accelerated-stress-final.txt`
+- `reports/release-1/metrics-window-evidence/app-host-after.json`
+- `reports/release-1/metrics-window-evidence/app-host-before.json`
+- `reports/release-1/metrics-window-evidence/app-host-final-repeat.json`
+- `reports/release-1/metrics-window-evidence/baseline-probe.swift`
+- `reports/release-1/metrics-window-evidence/cadence-periodic-after.json`
+- `reports/release-1/metrics-window-evidence/cadence-realistic-after.json`
+- `reports/release-1/metrics-window-evidence/default-benchmark-before.txt`
+- `reports/release-1/metrics-window-evidence/malloc-probe.c`
+- `reports/release-1/metrics-window-evidence/standalone-profile-before.json`
+- `reports/release-1/metrics-window-evidence/standalone-profile-stacks.txt`
+- `reports/voice-identity-2026-10-04.md`
+- `reports/voice-track-lock-2026-10-04.md`
