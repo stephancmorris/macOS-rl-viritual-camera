@@ -63,16 +63,26 @@ class Session:
 
 # ---------------------------------------------------------------- loading
 
-STAMP = re.compile(r"alfie_(?:soak|memory|session)_(\d{4}-\d{2}-\d{2}_\d{6})")
+# Timestamp-only historical files and UUID-suffixed session identities.
+STAMP = re.compile(
+    r"^alfie_(?:soak|memory|session)_(\d{4}-\d{2}-\d{2}_\d{6}"
+    r"(?:_[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})?)\.(?:csv|json)$"
+)
 
 
 def locate(target: Path) -> Session:
     """Find the session files for a CSV, manifest or folder (newest session)."""
     if target.is_dir():
-        stamps = sorted({m.group(1) for p in target.iterdir() if (m := STAMP.search(p.name))})
+        stamps = {}
+        for path in target.iterdir():
+            if path.is_file() and (match := STAMP.search(path.name)):
+                stem = match.group(1)
+                stamps[stem] = max(stamps.get(stem, 0), path.stat().st_mtime_ns)
         if not stamps:
             raise SystemExit(f"No Alfie diagnostics files in {target}")
-        folder, stamp = target, stamps[-1]
+        # Preserve date ordering; same-second UUIDs are unordered, so use
+        # latest file modification as the tie-breaker within that second.
+        folder, stamp = target, max(stamps, key=lambda stem: (stem[:17], stamps[stem], stem))
     else:
         match = STAMP.search(target.name)
         if not match:

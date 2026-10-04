@@ -280,6 +280,13 @@ private final class DiagnosticsFileWriter: @unchecked Sendable {
         }
     }
 
+    /// Finish queued writes without blocking the MainActor.
+    func drain() async {
+        await withCheckedContinuation { continuation in
+            queue.async { @Sendable in continuation.resume() }
+        }
+    }
+
     /// Delete diagnostics files older than `days`. Runs on the write queue so it
     /// never touches the MainActor.
     func prune(directory: URL, olderThan days: Int) {
@@ -428,6 +435,20 @@ final class DiagnosticsLog {
 
         """
 
+    private let outputDirectory: URL
+    private let wallClock: () -> Date
+
+    init(directory: URL? = nil, wallClock: @escaping () -> Date = Date.init) {
+        self.outputDirectory = directory ?? Self.directory
+        self.wallClock = wallClock
+    }
+
+    /// Await both file queues, including any session-close work already enqueued.
+    func drainWrites() async {
+        await writer.drain()
+        await memoryWriter.drain()
+    }
+
     private let writer = DiagnosticsFileWriter()
 
     /// Second file, same folder and same 5 s cadence, dedicated to the memory
@@ -480,16 +501,19 @@ final class DiagnosticsLog {
 
     func beginSession(note: String, identity: DiagnosticsSessionIdentity? = nil) {
         guard !isOpen else { return }
-        let stamp = Self.fileStampFormatter.string(from: Date())
+        let startedAt = wallClock()
+        // Wall time is only a readable label, not a session identity. Rapid
+        // restart and independent recorders must never append to another run.
+        let stamp = Self.fileStampFormatter.string(from: startedAt) + "_" + UUID().uuidString
         let name = "alfie_soak_\(stamp).csv"
-        let url = Self.directory.appendingPathComponent(name)
-        // Same folder, same timestamp, so the set from one run is obvious.
+        let url = outputDirectory.appendingPathComponent(name)
+        // Same unique stem for all three files in this session.
         let memoryName = "alfie_memory_\(stamp).csv"
-        let memoryURL = Self.directory.appendingPathComponent(memoryName)
+        let memoryURL = outputDirectory.appendingPathComponent(memoryName)
 
         writer.open(url: url, header: Self.header)
         memoryWriter.open(url: memoryURL, header: Self.memoryHeader)
-        writer.prune(directory: Self.directory, olderThan: 30)
+        writer.prune(directory: outputDirectory, olderThan: 30)
 
         sessionStart = CACurrentMediaTime()
         lastCPUSeconds = Self.processCPUSeconds()
@@ -507,11 +531,11 @@ final class DiagnosticsLog {
             let manifest = DiagnosticsManifest(
                 csvFile: name,
                 memoryFile: memoryName,
-                startedAt: Self.isoFormatter.string(from: Date()),
+                startedAt: Self.isoFormatter.string(from: startedAt),
                 identity: identity,
                 columns: Self.columns,
                 unobservable: Self.alwaysUnobservable + [identity.output.presentation])
-            let manifestURL = Self.directory.appendingPathComponent("alfie_session_\(stamp).json")
+            let manifestURL = outputDirectory.appendingPathComponent("alfie_session_\(stamp).json")
             self.manifest = manifest
             self.manifestURL = manifestURL
             writeManifest()

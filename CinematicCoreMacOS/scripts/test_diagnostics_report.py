@@ -3,6 +3,7 @@
 
 import csv
 import json
+import os
 import sys
 import tempfile
 import unittest
@@ -25,8 +26,7 @@ HEADER = ("elapsed_s,clock,window_kind,thermal,low_power,cpu_cores,cpu_pct,threa
 
 
 def write_session(folder: Path, *, admitted=250, short_window_at=None, refused_at=None, closing=True,
-                  thermal_at=None, windows=12):
-    stamp = "2026-09-28_120000"
+                  thermal_at=None, windows=12, stamp="2026-09-28_120000"):
     rows, total = [], 0
     marker = {k: "" for k in HEADER}
     marker.update(elapsed_s="0.0", clock="12:00:00", window_kind="marker", thermal="nominal", low_power="no",
@@ -108,6 +108,37 @@ class ReportTests(unittest.TestCase):
             (folder / "alfie_soak_2026-01-01_000000.csv").write_text(",".join(HEADER) + "\n")
             session = report.locate(folder)
         self.assertEqual(session.stamp, "2026-09-28_120000")
+
+    def test_suffixed_file_trios_are_resolved_without_losing_identity(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            folder = Path(tmp)
+            stamp = "2026-09-28_120000_01234567-89AB-CDEF-0123-456789ABCDEF"
+            write_session(folder, stamp=stamp)
+            (folder / f"alfie_memory_{stamp}.csv").write_text("elapsed_s,note\n5,test\n")
+            for name in (f"alfie_soak_{stamp}.csv", f"alfie_memory_{stamp}.csv", f"alfie_session_{stamp}.json"):
+                session = report.locate(folder / name)
+                self.assertEqual(session.stamp, stamp)
+                self.assertEqual(session.soak_path.name, f"alfie_soak_{stamp}.csv")
+                self.assertEqual(session.memory_path.name, f"alfie_memory_{stamp}.csv")
+                self.assertEqual(session.manifest_path.name, f"alfie_session_{stamp}.json")
+                self.assertIn("Elgato 4K X", report.build_report(report.load(session)))
+
+    def test_same_second_folder_selection_uses_write_time_not_random_uuid(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            folder = Path(tmp)
+            old = "2026-09-28_120000_FFFFFFFF-FFFF-FFFF-FFFF-FFFFFFFFFFFF"
+            new = "2026-09-28_120000_00000000-0000-0000-0000-000000000000"
+            for index, stamp in enumerate((old, new), 1):
+                write_session(folder, stamp=stamp)
+                for path in folder.glob(f"*{stamp}*"):
+                    os.utime(path, ns=(index * 1_000_000_000, index * 1_000_000_000))
+            self.assertEqual(report.locate(folder).stamp, new)
+
+    def test_malformed_suffix_does_not_alias_a_historical_session(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            folder = write_session(Path(tmp))
+            with self.assertRaises(SystemExit):
+                report.locate(folder / "alfie_soak_2026-09-28_120000_bad.csv")
 
     @unittest.skipUnless(LEGACY.exists(), "legacy fixture not present")
     def test_legacy_schema1_session_is_summarised_with_its_limits(self):

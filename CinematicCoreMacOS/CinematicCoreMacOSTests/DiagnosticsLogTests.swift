@@ -139,6 +139,73 @@ struct DiagnosticsLogTests {
         #expect(decoded.unobservable.contains { $0.contains("ATEM") })
     }
 
+    // Actual queue/file lifecycle, isolated from operator diagnostics.
+    @MainActor
+    @Test(arguments: [false, true])
+    func rapidSessionsKeepIndependentFiles(useSeparateRecorder: Bool) async throws {
+        let folder = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: folder) }
+        let fixedDate = Date(timeIntervalSince1970: 1_790_000_000)
+        let first = DiagnosticsLog(directory: folder, wallClock: { fixedDate })
+        let second = useSeparateRecorder ? DiagnosticsLog(directory: folder, wallClock: { fixedDate }) : first
+        func identity(_ fingerprint: String) -> DiagnosticsSessionIdentity {
+            DiagnosticsSessionIdentity(
+                build: .init(appVersion: "test", buildNumber: "1", sourceFingerprint: fingerprint,
+                             osVersion: "synthetic", machineModel: "synthetic"),
+                source: .init(inputKind: "Validation clip", belowShowRate: false),
+                output: .init(route: "synthetic", showStandard: "1080p50", showFPS: 50,
+                              playoutFPS: 50, presentation: "unknown"))
+        }
+        first.beginSession(note: "first start", identity: identity("first"))
+        let firstName = try #require(first.currentFileName)
+        // Duplicate Start cannot replace the active session.
+        first.beginSession(note: "ignored start", identity: identity("ignored"))
+        #expect(first.currentFileName == firstName)
+        first.appendRow(DiagnosticsWindow(windowSeconds: 5))
+        first.note("first memory")
+        first.appendMemoryRow(latencySamples: 1, dropTimestamps: 0, inputTimestamps: 1, detectedPersons: 0, framesTotal: 1)
+        first.endSession(note: "first stop")
+        await first.drainWrites()
+        let firstCSVBeforeRestart = try Data(contentsOf: folder.appendingPathComponent(firstName))
+
+        second.beginSession(note: "second start", identity: identity("second"))
+        let secondName = try #require(second.currentFileName)
+        second.appendRow(DiagnosticsWindow(windowSeconds: 5))
+        second.note("second memory")
+        second.appendMemoryRow(latencySamples: 1, dropTimestamps: 0, inputTimestamps: 1, detectedPersons: 0, framesTotal: 1)
+        second.endSession(note: "second stop")
+        await second.drainWrites()
+        #expect(firstName != secondName)
+        #expect(try Data(contentsOf: folder.appendingPathComponent(firstName)) == firstCSVBeforeRestart)
+        let files = try FileManager.default.contentsOfDirectory(at: folder, includingPropertiesForKeys: nil)
+        #expect(files.count == 6)
+        let manifests = try files.filter { $0.pathExtension == "json" }.map {
+            try JSONDecoder().decode(DiagnosticsManifest.self, from: Data(contentsOf: $0))
+        }
+        #expect(manifests.count == 2)
+        #expect(Set(manifests.map { $0.identity.build.sourceFingerprint }) == ["first", "second"])
+        for manifest in manifests {
+            let label = manifest.identity.build.sourceFingerprint
+            #expect(manifest.closing?.note == "\(label) stop")
+            #expect(manifest.closing?.windowsWritten == 1)
+            let stem = String(manifest.csvFile.dropFirst("alfie_soak_".count).dropLast(4))
+            #expect(manifest.memoryFile == "alfie_memory_\(stem).csv")
+            #expect(files.contains { $0.lastPathComponent == "alfie_session_\(stem).json" })
+            let rows = try String(contentsOf: folder.appendingPathComponent(manifest.csvFile), encoding: .utf8)
+            #expect(rows.hasPrefix(DiagnosticsLog.header))
+            #expect(rows.components(separatedBy: DiagnosticsLog.header).count == 2)
+            #expect(rows.contains("\(label) start"))
+            #expect(rows.contains("\(label) stop"))
+            #expect(!rows.contains(label == "first" ? "second" : "first"))
+            #expect(!rows.contains("ignored start"))
+            let memory = try String(contentsOf: folder.appendingPathComponent(manifest.memoryFile), encoding: .utf8)
+            #expect(memory.contains("\(label) memory"))
+            #expect(!memory.contains(label == "first" ? "second memory" : "first memory"))
+            #expect(memory.split(separator: "\n").count == 2)
+        }
+    }
+
     @Test func buildIdentityNeverShowsAnUnexpandedFingerprint() {
         let build = DiagnosticsLog.currentBuildIdentity()
         #expect(!build.sourceFingerprint.hasPrefix("$("))
