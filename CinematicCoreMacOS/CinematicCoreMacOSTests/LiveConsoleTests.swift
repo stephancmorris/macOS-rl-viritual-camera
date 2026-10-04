@@ -195,4 +195,245 @@ struct LiveConsoleTests {
         }
     }
 }
+
+/// Exercises the callbacks passed by LivePanePicture.body to CameraPreviewView.
+/// No gesture expression or command construction is duplicated in these tests.
+@MainActor
+struct LivePaneCommandTests {
+    enum Gesture: String, CaseIterable {
+        case manual, select, retarget
+    }
+
+    private struct ChannelState: Equatable {
+        let epoch: UInt64
+        let shotRevision: UInt64
+        let mode: CameraManager.OperationMode
+        let manualPoint: CGPoint
+        let trackingOwnsControl: Bool
+        let discovery: Bool
+        let tapPending: Bool
+        let lockedTarget: UUID?
+        let detectionGeneration: UInt64
+        let zoom: OperatorCommand.ZoomDirection?
+        let crop: CropEngine.CropRect?
+    }
+
+    private let point = CGPoint(x: 0.25, y: 0.75)
+
+    private func show(twoInputs: Bool = true) -> ShowCoordinator {
+        let show = ShowCoordinator(
+            programOutput: ProgramOutputManager(sinks: []),
+            admissionRecords: AdmissionRecordStore(defaults:
+                UserDefaults(suiteName: "alfie-pane-command-\(UUID().uuidString)")!))
+        show.channelA.setRunningForTesting(true)
+        if twoInputs { show.addChannel(.b).setRunningForTesting(true) }
+        return show
+    }
+
+    private func prepare(_ channel: CameraManager, for gesture: Gesture) {
+        switch gesture {
+        case .manual:
+            channel.setOperationMode(.manualCrop)
+        case .select:
+            channel.beginDetection()
+        case .retarget:
+            channel.shotComposer.lockTarget(UUID())
+            channel.shotComposer.forceTrackingForTesting()
+            channel.setOperationMode(.autoTracking)
+        }
+    }
+
+    private func pane(_ show: ShowCoordinator, channel: CameraManager) -> LivePanePicture {
+        let snapshot = LiveConsoleSnapshot.make(
+            show: show, paneView: .source, rates: [:], note: nil)
+        let pane = channel.channelID == show.programChannel
+            ? PaneModel.program(from: snapshot) : PaneModel.preview(from: snapshot)
+        return LivePanePicture(channel: channel, pane: pane, show: show)
+    }
+
+    private func callback(_ pane: LivePanePicture, for gesture: Gesture) throws -> (CGPoint) -> Void {
+        try #require(gesture == .retarget ? pane.holdHandler : pane.tapHandler)
+    }
+
+    private func state(_ channel: CameraManager) -> ChannelState {
+        ChannelState(
+            epoch: channel.commands.epoch, shotRevision: channel.shotRevision,
+            mode: channel.activeMode, manualPoint: channel.manualCropPoint,
+            trackingOwnsControl: channel.commands.trackingOwnsControl,
+            discovery: channel.detectionDiscoveryActive, tapPending: channel.tapPending,
+            lockedTarget: channel.manualLockedTargetID,
+            detectionGeneration: channel.detectionGenerationForTesting,
+            zoom: channel.zoomMoveDirection, crop: channel.cropEngine?.currentCrop)
+    }
+
+    private func expectEffect(_ channel: CameraManager, gesture: Gesture, previousEpoch: UInt64) {
+        #expect(channel.commands.epoch == previousEpoch + 1)
+        switch gesture {
+        case .manual:
+            #expect(channel.manualCropPoint == point)
+            #expect(!channel.tapPending)
+        case .select, .retarget:
+            #expect(channel.tapPending)
+            #expect(channel.commands.trackingOwnsControl)
+        }
+    }
+
+    @Test(arguments: Gesture.allCases)
+    func retainedPreviewCallbackCannotEditLive(gesture: Gesture) throws {
+        let show = show()
+        let a = show.channelA
+        let b = try #require(show.channel(.b))
+        prepare(a, for: gesture)
+        prepare(b, for: gesture)
+        let retained = try callback(pane(show, channel: b), for: gesture)
+        show.setEditLive(true)
+        let beforeA = state(a)
+        let beforeB = state(b)
+        retained(point)
+        #expect(state(a) == beforeA)
+        #expect(state(b) == beforeB)
+        #expect(show.programChannel == .a && show.router.routeGeneration == 0)
+    }
+
+    @Test(arguments: Gesture.allCases)
+    func retainedLiveCallbackCannotChangePreviewAfterDone(gesture: Gesture) throws {
+        let show = show()
+        let a = show.channelA
+        let b = try #require(show.channel(.b))
+        prepare(a, for: gesture)
+        prepare(b, for: gesture)
+        show.setEditLive(true)
+        let retained = try callback(pane(show, channel: a), for: gesture)
+        show.setEditLive(false)
+        let beforeA = state(a)
+        let beforeB = state(b)
+        retained(point)
+        #expect(state(a) == beforeA)
+        #expect(state(b) == beforeB)
+        #expect(show.programChannel == .a && show.router.routeGeneration == 0)
+    }
+
+    @Test(arguments: Gesture.allCases)
+    func switchingAwayAndBackDoesNotReviveCallback(gesture: Gesture) throws {
+        let show = show()
+        let a = show.channelA
+        let b = try #require(show.channel(.b))
+        prepare(b, for: gesture)
+        let retained = try callback(pane(show, channel: b), for: gesture)
+        let originalEpoch = b.commands.epoch
+        show.setEditLive(true)
+        show.setEditLive(false)
+        // Target changes cancel discovery. Re-arm it without changing the
+        // command epoch, so this regression isolates the target revision.
+        if gesture == .select { b.beginDetection() }
+        #expect(b.commands.epoch == originalEpoch)
+        let beforeA = state(a)
+        let beforeB = state(b)
+        retained(point)
+        #expect(state(a) == beforeA)
+        #expect(state(b) == beforeB)
+    }
+
+    @Test(arguments: Gesture.allCases)
+    func stoppedAndRestartedChannelRejectsItsOldCallback(gesture: Gesture) throws {
+        let show = show()
+        let a = show.channelA
+        let b = try #require(show.channel(.b))
+        prepare(b, for: gesture)
+        let retained = try callback(pane(show, channel: b), for: gesture)
+        let targetRevision = show.controlTargetRevision
+        b.stopCapture()
+        b.setRunningForTesting(true)
+        prepare(b, for: gesture)
+        // Direct channel Stop retires the epoch without changing the show's
+        // target revision. No source or device is started by this fixture.
+        #expect(show.controlTargetRevision == targetRevision)
+        let beforeA = state(a)
+        let beforeB = state(b)
+        retained(point)
+        #expect(state(a) == beforeA)
+        #expect(state(b) == beforeB)
+        let fresh = try callback(pane(show, channel: b), for: gesture)
+        fresh(point)
+        expectEffect(b, gesture: gesture, previousEpoch: beforeB.epoch)
+        #expect(state(a) == beforeA)
+    }
+
+    @Test func supersededManualCallbackCannotCancelANewShotMove() throws {
+        let show = show()
+        let a = show.channelA
+        let b = try #require(show.channel(.b))
+        prepare(b, for: .manual)
+        let retained = try callback(pane(show, channel: b), for: .manual)
+        #expect(b.dispatch(b.makeCommand(.beginZoom(.pushIn))) == .accepted)
+        #expect(b.zoomMoveDirection == .pushIn)
+        let beforeA = state(a)
+        let beforeB = state(b)
+        retained(point)
+        #expect(state(a) == beforeA)
+        #expect(state(b) == beforeB)
+        #expect(b.zoomMoveDirection == .pushIn)
+    }
+
+    @Test(arguments: Gesture.allCases)
+    func stalePaneCannotCreateANewCallback(gesture: Gesture) throws {
+        let show = show()
+        let b = try #require(show.channel(.b))
+        prepare(b, for: gesture)
+        let stalePane = pane(show, channel: b)
+        show.setEditLive(true)
+        // Read the production property after its pane lost control. Retarget
+        // and Manual remain eligible locally; the pane binding must refuse.
+        if gesture == .select { b.beginDetection() }
+        if gesture == .retarget {
+            #expect(stalePane.holdHandler == nil)
+        } else {
+            #expect(stalePane.tapHandler == nil)
+        }
+    }
+
+    @Test(arguments: Gesture.allCases)
+    func freshPreviewCallbackChangesOnlyPreview(gesture: Gesture) throws {
+        let show = show()
+        let a = show.channelA
+        let b = try #require(show.channel(.b))
+        prepare(b, for: gesture)
+        let beforeA = state(a)
+        let previousEpoch = b.commands.epoch
+        let fresh = try callback(pane(show, channel: b), for: gesture)
+        fresh(point)
+        expectEffect(b, gesture: gesture, previousEpoch: previousEpoch)
+        #expect(state(a) == beforeA)
+        #expect(show.programChannel == .a && show.router.routeGeneration == 0)
+    }
+
+    @Test(arguments: Gesture.allCases)
+    func freshEditLiveCallbackChangesOnlyProgram(gesture: Gesture) throws {
+        let show = show()
+        let a = show.channelA
+        let b = try #require(show.channel(.b))
+        show.setEditLive(true)
+        prepare(a, for: gesture)
+        let beforeB = state(b)
+        let previousEpoch = a.commands.epoch
+        let fresh = try callback(pane(show, channel: a), for: gesture)
+        fresh(point)
+        expectEffect(a, gesture: gesture, previousEpoch: previousEpoch)
+        #expect(state(b) == beforeB)
+        #expect(show.programChannel == .a && show.router.routeGeneration == 0)
+    }
+
+    @Test(arguments: Gesture.allCases)
+    func freshSingleInputCallbackKeepsProgramControl(gesture: Gesture) throws {
+        let show = show(twoInputs: false)
+        let a = show.channelA
+        prepare(a, for: gesture)
+        let previousEpoch = a.commands.epoch
+        let fresh = try callback(pane(show, channel: a), for: gesture)
+        fresh(point)
+        expectEffect(a, gesture: gesture, previousEpoch: previousEpoch)
+        #expect(show.previewChannel == nil && !show.editLive)
+        #expect(show.programChannel == .a && show.router.routeGeneration == 0)
+    }
+}
 #endif

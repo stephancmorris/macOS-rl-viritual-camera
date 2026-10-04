@@ -397,23 +397,41 @@ struct LivePanePicture: View {
         }
     }
 
-    /// Mirrors the single-camera tap rules, but every command is bound by
-    /// the show to the control target (this pane) at the tap.
-    private var tapHandler: ((CGPoint) -> Void)? {
+    /// Mirrors the single-camera tap rules. The returned callback retains
+    /// this pane's channel, command epoch and control-target revision, so a
+    /// delayed gesture cannot become a new command after an intervention.
+    var tapHandler: ((CGPoint) -> Void)? {
         if channel.activeMode == .autoPan { return nil }
         if channel.detectionDiscoveryActive || channel.recoveryState.allowsDirectSelection {
-            return { point in _ = show.dispatch(show.makeCommand(.selectSubject(point))) }
+            return boundPointHandler { .selectSubject($0) }
         }
         if channel.activeMode == .manualCrop {
-            return { point in _ = show.dispatch(show.makeCommand(.moveManualCenter(point))) }
+            return boundPointHandler { .moveManualCenter($0) }
         }
         return nil
     }
 
-    private var holdHandler: ((CGPoint) -> Void)? {
+    var holdHandler: ((CGPoint) -> Void)? {
         guard channel.activeMode != .manualCrop, channel.activeMode != .autoPan,
               channel.manualLockedTargetID != nil else { return nil }
-        return { point in _ = show.dispatch(show.makeCommand(.selectSubject(point, retarget: true))) }
+        return boundPointHandler { .selectSubject($0, retarget: true) }
+    }
+
+    private func boundPointHandler(
+        action: @escaping (CGPoint) -> OperatorCommand.Action
+    ) -> ((CGPoint) -> Void)? {
+        guard pane.isControlTarget, pane.channel == channel.channelID,
+              show.controlTarget == channel.channelID else { return nil }
+        let revision = show.controlTargetRevision
+        let epoch = channel.commands.epoch
+        let channel = channel
+        let show = show
+        return { point in
+            let command = OperatorCommand(
+                target: .channel(channel.channelID), epoch: epoch,
+                expiry: CACurrentMediaTime() + 2, action: action(point))
+            _ = show.dispatch(.init(command: command, controlTargetRevision: revision))
+        }
     }
 }
 
