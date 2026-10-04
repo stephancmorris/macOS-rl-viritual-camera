@@ -135,6 +135,7 @@ final class LiveConsoleModel: ObservableObject, ConsoleActions {
 
     func refresh() {
         updateRates()
+        pairCheck.invalidateIfChanged(show: show)
         measurePairIfUnmeasured()
         logConsoleStatsIfDue()
         let target = show.channel(show.controlTarget)
@@ -246,9 +247,11 @@ final class LiveConsoleModel: ObservableObject, ConsoleActions {
 
     func measurePair() {
         guard let preview = show.previewChannel else { return }
-        pairCheck.start(show: show, preview: preview) { [weak self] result in
-            self?.show.recordAdmission(result)
-            self?.refresh()
+        pairCheck.start(show: show, preview: preview) { [weak self] result, binding in
+            guard let self else { return false }
+            let saved = self.show.recordAdmission(result, from: binding)
+            self.refresh()
+            return saved
         }
     }
 

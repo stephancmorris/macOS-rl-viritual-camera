@@ -261,6 +261,66 @@ final class AdmissionRecordStore {
 
 // MARK: - Live check
 
+/// One live measurement's provenance. Historical compatibility still uses the
+/// fingerprint; a live check also belongs to these channel instances, sessions
+/// and roles. Shot/recovery transitions may occur normally while sampling.
+final class PairMeasurementBinding {
+    let fingerprint: AdmissionFingerprint
+    let context: PairAdmissionContext
+    let previewID: ChannelID
+    private let programID: ChannelID
+    private let routeGeneration: UInt64
+    private let programSourceGeneration: UInt64
+    private let previewSourceGeneration: UInt64
+    private let programControlEpoch: UInt64
+    private let previewControlEpoch: UInt64
+    private weak var owner: ShowCoordinator?
+    private weak var program: CameraManager?
+    private weak var preview: CameraManager?
+    private var consumed = false
+
+    fileprivate init?(show: ShowCoordinator, preview previewID: ChannelID) {
+        guard show.previewChannel == previewID,
+              let program = show.channel(show.programChannel), let preview = show.channel(previewID),
+              program.isRunning, preview.isRunning, !program.sourceMissing, !preview.sourceMissing else { return nil }
+        self.owner = show
+        self.program = program
+        self.preview = preview
+        self.programID = show.programChannel
+        self.previewID = previewID
+        self.routeGeneration = show.router.routeGeneration
+        self.programSourceGeneration = program.revisions.sourceGeneration
+        self.previewSourceGeneration = preview.revisions.sourceGeneration
+        self.programControlEpoch = program.revisions.controlEpoch
+        self.previewControlEpoch = preview.revisions.controlEpoch
+        self.fingerprint = show.admissionFingerprint()
+        self.context = show.pairAdmissionContext(preview: previewID)
+    }
+
+    func isCurrent(in show: ShowCoordinator) -> Bool {
+        guard owner === show, let program, let preview,
+              show.channel(programID) === program, show.channel(previewID) === preview else { return false }
+        return show.programChannel == programID && show.previewChannel == previewID
+            && show.router.routeGeneration == routeGeneration
+            && program.isRunning && preview.isRunning && !program.sourceMissing && !preview.sourceMissing
+            && program.revisions.sourceGeneration == programSourceGeneration
+            && preview.revisions.sourceGeneration == previewSourceGeneration
+            && program.revisions.controlEpoch == programControlEpoch
+            && preview.revisions.controlEpoch == previewControlEpoch
+            && show.admissionFingerprint() == fingerprint
+            && show.pairAdmissionContext(preview: previewID) == context
+    }
+
+    fileprivate func retire() { consumed = true }
+
+    /// A rejected save cannot later be retried after the setup changes back.
+    func consumeIfCurrent(in show: ShowCoordinator) -> Bool {
+        guard !consumed else { return false }
+        consumed = true
+        return isCurrent(in: show)
+    }
+}
+
 /// Measures the running pair: Program's closed diagnostics windows plus the
 /// Preview channel's render count over the same windows. Observes only; it
 /// never starts, stops or reconfigures anything.
@@ -277,6 +337,10 @@ final class MultiInputCheck: ObservableObject {
     }
 
     @Published private(set) var phase: Phase = .idle
+    private var phaseState: Phase = .idle
+    private var publishingPhase = false
+    private var phasePublicationPending = false
+    private(set) var binding: PairMeasurementBinding?
     let warmUpSeconds: TimeInterval
     let sampleWindows: Int
 
@@ -284,31 +348,54 @@ final class MultiInputCheck: ObservableObject {
     private var program: [CapabilitySample] = []
     private var preview: [PreviewAdmissionSample] = []
     private var lastPreviewCount: UInt64 = 0
+    private var sampleContext: PairAdmissionContext?
     private var subscription: AnyCancellable?
+    private var onResult: ((PairAdmissionResult, PairMeasurementBinding) -> Bool)?
+    private let clock: () -> TimeInterval
 
-    init(warmUpSeconds: TimeInterval = 5, sampleWindows: Int = 4) {
+    init(warmUpSeconds: TimeInterval = 5, sampleWindows: Int = 4,
+         clock: @escaping () -> TimeInterval = { CACurrentMediaTime() }) {
         self.warmUpSeconds = warmUpSeconds
         self.sampleWindows = sampleWindows
+        self.clock = clock
     }
 
     /// Core: feed one closed Program window and the Preview channel's
     /// cumulative new-render count at the same moment.
     func begin(now: TimeInterval, previewCount: UInt64) {
+        reset(now: now, previewCount: previewCount)
+        publish(.warmingUp)
+    }
+
+    private func reset(now: TimeInterval, previewCount: UInt64) {
+        subscription = nil
+        onResult = nil
+        binding?.retire()
+        binding = nil
+        sampleContext = nil
         startedAt = now
         program = []
         preview = []
         lastPreviewCount = previewCount
-        phase = .warmingUp
     }
 
     func ingest(_ window: DiagnosticsWindow?, previewCount: UInt64, thermal: ThermalLevel,
                 now: TimeInterval, context: PairAdmissionContext) {
-        guard phase.isRunning else { return }
+        guard phaseState.isRunning else { return }
         guard let window, window.kind != .partial else {
             finish(.cancelled("Capture stopped during the check."))
             return
         }
-        let frames = Int(previewCount &- lastPreviewCount)
+        guard sampleContext == nil || sampleContext == context else {
+            finish(.cancelled("Setup changed during the check."))
+            return
+        }
+        sampleContext = context
+        guard previewCount >= lastPreviewCount,
+              let frames = Int(exactly: previewCount - lastPreviewCount) else {
+            finish(.cancelled("Preview render counter changed during the check."))
+            return
+        }
         lastPreviewCount = previewCount
         guard now - window.windowSeconds >= startedAt + warmUpSeconds - 0.25 else { return }
         program.append(CapabilitySample(window: window, thermal: thermal))
@@ -316,35 +403,94 @@ final class MultiInputCheck: ObservableObject {
         if program.count >= sampleWindows {
             finish(.finished(PairAdmission.evaluate(program: program, preview: preview, context: context)))
         } else {
-            phase = .sampling(collected: program.count, needed: sampleWindows)
+            publish(.sampling(collected: program.count, needed: sampleWindows))
         }
     }
 
-    /// Live wiring: sample on every closed Program window.
-    func start(show: ShowCoordinator, preview previewID: ChannelID, onResult: @escaping (PairAdmissionResult) -> Void) {
-        guard let previewChannel = show.channel(previewID) else {
-            phase = .cancelled("Add the second input first.")
+    /// Live wiring: every window and the final save use the starting setup.
+    func start(show: ShowCoordinator, preview previewID: ChannelID,
+               onResult: @escaping (PairAdmissionResult, PairMeasurementBinding) -> Bool) {
+        guard let binding = PairMeasurementBinding(show: show, preview: previewID),
+              let preview = show.channel(previewID), preview.renderedFrameCount >= preview.repeatedFrameCount else {
+            finish(.cancelled("Both inputs must be running to measure the pair."))
             return
         }
-        begin(now: CACurrentMediaTime(), previewCount: previewChannel.renderedFrameCount &- previewChannel.repeatedFrameCount)
+        reset(now: clock(), previewCount: preview.renderedFrameCount - preview.repeatedFrameCount)
+        self.binding = binding
+        self.onResult = onResult
+        publish(.warmingUp)
+        guard self.binding === binding, phaseState.isRunning else { return }
         subscription = show.programOutput.$lastPipelineWindow.dropFirst().sink { [weak self, weak show] window in
-            guard let self, let show, let previewChannel = show.channel(previewID) else { return }
-            self.ingest(window,
-                        previewCount: previewChannel.renderedFrameCount &- previewChannel.repeatedFrameCount,
-                        thermal: ThermalLevel(ProcessInfo.processInfo.thermalState),
-                        now: CACurrentMediaTime(),
-                        context: show.pairAdmissionContext(preview: previewID))
-            if case .finished(let result) = self.phase { onResult(result) }
+            guard let self, let show else { return }
+            guard let preview = show.channel(previewID), preview.renderedFrameCount >= preview.repeatedFrameCount else {
+                self.finish(.cancelled("Preview render counter changed during the check."))
+                return
+            }
+            self.ingestBoundWindow(window, show: show,
+                                   previewCount: preview.renderedFrameCount - preview.repeatedFrameCount,
+                                   thermal: ThermalLevel(ProcessInfo.processInfo.thermalState), now: self.clock())
         }
     }
 
+    /// Keep a completed console label tied to its measured setup as well.
+    func invalidateIfChanged(show: ShowCoordinator) {
+        guard let binding, !binding.isCurrent(in: show) else { return }
+        finish(.cancelled("Setup changed during the check."))
+    }
+
+    private func ingestBoundWindow(_ window: DiagnosticsWindow?, show: ShowCoordinator,
+                                   previewCount: UInt64, thermal: ThermalLevel, now: TimeInterval) {
+        guard phaseState.isRunning, let binding else { return }
+        guard binding.isCurrent(in: show) else {
+            finish(.cancelled("Setup changed during the check."))
+            return
+        }
+        let save = onResult
+        ingest(window, previewCount: previewCount, thermal: thermal, now: now, context: binding.context)
+        guard self.binding === binding, case .finished(let result) = phaseState else { return }
+        // Publishing .finished may synchronously change the show. The store
+        // validates again, and a refused final save must clear the success text.
+        let saved = save?(result, binding) ?? false
+        if self.binding === binding, !saved {
+            finish(.cancelled("Setup changed before the check could be saved."))
+        }
+    }
+
+    #if DEBUG
+    /// Closed-window seam: exercises the live provenance/save path without cameras or a wall-clock wait.
+    func ingestBoundWindowForTesting(_ window: DiagnosticsWindow?, show: ShowCoordinator,
+                                     previewCount: UInt64, thermal: ThermalLevel, now: TimeInterval) {
+        ingestBoundWindow(window, show: show, previewCount: previewCount, thermal: thermal, now: now)
+    }
+    #endif
+
     func cancel() {
-        guard phase.isRunning else { return }
+        guard phaseState.isRunning || binding != nil else { return }
         finish(.cancelled("Cancelled by the operator."))
     }
 
     private func finish(_ result: Phase) {
         subscription = nil
-        phase = result
+        onResult = nil
+        if case .cancelled = result {
+            binding?.retire()
+            binding = nil
+        }
+        publish(result)
+    }
+
+    /// @Published notifies before assigning its stored value. Keep the run's
+    /// truth first, queue nested transitions, then publish the latest state so
+    /// an observer's cancellation/restart cannot be overwritten by the old run.
+    private func publish(_ next: Phase) {
+        phaseState = next
+        phasePublicationPending = true
+        guard !publishingPhase else { return }
+        publishingPhase = true
+        while phasePublicationPending {
+            phasePublicationPending = false
+            phase = phaseState
+        }
+        publishingPhase = false
     }
 }

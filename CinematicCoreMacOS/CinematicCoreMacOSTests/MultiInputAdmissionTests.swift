@@ -7,6 +7,7 @@
 //  via MULTI-QA; fingerprint changes invalidate; the output rate never moves.
 //
 
+import Combine
 import Foundation
 import Testing
 @testable import Alfie
@@ -168,7 +169,7 @@ struct AdmissionRecordTests {
         #expect(show.admissionDecision == .allowed(certified: false))    // one input: nothing to admit
         show.addChannel(.b)
         #expect(show.admissionDecision == .trialOnly)
-        show.recordAdmission(evaluate())
+        show.admissionRecords.record(evaluate().status, for: show.admissionFingerprint())
         #expect(show.admissionDecision == .allowed(certified: false))
         // Changing B's mode changes the fingerprint: back to unknown.
         show.channel(.b)!.setOperationMode(.autoPan)
@@ -203,3 +204,253 @@ struct AdmissionRecordTests {
         #expect(ShowStandard.activeOrCurrent == before)
     }
 }
+
+#if DEBUG
+@MainActor
+struct PairCheckProvenanceTests {
+    @MainActor
+    private struct Rig {
+        let suite: String
+        let defaults: UserDefaults
+        let show: ShowCoordinator
+        let check: MultiInputCheck
+        let frames: Int
+
+        init() {
+            suite = "alfie-pair-provenance-\(UUID().uuidString)"
+            defaults = UserDefaults(suiteName: suite)!
+            show = ShowCoordinator(programOutput: ProgramOutputManager(sinks: []),
+                                   admissionRecords: AdmissionRecordStore(defaults: defaults))
+            check = MultiInputCheck(warmUpSeconds: 0, sampleWindows: 3, clock: { 0 })
+            frames = Int(ShowStandard.activeOrCurrent.frameRate * 5)
+            for channel in [show.channelA, show.addChannel(.b)] {
+                channel.setRunningForTesting(true)
+                channel.setAdmissionFormatForTesting(width: 1920, height: 1080,
+                                                     fps: ShowStandard.activeOrCurrent.frameRate)
+            }
+        }
+
+        func start() {
+            check.start(show: show, preview: .b) { [weak show] result, binding in
+                show?.recordAdmission(result, from: binding) ?? false
+            }
+        }
+
+        func sample(_ index: Int) {
+            check.ingestBoundWindowForTesting(window(admitted: frames), show: show,
+                                              previewCount: UInt64(frames * index), thermal: .nominal,
+                                              now: Double(index * 5))
+        }
+
+        func cleanup() { defaults.removePersistentDomain(forName: suite) }
+    }
+
+    enum Change: CaseIterable {
+        case mode, profile, dimensions, rate, route, stopped, missing, rolesRoundTrip, modeRoundTrip
+    }
+
+    @Test(arguments: Change.allCases)
+    func changedPairCancelsWithoutRecording(_ change: Change) throws {
+        let rig = Rig()
+        defer { rig.cleanup() }
+        rig.start()
+        rig.sample(1)
+        let b = try #require(rig.show.channel(.b))
+        switch change {
+        case .mode: b.setOperationMode(.autoPan)
+        case .profile: b.shotComposer.config.cinematicFormat = .webcam
+        case .dimensions: b.setAdmissionFormatForTesting(width: 1280, height: 720, fps: ShowStandard.activeOrCurrent.frameRate)
+        case .rate: b.setAdmissionFormatForTesting(width: 1920, height: 1080, fps: 30)
+        case .route: rig.show.programOutput.preferredRoute = .virtualCamera
+        case .stopped:
+            b.stopCapture()
+            b.setRunningForTesting(true) // Same instance resumes; source generation still changed.
+        case .missing: b.setSourceMissingForTesting(true)
+        case .rolesRoundTrip:
+            #expect(rig.show.router.setProgram(.b, expectedRouteGeneration: rig.show.router.routeGeneration))
+            #expect(rig.show.router.setProgram(.a, expectedRouteGeneration: rig.show.router.routeGeneration))
+        case .modeRoundTrip:
+            b.setOperationMode(.autoPan)
+            b.setOperationMode(.wide)
+        }
+        rig.sample(2)
+        guard case .cancelled = rig.check.phase else { Issue.record("Changed pair continued sampling"); return }
+        #expect(rig.show.admissionRecords.allRecords().isEmpty)
+    }
+
+    @Test func replacingPreviewWithTheSameFingerprintCannotContinueTheOldCheck() throws {
+        let rig = Rig()
+        defer { rig.cleanup() }
+        rig.start()
+        rig.sample(1)
+        let old = try #require(rig.show.channel(.b))
+        let oldGeneration = old.revisions.sourceGeneration
+        let original = rig.show.admissionFingerprint()
+        rig.show.removeChannel(.b)
+        let replacement = rig.show.addChannel(.b)
+        replacement.setRunningForTesting(true)
+        replacement.setAdmissionFormatForTesting(width: 1920, height: 1080, fps: ShowStandard.activeOrCurrent.frameRate)
+        #expect(replacement !== old)
+        #expect(replacement.revisions.sourceGeneration == oldGeneration)
+        #expect(rig.show.admissionFingerprint() == original)
+        rig.check.ingestBoundWindowForTesting(window(admitted: rig.frames), show: rig.show,
+                                              previewCount: 0, thermal: .nominal, now: 10)
+        #expect(rig.check.phase == .cancelled("Setup changed during the check."))
+        #expect(rig.show.admissionRecords.allRecords().isEmpty)
+    }
+
+    @Test func setupChangeDuringFinishedPublicationRejectsTheFinalSave() throws {
+        let rig = Rig()
+        defer { rig.cleanup() }
+        rig.start()
+        let original = rig.show.admissionFingerprint()
+        let b = try #require(rig.show.channel(.b))
+        let observation = rig.check.$phase.sink { phase in
+            if case .finished = phase { b.setOperationMode(.autoPan) }
+        }
+        defer { observation.cancel() }
+        rig.sample(1)
+        rig.sample(2)
+        rig.sample(3)
+        #expect(rig.check.phase == .cancelled("Setup changed before the check could be saved."))
+        #expect(rig.show.admissionFingerprint() != original)
+        #expect(rig.show.admissionRecords.allRecords().isEmpty)
+        #expect(rig.show.admissionRecords.status(for: original) == .unknown)
+    }
+
+    @Test func refusedBindingCannotBeSavedAfterSetupChangesBack() throws {
+        let rig = Rig()
+        defer { rig.cleanup() }
+        rig.start()
+        let binding = try #require(rig.check.binding)
+        let b = try #require(rig.show.channel(.b))
+        b.shotComposer.config.cinematicFormat = .webcam
+        #expect(!rig.show.recordAdmission(evaluate(), from: binding))
+        b.shotComposer.config.cinematicFormat = .stage
+        #expect(rig.show.admissionFingerprint() == binding.fingerprint)
+        #expect(!rig.show.recordAdmission(evaluate(), from: binding))
+        #expect(rig.show.admissionRecords.allRecords().isEmpty)
+    }
+
+    @Test func unchangedPairSavesOnlyOnceUnderItsStartingFingerprint() throws {
+        let rig = Rig()
+        defer { rig.cleanup() }
+        var saves = 0
+        rig.check.start(show: rig.show, preview: .b) { result, binding in
+            saves += 1
+            return rig.show.recordAdmission(result, from: binding)
+        }
+        let binding = try #require(rig.check.binding)
+        rig.sample(1)
+        rig.sample(2)
+        rig.sample(3)
+        guard case .finished(let result) = rig.check.phase else { Issue.record("Expected finished check"); return }
+        #expect(result.status == .provisional)
+        #expect(rig.show.admissionRecords.status(for: binding.fingerprint) == .provisional)
+        #expect(rig.show.admissionRecords.allRecords().count == 1)
+        #expect(!rig.show.recordAdmission(result, from: binding))
+        rig.sample(4)
+        #expect(saves == 1)
+    }
+
+    @Test func changedContextCannotReuseEarlierWindows() {
+        let check = MultiInputCheck(warmUpSeconds: 0, sampleWindows: 3)
+        check.begin(now: 0, previewCount: 0)
+        check.ingest(window(), previewCount: 250, thermal: .nominal, now: 5, context: context)
+        var changed = context
+        changed.program.route = "Changed synthetic route"
+        check.ingest(window(), previewCount: 500, thermal: .nominal, now: 10, context: changed)
+        #expect(check.phase == .cancelled("Setup changed during the check."))
+    }
+
+    @Test(arguments: [UInt64(0), UInt64.max])
+    func resetOrUnrepresentablePreviewCounterCancelsSafely(_ next: UInt64) {
+        let check = MultiInputCheck(warmUpSeconds: 0, sampleWindows: 3)
+        check.begin(now: 0, previewCount: 250)
+        check.ingest(window(), previewCount: next, thermal: .nominal, now: 5, context: context)
+        #expect(check.phase == .cancelled("Preview render counter changed during the check."))
+    }
+
+    @Test func nonfiniteResultPublishesOnceAndReturns() {
+        let check = MultiInputCheck(warmUpSeconds: 0, sampleWindows: 3)
+        var finishedPublications = 0
+        let observation = check.$phase.sink { phase in
+            if case .finished = phase { finishedPublications += 1 }
+        }
+        defer { observation.cancel() }
+        check.begin(now: 0, previewCount: 0)
+        let nonfinite = window(frameMS: .nan)
+        for index in 1...3 {
+            check.ingest(nonfinite, previewCount: UInt64(250 * index), thermal: .nominal,
+                         now: Double(5 * index), context: context)
+        }
+        guard case .finished(let result) = check.phase else { Issue.record("Expected finished publication"); return }
+        #expect(result.programReport.measured.frameWallMeanMS.isNaN)
+        #expect(finishedPublications == 1)
+        #expect(!check.phase.isRunning)
+    }
+
+    enum Reentry: CaseIterable { case startDuringWarmup, startDuringFinish, cancelDuringFinish }
+
+    @Test(arguments: Reentry.allCases)
+    func observerTransitionPreservesTheLatestMeasurement(_ reentry: Reentry) throws {
+        let rig = Rig()
+        defer { rig.cleanup() }
+        var entered = false
+        var old: PairMeasurementBinding?
+        let observation = rig.check.$phase.sink { phase in
+            let trigger: Bool
+            switch (reentry, phase) {
+            case (.startDuringWarmup, .warmingUp), (.startDuringFinish, .finished), (.cancelDuringFinish, .finished):
+                trigger = true
+            default: trigger = false
+            }
+            guard trigger, !entered else { return }
+            entered = true
+            old = rig.check.binding
+            if reentry == .cancelDuringFinish { rig.check.cancel() }
+            else { rig.start() }
+        }
+        defer { observation.cancel() }
+        rig.start()
+        if reentry != .startDuringWarmup {
+            rig.sample(1)
+            rig.sample(2)
+            rig.sample(3)
+        }
+        #expect(entered)
+        #expect(rig.show.admissionRecords.allRecords().isEmpty)
+        if reentry == .cancelDuringFinish {
+            #expect(rig.check.phase == .cancelled("Cancelled by the operator."))
+            #expect(rig.check.binding == nil)
+        } else {
+            #expect(rig.check.phase == .warmingUp)
+            #expect(rig.check.binding !== old)
+            // The new callback and sampling state survive the old publisher.
+            rig.sample(1)
+            rig.sample(2)
+            rig.sample(3)
+            guard case .finished = rig.check.phase else { Issue.record("Replacement did not finish"); return }
+            #expect(rig.show.admissionStatus == .provisional)
+        }
+    }
+
+    @Test func cancelledMeasurementCannotSaveAfterANewCheckStarts() throws {
+        let rig = Rig()
+        defer { rig.cleanup() }
+        rig.start()
+        let first = try #require(rig.check.binding)
+        rig.check.cancel()
+        rig.start()
+        #expect(rig.check.binding !== first)
+        #expect(!rig.show.recordAdmission(evaluate(), from: first))
+        #expect(rig.show.admissionRecords.allRecords().isEmpty)
+        rig.sample(1)
+        rig.sample(2)
+        rig.sample(3)
+        guard case .finished = rig.check.phase else { Issue.record("New check did not finish"); return }
+        #expect(rig.show.admissionStatus == .provisional)
+    }
+
+}
+#endif

@@ -158,6 +158,36 @@ struct LiveConsoleTests {
         #expect(model.pairCheckText == "Measuring pair · warming up")
     }
 
+    @Test func completedPairTextIsInvalidatedWhenTheSetupChanges() {
+        let show = show()
+        show.channelA.setRunningForTesting(true)
+        let b = show.addChannel(.b)
+        b.setRunningForTesting(true)
+        let rate = ShowStandard.activeOrCurrent.frameRate
+        for channel in [show.channelA, b] {
+            channel.setAdmissionFormatForTesting(width: 1920, height: 1080, fps: rate)
+        }
+        let check = MultiInputCheck(warmUpSeconds: 0, sampleWindows: 3, clock: { 0 })
+        let model = LiveConsoleModel(show: show, pairCheck: check)
+        model.measurePair()
+        var window = DiagnosticsWindow()
+        window.windowSeconds = 5
+        window.footprintMB = 500
+        window.frameMeanMS = 8
+        window.mainMeanMS = 4
+        let frames = Int(rate * 5)
+        window.window = PipelineCounters(admitted: frames, routed: frames, handoffAccepted: frames)
+        for index in 1...3 {
+            check.ingestBoundWindowForTesting(window, show: show, previewCount: UInt64(frames * index),
+                                              thermal: .nominal, now: Double(index * 5))
+        }
+        #expect(model.pairCheckText == "Pair: \(AdmissionStatus.provisional.title)")
+        b.setOperationMode(.autoPan)
+        model.refresh()
+        #expect(model.pairCheckText == "Setup changed during the check.")
+        #expect(show.admissionStatus == .unknown)
+    }
+
     @Test func knownPairIsNotMeasuredAgain() {
         let show = show()
         show.channelA.setRunningForTesting(true)

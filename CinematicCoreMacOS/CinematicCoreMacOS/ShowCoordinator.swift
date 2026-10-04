@@ -152,8 +152,13 @@ final class ShowCoordinator: ObservableObject {
         AdmissionDecision.decide(admissionStatus)
     }
 
-    func recordAdmission(_ result: PairAdmissionResult) {
-        admissionRecords.record(result.status, for: admissionFingerprint())
+    /// Store a live result only for the pair that produced it. Historical
+    /// records keep their existing configuration compatibility rules.
+    @discardableResult
+    func recordAdmission(_ result: PairAdmissionResult, from binding: PairMeasurementBinding) -> Bool {
+        guard binding.consumeIfCurrent(in: self) else { return false }
+        admissionRecords.record(result.status, for: binding.fingerprint)
+        return true
     }
 
     func pairAdmissionContext(preview: ChannelID) -> PairAdmissionContext {

@@ -984,6 +984,12 @@ final class CameraManager: NSObject, ObservableObject {
     func setSourceMissingForTesting(_ missing: Bool) { sourceMissing = missing }
     /// Test seam: the identity a configured source would have recorded.
     func setSourceIdentityForTesting(_ source: DiagnosticsSessionIdentity.Source) { recordSourceIdentity(source) }
+    /// Test seam: delivered dimensions/rate as if capture had configured them.
+    func setAdmissionFormatForTesting(width: Int, height: Int, fps: Double?) {
+        sourcePixelWidth = width
+        sourcePixelHeight = height
+        configuredCaptureFPS = fps
+    }
     #endif
 
     // MARK: Render stats ([RENDER] line, every 5 s)
