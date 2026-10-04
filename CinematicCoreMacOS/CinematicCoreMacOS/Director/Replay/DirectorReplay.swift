@@ -16,6 +16,8 @@ nonisolated struct DirectorReplay {
             case enable(DirectorAuthority.Level), restart, navigation, cosmeticEdit
             case evidenceGap(Bool), identityLoss(ChannelID), sourceRebind(ChannelID)
             case outputFault, admissionLoss, healthRestored, policyChange, nominationChange
+            /// Isolated scheduler fault stimuli; they retain the queued callback.
+            case syntheticRequestRetirement, syntheticRequestReplacement
         }
         let at: TimeInterval
         let action: Action
@@ -24,6 +26,12 @@ nonisolated struct DirectorReplay {
         let name: String
         let duration: TimeInterval
         let events: [Event]
+    }
+    /// Deliberately faulty simulated executor used to prove the independent audit.
+    /// Both modes can mutate only Preview; neither can route Program or Take.
+    enum SimulatedExecutor: Sendable {
+        case guarded
+        case faultyPreviewMutation
     }
     struct Report: Equatable, Sendable {
         enum Evidence: Sendable { case synthetic }
@@ -48,6 +56,7 @@ nonisolated struct DirectorReplay {
         let acknowledgementsRejected: Int
         let readyEvaluations: Int
         let staleEffectsCommitted: Int
+        let staleCommittedEffectReasons: [DirectorProposalValidator.StaleReason: Int]
         let autoDirectRefusals: Int
         let finalLevel: DirectorAuthority.Level
         let finalPaused: Bool
@@ -72,7 +81,8 @@ nonisolated struct DirectorReplay {
     }
 
     static func run(_ fixture: Fixture, parameters: DirectorShotPolicy.Parameters,
-                    maximumProposalAge: TimeInterval, maximumEvidenceAge: TimeInterval, readinessParameters: DirectorReadiness.Parameters) -> Report {
+                    maximumProposalAge: TimeInterval, maximumEvidenceAge: TimeInterval, readinessParameters: DirectorReadiness.Parameters,
+                    simulatedExecutor: SimulatedExecutor = .guarded) -> Report {
         // Invalid clocks are counted and skipped rather than crashing a replay.
         var authority = DirectorAuthority(reviewPolicy: .conservative)
         _ = authority.apply(.enable(.autoPrepare), prerequisites: .init(nominationsCurrent: true, previewAvailable: true, sourcesHealthy: true, outputHealthy: true, admissionCurrent: true))
@@ -85,6 +95,7 @@ nonisolated struct DirectorReplay {
         var acknowledgements: [(id: String, due: TimeInterval, receipt: DirectorPreparation.Receipt)] = []
         var preparationsCommitted = 0, acknowledgementsAccepted = 0, acknowledgementsRejected = 0
         var readyEvaluations = 0, autoDirectRefusals = 0, staleEffectsCommitted = 0
+        var staleCommittedEffectReasons: [DirectorProposalValidator.StaleReason: Int] = [:]
         var programStartedAt = 0.0
         var lastWideAt = 0.0
         var previousProgram: ChannelID?
@@ -134,6 +145,49 @@ nonisolated struct DirectorReplay {
                     readinessParameters.minimumIdentityConfidence.isFinite &&
                     (0...1).contains(readinessParameters.minimumIdentityConfidence) &&
                     (0...1).contains(channels[target]?.confidence ?? -1))
+            // Capture the authoritative request before commit/discard clears it,
+            // and raw evidence before any sink mutation. Do not reuse the
+            // validator's derived evidenceAvailable or mirrored activeRequest.
+            let committedEffect = CommittedEffect(
+                proposal: effect.request.intent, requestID: effect.request.id,
+                currentRequestID: preparation.request?.id,
+                requestIssuedAt: effect.request.issuedAt,
+                requestMaximumAge: effect.request.maximumAge, appliedAt: now,
+                program: program, preview: program == .a ? .b : .a, routeGeneration: route,
+                revisionsBefore: channels[target]?.revisions,
+                sourceMissing: channels[target]?.missing ?? true,
+                authorityEpoch: authority.epoch, authorityMayPrepare: authority.mayPrepare,
+                policyRevision: policyRevision, nominationRevision: nominationRevision,
+                evidence: .init(authorityAvailable: authority.evidenceAvailable,
+                    subjectPresent: channels[target]?.present == true,
+                    observedAt: channels[target]?.lastEvidenceAt,
+                    identityConfidence: channels[target]?.confidence ?? -1,
+                    movement: channels[target]?.movement ?? -1,
+                    maximumAge: maximumEvidenceAge,
+                    minimumIdentityConfidence: readinessParameters.minimumIdentityConfidence))
+            func mutateSimulatedPreview(_ revisions: ChannelRevisions) {
+                let reasons = Self.audit(committedEffect)
+                channels[target]?.revisions = revisions
+                preparationsCommitted += 1
+                if !reasons.isEmpty { staleEffectsCommitted += 1 }
+                for reason in reasons { staleCommittedEffectReasons[reason, default: 0] += 1 }
+            }
+            if simulatedExecutor == .faultyPreviewMutation {
+                // Explicit fault injection bypasses the final gate, never the
+                // Preview-only sink boundary. It forges no ACK or composition.
+                guard effect.succeeds else {
+                    failedEffects += 1; preparation.discard(effect.request); return
+                }
+                guard target != program, target == committedEffect.preview,
+                      var revisions = channels[target]?.revisions,
+                      revisions.controlEpoch < UInt64.max, revisions.shotRevision < UInt64.max else {
+                    rejectedAttempts += 1; return
+                }
+                revisions.controlEpoch += 1; revisions.shotRevision += 1
+                mutateSimulatedPreview(revisions)
+                preparation.discard(effect.request)
+                return
+            }
             let validation = preparation.validate(effect.request, live: live, now: now)
             if case .stale(let reasons) = validation {
                 recordStale(effect.proposalID, reasons); rejectedAttempts += 1
@@ -145,19 +199,7 @@ nonisolated struct DirectorReplay {
                     revisions.controlEpoch < UInt64.max, revisions.shotRevision < UInt64.max {
                 revisions.controlEpoch += 1; revisions.shotRevision += 1
                 if let receipt = preparation.commit(effect.request, live: live, now: now, postRevisions: revisions) {
-                    // Audit the raw world at the sink mutation, independently
-                    // of the validator that guarded the commit above.
-                    let audit = Self.audit(CommittedEffect(
-                        proposal: effect.request.intent, requestIssuedAt: effect.request.issuedAt,
-                        requestMaximumAge: effect.request.maximumAge, appliedAt: now,
-                        program: program, preview: program == .a ? .b : .a, routeGeneration: route,
-                        revisionsBefore: channels[target]?.revisions,
-                        sourceMissing: channels[target]?.missing ?? true,
-                        authorityEpoch: authority.epoch, authorityMayPrepare: authority.mayPrepare,
-                        policyRevision: policyRevision, nominationRevision: nominationRevision))
-                    channels[target]?.revisions = revisions
-                    preparationsCommitted += 1
-                    if !audit.isEmpty { staleEffectsCommitted += 1 }
+                    mutateSimulatedPreview(revisions)
                     acknowledgements.append((effect.id, now + effect.acknowledgementDelay, receipt))
                 } else { rejectedAttempts += 1 }
             } else { rejectedAttempts += 1 }
@@ -299,6 +341,12 @@ nonisolated struct DirectorReplay {
             case .healthRestored: authority.apply(.healthRestored)
             case .policyChange: policyRevision += 1; authority.apply(.policyChanged)
             case .nominationChange: nominationRevision += 1; authority.apply(.nominationChanged)
+            case .syntheticRequestRetirement:
+                preparation.retire()
+            case .syntheticRequestReplacement:
+                if let pending {
+                    _ = preparation.propose(pending, maximumAge: maximumProposalAge, now: now)
+                }
             case .subject(let id, let present, let confidence, let intended, let ready, let movement):
                 channels[id, default: Channel()].lastEvidenceAt = now
                 channels[id, default: Channel()].present = present
@@ -375,7 +423,8 @@ nonisolated struct DirectorReplay {
             duplicateCallbacks: duplicateCallbacks, failedEffects: failedEffects,
             rejectedAttempts: rejectedAttempts, preparationsCommitted: preparationsCommitted,
             acknowledgementsAccepted: acknowledgementsAccepted, acknowledgementsRejected: acknowledgementsRejected,
-            readyEvaluations: readyEvaluations, staleEffectsCommitted: staleEffectsCommitted, autoDirectRefusals: autoDirectRefusals,
+            readyEvaluations: readyEvaluations, staleEffectsCommitted: staleEffectsCommitted,
+            staleCommittedEffectReasons: staleCommittedEffectReasons, autoDirectRefusals: autoDirectRefusals,
             finalLevel: authority.level, finalPaused: authority.paused, clockAnomalies: clockAnomalies,
             wrongSubjectAttempts: wrongAttempts, labelledSubjectAttempts: labelledAttempts,
             proposalsMadeWhilePaused: pausedProposals,
@@ -389,8 +438,19 @@ nonisolated struct DirectorReplay {
     /// captured before the mutation. Judged by `audit`, which shares no code
     /// with `DirectorPreparation.validate`, so `staleEffectsCommitted` can
     /// catch a stale effect that a faulty validator let through.
+    struct EffectEvidence: Equatable, Sendable {
+        let authorityAvailable: Bool
+        let subjectPresent: Bool
+        let observedAt: TimeInterval?
+        let identityConfidence: Double
+        let movement: Double
+        let maximumAge: TimeInterval
+        let minimumIdentityConfidence: Double
+    }
     struct CommittedEffect: Equatable, Sendable {
         let proposal: DirectorProposal
+        let requestID: UUID
+        let currentRequestID: UUID?
         let requestIssuedAt: TimeInterval
         let requestMaximumAge: TimeInterval
         let appliedAt: TimeInterval
@@ -403,6 +463,7 @@ nonisolated struct DirectorReplay {
         let authorityMayPrepare: Bool
         let policyRevision: UInt64
         let nominationRevision: UInt64
+        let evidence: EffectEvidence
     }
 
     /// Every way the committed effect was stale; empty means it was valid.
@@ -421,6 +482,19 @@ nonisolated struct DirectorReplay {
         }
         if effect.policyRevision != p.policyRevision { reasons.append(.policyChanged) }
         if effect.nominationRevision != p.nominationRevision { reasons.append(.nominationChanged) }
+        if effect.currentRequestID != effect.requestID { reasons.append(.requestReplaced) }
+        let e = effect.evidence
+        let evidenceAge = e.observedAt.map { effect.appliedAt - $0 }
+        if !e.authorityAvailable || !e.subjectPresent ||
+            e.observedAt?.isFinite != true || evidenceAge?.isFinite != true ||
+            evidenceAge.map({ $0 >= 0 && $0 <= e.maximumAge }) != true ||
+            !e.maximumAge.isFinite || e.maximumAge < 0 ||
+            !e.minimumIdentityConfidence.isFinite || !(0...1).contains(e.minimumIdentityConfidence) ||
+            !e.identityConfidence.isFinite || !(0...1).contains(e.identityConfidence) ||
+            e.identityConfidence < e.minimumIdentityConfidence ||
+            !e.movement.isFinite || e.movement < 0 {
+            reasons.append(.evidenceUnavailable)
+        }
         let age = effect.appliedAt - effect.requestIssuedAt
         if !age.isFinite || age < 0 || !effect.requestMaximumAge.isFinite || age > effect.requestMaximumAge {
             reasons.append(.expired)

@@ -214,18 +214,33 @@ extension DirectorReplayTests {
 /// validator lets through.
 struct DirectorEffectAuditTests {
     private let revisions = ChannelRevisions(sourceGeneration: 1, controlEpoch: 2, shotRevision: 3)
+    private let requestID = UUID(uuidString: "00000000-0000-0000-0000-000000000001")!
+    private let replacementID = UUID(uuidString: "00000000-0000-0000-0000-000000000002")!
+
+    private func evidence(authority: Bool = true, present: Bool = true, observedAt: Double? = 10,
+                          confidence: Double = 0.95, movement: Double = 0,
+                          maximumAge: Double = 2, floor: Double = 0.7) -> DirectorReplay.EffectEvidence {
+        .init(authorityAvailable: authority, subjectPresent: present, observedAt: observedAt,
+              identityConfidence: confidence, movement: movement, maximumAge: maximumAge,
+              minimumIdentityConfidence: floor)
+    }
 
     private func effect(epoch: UInt64 = 7, mayPrepare: Bool = true, program: ChannelID = .a, preview: ChannelID = .b,
                         route: UInt64 = 4, before: ChannelRevisions? = nil, missing: Bool = false,
-                        policy: UInt64 = 0, nomination: UInt64 = 0, age: TimeInterval = 0.1) throws -> DirectorReplay.CommittedEffect {
+                        policy: UInt64 = 0, nomination: UInt64 = 0, age: TimeInterval = 0.1,
+                        currentRequest: Bool = true, matchingRequest: Bool = true,
+                        evidence rawEvidence: DirectorReplay.EffectEvidence? = nil) throws -> DirectorReplay.CommittedEffect {
         let proposal = try #require(DirectorProposal(target: .b, preview: .b,
             shot: DirectorShot(preset: .waistUp, mode: .autoTracking, zoomRung: 1), reason: "test",
             authorityEpoch: 7, revisions: revisions, routeGeneration: 4, createdAt: 10))
-        return .init(proposal: proposal, requestIssuedAt: 10, requestMaximumAge: 0.5, appliedAt: 10 + age,
+        return .init(proposal: proposal, requestID: requestID,
+                     currentRequestID: currentRequest ? (matchingRequest ? requestID : replacementID) : nil,
+                     requestIssuedAt: 10, requestMaximumAge: 0.5, appliedAt: 10 + age,
                      program: program, preview: preview, routeGeneration: route,
                      revisionsBefore: before ?? revisions, sourceMissing: missing,
                      authorityEpoch: epoch, authorityMayPrepare: mayPrepare,
-                     policyRevision: policy, nominationRevision: nomination)
+                     policyRevision: policy, nominationRevision: nomination,
+                     evidence: rawEvidence ?? evidence())
     }
 
     @Test func validEffectPassesTheAudit() throws {
@@ -243,6 +258,143 @@ struct DirectorEffectAuditTests {
         #expect(DirectorReplay.audit(try effect(policy: 1)) == [.policyChanged])
         #expect(DirectorReplay.audit(try effect(nomination: 1)) == [.nominationChanged])
         #expect(DirectorReplay.audit(try effect(age: 0.6)) == [.expired])
-        #expect(DirectorReplay.audit(try effect(age: -1)) == [.expired])
+        #expect(DirectorReplay.audit(try effect(age: -1, evidence: evidence(observedAt: 9))) == [.expired])
+        #expect(Set(DirectorReplay.audit(try effect(age: -1))) == Set([.expired, .evidenceUnavailable]))
+        #expect(DirectorReplay.audit(try effect(currentRequest: false)) == [.requestReplaced])
+        #expect(DirectorReplay.audit(try effect(matchingRequest: false)) == [.requestReplaced])
+    }
+
+    @Test(arguments: ["authority", "presence", "missingTime", "nanTime", "infiniteTime", "futureTime", "staleTime",
+        "nanConfidence", "infiniteConfidence", "negativeConfidence", "overConfidence", "belowFloor",
+        "nanMovement", "infiniteMovement", "negativeMovement", "nanFloor", "negativeFloor", "overFloor",
+        "nanMaximumAge", "infiniteMaximumAge", "negativeMaximumAge"])
+    func rawEvidenceFaultsAreIndependentOfTheValidator(fault: String) throws {
+        let raw: DirectorReplay.EffectEvidence
+        switch fault {
+        case "authority": raw = evidence(authority: false)
+        case "presence": raw = evidence(present: false)
+        case "missingTime": raw = evidence(observedAt: nil)
+        case "nanTime": raw = evidence(observedAt: .nan)
+        case "infiniteTime": raw = evidence(observedAt: .infinity)
+        case "futureTime": raw = evidence(observedAt: 11)
+        case "staleTime": raw = evidence(observedAt: 7)
+        case "nanConfidence": raw = evidence(confidence: .nan)
+        case "infiniteConfidence": raw = evidence(confidence: .infinity)
+        case "negativeConfidence": raw = evidence(confidence: -0.1)
+        case "overConfidence": raw = evidence(confidence: 1.1)
+        case "belowFloor": raw = evidence(confidence: 0.6)
+        case "nanMovement": raw = evidence(movement: .nan)
+        case "infiniteMovement": raw = evidence(movement: .infinity)
+        case "negativeMovement": raw = evidence(movement: -0.1)
+        case "nanFloor": raw = evidence(floor: .nan)
+        case "negativeFloor": raw = evidence(floor: -0.1)
+        case "overFloor": raw = evidence(floor: 1.1)
+        case "nanMaximumAge": raw = evidence(maximumAge: .nan)
+        case "infiniteMaximumAge": raw = evidence(maximumAge: .infinity)
+        default: raw = evidence(maximumAge: -0.1)
+        }
+        #expect(DirectorReplay.audit(try effect(evidence: raw)) == [.evidenceUnavailable])
+    }
+
+    @Test func evidenceConfidenceAndFreshnessBoundariesAreInclusive() throws {
+        #expect(DirectorReplay.audit(try effect(age: 0, evidence: evidence(observedAt: 8))).isEmpty)
+        #expect(DirectorReplay.audit(try effect(evidence: evidence(confidence: 0, floor: 0))).isEmpty)
+        #expect(DirectorReplay.audit(try effect(evidence: evidence(confidence: 1, floor: 1))).isEmpty)
+        // Preparation can move; editorial readiness is a separate gate.
+        #expect(DirectorReplay.audit(try effect(evidence: evidence(movement: 0.5))).isEmpty)
+    }
+}
+
+@MainActor
+struct DirectorEffectFaultInjectionTests {
+    private func replay(_ interventions: [DirectorReplay.Event],
+                        executor: DirectorReplay.SimulatedExecutor = .guarded,
+                        maximumEvidenceAge: Double = 10, succeeds: Bool = true) -> DirectorReplay.Report {
+        let events: [DirectorReplay.Event] = [
+            .init(at: 1, action: .render(channel: .b)),
+            .init(at: 1, action: .subject(channel: .b, present: true, confidence: 0.95,
+                intended: true, framingReady: true, movement: 0)),
+            .init(at: 2, action: .directorAttempt(id: "queued", delay: 3, succeeds: succeeds))]
+            + interventions + [.init(at: 6, action: .effect(id: "queued"))]
+        return DirectorReplay.run(.init(name: "explicit simulated executor fault", duration: 7, events: events),
+            parameters: .proposed, maximumProposalAge: 20, maximumEvidenceAge: maximumEvidenceAge,
+            readinessParameters: .init(minimumIdentityConfidence: 0.7, minimumSettledTime: 0.2,
+                maximumMotion: 0.1, cutOnMotionAllowed: false), simulatedExecutor: executor)
+    }
+
+    @Test func validGuardedCommitCapturesRequestBeforeItIsCleared() {
+        let normal = replay([])
+        let simulated = replay([], executor: .faultyPreviewMutation)
+        for report in [normal, simulated] {
+            #expect(report.preparationsCommitted == 1 && report.staleEffectsCommitted == 0)
+            #expect(report.staleCommittedEffectReasons.isEmpty)
+            #expect(report.duplicateCallbacks == 1 && report.directorCuts == 0)
+            #expect(report.programChangesWithoutAuthority == 0 && report.evidence == .synthetic)
+        }
+        #expect(normal.acknowledgementsAccepted == 1)
+        #expect(simulated.acknowledgementsAccepted == 0) // Fault path forges no receipt.
+    }
+
+    @Test(arguments: ["missing", "confidence", "movement", "stale", "authority"])
+    func faultyPreviewMutationExposesLostEvidence(fault: String) {
+        let interventions: [DirectorReplay.Event]
+        let maximumEvidenceAge: Double
+        switch fault {
+        case "stale": interventions = []; maximumEvidenceAge = 2
+        case "authority": interventions = [.init(at: 3, action: .evidenceGap(true))]; maximumEvidenceAge = 10
+        default:
+            interventions = [.init(at: 3, action: .subject(channel: .b, present: fault != "missing",
+                confidence: fault == "confidence" ? .nan : 0.95, intended: true, framingReady: true,
+                movement: fault == "movement" ? .infinity : 0))]
+            maximumEvidenceAge = 10
+        }
+        let normal = replay(interventions, maximumEvidenceAge: maximumEvidenceAge)
+        let faulty = replay(interventions, executor: .faultyPreviewMutation, maximumEvidenceAge: maximumEvidenceAge)
+        #expect(normal.preparationsCommitted == 0 && normal.staleEffectsCommitted == 0)
+        #expect(normal.rejectedAttempts == 1)
+        #expect(faulty.preparationsCommitted == 1 && faulty.staleEffectsCommitted == 1)
+        #expect(faulty.staleCommittedEffectReasons[.evidenceUnavailable] == 1)
+        #expect(faulty.duplicateCallbacks == 1 && faulty.directorCuts == 0)
+        #expect(faulty.programChangesWithoutAuthority == 0)
+    }
+
+    @Test(arguments: [DirectorReplay.Event.Action.syntheticRequestRetirement, .syntheticRequestReplacement])
+    func authoritativeRequestIdentityExposesRetiredAndReplacedCallbacks(action: DirectorReplay.Event.Action) {
+        let interventions = [DirectorReplay.Event(at: 3, action: action)]
+        let normal = replay(interventions)
+        let faulty = replay(interventions, executor: .faultyPreviewMutation)
+        #expect(normal.preparationsCommitted == 0 && normal.rejectedAttempts == 1)
+        #expect(normal.staleEffectsCommitted == 0)
+        #expect(faulty.preparationsCommitted == 1 && faulty.staleEffectsCommitted == 1)
+        #expect(faulty.staleCommittedEffectReasons == [.requestReplaced: 1])
+        #expect(faulty.directorCuts == 0 && faulty.programChangesWithoutAuthority == 0)
+    }
+
+    @Test func combinedReasonsCountOneCommittedEffectAndDuplicateDoesNotInflateIt() {
+        let interventions: [DirectorReplay.Event] = [
+            .init(at: 3, action: .syntheticRequestRetirement),
+            .init(at: 3, action: .subject(channel: .b, present: false, confidence: .nan,
+                intended: true, framingReady: true, movement: .infinity))]
+        let faulty = replay(interventions, executor: .faultyPreviewMutation)
+        #expect(faulty.preparationsCommitted == 1 && faulty.staleEffectsCommitted == 1)
+        #expect(faulty.staleCommittedEffectReasons == [.requestReplaced: 1, .evidenceUnavailable: 1])
+        #expect(faulty.duplicateCallbacks == 1 && faulty.directorCuts == 0)
+        #expect(faulty.programChangesWithoutAuthority == 0)
+    }
+
+    @Test func failedEffectsDoNotReachTheAuditInEitherExecutor() {
+        for executor in [DirectorReplay.SimulatedExecutor.guarded, .faultyPreviewMutation] {
+            let report = replay([], executor: executor, succeeds: false)
+            #expect(report.failedEffects == 1 && report.duplicateCallbacks == 1)
+            #expect(report.preparationsCommitted == 0 && report.staleEffectsCommitted == 0)
+            #expect(report.staleCommittedEffectReasons.isEmpty && report.directorCuts == 0)
+        }
+    }
+
+    @Test func evenTheFaultyExecutorCannotMutateATargetThatBecameProgram() {
+        let report = replay([.init(at: 3, action: .operatorTake)], executor: .faultyPreviewMutation)
+        #expect(report.operatorCuts == 1 && report.directorCuts == 0)
+        #expect(report.preparationsCommitted == 0 && report.staleEffectsCommitted == 0)
+        #expect(report.rejectedAttempts == 1 && report.programChangesWithoutAuthority == 0)
     }
 }
