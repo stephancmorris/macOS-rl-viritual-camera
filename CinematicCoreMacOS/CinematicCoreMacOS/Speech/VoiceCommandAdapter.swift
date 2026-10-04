@@ -188,6 +188,9 @@ nonisolated struct BoundVoiceCommand: Sendable {
         if let rejection = validate(value.token, world: world) { return .failure(rejection) }
         guard value.target == world.preview, value.target == value.token.start.preview,
               !world.sourceMissing(value.target) else { return .failure(.roleChanged) }
+        if case .setMode(.autoTracking) = value.intent, !world.subjectLocked(value.target) {
+            return .failure(.subjectNotLocked)
+        }
         let action: OperatorCommand.Action
         switch value.intent {
         case .detect: action = .detect

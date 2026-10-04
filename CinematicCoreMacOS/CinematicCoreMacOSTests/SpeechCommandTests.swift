@@ -77,14 +77,14 @@ import Testing
                        running: Bool = true, muted: Bool = false, targetRevision: UInt64 = 1,
                        program: ChannelID = .a, preview: ChannelID = .b,
                        control: ChannelID = .b, sourceGeneration: UInt64 = 1,
-                       locked: Bool = true) -> VoiceWorldSnapshot {
+                       locked: Bool = true, aLocked: Bool = true) -> VoiceWorldSnapshot {
         VoiceWorldSnapshot(now: now, sessionGeneration: session, muteGeneration: mute,
             running: running, muted: muted, controlTargetRevision: targetRevision,
             program: program, preview: preview, controlTarget: control,
             aRevisions: .init(sourceGeneration: 1, controlEpoch: 1, shotRevision: 1),
             bRevisions: .init(sourceGeneration: sourceGeneration, controlEpoch: 1, shotRevision: 1),
             aSourceMissing: false, bSourceMissing: false,
-            aSubjectLocked: true, bSubjectLocked: locked)
+            aSubjectLocked: aLocked, bSubjectLocked: locked)
     }
 
     private func pending(_ adapter: VoiceCommandAdapter,
@@ -303,4 +303,48 @@ import Testing
         #expect(adapter.accept(.init(id: evicted.id, text: "Alfie, pan", confidence: 0.95),
             world: world(now: 0.7)) == .failure(.missingUtteranceStart))
     }
+    @Test(arguments: [ChannelID.a, .b])
+    func trackRechecksTheBoundPreviewLockAndConsumesARefusedDispatch(target: ChannelID) throws {
+        let adapter = VoiceCommandAdapter(confidenceFloor: 0.8)
+        let program: ChannelID = target == .a ? .b : .a
+        func snapshot(_ now: Double, locked: Bool) -> VoiceWorldSnapshot {
+            world(now: now, program: program, preview: target, control: target,
+                  locked: target == .b ? locked : true, aLocked: target == .a ? locked : true)
+        }
+        let token = try adapter.beginUtterance(world: snapshot(1, locked: true)).get()
+        let text = target == .a ? "Alfie, camera one, track" : "Alfie, camera two, track"
+        let pending = try adapter.accept(.init(id: token.id, text: text, confidence: 0.95),
+            world: snapshot(1.1, locked: true)).get()
+        // Program stays locked; only the bound Preview subject is lost.
+        if case .failure(let reason) = adapter.prepareDispatch(pending,
+            world: snapshot(1.2, locked: false), format: .stage) {
+            #expect(reason == .subjectNotLocked)
+            #expect(reason.message == "Pick a subject.")
+        } else { Issue.record("Track admitted without the bound Preview subject lock") }
+        if case .failure(let reason) = adapter.prepareDispatch(pending,
+            world: snapshot(1.3, locked: true), format: .stage) {
+            #expect(reason == .duplicateUtterance)
+        } else { Issue.record("Lock restoration revived a consumed Track command") }
+        let fresh = try adapter.beginUtterance(world: snapshot(1.3, locked: true)).get()
+        let freshPending = try adapter.accept(.init(id: fresh.id, text: text, confidence: 0.95),
+            world: snapshot(1.4, locked: true)).get()
+        let bound = try adapter.prepareDispatch(freshPending,
+            world: snapshot(1.5, locked: true), format: .stage).get()
+        #expect(bound.target == target && bound.utteranceID == fresh.id)
+        guard case .setMode(.autoTracking) = bound.action else {
+            Issue.record("Fresh locked Track mapped to the wrong action"); return
+        }
+    }
+
+    @Test(arguments: ["detect", "manual", "pan", "back to wide", "waist up", "push in", "pull out"])
+    func nonTrackIntentsRemainEligibleWithoutAnySubjectLock(intent: String) throws {
+        let adapter = VoiceCommandAdapter(confidenceFloor: 0.8)
+        let token = try adapter.beginUtterance(world: world(now: 1, locked: false, aLocked: false)).get()
+        let pending = try adapter.accept(.init(id: token.id, text: "Alfie, \(intent)", confidence: 0.95),
+            world: world(now: 1.1, locked: false, aLocked: false)).get()
+        let bound = try adapter.prepareDispatch(pending,
+            world: world(now: 1.2, locked: false, aLocked: false), format: .stage).get()
+        #expect(bound.target == .b && bound.utteranceID == token.id)
+    }
+
 }
