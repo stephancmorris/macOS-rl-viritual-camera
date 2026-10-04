@@ -1,0 +1,1 @@
+[METRICS] accelerated source-clock instrumentation: 20.37 µs/frame over 5000 frames; row aggregate: 0.010 ms (Debug build)

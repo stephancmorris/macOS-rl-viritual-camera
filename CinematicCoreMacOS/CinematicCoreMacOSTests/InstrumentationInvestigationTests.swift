@@ -30,14 +30,10 @@ import Testing
         let lowPower: Bool
         let retainedLatencySamples: Int
     }
-    // Reflection is investigation-only: observe existing private collections
-    // without exposing a production API or measuring reflection in the loop.
+    // Read scalar storage statistics after timing; no reflection or collection
+    // copying enters the measured frame loop.
     private func retainedSamples(_ output: ProgramOutputManager) -> Int {
-        guard let value = Mirror(reflecting: output).children.first(where: { $0.label == "latencySamples" })?.value else { return -1 }
-        return Mirror(reflecting: value).children.reduce(0) { total, entry in
-            guard let values = Array(Mirror(reflecting: entry.value).children).last?.value else { return total }
-            return total + Mirror(reflecting: values).children.count
-        }
+        output.latencyStorageStatistics.values.reduce(0) { $0 + $1.count }
     }
 
     @Test(.enabled(if: ProcessInfo.processInfo.environment["ALFIE_INSTRUMENTATION_STUDY"] == "1",

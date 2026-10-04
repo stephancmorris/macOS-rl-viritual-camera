@@ -70,6 +70,7 @@
 			membershipExceptions = (
 				CropRenderer.metal,
 				DiagnosticsLog.swift,
+				LatencySampleWindow.swift,
 				ProgramOutputManager.swift,
 				ShowStandard.swift,
 			);

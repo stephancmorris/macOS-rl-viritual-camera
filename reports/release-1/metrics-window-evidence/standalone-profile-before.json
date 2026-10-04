@@ -1,0 +1,181 @@
+{
+  "kind": "synthetic standalone algorithm reproduction, not app/capture/receiver qualification",
+  "production_source": "ProgramOutputManager.recordLatency at origin/main a89644b865e31d179ab9bee5f41fe25b760d2f34; algorithm verified unchanged at bb7e692bd422aa1f41bb0889b58568475e54c560",
+  "compiler": "swiftc -g -Onone -module-cache-path /private/tmp/alfie-metrics-module-cache",
+  "allocator_profiler": "DYLD malloc/calloc/realloc interposer; cumulative requested bytes, not footprint; raw repetitions serialized",
+  "cpu_profiler": "sample <temporary probe PID> 2 1; one 2-second sample at 1ms interval",
+  "cpu_sample": {
+    "total_sampled_stacks": 1514,
+    "removeAll_ancestry": 1498,
+    "append_copy_ancestry": 11
+  },
+  "limitations": [
+    "Standalone class omits MainActor/app publisher/sink/diagnostics work.",
+    "-Onone generic-library scanning costs are compiler/build-specific.",
+    "Interposer alters allocator path and timing; first wall profiled repetition crosses 5s and consequently expires some samples.",
+    "No live lag or physical presentation latency claim.",
+    "Initial overlapped exploratory runs excluded.",
+    "Instruments Allocations launch stalled with suspended probe, was forcibly stopped, and yielded no usable trace."
+  ],
+  "unprofiled_wall": [
+    {
+      "cpuSeconds": 3.774219,
+      "frames": 5000,
+      "lowPower": false,
+      "microsecondsPerFrame": 761.2629750045016,
+      "mode": "wall",
+      "repetition": 0,
+      "retainedSamples": 20000,
+      "thermal": "NSProcessInfoThermalState(rawValue: 0)",
+      "wallSeconds": 3.806314875022508
+    },
+    {
+      "cpuSeconds": 3.764405,
+      "frames": 5000,
+      "lowPower": false,
+      "microsecondsPerFrame": 753.9036916801706,
+      "mode": "wall",
+      "repetition": 1,
+      "retainedSamples": 20000,
+      "thermal": "NSProcessInfoThermalState(rawValue: 0)",
+      "wallSeconds": 3.769518458400853
+    },
+    {
+      "cpuSeconds": 3.7423699999999993,
+      "frames": 5000,
+      "lowPower": false,
+      "microsecondsPerFrame": 749.8839250067249,
+      "mode": "wall",
+      "repetition": 2,
+      "retainedSamples": 20000,
+      "thermal": "NSProcessInfoThermalState(rawValue: 0)",
+      "wallSeconds": 3.7494196250336245
+    }
+  ],
+  "unprofiled_source": [
+    {
+      "cpuSeconds": 1.0769609999999998,
+      "frames": 5000,
+      "lowPower": false,
+      "microsecondsPerFrame": 215.98209165968,
+      "mode": "source",
+      "repetition": 0,
+      "retainedSamples": 1004,
+      "thermal": "NSProcessInfoThermalState(rawValue: 0)",
+      "wallSeconds": 1.0799104582984
+    },
+    {
+      "cpuSeconds": 1.081358,
+      "frames": 5000,
+      "lowPower": false,
+      "microsecondsPerFrame": 216.58299167174846,
+      "mode": "source",
+      "repetition": 1,
+      "retainedSamples": 1004,
+      "thermal": "NSProcessInfoThermalState(rawValue: 0)",
+      "wallSeconds": 1.0829149583587423
+    },
+    {
+      "cpuSeconds": 1.09971,
+      "frames": 5000,
+      "lowPower": false,
+      "microsecondsPerFrame": 220.22778333630413,
+      "mode": "source",
+      "repetition": 2,
+      "retainedSamples": 1004,
+      "thermal": "NSProcessInfoThermalState(rawValue: 0)",
+      "wallSeconds": 1.1011389166815206
+    }
+  ],
+  "allocator_profiled_wall": [
+    {
+      "allocatedBytes": 4066772415,
+      "allocationRequests": 103077391,
+      "cpuSeconds": 5.253451999999999,
+      "frames": 5000,
+      "lowPower": false,
+      "microsecondsPerFrame": 1052.3010916775092,
+      "mode": "wall",
+      "repetition": 0,
+      "retainedSamples": 15544,
+      "thermal": "NSProcessInfoThermalState(rawValue: 0)",
+      "wallSeconds": 5.261505458387546
+    },
+    {
+      "allocatedBytes": 3981859424,
+      "allocationRequests": 100045003,
+      "cpuSeconds": 4.925285,
+      "frames": 5000,
+      "lowPower": false,
+      "microsecondsPerFrame": 987.2209833469241,
+      "mode": "wall",
+      "repetition": 1,
+      "retainedSamples": 20000,
+      "thermal": "NSProcessInfoThermalState(rawValue: 0)",
+      "wallSeconds": 4.936104916734621
+    },
+    {
+      "allocatedBytes": 3981859424,
+      "allocationRequests": 100045003,
+      "cpuSeconds": 4.944848,
+      "frames": 5000,
+      "lowPower": false,
+      "microsecondsPerFrame": 990.8440999919549,
+      "mode": "wall",
+      "repetition": 2,
+      "retainedSamples": 20000,
+      "thermal": "NSProcessInfoThermalState(rawValue: 0)",
+      "wallSeconds": 4.954220499959774
+    }
+  ],
+  "allocator_profiled_source": [
+    {
+      "allocatedBytes": 879863615,
+      "allocationRequests": 27860783,
+      "cpuSeconds": 1.5086009999999999,
+      "frames": 5000,
+      "lowPower": false,
+      "microsecondsPerFrame": 305.6454249890521,
+      "mode": "source",
+      "repetition": 0,
+      "retainedSamples": 1004,
+      "thermal": "NSProcessInfoThermalState(rawValue: 0)",
+      "wallSeconds": 1.5282271249452606
+    },
+    {
+      "allocatedBytes": 879852224,
+      "allocationRequests": 27860595,
+      "cpuSeconds": 1.525417,
+      "frames": 5000,
+      "lowPower": false,
+      "microsecondsPerFrame": 305.72330832947046,
+      "mode": "source",
+      "repetition": 1,
+      "retainedSamples": 1004,
+      "thermal": "NSProcessInfoThermalState(rawValue: 0)",
+      "wallSeconds": 1.5286165416473523
+    },
+    {
+      "allocatedBytes": 879852224,
+      "allocationRequests": 27860595,
+      "cpuSeconds": 1.5149910000000002,
+      "frames": 5000,
+      "lowPower": false,
+      "microsecondsPerFrame": 303.3397916704416,
+      "mode": "source",
+      "repetition": 2,
+      "retainedSamples": 1004,
+      "thermal": "NSProcessInfoThermalState(rawValue: 0)",
+      "wallSeconds": 1.5166989583522081
+    }
+  ],
+  "compiler_version": "Apple Swift 6.2.3 (swiftlang-6.2.3.3.21 clang-1700.6.3.2), target arm64-apple-macosx26.0",
+  "app_host_default_benchmark_baseline": {
+    "commit": "bb7e692bd422aa1f41bb0889b58568475e54c560",
+    "microseconds_per_frame": 182.14,
+    "frames": 5000,
+    "emit_milliseconds": 0.011,
+    "result": "passed existing unchanged 250us assertion",
+    "note": "Copied test-host benchmark file preserved separately; root confirmed full-suite evidence."
+  }
+}

@@ -1,0 +1,44 @@
+[
+  {
+    "allocatedLatencySlots" : 1024,
+    "build" : "unrecorded",
+    "cpuSeconds" : 0.14480499999999996,
+    "elapsedSeconds" : 5.47349808330182,
+    "frames" : 250,
+    "instrumentationMicrosecondsPerFrame" : 165.2836687862873,
+    "invocationCadenceFPS" : 45.67463004375268,
+    "lowPower" : true,
+    "repetition" : 0,
+    "retainedLatencySamples" : 916,
+    "thermal" : "nominal",
+    "warmUpSeconds" : 5.508577041677199
+  },
+  {
+    "allocatedLatencySlots" : 1024,
+    "build" : "unrecorded",
+    "cpuSeconds" : 0.2524710000000001,
+    "elapsedSeconds" : 5.5454820833401754,
+    "frames" : 250,
+    "instrumentationMicrosecondsPerFrame" : 190.45633543282747,
+    "invocationCadenceFPS" : 45.081743344019436,
+    "lowPower" : true,
+    "repetition" : 1,
+    "retainedLatencySamples" : 904,
+    "thermal" : "nominal",
+    "warmUpSeconds" : 5.508577041677199
+  },
+  {
+    "allocatedLatencySlots" : 1024,
+    "build" : "unrecorded",
+    "cpuSeconds" : 0.16566300000000012,
+    "elapsedSeconds" : 5.520230666734278,
+    "frames" : 250,
+    "instrumentationMicrosecondsPerFrame" : 191.20016414672136,
+    "invocationCadenceFPS" : 45.28796260390653,
+    "lowPower" : true,
+    "repetition" : 2,
+    "retainedLatencySamples" : 908,
+    "thermal" : "nominal",
+    "warmUpSeconds" : 5.508577041677199
+  }
+]

@@ -1,0 +1,201 @@
+Allocation profile: first eight sampled malloc-family backtraces. Full raw stacks remain in /private/tmp/alfie-latency-baseline-allocation-stacks.txt.
+
+ALLOCATION_STACK 0 requested_bytes=40
+0   alfie-malloc-probe.dylib            0x00000001040a46e0 probe_malloc + 204
+1   libswiftCore.dylib                  0x0000000195c4db90 $sSnyxGSlsSxRzSZ6StrideRpzrlSly7ElementQz5IndexQzcirTW + 48
+2   libswiftCore.dylib                  0x0000000195abe088 $ss16IndexingIteratorV4next7ElementQzSgyF + 452
+3   alfie-latency-baseline              0x000000010406996c main + 2756
+4   dyld                                0x0000000181e684e4 start + 6992
+
+ALLOCATION_STACK 1 requested_bytes=16
+0   alfie-malloc-probe.dylib            0x00000001040a46e0 probe_malloc + 204
+1   libswiftCore.dylib                  0x000000019599b0c4 $sSayxSicir + 128
+2   libswiftCore.dylib                  0x0000000195acd618 $sSayxGSlsSly7ElementQz5IndexQzcirTW + 68
+3   libswiftCore.dylib                  0x0000000195b37994 $sSlsE10firstIndex5where0B0QzSgSb7ElementQzKXE_tKF + 676
+4   libswiftCore.dylib                  0x0000000195b3a2a0 $sSMsE20_halfStablePartition15isSuffixElement5IndexQzSb0F0QzKXE_tKF + 568
+5   libswiftCore.dylib                  0x0000000195ad447c $sSmsSMRzrlE9removeAll5whereySb7ElementSTQzKXE_tKF + 752
+6   alfie-latency-baseline              0x000000010406aba0 $s4main8BaselineC13recordLatency5stage8duration9timestampyAA5StageO_S2dtF + 1116
+7   alfie-latency-baseline              0x0000000104069a98 main + 3056
+8   dyld                                0x0000000181e684e4 start + 6992
+
+ALLOCATION_STACK 2 requested_bytes=40
+0   alfie-malloc-probe.dylib            0x00000001040a46e0 probe_malloc + 204
+1   libswiftCore.dylib                  0x0000000195acd600 $sSayxGSlsSly7ElementQz5IndexQzcirTW + 44
+2   libswiftCore.dylib                  0x0000000195b37994 $sSlsE10firstIndex5where0B0QzSgSb7ElementQzKXE_tKF + 676
+3   libswiftCore.dylib                  0x0000000195b3a2a0 $sSMsE20_halfStablePartition15isSuffixElement5IndexQzSb0F0QzKXE_tKF + 568
+4   libswiftCore.dylib                  0x0000000195ad447c $sSmsSMRzrlE9removeAll5whereySb7ElementSTQzKXE_tKF + 752
+5   alfie-latency-baseline              0x000000010406aba0 $s4main8BaselineC13recordLatency5stage8duration9timestampyAA5StageO_S2dtF + 1116
+6   alfie-latency-baseline              0x0000000104069a98 main + 3056
+7   dyld                                0x0000000181e684e4 start + 6992
+
+ALLOCATION_STACK 3 requested_bytes=40
+0   alfie-malloc-probe.dylib            0x00000001040a46e0 probe_malloc + 204
+1   libswiftCore.dylib                  0x0000000195acd600 $sSayxGSlsSly7ElementQz5IndexQzcirTW + 44
+2   libswiftCore.dylib                  0x0000000195b37994 $sSlsE10firstIndex5where0B0QzSgSb7ElementQzKXE_tKF + 676
+3   libswiftCore.dylib                  0x0000000195b3a2a0 $sSMsE20_halfStablePartition15isSuffixElement5IndexQzSb0F0QzKXE_tKF + 568
+4   libswiftCore.dylib                  0x0000000195ad447c $sSmsSMRzrlE9removeAll5whereySb7ElementSTQzKXE_tKF + 752
+5   alfie-latency-baseline              0x000000010406aba0 $s4main8BaselineC13recordLatency5stage8duration9timestampyAA5StageO_S2dtF + 1116
+6   alfie-latency-baseline              0x0000000104069ab0 main + 3080
+7   dyld                                0x0000000181e684e4 start + 6992
+
+ALLOCATION_STACK 4 requested_bytes=16
+0   alfie-malloc-probe.dylib            0x00000001040a46e0 probe_malloc + 204
+1   libswiftCore.dylib                  0x000000019599b0c4 $sSayxSicir + 128
+2   libswiftCore.dylib                  0x0000000195acd618 $sSayxGSlsSly7ElementQz5IndexQzcirTW + 68
+3   libswiftCore.dylib                  0x0000000195b37994 $sSlsE10firstIndex5where0B0QzSgSb7ElementQzKXE_tKF + 676
+4   libswiftCore.dylib                  0x0000000195b3a2a0 $sSMsE20_halfStablePartition15isSuffixElement5IndexQzSb0F0QzKXE_tKF + 568
+5   libswiftCore.dylib                  0x0000000195ad447c $sSmsSMRzrlE9removeAll5whereySb7ElementSTQzKXE_tKF + 752
+6   alfie-latency-baseline              0x000000010406aba0 $s4main8BaselineC13recordLatency5stage8duration9timestampyAA5StageO_S2dtF + 1116
+7   alfie-latency-baseline              0x0000000104069a80 main + 3032
+8   dyld                                0x0000000181e684e4 start + 6992
+
+ALLOCATION_STACK 5 requested_bytes=16
+0   alfie-malloc-probe.dylib            0x00000001040a46e0 probe_malloc + 204
+1   libswiftCore.dylib                  0x000000019599b0c4 $sSayxSicir + 128
+2   libswiftCore.dylib                  0x0000000195acd618 $sSayxGSlsSly7ElementQz5IndexQzcirTW + 68
+3   libswiftCore.dylib                  0x0000000195b37994 $sSlsE10firstIndex5where0B0QzSgSb7ElementQzKXE_tKF + 676
+4   libswiftCore.dylib                  0x0000000195b3a2a0 $sSMsE20_halfStablePartition15isSuffixElement5IndexQzSb0F0QzKXE_tKF + 568
+5   libswiftCore.dylib                  0x0000000195ad447c $sSmsSMRzrlE9removeAll5whereySb7ElementSTQzKXE_tKF + 752
+6   alfie-latency-baseline              0x000000010406aba0 $s4main8BaselineC13recordLatency5stage8duration9timestampyAA5StageO_S2dtF + 1116
+7   alfie-latency-baseline              0x0000000104069ac8 main + 3104
+8   dyld                                0x0000000181e684e4 start + 6992
+
+ALLOCATION_STACK 6 requested_bytes=16
+0   alfie-malloc-probe.dylib            0x00000001040a46e0 probe_malloc + 204
+1   libswiftCore.dylib                  0x000000019599b0c4 $sSayxSicir + 128
+2   libswiftCore.dylib                  0x0000000195acd618 $sSayxGSlsSly7ElementQz5IndexQzcirTW + 68
+3   libswiftCore.dylib                  0x0000000195b37994 $sSlsE10firstIndex5where0B0QzSgSb7ElementQzKXE_tKF + 676
+4   libswiftCore.dylib                  0x0000000195b3a2a0 $sSMsE20_halfStablePartition15isSuffixElement5IndexQzSb0F0QzKXE_tKF + 568
+5   libswiftCore.dylib                  0x0000000195ad447c $sSmsSMRzrlE9removeAll5whereySb7ElementSTQzKXE_tKF + 752
+6   alfie-latency-baseline              0x000000010406aba0 $s4main8BaselineC13recordLatency5stage8duration9timestampyAA5StageO_S2dtF + 1116
+7   alfie-latency-baseline              0x0000000104069a98 main + 3056
+8   dyld                                0x0000000181e684e4 start + 6992
+
+ALLOCATION_STACK 7 requested_bytes=16
+0   alfie-malloc-probe.dylib            0x00000001040a46e0 probe_malloc + 204
+1   libswiftCore.dylib                  0x000000019599b0c4 $sSayxSicir + 128
+2   libswiftCore.dylib                  0x0000000195acd618 $sSayxGSlsSly7ElementQz5IndexQzcirTW + 68
+3   libswiftCore.dylib                  0x0000000195b37994 $sSlsE10firstIndex5where0B0QzSgSb7ElementQzKXE_tKF + 676
+4   libswiftCore.dylib                  0x0000000195b3a2a0 $sSMsE20_halfStablePartition15isSuffixElement5IndexQzSb0F0QzKXE_tKF + 568
+5   libswiftCore.dylib                  0x0000000195ad447c $sSmsSMRzrlE9removeAll5whereySb7ElementSTQzKXE_tKF + 752
+6   alfie-latency-baseline              0x000000010406aba0 $s4main8BaselineC13recordLatency5stage8duration9timestampyAA5StageO_S2dtF + 1116
+7   alfie-latency-baseline              0x0000000104069ab0 main + 3080
+8   dyld                                0x0000000181e684e4 start + 6992
+
+CPU sample summary: 1498 / 1514 stacks under recordLatency removeAll(where:); 11 under Array.append/COW.
+
+Analysis of sampling alfie-latency-baseline (pid 70623) every 1 millisecond
+Process:         alfie-latency-baseline [70623]
+Path:            /private/tmp/alfie-latency-baseline
+Load Address:    0x1040e4000
+Identifier:      alfie-latency-baseline
+Version:         0
+Code Type:       ARM64
+Platform:        macOS
+Parent Process:  zsh [70614]
+Target Type:     live task
+
+Date/Time:       2026-10-04 13:07:59.824 +1100
+Launch Time:     2026-10-04 13:07:59.785 +1100
+OS Version:      macOS 26.6.2 (25G83)
+Report Version:  7
+Analysis Tool:   /usr/bin/sample
+
+Physical footprint:         2656K
+Physical footprint (peak):  2688K
+Idle exit:                  untracked
+----
+
+Call graph:
+    1514 Thread_10162169   DispatchQueue_1: com.apple.main-thread  (serial)
+      1514 start  (in dyld) + 6992  [0x181e684e4]
+        396 main  (in alfie-latency-baseline) + 3056  [0x1040e5a98]  alfie-latency-baseline.swift:62
+        + 389 Baseline.recordLatency(stage:duration:timestamp:)  (in alfie-latency-baseline) + 1116  [0x1040e6ba0]  alfie-latency-baseline.swift:27
+        + ! 389 RangeReplaceableCollection<>.removeAll(where:)  (in libswiftCore.dylib) + 752  [0x195ad447c]
+        + !   389 MutableCollection._halfStablePartition(isSuffixElement:)  (in libswiftCore.dylib) + 568  [0x195b3a2a0]
+        + !     230 Collection.firstIndex(where:)  (in libswiftCore.dylib) + 740  [0x195b379d4]
+        + !     : 153 protocol witness for Collection.subscript.read in conformance _ArrayBuffer<A>  (in libswiftCore.dylib) + 40  [0x195d642d8]
+        + !     : | 97 _xzm_free  (in libsystem_malloc.dylib) + 1048  [0x182050530]
+        + !     : | + 94 mach_absolute_time  (in libsystem_kernel.dylib) + 108,16,...  [0x1821f010c,0x1821f00b0,...]
+        + !     : | + 3 DYLD-STUB$$mach_absolute_time  (in libsystem_malloc.dylib) + 12,0  [0x182067b9c,0x182067b90]
+        + !     : | 41 _xzm_free  (in libsystem_malloc.dylib) + 0,28,...  [0x182050118,0x182050134,...]
+        + !     : | 7 _free  (in libsystem_malloc.dylib) + 0,36,...  [0x18205fcd0,0x18205fcf4,...]
+        + !     : | 4 Array.subscript.read  (in libswiftCore.dylib) + 44  [0x195acd674]
+        + !     : | + 4 __swift_noop_void_return  (in alfie-latency-baseline) + 0  [0x1040ea578]  /<compiler-generated>:0
+        + !     : | 3 DYLD-STUB$$free  (in libswiftCore.dylib) + 12  [0x195e234d8]
+        + !     : | 1 Array.subscript.read  (in libswiftCore.dylib) + 40  [0x195acd670]
+        + !     : 51 _xzm_free  (in libsystem_malloc.dylib) + 1048  [0x182050530]
+        + !     : | 51 mach_absolute_time  (in libsystem_kernel.dylib) + 108,16,...  [0x1821f010c,0x1821f00b0,...]
+        + !     : 15 _xzm_free  (in libsystem_malloc.dylib) + 580,1144,...  [0x18205035c,0x182050590,...]
+        + !     : 5 _free  (in libsystem_malloc.dylib) + 96,20  [0x18205fd30,0x18205fce4]
+        + !     : 3 _xzm_free  (in libsystem_malloc.dylib) + 352  [0x182050278]
+        + !     : | 3 _platform_memset  (in libsystem_platform.dylib) + 176,180  [0x18223d140,0x18223d144]
+        + !     : 2 protocol witness for Collection.subscript.read in conformance _ArrayBuffer<A>  (in libswiftCore.dylib) + 36  [0x195d642d4]
+        + !     : 1 Array.subscript.read  (in libswiftCore.dylib) + 60  [0x195acd684]
+        + !     129 Collection.firstIndex(where:)  (in libswiftCore.dylib) + 676  [0x195b37994]
+        + !     : 87 protocol witness for Collection.subscript.read in conformance [A]  (in libswiftCore.dylib) + 68  [0x195acd618]
+        + !     : | 67 Array.subscript.read  (in libswiftCore.dylib) + 128  [0x19599b0c4]
+        + !     : | + 39 _xzm_xzone_malloc_tiny  (in libsystem_malloc.dylib) + 88,420,...  [0x182054f94,0x1820550e0,...]
+        + !     : | + 14 <deduplicated_symbol>  (in libsystem_malloc.dylib) + 112,212,...  [0x18204f1cc,0x18204f230,...]
+        + !     : | + 7 _xzm_xzone_malloc  (in libsystem_malloc.dylib) + 8,324,...  [0x18204f958,0x18204fa94,...]
+        + !     : | + 6 _malloc_zone_malloc  (in libsystem_malloc.dylib) + 44,64,...  [0x18205f0e8,0x18205f0fc,...]
+        + !     : | + 1 DYLD-STUB$$malloc  (in libswiftCore.dylib) + 12  [0x195e23618]
+        + !     : | 7 Array.subscript.read  (in libswiftCore.dylib) + 180  [0x19599b0f8]
+        + !     : | + 4 Array._checkSubscript(_:wasNativeTypeChecked:)  (in libswiftCore.dylib) + 12,60  [0x1959923e8,0x195992418]
+        + !     : | + 3 Array._checkSubscript(_:wasNativeTypeChecked:)  (in libswiftCore.dylib) + 44  [0x195992408]
+        + !     : | +   3 _swift_isClassOrObjCExistentialType  (in libswiftCore.dylib) + 0,100  [0x19598b3bc,0x19598b420]
+        + !     : | 6 Array.subscript.read  (in libswiftCore.dylib) + 16,0,...  [0x19599b054,0x19599b044,...]
+        + !     : | 4 Array.subscript.read  (in libswiftCore.dylib) + 148  [0x19599b0d8]
+        + !     : | + 4 _swift_isClassOrObjCExistentialType  (in libswiftCore.dylib) + 64,100  [0x19598b3fc,0x19598b420]
+        + !     : | 3 Array._checkSubscript(_:wasNativeTypeChecked:)  (in libswiftCore.dylib) + 84  [0x195992430]
+        + !     : 38 protocol witness for Collection.subscript.read in conformance [A]  (in libswiftCore.dylib) + 44  [0x195acd600]
+        + !     : | 26 _xzm_xzone_malloc_tiny  (in libsystem_malloc.dylib) + 256,88,...  [0x18205503c,0x182054f94,...]
+        + !     : | 6 _xzm_xzone_malloc  (in libsystem_malloc.dylib) + 8,324,...  [0x18204f958,0x18204fa94,...]
+        + !     : | 4 <deduplicated_symbol>  (in libsystem_malloc.dylib) + 80,136,...  [0x18204f1ac,0x18204f1e4,...]
+        + !     : | 2 _malloc_zone_malloc  (in libsystem_malloc.dylib) + 12,80  [0x18205f0c8,0x18205f10c]
+        + !     : 2 Array.subscript.read  (in libswiftCore.dylib) + 284  [0x19599b160]
+        + !     : 2 protocol witness for Collection.subscript.read in conformance [A]  (in libswiftCore.dylib) + 12  [0x195acd5e0]
+        + !     13 Collection.firstIndex(where:)  (in libswiftCore.dylib) + 516,712,...  [0x195b378f4,0x195b379b8,...]
+        + !     7 Collection.firstIndex(where:)  (in libswiftCore.dylib) + 544  [0x195b37910]
+        + !     : 5 protocol witness for Collection.endIndex.getter in conformance [A]  (in libswiftCore.dylib) + 36  [0x195acd5c4]
+        + !     : | 3 Array._getCount()  (in libswiftCore.dylib) + 0  [0x195991e54]
+        + !     : | 2 _ArrayBuffer.count.getter  (in libswiftCore.dylib) + 44  [0x195ac340c]
+        + !     : 2 _ArrayBuffer.count.getter  (in libswiftCore.dylib) + 80  [0x195ac3430]
+        + !     5 Collection.firstIndex(where:)  (in libswiftCore.dylib) + 760  [0x195b379e8]
+        + !     : 5 partial apply for closure #1 in Baseline.recordLatency(stage:duration:timestamp:)  (in alfie-latency-baseline) + 28,4  [0x1040e80bc,0x1040e80a4]  /<compiler-generated>:0
+        + !     2 Collection.firstIndex(where:)  (in libswiftCore.dylib) + 572  [0x195b3792c]
+        + !     : 2 <deduplicated_symbol>  (in libswiftCore.dylib) + 0  [0x195e1ec94]
+        + !     1 Collection.firstIndex(where:)  (in libswiftCore.dylib) + 716  [0x195b379bc]
+        + !     : 1 __swift_memcpy16_8  (in alfie-latency-baseline) + 4  [0x1040ea90c]  /<compiler-generated>:0
+        + !     1 protocol witness for Collection.subscript.read in conformance [A]  (in libswiftCore.dylib) + 112  [0x195acd644]
+        + !     1 protocol witness for Collection.subscript.read in conformance _ArrayBuffer<A>  (in libswiftCore.dylib) + 56  [0x195d642e8]
+        + 6 Baseline.recordLatency(stage:duration:timestamp:)  (in alfie-latency-baseline) + 1008  [0x1040e6b34]  alfie-latency-baseline.swift:25
+        + ! 5 Array.append(_:)  (in libswiftCore.dylib) + 36  [0x1959a627c]
+        + ! : 4 Array._makeUniqueAndReserveCapacityIfNotUnique()  (in libswiftCore.dylib) + 120  [0x19599302c]
+        + ! : | 4 _ArrayBuffer._consumeAndCreateNew(bufferIsUnique:minimumCapacity:growForAppend:)  (in libswiftCore.dylib) + 576  [0x195ac61f8]
+        + ! : |   4 _ArrayBuffer._copyContents(subRange:initializing:)  (in libswiftCore.dylib) + 212  [0x195993ed0]
+        + ! : |     4 _platform_memmove  (in libsystem_platform.dylib) + 88  [0x18223d3b8]
+        + ! : 1 Array._makeUniqueAndReserveCapacityIfNotUnique()  (in libswiftCore.dylib) + 96  [0x195993014]
+        + ! :   1 _ArrayBuffer.count.getter  (in libswiftCore.dylib) + 68  [0x195ac3424]
+        + ! 1 Array.append(_:)  (in libswiftCore.dylib) + 36  [0x1959a627c]
+        + 1 Baseline.recordLatency(stage:duration:timestamp:)  (in alfie-latency-baseline) + 1232  [0x1040e6c14]  alfie-latency-baseline.swift:28
+        +   1 Dictionary.subscript.setter  (in libswiftCore.dylib) + 580  [0x195b05d70]
+        +     1 __swift_instantiateGenericMetadata  (in libswiftCore.dylib) + 36  [0x195e1cc50]
+        +       1 _swift_getGenericMetadata(swift::MetadataRequest, void const* const*, swift::TargetTypeContextDescriptor<swift::InProcess> const*)  (in libswiftCore.dylib) + 264  [0x1959fbc00]
+        +         1 swift::LockingConcurrentMap<swift::GenericCacheEntry, swift::LockingConcurrentMapStorage<swift::GenericCacheEntry, (unsigned short)14>>::getOrInsert<swift::MetadataCacheKey, swift::MetadataRequest&, swift::TargetTypeContextDescriptor<swift::InProcess> const*&, void const* const*&>(swift::MetadataCacheKey, swift::MetadataRequest&, swift::TargetTypeContextDescriptor<swift::InProcess> const*&, void const* const*&)  (in libswiftCore.dylib) + 88  [0x195a0f0a0]
+        +           1 swift::StableAddressConcurrentReadableHashMap<swift::GenericCacheEntry, swift::TaggedMetadataAllocator<(unsigned short)14>, swift::Mutex>::getOrInsert<swift::MetadataCacheKey, swift::MetadataWaitQueue::Worker&, swift::MetadataRequest&, swift::TargetTypeContextDescriptor<swift::InProcess> const*&, void const* const*&>(swift::MetadataCacheKey, swift::MetadataWaitQueue::Worker&, swift::MetadataRequest&, swift::TargetTypeContextDescriptor<swift::InProcess> const*&, void const* const*&)  (in libswiftCore.dylib) + 104  [0x195a0f2fc]
+        +             1 swift::StableAddressConcurrentReadableHashMap<swift::GenericCacheEntry, swift::TaggedMetadataAllocator<(unsigned short)14>, swift::Mutex>::getOrInsert<swift::MetadataCacheKey, swift::MetadataWaitQueue::Worker&, swift::MetadataRequest&, swift::TargetTypeContextDescriptor<swift::InProcess> const*&, void const* const*&>(swift::MetadataCacheKey, swift::MetadataWaitQueue::Worker&, swift::MetadataRequest&, swift::TargetTypeContextDescriptor<swift::InProcess> const*&, void const* const*&)  (in libswiftCore.dylib) + 104  [0x195a0f2fc]
+        +               1 swift::MetadataCacheKey::operator==(swift::MetadataCacheKey const&) const  (in libswiftCore.dylib) + 56  [0x195a0b3e4]
+        396 main  (in alfie-latency-baseline) + 3080  [0x1040e5ab0]  alfie-latency-baseline.swift:63
+        + 391 Baseline.recordLatency(stage:duration:timestamp:)  (in alfie-latency-baseline) + 1116  [0x1040e6ba0]  alfie-latency-baseline.swift:27
+        + ! 390 RangeReplaceableCollection<>.removeAll(where:)  (in libswiftCore.dylib) + 752  [0x195ad447c]
+        + ! : 390 MutableCollection._halfStablePartition(isSuffixElement:)  (in libswiftCore.dylib) + 568  [0x195b3a2a0]
+        + ! :   228 Collection.firstIndex(where:)  (in libswiftCore.dylib) + 740  [0x195b379d4]
+        + ! :   | 121 protocol witness for Collection.subscript.read in conformance _ArrayBuffer<A>  (in libswiftCore.dylib) + 40  [0x195d642d8]
+        + ! :   | + 69 _xzm_free  (in libsystem_malloc.dylib) + 1048  [0x182050530]
+        + ! :   | + ! 67 mach_absolute_time  (in libsystem_kernel.dylib) + 108,16,...  [0x1821f010c,0x1821f00b0,...]
+        + ! :   | + ! 2 DYLD-STUB$$mach_absolute_time  (in libsystem_malloc.dylib) + 12  [0x182067b9c]
+        + ! :   | + 42 _xzm_free  (in libsystem_malloc.dylib) + 0,28,...  [0x182050118,0x182050134,...]
+        + ! :   | + 7 _free  (in libsystem_malloc.dylib) + 0,76,...  [0x18205fcd0,0x18205fd1c,...]
+        + ! :   | + 1 Array.subscript.read  (in libswiftCore.dylib) + 44  [0x195acd674]
+        + ! :   | + ! 1 __swift_noop_void_return  (in alfie-latency-baseline) + 0  [0x1040ea578]  /<compiler-generated>:0

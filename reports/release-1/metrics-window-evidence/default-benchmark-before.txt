@@ -1,0 +1,1 @@
+[METRICS] per-frame instrumentation: 180.78 µs/frame over 5000 frames; row aggregate: 0.014 ms (Debug build)

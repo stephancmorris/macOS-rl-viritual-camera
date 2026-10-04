@@ -206,11 +206,6 @@ final class ProgramOutputManager: ObservableObject {
         var id: LatencyStage { stage }
     }
 
-    private struct TimedDuration {
-        let timestamp: TimeInterval
-        let duration: TimeInterval
-    }
-
     enum Route: String, CaseIterable, Identifiable {
         case virtualCamera
         case display
@@ -320,7 +315,7 @@ final class ProgramOutputManager: ObservableObject {
     private let sinks: [any ProgramOutputSink]
     private var isCaptureRunning = false
     private var dropTimestamps: [Double] = []
-    private var latencySamples: [LatencyStage: [TimedDuration]] = [:]
+    private var latencySamples: [LatencyStage: LatencySampleWindow] = [:]
     private var inputFrameTimestamps: [Double] = []
     private static let inputRateWindow: Double = 2.0
 
@@ -874,11 +869,23 @@ final class ProgramOutputManager: ObservableObject {
             rawFrameMax = max(rawFrameMax, duration)
             rawFrameCount += 1
         }
-        var samples = latencySamples[stage, default: []]
-        samples.append(TimedDuration(timestamp: timestamp, duration: duration))
-        let windowStart = timestamp - 5
-        samples.removeAll { $0.timestamp < windowStart }
-        latencySamples[stage] = samples
+        // Clock validity affects the rolling window only. The clock-independent
+        // raw duration counters above retain their existing per-call behavior.
+        guard timestamp.isFinite else { return }
+        let window: LatencySampleWindow
+        if let existing = latencySamples[stage] {
+            window = existing
+        } else {
+            window = LatencySampleWindow()
+            latencySamples[stage] = window
+        }
+        window.append(timestamp: timestamp, duration: duration)
+    }
+
+    /// Internal observability for deterministic tests and opt-in synthetic studies.
+    /// Counts are retained observations; capacity is allocated FIFO slots.
+    var latencyStorageStatistics: [LatencyStage: (count: Int, capacity: Int)] {
+        latencySamples.mapValues { (count: $0.count, capacity: $0.storageCapacity) }
     }
 
     /// Copies the per-frame raw counters into the @Published snapshots at most
@@ -1039,9 +1046,8 @@ final class ProgramOutputManager: ObservableObject {
 
     private func refreshLatencySnapshot() {
         stageLatencies = LatencyStage.allCases.compactMap { stage in
-            guard let samples = latencySamples[stage], !samples.isEmpty else { return nil }
-            let total = samples.reduce(0) { $0 + $1.duration }
-            return StageLatency(stage: stage, averageDuration: total / Double(samples.count))
+            guard let average = latencySamples[stage]?.averageDuration else { return nil }
+            return StageLatency(stage: stage, averageDuration: average)
         }
     }
 
