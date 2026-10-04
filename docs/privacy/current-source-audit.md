@@ -36,3 +36,7 @@ Use a disposable app-data fixture/new test account, candidate fingerprints and s
 - Review manual export for build/device/path/note fields; approve recipient and data before sharing. Check manifest contents and privacy declarations in the actual built app and extension.
 
 No existing private logs were uploaded, and no network or Store policy claim was approved. Remaining policy/retention choices belong to the product owner.
+
+## 4 October 2026 consent repair
+
+The consent finding above described the reviewed 2 October base. [Quality sprint evidence](../../reports/quality-sprint-2026-10-04.md) records the subsequent serialized Stop/revoke admission boundary, editable consent binding, temporary writer tests and actual persisted JSONL schema. Already accepted observations drain without deletion; restart requires consent and completed shutdown. This narrow source/test repair does not close the remaining permission, retention, export, disclosure or Store acceptance items.

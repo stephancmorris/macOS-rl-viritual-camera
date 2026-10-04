@@ -16,12 +16,11 @@ struct RecorderSettingsView: View {
     var body: some View {
         Form {
             Section("Recording") {
-                Toggle("Consent to Training Data", isOn: $recorder.hasUserConsentedToTrainingData)
-                    .disabled(recorder.isRecording)
+                Toggle("Consent to Training Data", isOn: consentBinding)
 
                 Toggle("Record Training Data", isOn: recordingBinding)
                     .tint(.red)
-                    .disabled(!recorder.hasUserConsentedToTrainingData)
+                    .disabled(!recorder.hasUserConsentedToTrainingData || recorder.isStopping)
 
                 Toggle("Manual Crop Labels", isOn: manualOverrideBinding)
                     .help("Use manual crop adjustments as ideal labels instead of auto ShotComposer output")
@@ -34,7 +33,7 @@ struct RecorderSettingsView: View {
                     value: $recorder.config.subsampleRate,
                     in: 1...10
                 )
-                .disabled(recorder.isRecording)
+                .disabled(recorder.isRecording || recorder.isStopping)
 
                 Stepper(
                     "Buffer size: \(recorder.config.bufferSize)",
@@ -42,14 +41,14 @@ struct RecorderSettingsView: View {
                     in: 50...500,
                     step: 50
                 )
-                .disabled(recorder.isRecording)
+                .disabled(recorder.isRecording || recorder.isStopping)
 
                 Stepper(
                     "Retention: \(recorder.config.retentionDays) days",
                     value: $recorder.config.retentionDays,
                     in: 1...365
                 )
-                .disabled(recorder.isRecording)
+                .disabled(recorder.isRecording || recorder.isStopping)
             }
 
             Section("Output") {
@@ -63,12 +62,12 @@ struct RecorderSettingsView: View {
                 Button("Delete Expired Sessions") {
                     recorder.deleteExpiredSessions()
                 }
-                .disabled(recorder.isRecording)
+                .disabled(recorder.isRecording || recorder.isStopping)
 
                 Button("Delete Completed Sessions", role: .destructive) {
                     recorder.deleteAllCompletedSessions()
                 }
-                .disabled(recorder.isRecording)
+                .disabled(recorder.isRecording || recorder.isStopping)
             }
 
             Section("Session Statistics") {
@@ -97,6 +96,13 @@ struct RecorderSettingsView: View {
     }
 
     // MARK: - Bindings
+
+    private var consentBinding: Binding<Bool> {
+        Binding(
+            get: { recorder.hasUserConsentedToTrainingData },
+            set: { recorder.setTrainingDataConsent($0) }
+        )
+    }
 
     private var recordingBinding: Binding<Bool> {
         Binding(
