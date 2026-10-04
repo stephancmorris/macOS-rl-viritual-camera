@@ -54,6 +54,37 @@ struct PairAdmissionTests {
         #expect(abs(result.previewFPS - 50) < 0.01)
     }
 
+    @Test(arguments: [nil, Double.nan, -Double.infinity, 0, -1] as [Double?])
+    func invalidPreviewCaptureRateStaysUnknown(_ captureFPS: Double?) {
+        let result = evaluatePreviewRate(captureFPS)
+        #expect(result.programReport.verdict == .supported)
+        #expect(result.previewFPS == 50)
+        #expect(result.status == .unknown)
+        #expect(result.reasons.contains { $0.code == "preview.rateUnknown" && $0.bottleneck == .evidence })
+    }
+
+    @Test(arguments: [25.0, 30.0, 60.0])
+    func validPreviewCaptureRateUsesItsOwnCadence(_ captureFPS: Double) {
+        var ownRate = context
+        ownRate.previewCaptureFPS = captureFPS
+        let result = PairAdmission.evaluate(
+            program: Array(repeating: CapabilitySample(window: window(), thermal: .nominal), count: 4),
+            preview: Array(repeating: PreviewAdmissionSample(windowSeconds: 5, renderedFrames: Int(captureFPS * 5)), count: 4),
+            context: ownRate)
+        #expect(result.status == .provisional)
+        #expect(result.reasons.isEmpty)
+        #expect(result.previewFPS == captureFPS)
+    }
+
+    private func evaluatePreviewRate(_ captureFPS: Double?) -> PairAdmissionResult {
+        var unknownRate = context
+        unknownRate.previewCaptureFPS = captureFPS
+        return PairAdmission.evaluate(
+            program: Array(repeating: CapabilitySample(window: window(), thermal: .nominal), count: 4),
+            preview: Array(repeating: PreviewAdmissionSample(windowSeconds: 5, renderedFrames: 250), count: 4),
+            context: unknownRate)
+    }
+
     @Test func pairWithoutDetectionIsJudgedWhenNoInputDetects() {
         var wideAndPan = context
         wideAndPan.program.expectsDetection = false
@@ -116,6 +147,37 @@ struct PairAdmissionTests {
         #expect(AdmissionDecision.decide(.certified) == .allowed(certified: true))
         let reason = AdmissionReason(code: "x", bottleneck: .render, message: "x")
         #expect(AdmissionDecision.decide(.unsupported([reason])) == .refused([reason]))
+    }
+}
+
+// Select this suite only after the repair; the old formatter traps on Int(infinity).
+struct PairAdmissionInfiniteRateTests {
+    @Test func finiteRateBeyondIntegerRangeReportsRefusalWithoutTrapping() {
+        var enormousRate = context
+        enormousRate.previewCaptureFPS = 1e20
+        let result = PairAdmission.evaluate(
+            program: Array(repeating: CapabilitySample(window: window(), thermal: .nominal), count: 4),
+            preview: Array(repeating: PreviewAdmissionSample(windowSeconds: 5, renderedFrames: 250), count: 4),
+            context: enormousRate)
+        guard case .unsupported = result.status else { Issue.record("Expected a measured cadence refusal"); return }
+        #expect(result.reasons.contains {
+            $0.code == "preview.render" && $0.message.contains("100000000000000000000.00")
+        })
+        #expect(CapabilityReport.rate(50) == "50")
+        #expect(CapabilityReport.rate(59.94) == "59.94")
+    }
+
+    @Test func positiveInfinitePreviewCaptureRateStaysUnknown() {
+        var infiniteRate = context
+        infiniteRate.previewCaptureFPS = .infinity
+        let result = PairAdmission.evaluate(
+            program: Array(repeating: CapabilitySample(window: window(), thermal: .nominal), count: 4),
+            preview: Array(repeating: PreviewAdmissionSample(windowSeconds: 5, renderedFrames: 250), count: 4),
+            context: infiniteRate)
+        #expect(result.programReport.verdict == .supported)
+        #expect(result.previewFPS == 50)
+        #expect(result.status == .unknown)
+        #expect(result.reasons.contains { $0.code == "preview.rateUnknown" && $0.bottleneck == .evidence })
     }
 }
 

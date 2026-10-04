@@ -288,6 +288,7 @@ nonisolated struct CapabilityReport: Equatable, Sendable {
 
     /// "50", "59.94", "30".
     static func rate(_ fps: Double) -> String {
-        fps.rounded() == fps ? String(Int(fps)) : String(format: "%.2f", fps)
+        if fps.rounded() == fps, let whole = Int(exactly: fps) { return String(whole) }
+        return String(format: "%.2f", fps)
     }
 }

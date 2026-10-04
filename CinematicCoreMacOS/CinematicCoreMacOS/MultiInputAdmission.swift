@@ -149,11 +149,15 @@ nonisolated enum PairAdmission {
         if preview.isEmpty || previewSeconds <= 0 {
             reasons.append(.init(code: "preview.noEvidence", bottleneck: .evidence,
                 message: "The second input produced no measurement windows."))
-        } else if let target = context.previewCaptureFPS, target > 0,
-                  previewFPS < target * previewCadenceFloor {
-            reasons.append(.init(code: "preview.render", bottleneck: .render,
-                message: String(format: "The second input rendered %.1f fps; it needs about %@ fps to stay ready for Take.",
-                                previewFPS, CapabilityReport.rate(target))))
+        } else if let target = context.previewCaptureFPS, target.isFinite, target > 0 {
+            if previewFPS < target * previewCadenceFloor {
+                reasons.append(.init(code: "preview.render", bottleneck: .render,
+                    message: String(format: "The second input rendered %.1f fps; it needs about %@ fps to stay ready for Take.",
+                                    previewFPS, CapabilityReport.rate(target))))
+            }
+        } else {
+            reasons.append(.init(code: "preview.rateUnknown", bottleneck: .evidence,
+                message: "The second input's capture rate is unknown; its readiness for Take cannot be measured."))
         }
 
         let m = report.measured

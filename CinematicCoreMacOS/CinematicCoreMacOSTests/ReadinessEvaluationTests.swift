@@ -192,6 +192,53 @@ struct ReadinessEvaluationTests {
     }
 
 
+    #if DEBUG
+    @Test(arguments: [false, true])
+    func validationClipStartupClearsPriorCameraRate(unreadable: Bool) async throws {
+        let url = FileManager.default.temporaryDirectory
+            .appendingPathComponent("alfie-rate-truth-\(UUID().uuidString).mov")
+        defer { try? FileManager.default.removeItem(at: url) }
+        if !unreadable { try await makeSyntheticClip(at: url) }
+
+        let suite = "alfie-rate-truth-\(UUID().uuidString)"
+        let defaults = try #require(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let show = ShowCoordinator(programOutput: ProgramOutputManager(sinks: []),
+                                   admissionRecords: AdmissionRecordStore(defaults: defaults))
+        // Unrouted B exercises real clip startup without starting the show output.
+        let preview = show.addChannel(.b)
+        defer { preview.stopCapture() }
+        preview.setAdmissionFormatForTesting(width: 1920, height: 1080, fps: 50)
+        #expect(preview.admissionInput.captureFPS == 50)
+        preview.preferredInputSource = .validationClip
+        preview.loopValidationClip = false
+        preview.setValidationClipURL(url)
+
+        try await preview.startCapture()
+
+        #expect(preview.activeInputSource == .validationClip)
+        #expect(preview.sourceIdentity?.inputKind == "Validation clip")
+        #expect(preview.sourceIdentity?.configuredCaptureFPS == nil)
+        #expect(preview.configuredCaptureFPS == nil)
+        #expect(preview.admissionInput.captureFPS == nil)
+        #expect(show.pairAdmissionContext(preview: .b).previewCaptureFPS == nil)
+        #expect(!show.channelA.isRunning)
+        if unreadable {
+            // The public startup returns before the decoder reports a missing file.
+            for _ in 0..<100 {
+                if !preview.isRunning { break }
+                try await Task.sleep(for: .milliseconds(10))
+            }
+            #expect(!preview.isRunning)
+            #expect(preview.error != nil)
+            #expect(preview.configuredCaptureFPS == nil)
+            #expect(preview.admissionInput.captureFPS == nil)
+            #expect(show.pairAdmissionContext(preview: .b).previewCaptureFPS == nil)
+        }
+    }
+    #endif
+
+
     @Test func invalidAnnotationsNeverFallBackToUnannotatedSelection() throws {
         #expect(throws: StudyError.self) { try Annotation(points: []) }
         for value in [Double.nan, .infinity, -.infinity, -1] {

@@ -1680,6 +1680,7 @@ final class CameraManager: NSObject, ObservableObject {
             stopSessionAsync()
         }
 
+        configuredCaptureFPS = nil
         error = nil
         isRunning = true
         recordSourceIdentity(DiagnosticsSessionIdentity.Source(
