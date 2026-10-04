@@ -2,7 +2,7 @@
 
 Alfie frames camera pictures into one Program feed. The operator chooses the subject and composition. Current Stage code provides Camera A/B Program/Preview, manual Take and deliberate Edit Live; Webcam uses the single-camera workflow. Automatic Director cuts, active-speaker listening, hardware motion and microphone control are not integrated.
 
-See the [current candidate operator guide](docs/user-guide/README.md). It is source-checked against `7691e6e`; actual installation, 1280-point walkthrough, screenshots and real-camera/downstream-output qualification remain pending. This README describes implemented code, not a certified rig or released build.
+See the [current candidate operator guide](docs/user-guide/README.md). Its workflow was source-checked against `7691e6e`, with consent and pair-history instructions updated for `bb7e692` and `1bcb3d6`; actual installation, 1280-point walkthrough, screenshots and real-camera/downstream-output qualification remain pending. This README describes implemented code, not a certified rig or released build.
 
 ## Inputs and framing
 

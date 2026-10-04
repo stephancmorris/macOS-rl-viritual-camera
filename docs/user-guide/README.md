@@ -1,6 +1,6 @@
 # Current candidate operator guide
 
-Open index.html locally; no build or remote assets are required. Print CSS supports a light A4 layout. Source base: origin/r2/engine 7691e6e1046ab40bca9b4e27a80e0b500f409c83, reviewed 2 October 2026. This replaces obsolete build-4/single-source-only guidance in an isolated branch; concurrent drafts were not overwritten.
+Open index.html locally; no build or remote assets are required. Print CSS supports a light A4 layout. Source base: origin/r2/engine 7691e6e1046ab40bca9b4e27a80e0b500f409c83, reviewed 2 October 2026. Consent and pair-history instructions updated 4 October against quality fixes `bb7e692bd422aa1f41bb0889b58568475e54c560` and `1bcb3d6`; the original workflow review remains tied to that base. See [delta verification](../../reports/guide-truth-2026-10-04.md) and [quality sprint evidence](../../reports/quality-sprint-2026-10-04.md). This replaces obsolete build-4/single-source-only guidance in an isolated branch; concurrent drafts were not overwritten.
 
 Behavior references: LiveShowSetup/ShowSetupView (A/B Start), Console/LiveConsole and ContentView (live Multiview), ShowCoordinator (control target and Take), OperatorPill/CameraManager (framing), ProgramOutputManager/DiagnosticsLog/InspectorDrawer (output and log folders), RecorderSettingsView/TrainingDataRecorder (optional data).
 
