@@ -151,13 +151,34 @@ struct ReadinessEvaluationTests {
         guard reader.status == .completed else {
             throw reader.error ?? NSError(domain: "ReadinessEvaluation", code: 3)
         }
-        let ordered = heights.sorted()
-        let median = ordered.isEmpty ? nil : ordered[ordered.count / 2]
-        return ClipRow(clip: url.lastPathComponent, annotated: annotation != nil,
-                       decodedFrames: decoded, selectedFrames: selected,
-                       subjectHeightMedianPx: median, faceFrames: faces,
-                       featurePrintFrames: prints, poseFrames: poses, freshFrames: fresh,
-                       identitySwitchesProxy: switches)
+        return makeClipRow(clip: url.lastPathComponent, annotated: annotation != nil,
+                           decodedFrames: decoded, selectedFrames: selected,
+                           subjectHeightsPx: heights, faceFrames: faces,
+                           featurePrintFrames: prints, poseFrames: poses, freshFrames: fresh,
+                           identitySwitchesProxy: switches)
+    }
+
+    /// Build the evidence row from the selected subject measurements. Kept pure
+    /// so the CSV's summary arithmetic can be checked without detector inference.
+    private func makeClipRow(clip: String, annotated: Bool, decodedFrames: Int,
+                             selectedFrames: Int, subjectHeightsPx: [Double], faceFrames: Int,
+                             featurePrintFrames: Int, poseFrames: Int, freshFrames: Int,
+                             identitySwitchesProxy: Int) -> ClipRow {
+        let ordered = subjectHeightsPx.sorted()
+        let middle = ordered.count / 2
+        let median: Double?
+        if ordered.isEmpty {
+            median = nil
+        } else if ordered.count.isMultiple(of: 2) {
+            median = (ordered[middle - 1] + ordered[middle]) / 2
+        } else {
+            median = ordered[middle]
+        }
+        return ClipRow(clip: clip, annotated: annotated,
+                       decodedFrames: decodedFrames, selectedFrames: selectedFrames,
+                       subjectHeightMedianPx: median, faceFrames: faceFrames,
+                       featurePrintFrames: featurePrintFrames, poseFrames: poseFrames,
+                       freshFrames: freshFrames, identitySwitchesProxy: identitySwitchesProxy)
     }
 
     @Test(.enabled(if: ProcessInfo.processInfo.environment["ALFIE_READINESS_CLIPS"] != nil ||
@@ -379,6 +400,33 @@ struct ReadinessEvaluationTests {
     }
     #endif
 
+
+    @Test func evenSubjectHeightMedianIsWrittenToCSV() {
+        let row = makeClipRow(clip: "even.mov", annotated: true, decodedFrames: 3,
+                              selectedFrames: 2, subjectHeightsPx: [300, 100], faceFrames: 2,
+                              featurePrintFrames: 1, poseFrames: 2, freshFrames: 1,
+                              identitySwitchesProxy: 1)
+        #expect(row.subjectHeightMedianPx == 200)
+        #expect(row.csv == "\"even.mov\",yes,3,2,200.0,2,1,2,1,1\n")
+    }
+
+    @Test func oddSubjectHeightMedianIsWrittenToCSV() {
+        let row = makeClipRow(clip: "odd.mov", annotated: false, decodedFrames: 3,
+                              selectedFrames: 3, subjectHeightsPx: [300, 100, 200], faceFrames: 3,
+                              featurePrintFrames: 2, poseFrames: 1, freshFrames: 3,
+                              identitySwitchesProxy: 1)
+        #expect(row.subjectHeightMedianPx == 200)
+        #expect(row.csv == "\"odd.mov\",no,3,3,200.0,3,2,1,3,1\n")
+    }
+
+    @Test func emptySubjectHeightMedianStaysUnknownInCSV() {
+        let row = makeClipRow(clip: "empty.mov", annotated: true, decodedFrames: 6,
+                              selectedFrames: 0, subjectHeightsPx: [], faceFrames: 0,
+                              featurePrintFrames: 0, poseFrames: 0, freshFrames: 0,
+                              identitySwitchesProxy: 0)
+        #expect(row.subjectHeightMedianPx == nil)
+        #expect(row.csv == "\"empty.mov\",yes,6,0,,0,0,0,0,0\n")
+    }
 
     @Test func invalidAnnotationsNeverFallBackToUnannotatedSelection() throws {
         #expect(throws: StudyError.self) { try Annotation(points: []) }
