@@ -246,3 +246,135 @@ struct CameraSwitchLifecycleTests {
     }
 }
 #endif
+#if DEBUG
+
+import AVFoundation
+import CoreMedia
+import CoreVideo
+
+// OCT10-CAPTURE-CALLBACK-REGRESSIONS: synthetic source callbacks must remain
+// bound to the current live output, including callbacks minted after reset.
+@MainActor
+private final class CaptureCallbackProbePort: ChannelOutputPort {
+    var diagnosticsFileName: String? { "unit test: no diagnostics file" }
+    private(set) var inputs = 0
+    private(set) var hops = 0
+    private(set) var submitted = 0
+    private(set) var upstreamDrops = 0
+    func start() {}
+    func stop() {}
+    func updateCaptureStatus(isRunning: Bool) {}
+    func sendFrame(_ pixelBuffer: CVPixelBuffer, timestamp: Double, isRepeat: Bool) { submitted += 1 }
+    func beginDiagnosticsSessionIfNeeded(note: String) {}
+    func noteDetectionStartIfNeeded() {}
+    func noteDiagnostics(_ text: String) {}
+    func recordSourceIdentity(_ source: DiagnosticsSessionIdentity.Source) {}
+    func recordDeliveredDimensions(width: Int, height: Int) {}
+    func recordInputFrame(timestamp: Double) { inputs += 1 }
+    func recordMainActorHop(_ seconds: TimeInterval) { hops += 1 }
+    func recordDetectionTiming(queueWait: TimeInterval, visionWall: TimeInterval) {}
+    func recordObservationAge(_ age: TimeInterval) {}
+    func recordLatency(stage: ProgramOutputManager.LatencyStage, duration: TimeInterval, timestamp: TimeInterval) {}
+    func recordDroppedFrame(timestamp: Double, reason: String, stage: ProgramOutputManager.DropStage) {
+        if case .captureUpstream = stage { upstreamDrops += 1 }
+    }
+    func recordGateDropTotal(_ total: UInt64) {}
+    func recordFramePathCounts(detectedPersons: Int) {}
+    func recordPictureQuality(sourceHeight: Int, cropHeightFraction: Double, outputHeight: Int) {}
+}
+
+@MainActor
+struct CaptureCallbackProvenanceTests {
+    private func sample() throws -> (sample: CMSampleBuffer, pixels: CVPixelBuffer) {
+        var pixels: CVPixelBuffer?
+        let pixelResult = CVPixelBufferCreate(
+            kCFAllocatorDefault, 64, 36, kCVPixelFormatType_32BGRA,
+            [kCVPixelBufferIOSurfacePropertiesKey: [:], kCVPixelBufferMetalCompatibilityKey: true] as CFDictionary,
+            &pixels)
+        #expect(pixelResult == kCVReturnSuccess)
+        let buffer = try #require(pixels)
+        try #require(CVPixelBufferGetIOSurface(buffer) != nil)
+        var format: CMVideoFormatDescription?
+        let formatResult = CMVideoFormatDescriptionCreateForImageBuffer(
+            allocator: kCFAllocatorDefault, imageBuffer: buffer, formatDescriptionOut: &format)
+        #expect(formatResult == noErr)
+        let description = try #require(format)
+        var timing = CMSampleTimingInfo(duration: CMTime(value: 1, timescale: 50),
+                                        presentationTimeStamp: CMTime(value: 1, timescale: 50),
+                                        decodeTimeStamp: .invalid)
+        var sampleBuffer: CMSampleBuffer?
+        let sampleResult = CMSampleBufferCreateReadyWithImageBuffer(
+            allocator: kCFAllocatorDefault, imageBuffer: buffer, formatDescription: description,
+            sampleTiming: &timing, sampleBufferOut: &sampleBuffer)
+        #expect(sampleResult == noErr)
+        return (try #require(sampleBuffer), buffer)
+    }
+
+    private func rig(_ scenario: String) throws -> (
+        manager: CameraManager, port: CaptureCallbackProbePort,
+        callback: AVCaptureVideoDataOutput, current: AVCaptureVideoDataOutput
+    ) {
+        let port = CaptureCallbackProbePort()
+        let output = ProgramOutputManager(sinks: [])
+        let manager = CameraManager(channelID: .a, programOutput: output, outputPort: port)
+        _ = try #require(manager.cropEngine)
+        let old = AVCaptureVideoDataOutput()
+        let current = scenario == "replaced" ? AVCaptureVideoDataOutput() : old
+        manager.setCaptureCallbackSourceForTesting(output: old, running: true, missing: false,
+                                                  source: .liveCamera)
+        switch scenario {
+        case "replaced":
+            manager.setCaptureCallbackSourceForTesting(output: current, running: true, missing: false,
+                                                      source: .liveCamera, resetGate: true)
+        case "lost":
+            // Loss deliberately leaves isRunning true for hold/standby.
+            manager.setCaptureCallbackSourceForTesting(output: current, running: true, missing: true,
+                                                      source: .liveCamera, resetGate: true)
+        case "stopped":
+            manager.setCaptureCallbackSourceForTesting(output: current, running: false, missing: false,
+                                                      source: .liveCamera, resetGate: true)
+        case "clip":
+            manager.setCaptureCallbackSourceForTesting(output: current, running: true, missing: false,
+                                                      source: .validationClip, resetGate: true)
+        case "current": break
+        default: Issue.record("Unknown synthetic callback scenario: \(scenario)")
+        }
+        return (manager, port, old, current)
+    }
+
+    @Test(arguments: ["replaced", "lost", "stopped", "clip", "current"])
+    func deliveredSampleRequiresCurrentLiveSource(scenario: String) async throws {
+        let rig = try rig(scenario)
+        let sample = try sample()
+        await rig.manager.processCaptureSampleForTesting(sample.sample, from: rig.callback)
+        if scenario == "current" {
+            #expect(rig.manager.currentFrameBuffer === sample.pixels)
+            #expect(rig.manager.latestRenderedFrame != nil)
+            #expect(rig.port.inputs == 1 && rig.port.hops == 1 && rig.port.submitted == 1)
+        } else {
+            #expect(rig.manager.currentFrameBuffer == nil)
+            #expect(rig.manager.latestRenderedFrame == nil)
+            #expect(rig.port.inputs == 0 && rig.port.hops == 0 && rig.port.submitted == 0)
+            // Rejection releases its newly minted lease; the next current
+            // live callback must still make it through the actual frame path.
+            rig.manager.setCaptureCallbackSourceForTesting(output: rig.current, running: true,
+                                                          missing: false, source: .liveCamera)
+            let fresh = try self.sample()
+            await rig.manager.processCaptureSampleForTesting(fresh.sample, from: rig.current)
+            #expect(rig.manager.currentFrameBuffer === fresh.pixels)
+            #expect(rig.manager.latestRenderedFrame != nil)
+            #expect(rig.port.inputs == 1 && rig.port.hops == 1 && rig.port.submitted == 1)
+        }
+    }
+
+    @Test(arguments: ["replaced", "lost", "stopped", "clip", "current"])
+    func droppedSampleMetricsRequireCurrentLiveSource(scenario: String) throws {
+        let rig = try rig(scenario)
+        let sample = try sample()
+        rig.manager.processDroppedCaptureSampleForTesting(sample.sample, from: rig.callback)
+        #expect(rig.port.upstreamDrops == (scenario == "current" ? 1 : 0))
+        #expect(rig.port.inputs == 0 && rig.port.hops == 0 && rig.port.submitted == 0)
+    }
+}
+
+#endif

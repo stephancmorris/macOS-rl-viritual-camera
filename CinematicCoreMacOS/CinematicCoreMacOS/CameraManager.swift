@@ -2926,6 +2926,77 @@ final class VirtualCameraOutputSink: ProgramOutputSink {
     }
 }
 
+// OCT10-CAPTURE-CALLBACK-BOUNDARY: shared MainActor callback completion seam.
+/// Retains callback provenance through the MainActor hop. Only identity is
+/// read on MainActor; the output is never invoked or mutated through this box.
+private final class SendableCaptureOutputBox: @unchecked Sendable {
+    nonisolated(unsafe) let value: AVCaptureOutput
+    nonisolated init(_ value: AVCaptureOutput) { self.value = value }
+}
+
+extension CameraManager {
+    /// Gate leases retire already queued work; output identity additionally
+    /// retires callbacks delivered by an old output after that gate was reset.
+    private func acceptsCaptureCallback(from output: SendableCaptureOutputBox) -> Bool {
+        guard isRunning, activeInputSource == .liveCamera, !sourceMissing,
+              let currentOutput = videoOutput else { return false }
+        return output.value === currentOutput
+    }
+
+    private func handleCapturedFrame(
+        output: SendableCaptureOutputBox, pixelBuffer: CVPixelBuffer,
+        timestampSeconds: Double, frameLease: UInt64, enqueueTime: TimeInterval
+    ) async {
+        defer { frameProcessingGate.finish(frameLease) }
+        guard frameProcessingGate.isCurrent(frameLease),
+              acceptsCaptureCallback(from: output) else { return }
+        outputPort.recordMainActorHop(CACurrentMediaTime() - enqueueTime)
+        await processFrame(pixelBuffer: pixelBuffer, timestampSeconds: timestampSeconds)
+    }
+
+    private func handleDroppedCaptureFrame(output: SendableCaptureOutputBox, timestampSeconds: Double) {
+        guard acceptsCaptureCallback(from: output) else { return }
+        outputPort.recordDroppedFrame(
+            timestamp: timestampSeconds,
+            reason: "AVCapture dropped a frame before processing.",
+            stage: .captureUpstream
+        )
+    }
+
+    #if DEBUG
+    /// Synthetic callback setup: no authorization, configuration or capture.
+    func setCaptureCallbackSourceForTesting(
+        output: AVCaptureVideoDataOutput?, running: Bool, missing: Bool,
+        source: InputSource, resetGate: Bool = false
+    ) {
+        videoOutput = output
+        isRunning = running
+        sourceMissing = missing
+        activeInputSource = source
+        if resetGate {
+            captureGeneration &+= 1
+            frameProcessingGate.reset()
+        }
+    }
+
+    /// Drive the delegate's shared completion path without a device-backed
+    /// AVCaptureConnection. The lease is minted now, even after a gate reset.
+    func processCaptureSampleForTesting(_ sampleBuffer: CMSampleBuffer, from output: AVCaptureOutput) async {
+        guard let pixelBuffer = CMSampleBufferGetImageBuffer(sampleBuffer),
+              CVPixelBufferGetIOSurface(pixelBuffer) != nil,
+              let frameLease = frameProcessingGate.begin() else { return }
+        await handleCapturedFrame(output: SendableCaptureOutputBox(output), pixelBuffer: pixelBuffer,
+                                  timestampSeconds: CMSampleBufferGetPresentationTimeStamp(sampleBuffer).seconds,
+                                  frameLease: frameLease, enqueueTime: CACurrentMediaTime())
+    }
+
+    func processDroppedCaptureSampleForTesting(_ sampleBuffer: CMSampleBuffer, from output: AVCaptureOutput) {
+        handleDroppedCaptureFrame(output: SendableCaptureOutputBox(output),
+                                  timestampSeconds: CMSampleBufferGetPresentationTimeStamp(sampleBuffer).seconds)
+    }
+    #endif
+}
+
 // MARK: - AVCaptureVideoDataOutputSampleBufferDelegate
 
 extension CameraManager: AVCaptureVideoDataOutputSampleBufferDelegate {
@@ -2968,13 +3039,12 @@ extension CameraManager: AVCaptureVideoDataOutputSampleBufferDelegate {
             // MainActor/SwiftUI accumulation (see the [SOAK] line).
             let enqueueTime = CACurrentMediaTime()
 
+            let originatingOutput = SendableCaptureOutputBox(output)
             Task(priority: .userInitiated) { @MainActor in
-                defer { self.frameProcessingGate.finish(frameLease) }
-                guard self.frameProcessingGate.isCurrent(frameLease) else { return }
-                self.outputPort.recordMainActorHop(CACurrentMediaTime() - enqueueTime)
-                await self.processFrame(
-                    pixelBuffer: sendableBuffer.pixelBuffer,
-                    timestampSeconds: timestampSeconds
+                await self.handleCapturedFrame(
+                    output: originatingOutput, pixelBuffer: sendableBuffer.pixelBuffer,
+                    timestampSeconds: timestampSeconds, frameLease: frameLease,
+                    enqueueTime: enqueueTime
                 )
             }
         }
@@ -2988,12 +3058,9 @@ extension CameraManager: AVCaptureVideoDataOutputSampleBufferDelegate {
         // Performance monitoring: frame drops indicate system overload
         latencyLog("avcapture-drop (system overload upstream of processing gate)")
         let timestampSeconds = CMSampleBufferGetPresentationTimeStamp(sampleBuffer).seconds
+        let originatingOutput = SendableCaptureOutputBox(output)
         Task(priority: .userInitiated) { @MainActor in
-            self.outputPort.recordDroppedFrame(
-                timestamp: timestampSeconds,
-                reason: "AVCapture dropped a frame before processing.",
-                stage: .captureUpstream
-            )
+            self.handleDroppedCaptureFrame(output: originatingOutput, timestampSeconds: timestampSeconds)
         }
     }
 }
