@@ -821,3 +821,94 @@ struct FramingRegressionTests {
         ) == 0)
     }
 }
+
+// OCT10-CROP-SPRING-REGRESSIONS: ordinary crops must settle at supported
+// smoothing values even when consecutive processing ticks are 100 ms apart.
+// These exercise production tickInterpolation without capture or rendering.
+@MainActor
+struct CropSpringRegressionTests {
+    private func makeEngine(_ smoothing: Float) throws -> CropEngine {
+        let engine = try #require(CropEngine())
+        engine.config.transitionSmoothing = smoothing
+        engine.qualityFloor = .init(minCropHeightFraction: 0.25)
+        return engine
+    }
+
+    private func verifyPositionMove(smoothing: Float, intervals: [Double]) throws {
+        let engine = try makeEngine(smoothing)
+        let start = CropEngine.CropRect(
+            center: CGPoint(x: 0.3, y: 0.5), size: CGSize(width: 0.5, height: 0.5))
+        let destination = CropEngine.CropRect(
+            center: CGPoint(x: 0.7, y: 0.5), size: start.size)
+        engine.setTargetCrop(start)
+        engine.jumpToTarget()
+        engine.setTargetCrop(destination)
+        var now: Double = 100
+        _ = engine.tickInterpolation(now: now)
+        var previousX = start.origin.x
+        // Six simulated seconds allows every existing smoothing setting to
+        // settle; clock shape must not cause overshoot or sustained bouncing.
+        var tick = 0
+        while now < 106 {
+            now += intervals[tick % intervals.count]
+            tick += 1
+            let crop = engine.tickInterpolation(now: now).crop
+            try #require(crop.origin.x.isFinite)
+            try #require(crop.origin.x >= previousX - 0.000001,
+                         "ordinary crop moved away from its target at tick \(tick)")
+            try #require(crop.origin.x <= destination.origin.x + 0.000001,
+                         "ordinary crop overshot its target at tick \(tick)")
+            #expect(crop.size == start.size)
+            #expect(abs(crop.origin.y - start.origin.y) < 0.000001)
+            previousX = crop.origin.x
+        }
+        #expect(engine.currentCrop == engine.targetCrop)
+        #expect(!engine.isInterpolating)
+    }
+
+    @Test(arguments: [Float(0.05), 0.10, 0.20, 0.25, 0.30], [0.02, 0.10])
+    func ordinaryPositionMoveIsBoundedMonotonicAndSettles(smoothing: Float, interval: Double) throws {
+        try verifyPositionMove(smoothing: smoothing, intervals: [interval])
+    }
+
+    @Test func ordinaryPositionMoveSettlesAcrossMixedTickIntervals() throws {
+        try verifyPositionMove(smoothing: 0.25, intervals: [0.02, 0.10, 1.0 / 30.0, 0.08, 0.02, 0.04])
+    }
+
+    @Test(arguments: [CGFloat(1), 9 / 16, 16 / 9], [0.02, 0.10])
+    func ordinarySizeMovePreservesAspectAndQualityFloor(aspect: CGFloat, interval: Double) throws {
+        let engine = try makeEngine(0.25)
+        let start = CropEngine.CropRect(
+            center: CGPoint(x: 0.5, y: 0.5),
+            size: CGSize(width: 0.5 * aspect, height: 0.5))
+        engine.setTargetCrop(start)
+        engine.jumpToTarget()
+        engine.setTargetCrop(.init(center: start.center,
+                                   size: CGSize(width: 0.10 * aspect, height: 0.10)))
+        let destination = engine.targetCrop
+        #expect(abs(destination.size.height - 0.25) < 0.000001)
+        var now: Double = 100
+        _ = engine.tickInterpolation(now: now)
+        var previousHeight = start.size.height
+        var tick = 0
+        while now < 106 {
+            now += interval
+            tick += 1
+            let crop = engine.tickInterpolation(now: now).crop
+            try #require(crop.size.height.isFinite)
+            try #require(crop.size.height <= previousHeight + 0.000001,
+                         "ordinary crop grew during push in at tick \(tick)")
+            try #require(crop.size.height >= destination.size.height - 0.000001,
+                         "ordinary crop passed its quality bound at tick \(tick)")
+            #expect(abs(crop.size.width / crop.size.height - aspect) < 0.000001)
+            #expect(crop.origin.x >= 0 && crop.origin.y >= 0)
+            #expect(crop.origin.x + crop.size.width <= 1.000001)
+            #expect(crop.origin.y + crop.size.height <= 1.000001)
+            #expect(abs(crop.center.x - 0.5) < 0.000001)
+            #expect(abs(crop.center.y - 0.5) < 0.000001)
+            previousHeight = crop.size.height
+        }
+        #expect(engine.currentCrop == destination)
+        #expect(!engine.isInterpolating)
+    }
+}
