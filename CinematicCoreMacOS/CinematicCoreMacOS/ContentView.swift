@@ -9,14 +9,30 @@ import Combine
 import OSLog
 import SwiftUI
 
+/// Forwards lifecycle changes from an optional show to ContentView.
+/// The single-camera manager remains directly observed by the view.
+@MainActor
+final class ShowLifecycleObservation: ObservableObject {
+    let show: ShowCoordinator?
+    private var subscription: AnyCancellable?
+
+    init(show: ShowCoordinator?) {
+        self.show = show
+        subscription = show?.objectWillChange.sink { [weak self] in
+            self?.objectWillChange.send()
+        }
+    }
+}
+
 struct ContentView: View {
     private static let logger = Logger(subsystem: "com.alfie", category: "ContentView")
 
     @ObservedObject var cameraManager: CameraManager
     @ObservedObject var systemExtensionManager: SystemExtensionActivationManager
     @ObservedObject var settingsWindowController: SettingsWindowController
-    /// The show; drives the Multiview console when it is enabled.
-    let show: ShowCoordinator?
+    /// Observe an optional show without constructing another capture owner.
+    @ObservedObject private var showObservation: ShowLifecycleObservation
+    var show: ShowCoordinator? { showObservation.show }
 
     @State private var showError = false
     @State private var inspectorOpen = false
@@ -36,13 +52,20 @@ struct ContentView: View {
         self.cameraManager = cameraManager
         self.systemExtensionManager = systemExtensionManager
         self.settingsWindowController = settingsWindowController
-        self.show = show
+        self.showObservation = ShowLifecycleObservation(show: show)
     }
 
     /// Multiview console only in Stage format, behind the developer flag, and
     /// only while capture runs (ConsolePresentation: Webcam keeps this view).
     private var multiviewShow: ShowCoordinator? {
-        guard DeveloperFlags.useMultiviewConsole, cameraManager.isRunning, let show else { return nil }
+        Self.resolveMultiviewShow(cameraManager: cameraManager, show: show,
+                                  enabled: DeveloperFlags.useMultiviewConsole)
+    }
+
+    /// Shares the production view-selection rule with deterministic lifecycle tests.
+    static func resolveMultiviewShow(cameraManager: CameraManager, show: ShowCoordinator?,
+                                    enabled: Bool) -> ShowCoordinator? {
+        guard enabled, let show, show.isRunning else { return nil }
         let profile: CaptureProfilePolicy.Profile =
             cameraManager.shotComposer.config.cinematicFormat == .webcam ? .webcam : .stage
         return ConsolePresentation.resolve(for: profile) == .multiview ? show : nil

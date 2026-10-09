@@ -535,4 +535,338 @@ struct ShowSetupTests {
         }
     }
 }
+
+
+@MainActor
+struct ShowLifecycleAuthorityTests {
+    private final class Starts { var count = 0 }
+    private enum Start: CaseIterable { case aOnly, pair }
+    private enum Activity: CaseIterable { case stopped, starting, running }
+
+    private struct Rig {
+        let show: ShowCoordinator
+        let live: LiveShowSetupModel
+        let sink: SetupProfileOutputSpy
+        let defaults: UserDefaults
+        let suite: String
+        let starts: Starts
+        let choices: [CameraManager.CameraDevice]
+        var a: CameraManager { show.channelA }
+    }
+
+    private func rig() throws -> Rig {
+        let suite = "alfie-show-activity-\(UUID().uuidString)"
+        let defaults = try #require(UserDefaults(suiteName: suite))
+        defaults.set(ShowStandard.p50.rawValue, forKey: ShowStandard.userDefaultsKey)
+        let choices = ["setup-a", "setup-b", "setup-c"].map { id in
+            CameraManager.CameraDevice(id: id, name: id, modelID: id, uniqueID: id,
+                                       maxResolution: "1920x1080", supports4K: false, formatCount: 1)
+        }
+        defaults.set(choices[0].uniqueID, forKey: LiveShowSetupModel.deviceAKey)
+        defaults.set(choices[1].uniqueID, forKey: LiveShowSetupModel.deviceBKey)
+        let sink = SetupProfileOutputSpy()
+        let show = ShowCoordinator(programOutput: ProgramOutputManager(sinks: [sink]),
+                                   admissionRecords: AdmissionRecordStore(defaults: defaults))
+        show.clock = { 1000 }
+        show.router.clock = { 1000 }
+        show.channelA.selectedCamera = choices[0]
+        show.channelA.setAvailableCamerasForTesting(choices)
+        show.channelA.shotComposer.config.cinematicFormat = .stage
+        let starts = Starts()
+        let live = LiveShowSetupModel(show: show, defaults: defaults, machine: ShowSetupModel.galleryMachine) {
+            starts.count += 1 // No authorization, capture or output start.
+        }
+        return Rig(show: show, live: live, sink: sink, defaults: defaults,
+                   suite: suite, starts: starts, choices: choices)
+    }
+
+    private func clear(_ rig: Rig) {
+        rig.show.stopShow()
+        rig.defaults.removePersistentDomain(forName: rig.suite)
+    }
+
+    private func multiview(_ rig: Rig, enabled: Bool = true) -> ShowCoordinator? {
+        ContentView.resolveMultiviewShow(cameraManager: rig.a, show: rig.show, enabled: enabled)
+    }
+
+    private func set(_ activity: Activity, on channel: CameraManager) {
+        channel.setStartingSessionForTesting(activity == .starting)
+        channel.setRunningForTesting(activity == .running)
+    }
+
+    private func verifyLockedMutations(_ rig: Rig, start: Start = .aOnly) async throws {
+        let selection = rig.live.setup.selection
+        let preferred = rig.show.programOutput.preferredRoute
+        let standard = rig.defaults.string(forKey: ShowStandard.userDefaultsKey)
+        rig.live.select(rig.choices[2].uniqueID, for: .a)
+        rig.live.selectStandard(.p60)
+        rig.live.selectOutput(.virtualCamera)
+        switch start {
+        case .aOnly: rig.live.startAOnly()
+        case .pair: rig.live.startPair()
+        }
+        // Let a wrongly admitted fake Start execute; no camera path is supplied.
+        try await Task.sleep(for: .milliseconds(10))
+        #expect(rig.live.setup.selection == selection)
+        #expect(rig.live.setup.standard == .p50)
+        #expect(rig.defaults.string(forKey: ShowStandard.userDefaultsKey) == standard)
+        #expect(rig.show.programOutput.preferredRoute == preferred)
+        #expect(rig.live.setup.output == preferred)
+        #expect(rig.starts.count == 0)
+    }
+
+    @Test(arguments: Start.allCases)
+    private func takeToBThenStoppingPreviewAKeepsShowLiveAndSetupLocked(start: Start) async throws {
+        let rig = try rig()
+        defer { clear(rig) }
+        let b = rig.show.addChannel(.b)
+        b.selectedCamera = rig.choices[1]
+        rig.a.setRunningForTesting(true)
+        b.setRunningForTesting(true)
+        rig.a.outputPort.start()
+        rig.a.outputPort.updateCaptureStatus(isRunning: true)
+        let buffer = try #require(ProgramRouter.makeBlackFrame(width: 1920, height: 1080))
+        b.setLatestRenderedFrameForTesting(RenderedChannelFrame(
+            channelID: .b, revisions: b.revisions, sourceTimestamp: 1,
+            processingStartedAt: 1000, renderedAt: 1000, crop: .fullFrame,
+            outputSize: CGSize(width: 1920, height: 1080), isRepeat: false, pixelBuffer: buffer))
+        #expect(rig.show.take() == .committed(newProgram: .b))
+        let route = rig.show.router.routeGeneration
+        let frames = rig.sink.frames
+        rig.a.stopCapture() // A is Preview; B/output must continue.
+        #expect(!rig.a.isRunning && b.isRunning)
+        #expect(rig.show.programOutput.activeRoute == .display)
+        #expect(rig.show.router.state == .routed)
+        #expect(rig.show.programChannel == .b)
+        #expect(rig.show.router.routeGeneration == route)
+        #expect(rig.sink.frames == frames)
+        #expect(rig.show.isRunning && rig.show.isBusy)
+        #expect(rig.show.currentCaptureActivity.runningChannels == [.b])
+        #expect(rig.live.setup.isRunning)
+        #expect(!rig.live.setup.canStartAOnly && !rig.live.setup.canStartPair)
+        #expect(multiview(rig) === rig.show)
+        #expect(!ConsolePresentation.canSwitchFormat(isShowRunning: rig.show.isBusy,
+                                                     runningInputs: rig.show.channels.count))
+        try await verifyLockedMutations(rig, start: start)
+        #expect(rig.show.programChannel == .b)
+        #expect(b.isRunning)
+    }
+
+    @Test func startingBLocksSetupButDoesNotShowLiveConsoleOrStartOutput() async throws {
+        let rig = try rig()
+        defer { clear(rig) }
+        let b = rig.show.addChannel(.b)
+        let observation = ShowLifecycleObservation(show: rig.show)
+        var observed: [ShowCoordinator.CaptureActivity] = []
+        let subscriber = observation.objectWillChange.sink {
+            observed.append(rig.show.currentCaptureActivity)
+        }
+        defer { subscriber.cancel() }
+        b.setStartingSessionForTesting(true)
+        #expect(!rig.show.isRunning && rig.show.isStartingSession && rig.show.isBusy)
+        #expect(rig.show.currentCaptureActivity.startingChannels == [.b])
+        #expect(rig.live.setup.isRunning)
+        #expect(multiview(rig) == nil) // Existing starting-only setup policy is preserved.
+        #expect(observed.last?.startingChannels == [.b])
+        #expect(rig.show.programOutput.activeRoute == nil)
+        #expect(rig.sink.connectCalls == 0 && rig.sink.frames == 0)
+        try await verifyLockedMutations(rig)
+        b.setStartingSessionForTesting(false)
+        #expect(!rig.live.setup.isRunning)
+        #expect(!rig.show.isBusy)
+        #expect(observed.last?.isBusy == false)
+    }
+
+    @Test(arguments: [Activity.starting, .running])
+    private func setupCreatedAfterBBecomesActiveReadsShowTruth(activity: Activity) throws {
+        let rig = try rig()
+        defer { clear(rig) }
+        let b = rig.show.addChannel(.b)
+        set(activity, on: b)
+        let recreated = LiveShowSetupModel(show: rig.show, defaults: rig.defaults,
+                                          machine: ShowSetupModel.galleryMachine) {
+            Issue.record("Lifecycle inspection cannot start capture")
+        }
+        #expect(recreated.setup.isRunning)
+        #expect(!recreated.setup.canStartAOnly && !recreated.setup.canStartPair)
+        #expect(rig.show.isBusy)
+    }
+
+    @Test(arguments: Activity.allCases)
+    private func singleAViewAndSetupPoliciesRemainUnchanged(activity: Activity) throws {
+        let rig = try rig()
+        defer { clear(rig) }
+        set(activity, on: rig.a)
+        let busy = activity != .stopped
+        #expect(rig.show.isBusy == busy)
+        #expect(rig.live.setup.isRunning == busy)
+        #expect(rig.live.setup.canStartAOnly == !busy)
+        #expect(rig.live.setup.canStartPair == !busy) // The saved distinct pair remains an allowed trial.
+        #expect((multiview(rig) != nil) == (activity == .running))
+        #expect(multiview(rig, enabled: false) == nil)
+        rig.a.shotComposer.config.cinematicFormat = .webcam
+        #expect(multiview(rig) == nil)
+        #expect(ConsolePresentation.canSwitchFormat(isShowRunning: rig.show.isBusy, runningInputs: 1))
+        #expect(rig.starts.count == 0)
+        #expect(rig.show.programOutput.activeRoute == nil)
+    }
+
+    @Test func removalReplacementAndNewShowRetireOnlyTheCorrectChannelActivity() throws {
+        let rig = try rig()
+        defer { clear(rig) }
+        let old = rig.show.addChannel(.b)
+        old.setRunningForTesting(true)
+        #expect(rig.live.setup.isRunning)
+        rig.show.removeChannel(.b)
+        #expect(!rig.show.isBusy && !rig.live.setup.isRunning)
+        let replacement = rig.show.addChannel(.b)
+        replacement.setStartingSessionForTesting(true)
+        rig.show.prepareForNewShow()
+        #expect(rig.show.channel(.b) === replacement) // Starting B keeps preparation locked.
+        #expect(rig.show.currentCaptureActivity.startingChannels == [.b])
+        old.setRunningForTesting(true)
+        old.setStartingSessionForTesting(true) // Retained old instance no longer contributes.
+        #expect(rig.show.currentCaptureActivity.runningChannels.isEmpty)
+        #expect(rig.show.currentCaptureActivity.startingChannels == [.b])
+        replacement.stopCapture()
+        #expect(!rig.show.isBusy && !rig.live.setup.isRunning)
+        rig.show.prepareForNewShow()
+        #expect(rig.show.channel(.b) == nil)
+        #expect(rig.show.programChannel == .a)
+        #expect(rig.show.currentCaptureActivity == .init())
+        #expect(rig.live.setup.canStartAOnly && rig.live.setup.canStartPair)
+    }
+
+    @Test func reentrantRemovalCannotDeleteTheReplacementOrAdmitOldLifecyclePayloads() throws {
+        let rig = try rig()
+        defer { clear(rig) }
+        let old = rig.show.addChannel(.b)
+        old.setRunningForTesting(true)
+        var replacing = false
+        var replacement: CameraManager?
+        let subscriber = old.$isRunning.dropFirst().sink { running in
+            guard !running, !replacing else { return }
+            replacing = true
+            rig.show.removeChannel(.b)
+            let fresh = rig.show.addChannel(.b)
+            replacement = fresh
+            fresh.setStartingSessionForTesting(true)
+        }
+        defer { subscriber.cancel() }
+        rig.show.removeChannel(.b)
+        let fresh = try #require(replacement)
+        #expect(rig.show.channel(.b) === fresh)
+        #expect(rig.show.isBusy && rig.live.setup.isRunning)
+        #expect(rig.show.currentCaptureActivity.startingChannels == [.b])
+        old.setRunningForTesting(true)
+        old.stopCapture()
+        #expect(rig.show.channel(.b) === fresh)
+        #expect(rig.show.currentCaptureActivity.runningChannels.isEmpty)
+        #expect(rig.show.currentCaptureActivity.startingChannels == [.b])
+    }
+
+    @Test func stopAllClearsRunningAndStartingActivityAndRestoresStoppedSetup() throws {
+        let rig = try rig()
+        defer { clear(rig) }
+        rig.a.setRunningForTesting(true)
+        let b = rig.show.addChannel(.b)
+        b.setStartingSessionForTesting(true)
+        rig.show.stopShow()
+        #expect(!rig.show.isBusy && !rig.show.isRunning && !rig.show.isStartingSession)
+        #expect(rig.show.currentCaptureActivity == .init())
+        #expect(!rig.live.setup.isRunning)
+        #expect(rig.live.setup.canStartAOnly && rig.live.setup.canStartPair)
+        #expect(multiview(rig) == nil)
+        #expect(rig.show.programChannel == .a)
+        rig.live.selectStandard(.p60)
+        rig.live.selectOutput(.virtualCamera)
+        #expect(rig.live.setup.standard == .p60)
+        #expect(rig.defaults.string(forKey: ShowStandard.userDefaultsKey) == ShowStandard.p60.rawValue)
+        #expect(rig.show.programOutput.preferredRoute == .virtualCamera)
+        #expect(rig.starts.count == 0)
+    }
+
+    @Test(arguments: Start.allCases)
+    private func startRequestedWhileStoppedIsRetiredIfBStartsBeforeTaskEntry(start: Start) async throws {
+        let rig = try rig()
+        defer { clear(rig) }
+        let b = rig.show.addChannel(.b)
+        rig.a.selectedCamera = rig.choices[2]
+        let selected = rig.a.selectedCamera
+        let proposals = rig.live.setup.selection
+        #expect(rig.live.setup.canStartAOnly && rig.live.setup.canStartPair)
+        switch start {
+        case .aOnly: rig.live.startAOnly()
+        case .pair: rig.live.startPair()
+        }
+        // The Start body is queued on MainActor; B's state changes before any yield.
+        b.setStartingSessionForTesting(true)
+        try await Task.sleep(for: .milliseconds(10))
+        #expect(rig.starts.count == 0)
+        #expect(rig.a.selectedCamera == selected)
+        #expect(rig.live.setup.selection == proposals)
+        #expect(rig.show.channel(.b) === b)
+        #expect(b.isStartingSession)
+        #expect(!rig.a.isRunning && !rig.a.isStartingSession)
+        #expect(rig.show.programOutput.activeRoute == nil)
+    }
+
+    @Test func currentShowTruthGuardsMutationsDuringWillSetBeforeSetupReceivesThePayload() async throws {
+        let rig = try rig()
+        defer { clear(rig) }
+        let b = rig.show.addChannel(.b)
+        let observation = ShowLifecycleObservation(show: rig.show)
+        let selection = rig.live.setup.selection
+        var attempted = false
+        var sawOldSetup = false
+        let subscriber = observation.objectWillChange.sink {
+            guard rig.show.isBusy, !attempted else { return }
+            attempted = true
+            sawOldSetup = !rig.live.setup.isRunning
+            rig.live.select(rig.choices[2].uniqueID, for: .a)
+            rig.live.selectStandard(.p60)
+            rig.live.selectOutput(.virtualCamera)
+            rig.live.startAOnly()
+            rig.live.startPair()
+            rig.show.prepareForNewShow()
+        }
+        defer { subscriber.cancel() }
+        b.setStartingSessionForTesting(true)
+        try await Task.sleep(for: .milliseconds(10))
+        #expect(attempted && sawOldSetup)
+        #expect(rig.live.setup.isRunning)
+        #expect(rig.live.setup.selection == selection)
+        #expect(rig.live.setup.standard == .p50)
+        #expect(rig.defaults.string(forKey: ShowStandard.userDefaultsKey) == ShowStandard.p50.rawValue)
+        #expect(rig.show.programOutput.preferredRoute == .display)
+        #expect(rig.starts.count == 0)
+        #expect(rig.show.channel(.b) === b)
+    }
+
+    @Test func aggregatePublicationSettlesAfterObserverStopsTheOtherChannel() throws {
+        let rig = try rig()
+        defer { clear(rig) }
+        rig.a.setRunningForTesting(true)
+        let b = rig.show.addChannel(.b)
+        let observation = ShowLifecycleObservation(show: rig.show)
+        var stopped = false
+        var observed: [ShowCoordinator.CaptureActivity] = []
+        let subscriber = observation.objectWillChange.sink {
+            let activity = rig.show.currentCaptureActivity
+            observed.append(activity)
+            guard activity.startingChannels.contains(.b), !stopped else { return }
+            stopped = true
+            rig.a.stopCapture()
+        }
+        defer { subscriber.cancel() }
+        b.setStartingSessionForTesting(true)
+        #expect(stopped)
+        #expect(!rig.a.isRunning && b.isStartingSession)
+        #expect(rig.show.isBusy && !rig.show.isRunning)
+        #expect(rig.live.setup.isRunning)
+        #expect(observed.last?.runningChannels.isEmpty == true)
+        #expect(observed.last?.startingChannels == [.b])
+        #expect(rig.starts.count == 0)
+    }
+}
 #endif

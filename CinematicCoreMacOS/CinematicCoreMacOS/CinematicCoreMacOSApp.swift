@@ -51,7 +51,7 @@ struct CinematicCoreMacOSApp: App {
                     show.stopShow()
                 }
                 .keyboardShortcut("s", modifiers: [.command, .option, .shift])
-                .disabled(!cameraManager.isRunning)
+                .disabled(!show.isBusy)
             }
         }
 

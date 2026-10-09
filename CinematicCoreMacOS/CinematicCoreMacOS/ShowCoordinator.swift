@@ -40,6 +40,29 @@ final class ShowCoordinator: ObservableObject {
 
     var channelA: CameraManager { channels[.a]! }
 
+    nonisolated struct CaptureActivity: Equatable, Sendable {
+        var runningChannels: Set<ChannelID> = []
+        var startingChannels: Set<ChannelID> = []
+        var isRunning: Bool { !runningChannels.isEmpty }
+        var isStartingSession: Bool { !startingChannels.isEmpty }
+        var isBusy: Bool { isRunning || isStartingSession }
+    }
+
+    /// Atomic UI snapshot; plain channel truth is updated before publication.
+    @Published private(set) var captureActivity = CaptureActivity()
+    private var channelActivity: [ChannelID: (running: Bool, starting: Bool)] = [:]
+    private var lifecycleSubscriptions: [ChannelID: AnyCancellable] = [:]
+    private var publishingCaptureActivity = false
+
+    var currentCaptureActivity: CaptureActivity {
+        CaptureActivity(
+            runningChannels: Set(channelActivity.compactMap { $0.value.running ? $0.key : nil }),
+            startingChannels: Set(channelActivity.compactMap { $0.value.starting ? $0.key : nil }))
+    }
+    var isRunning: Bool { currentCaptureActivity.isRunning }
+    var isStartingSession: Bool { currentCaptureActivity.isStartingSession }
+    var isBusy: Bool { currentCaptureActivity.isBusy }
+
     // MARK: Control target (CHANNEL-CMD)
 
     /// The channel every console control acts on: Preview by default, Program
@@ -74,6 +97,7 @@ final class ShowCoordinator: ObservableObject {
         a.deviceRegistry = deviceRegistry
         a.workScheduler = workScheduler
         channels[.a] = a
+        observeLifecycle(of: a)
     }
 
     func channel(_ id: ChannelID) -> CameraManager? { channels[id] }
@@ -88,6 +112,7 @@ final class ShowCoordinator: ObservableObject {
         channel.deviceRegistry = deviceRegistry
         channel.workScheduler = workScheduler
         channels[id] = channel
+        observeLifecycle(of: channel)
         retarget()
         return channel
     }
@@ -97,7 +122,12 @@ final class ShowCoordinator: ObservableObject {
     func removeChannel(_ id: ChannelID) {
         guard id != programChannel, let channel = channels[id] else { return }
         channel.stopCapture()
+        // A synchronous Stop observer may have removed and replaced this slot.
+        guard channels[id] === channel else { return }
+        lifecycleSubscriptions[id] = nil
+        channelActivity[id] = nil
         channels[id] = nil
+        publishCaptureActivity()
         retarget()
     }
 
@@ -113,7 +143,7 @@ final class ShowCoordinator: ObservableObject {
     /// the last show ended on (roles are never restored). Only while every
     /// channel is stopped.
     func prepareForNewShow() {
-        guard channels.values.allSatisfy({ !$0.isRunning && !$0.isStartingSession }) else { return }
+        guard !isBusy else { return }
         resetProgramToA()
         for id in ChannelID.allCases where id != .a { removeChannel(id) }
         setEditLive(false)
@@ -122,6 +152,28 @@ final class ShowCoordinator: ObservableObject {
     private func resetProgramToA() {
         if programChannel != .a {
             router.setProgram(.a, expectedRouteGeneration: router.routeGeneration)
+        }
+    }
+
+    private func observeLifecycle(of channel: CameraManager) {
+        let id = channel.channelID
+        lifecycleSubscriptions[id] = channel.$isRunning.combineLatest(channel.$isStartingSession)
+            .sink { [weak self, weak channel] running, starting in
+                guard let self, let channel, self.channels[id] === channel else { return }
+                // Use the payload: @Published sends before the channel getter changes.
+                self.channelActivity[id] = (running, starting)
+                self.publishCaptureActivity()
+            }
+    }
+
+    private func publishCaptureActivity() {
+        guard !publishingCaptureActivity else { return }
+        publishingCaptureActivity = true
+        defer { publishingCaptureActivity = false }
+        // Reentrant observers may Stop or replace a channel. Finish publishing
+        // its current plain truth after the outer notification has completed.
+        while captureActivity != currentCaptureActivity {
+            captureActivity = currentCaptureActivity
         }
     }
 

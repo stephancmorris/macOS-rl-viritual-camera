@@ -62,7 +62,7 @@ final class LiveShowSetupModel: ObservableObject {
             captureProfile: channelA.shotComposer.config.cinematicFormat == .webcam ? "Webcam" : "Stage",
             machine: machine ?? .init(model: build.machineModel, osVersion: build.osVersion),
             records: show.admissionRecords.storedPairRecords())
-        setup.isRunning = channelA.isRunning || channelA.isStartingSession
+        setup.isRunning = show.isBusy
         observe()
     }
 
@@ -74,8 +74,8 @@ final class LiveShowSetupModel: ObservableObject {
             .dropFirst()
             .sink { [weak self] cameras in self?.setup.updateDevices(cameras.map(Self.device)) }
             .store(in: &cancellables)
-        channelA.$isRunning.combineLatest(channelA.$isStartingSession)
-            .sink { [weak self] running, starting in self?.setup.isRunning = running || starting }
+        show.$captureActivity
+            .sink { [weak self] activity in self?.setup.isRunning = activity.isBusy }
             .store(in: &cancellables)
         // Settings can change the capture profile while the stopped setup remains open.
         channelA.shotComposer.$config
@@ -117,29 +117,30 @@ final class LiveShowSetupModel: ObservableObject {
     }
 
     func select(_ uniqueID: String, for slot: ChannelID) {
-        guard setup.select(uniqueID, for: slot) else { return }
+        guard !show.isBusy, setup.select(uniqueID, for: slot) else { return }
         persistProposals()
     }
 
     /// Same persisted key the Settings picker binds with @AppStorage.
     func selectStandard(_ standard: ShowStandard) {
-        guard !setup.isRunning else { return }
+        guard !show.isBusy, !setup.isRunning else { return }
         defaults.set(standard.rawValue, forKey: ShowStandard.userDefaultsKey)
         setup.setStandard(standard)
     }
 
     /// Same property the Settings "Preferred Route" picker binds.
     func selectOutput(_ route: ProgramOutputManager.Route) {
-        guard !setup.isRunning else { return }
+        guard !show.isBusy, !setup.isRunning else { return }
         show.programOutput.preferredRoute = route
         setup.setOutput(route)
     }
 
     func startAOnly() {
-        guard setup.canStartAOnly, startTask == nil, let a = camera(for: .a) else { return }
+        guard !show.isBusy, setup.canStartAOnly, startTask == nil, let a = camera(for: .a) else { return }
         persistProposals()
         startTask = Task { [self] in
             defer { startTask = nil }
+            guard !show.isBusy else { return }
             show.prepareForNewShow()
             show.channelA.selectedCamera = a
             await startChannelA()
@@ -147,10 +148,11 @@ final class LiveShowSetupModel: ObservableObject {
     }
 
     func startPair() {
-        guard setup.canStartPair, startTask == nil, let a = camera(for: .a), let b = camera(for: .b) else { return }
+        guard !show.isBusy, setup.canStartPair, startTask == nil, let a = camera(for: .a), let b = camera(for: .b) else { return }
         persistProposals()
         startTask = Task { [self] in
             defer { startTask = nil }
+            guard !show.isBusy else { return }
             show.prepareForNewShow()
             show.channelA.selectedCamera = a
             await startChannelA()
