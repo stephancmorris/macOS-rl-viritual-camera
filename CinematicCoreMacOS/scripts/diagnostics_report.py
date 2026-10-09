@@ -19,6 +19,9 @@ own frozen budgets.
 Usage:
     diagnostics_report.py <session .csv | .json | diagnostics folder> [--out report.md]
                           [--expected-fps 50] [--cadence-floor 0.97]
+
+Cadence settings must be finite and greater than zero. The cadence floor is a
+multiplier of the expected rate; values above one remain supported.
 """
 
 from __future__ import annotations
@@ -199,6 +202,13 @@ def expected_fps(session: Session, override: float | None) -> tuple[float | None
     return None, "unknown"
 
 
+def validate_report_parameters(expected_override: float | None, cadence_floor: float) -> None:
+    """Validate user-supplied cadence settings before reading or writing evidence."""
+    for name, value in (("--expected-fps", expected_override), ("--cadence-floor", cadence_floor)):
+        if value is not None and (not math.isfinite(value) or value <= 0):
+            raise ValueError(f"{name} must be finite and greater than zero")
+
+
 # ---------------------------------------------------------------- report
 
 def fmt(value: float | None, digits: int = 1, unit: str = "") -> str:
@@ -214,6 +224,7 @@ def mmss(seconds: float | None) -> str:
 
 
 def build_report(session: Session, expected_override: float | None = None, cadence_floor: float = 0.97) -> str:
+    validate_report_parameters(expected_override, cadence_floor)
     rows, lines, findings = session.rows, [], []
     total_elapsed = max(series(rows + session.markers, "elapsed_s") or [0.0])
     partial = [r for r in rows if r.get("window_kind") == "partial"]
@@ -423,6 +434,10 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--expected-fps", type=float)
     parser.add_argument("--cadence-floor", type=float, default=0.97)
     args = parser.parse_args(argv)
+    try:
+        validate_report_parameters(args.expected_fps, args.cadence_floor)
+    except ValueError as error:
+        parser.error(str(error))
     session = load(locate(args.target))
     report = build_report(session, args.expected_fps, args.cadence_floor)
     if args.out:

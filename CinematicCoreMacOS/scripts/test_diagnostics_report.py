@@ -4,6 +4,7 @@
 import csv
 import json
 import os
+import subprocess
 import sys
 import tempfile
 import unittest
@@ -149,6 +150,86 @@ class ReportTests(unittest.TestCase):
         # The known August symptom: hop lag and footprint grew over the run.
         self.assertIn("Capture → MainActor hop (ms) grew", text)
         self.assertIn("Footprint trended up", text)
+
+
+class ReportParameterTests(unittest.TestCase):
+    invalid_cli_values = ("nan", "inf", "-inf", "0", "-1", "1e309")
+    invalid_api_values = (float("nan"), float("inf"), -float("inf"), 0.0, -1.0)
+
+    def run_cli(self, folder, output, *options):
+        return subprocess.run(
+            [sys.executable, str(Path(report.__file__).resolve()), str(folder),
+             "--out", str(output), *options],
+            capture_output=True, text=True, check=False,
+        )
+
+    def assert_invalid_cli_preserves_output(self, option):
+        with tempfile.TemporaryDirectory() as tmp:
+            folder = write_session(Path(tmp), windows=2, short_window_at=1)
+            output = folder / "summary.md"
+            original = "existing reviewed evidence\n"
+            for existing in (False, True):
+                for value in self.invalid_cli_values:
+                    with self.subTest(option=option, value=value, existing=existing):
+                        if existing:
+                            output.write_text(original)
+                        elif output.exists():
+                            output.unlink()
+                        result = self.run_cli(folder, output, f"{option}={value}")
+                        self.assertEqual(result.returncode, 2, result.stderr)
+                        self.assertIn(f"{option} must be finite and greater than zero", result.stderr)
+                        self.assertEqual(result.stdout, "")
+                        if existing:
+                            self.assertEqual(output.read_text(), original)
+                        else:
+                            self.assertFalse(output.exists())
+
+    def test_cli_rejects_invalid_expected_fps_before_writing(self):
+        self.assert_invalid_cli_preserves_output("--expected-fps")
+
+    def test_cli_rejects_invalid_cadence_floor_before_writing(self):
+        self.assert_invalid_cli_preserves_output("--cadence-floor")
+
+    def test_cli_accepts_positive_custom_settings_and_reports_cadence(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            folder = write_session(Path(tmp), windows=2, short_window_at=1)
+            output = folder / "summary.md"
+            # Rates are 50 and 25 fps. A multiplier above one remains supported.
+            for fps, floor, short in ((25, 0.97, 0), (100, 0.4, 1), (50, 1.1, 2)):
+                with self.subTest(fps=fps, floor=floor):
+                    result = self.run_cli(folder, output, f"--expected-fps={fps}",
+                                          f"--cadence-floor={floor}")
+                    self.assertEqual(result.returncode, 0, result.stderr)
+                    text = output.read_text()
+                    self.assertIn(f"Expected rate: {fps:.2f} fps (--expected-fps)", text)
+                    self.assertIn(f"**Cadence:** {short} of 2 full windows", text)
+                    self.assertIn(f"below {floor:.0%} of {fps:.2f} fps", text)
+                    if short:
+                        self.assertIn("first at 0:10" if short == 1 else "first at 0:05", text)
+
+    def test_invalid_cli_parameter_is_rejected_before_input_loading(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            output = Path(tmp) / "summary.md"
+            result = self.run_cli(Path(tmp) / "missing-input", output, "--expected-fps=nan")
+            self.assertEqual(result.returncode, 2, result.stderr)
+            self.assertIn("--expected-fps must be finite and greater than zero", result.stderr)
+            self.assertFalse(output.exists())
+
+    def test_build_report_rejects_invalid_expected_fps(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            session = report.load(report.locate(write_session(Path(tmp), windows=2)))
+            for value in self.invalid_api_values:
+                with self.subTest(value=value):
+                    with self.assertRaisesRegex(ValueError, "--expected-fps must be finite and greater than zero"):
+                        report.build_report(session, expected_override=value)
+
+    def test_build_report_rejects_invalid_cadence_floor(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            session = report.load(report.locate(write_session(Path(tmp), windows=2)))
+            for value in self.invalid_api_values:
+                with self.subTest(value=value):
+                    with self.assertRaisesRegex(ValueError, "--cadence-floor must be finite and greater than zero"):
+                        report.build_report(session, cadence_floor=value)
 
 
 if __name__ == "__main__":
