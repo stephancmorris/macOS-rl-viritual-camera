@@ -430,6 +430,8 @@ final class CameraManager: NSObject, ObservableObject {
     /// or a repeat of the previous frame's — which matters because several
     /// framing rules count *consecutive frames* and a repeat is not evidence.
     private var captureGeneration: UInt64 = 0
+    /// Retires a delayed camera-selection intent on Stop, Start or a newer selection.
+    private var cameraSwitchRevision: UInt64 = 0
 
     /// Frame counter driving `DeveloperFlags.detectionFrameInterval`.
     private var detectionFrameCounter: UInt64 = 0
@@ -995,6 +997,9 @@ final class CameraManager: NSObject, ObservableObject {
         sourcePixelHeight = height
         configuredCaptureFPS = fps
     }
+    /// Test seams: defer a camera switch and observe restart without capture access.
+    var cameraSwitchPauseForTesting: (@MainActor () async throws -> Void)?
+    var cameraSwitchStartForTesting: (@MainActor () async throws -> Void)?
     #endif
 
     // MARK: Render stats ([RENDER] line, every 5 s)
@@ -1149,6 +1154,7 @@ final class CameraManager: NSObject, ObservableObject {
 
     func startCapture() async throws {
         try Task.checkCancellation()
+        cameraSwitchRevision &+= 1
         cancelOperatorMotion()
         commands.setTrackingOwnership(false)
         lastGoodProgramBuffer = nil
@@ -1248,6 +1254,7 @@ final class CameraManager: NSObject, ObservableObject {
     
     /// Stop the capture session
     func stopCapture() {
+        cameraSwitchRevision &+= 1
         sessionStartTask?.cancel()
         sessionStartTask = nil
         isStartingSession = false
@@ -1574,26 +1581,53 @@ final class CameraManager: NSObject, ObservableObject {
     
     /// Restart capture with a different camera
     func restartWithCamera(_ cameraDevice: CameraDevice) async throws {
+        cameraSwitchRevision &+= 1
         Self.logger.notice("Switching to camera: \(cameraDevice.name, privacy: .public)")
-        
-        // Stop current session
+
         let wasRunning = isRunning && activeInputSource == .liveCamera
+        // Account for our own Stop only; a reentrant Stop retires this intent.
+        let revision = wasRunning ? cameraSwitchRevision &+ 1 : cameraSwitchRevision
         if wasRunning {
             Self.logger.debug("Stopping current session before camera switch")
             stopCapture()
-            // Give the session time to fully stop
-            try await Task.sleep(for: .milliseconds(500))
         }
-        
-        // Update selected camera
+        if wasRunning {
+            // Give the session time to fully stop.
+            try await waitForCameraSwitchStop()
+        }
+        try Task.checkCancellation()
+        guard revision == cameraSwitchRevision else { throw CancellationError() }
+
         selectedCamera = cameraDevice
+        // Published observers may synchronously Stop or supersede the choice.
+        try Task.checkCancellation()
+        guard revision == cameraSwitchRevision else { throw CancellationError() }
         Self.logger.notice("Selected camera updated")
-        
-        // Start new session if it was running before
+
         if wasRunning {
             Self.logger.debug("Restarting capture after camera switch")
-            try await startCapture()
+            try await startAfterCameraSwitch()
         }
+    }
+
+    private func waitForCameraSwitchStop() async throws {
+        #if DEBUG
+        if let pause = cameraSwitchPauseForTesting {
+            try await pause()
+            return
+        }
+        #endif
+        try await Task.sleep(for: .milliseconds(500))
+    }
+
+    private func startAfterCameraSwitch() async throws {
+        #if DEBUG
+        if let start = cameraSwitchStartForTesting {
+            try await start()
+            return
+        }
+        #endif
+        try await startCapture()
     }
 
     func setValidationClipURL(_ url: URL?) {
