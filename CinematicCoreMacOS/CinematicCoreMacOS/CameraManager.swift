@@ -980,6 +980,11 @@ final class CameraManager: NSObject, ObservableObject {
     func setRunningForTesting(_ running: Bool) { isRunning = running }
     /// Test seam: a rendered frame as if processFrame had produced it.
     func setLatestRenderedFrameForTesting(_ frame: RenderedChannelFrame?) { latestRenderedFrame = frame }
+    /// Test seam: deliver a decoder completion with its original source token.
+    func completeValidationClipForTesting(generation: UInt64, cancelled: Bool = false, failure: Error? = nil) {
+        if let failure { handleValidationClipFailure(failure, generation: generation) }
+        else { finishValidationClipPlayback(cancelled: cancelled, generation: generation) }
+    }
     /// Test seam: mark the source missing as a hot unplug would.
     func setSourceMissingForTesting(_ missing: Bool) { sourceMissing = missing }
     /// Test seam: the identity a configured source would have recorded.
@@ -2182,8 +2187,10 @@ final class CameraManager: NSObject, ObservableObject {
 
     private func finishValidationClipPlayback(cancelled: Bool, generation: UInt64) {
         guard generation == captureGeneration else { return }
-        invalidateDetection()
         guard activeInputSource == .validationClip || isRunning else { return }
+        captureGeneration &+= 1
+        latestRenderedFrame = nil
+        invalidateDetection()
 
         cancelOperatorMotion()
         commands.setTrackingOwnership(false)

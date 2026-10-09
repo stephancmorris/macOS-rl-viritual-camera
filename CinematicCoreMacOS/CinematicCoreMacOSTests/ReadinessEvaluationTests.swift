@@ -215,6 +215,7 @@ struct ReadinessEvaluationTests {
         preview.setValidationClipURL(url)
 
         try await preview.startCapture()
+        let playbackGeneration = preview.revisions.sourceGeneration
 
         #expect(preview.activeInputSource == .validationClip)
         #expect(preview.sourceIdentity?.inputKind == "Validation clip")
@@ -230,11 +231,151 @@ struct ReadinessEvaluationTests {
                 try await Task.sleep(for: .milliseconds(10))
             }
             #expect(!preview.isRunning)
+            #expect(preview.revisions.sourceGeneration > playbackGeneration)
+            #expect(preview.latestRenderedFrame == nil)
             #expect(preview.error != nil)
             #expect(preview.configuredCaptureFPS == nil)
             #expect(preview.admissionInput.captureFPS == nil)
             #expect(show.pairAdmissionContext(preview: .b).previewCaptureFPS == nil)
         }
+    }
+
+    private final class ClipLifecycleSink: ProgramOutputSink {
+        let route: ProgramOutputManager.Route = .display
+        var isAvailable: Bool { true }
+        var summary: String { "clip lifecycle fake" }
+        var detail: String { "in-memory handoff" }
+        var lastErrorDescription: String? { nil }
+        var onStateChange: (() -> Void)?
+        private(set) var sent: [CVPixelBuffer] = []
+        func connect() {}
+        func disconnect() {}
+        func updateCaptureStatus(isRunning: Bool) {}
+        func sendFrame(pixelBuffer: CVPixelBuffer, timestamp: Double) -> Bool {
+            sent.append(pixelBuffer)
+            return true
+        }
+    }
+
+    private enum ClipCompletion: CaseIterable { case eof, cancelled, failed }
+
+    private func clipLifecycleShow(defaults: UserDefaults) -> (ShowCoordinator, ClipLifecycleSink) {
+        let sink = ClipLifecycleSink()
+        let show = ShowCoordinator(programOutput: ProgramOutputManager(sinks: [sink]),
+                                   admissionRecords: AdmissionRecordStore(defaults: defaults))
+        show.addChannel(.b)
+        show.channelA.setRunningForTesting(true)
+        show.channelA.outputPort.start()
+        show.channelA.outputPort.updateCaptureStatus(isRunning: true)
+        show.clock = { 1000 }
+        show.router.clock = { 1000 }
+        return (show, sink)
+    }
+
+    @discardableResult
+    private func prepareClipLifecycleFrame(_ channel: CameraManager) throws -> RenderedChannelFrame {
+        let buffer = try #require(ProgramRouter.makeBlackFrame(width: 1920, height: 1080))
+        let frame = RenderedChannelFrame(
+            channelID: channel.channelID, revisions: channel.revisions, sourceTimestamp: 1,
+            processingStartedAt: 1000, renderedAt: 1000, crop: .fullFrame,
+            outputSize: CGSize(width: 1920, height: 1080), isRepeat: false, pixelBuffer: buffer)
+        channel.setLatestRenderedFrameForTesting(frame)
+        return frame
+    }
+
+    @Test func naturalPreviewClipEOFRevokesTakeAndRetiresSource() async throws {
+        let url = FileManager.default.temporaryDirectory.appendingPathComponent("alfie-clip-eof-\(UUID().uuidString).mov")
+        defer { try? FileManager.default.removeItem(at: url) }
+        try await makeSyntheticClip(at: url)
+        let suite = "alfie-clip-eof-\(UUID().uuidString)"
+        let defaults = try #require(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let (show, sink) = clipLifecycleShow(defaults: defaults)
+        defer { show.stopShow() }
+        let preview = try #require(show.channel(.b))
+        let aBefore = show.channelA.revisions
+        preview.preferredInputSource = .validationClip
+        preview.loopValidationClip = false
+        preview.setValidationClipURL(url)
+        try await preview.startCapture()
+        let generation = preview.revisions.sourceGeneration
+        for _ in 0..<200 {
+            if !preview.isRunning { break }
+            try await Task.sleep(for: .milliseconds(10))
+        }
+        #expect(!preview.isRunning)
+        #expect(preview.renderedFrameCount > 0) // The actual decoder/render path produced a candidate.
+        #expect(preview.error == nil)
+        #expect(preview.validationClipStatus.hasPrefix("Finished "))
+        #expect(preview.revisions.sourceGeneration > generation)
+        #expect(preview.latestRenderedFrame == nil)
+        // Freeze freshness at the just-finished frame even on the old implementation;
+        // this proves retirement, rather than eventually passing because a frame ages out.
+        if let frame = preview.latestRenderedFrame { show.clock = { frame.renderedAt } }
+        #expect(show.take() == .rejected(.notEligible(.preparing)))
+        #expect(show.programChannel == .a)
+        #expect(show.router.routeGeneration == 0)
+        #expect(sink.sent.isEmpty)
+        #expect(show.channelA.isRunning)
+        #expect(show.channelA.revisions == aBefore)
+    }
+
+    @Test(arguments: ClipCompletion.allCases)
+    private func currentClipCompletionRetiresCandidateExactlyOnce(completion: ClipCompletion) throws {
+        let suite = "alfie-clip-current-\(UUID().uuidString)"
+        let defaults = try #require(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let (show, sink) = clipLifecycleShow(defaults: defaults)
+        defer { show.stopShow() }
+        let preview = try #require(show.channel(.b))
+        preview.setRunningForTesting(true)
+        let generation = preview.revisions.sourceGeneration
+        let aBefore = show.channelA.revisions
+        try prepareClipLifecycleFrame(preview)
+        #expect(TakeAvailability.evaluate(take: show.takeInputs()!, program: .a, preview: .b,
+                                          standard: .p50, editLive: false).isEligible)
+        let failure: Error? = completion == .failed ? NSError(domain: "ClipLifecycle", code: 1) : nil
+        preview.completeValidationClipForTesting(generation: generation, cancelled: completion == .cancelled, failure: failure)
+        #expect(!preview.isRunning)
+        #expect(preview.revisions.sourceGeneration > generation)
+        #expect(preview.latestRenderedFrame == nil)
+        #expect((preview.error != nil) == (completion == .failed))
+        #expect(show.take() == .rejected(.notEligible(.preparing)))
+        #expect(show.programChannel == .a)
+        #expect(show.router.routeGeneration == 0)
+        #expect(sink.sent.isEmpty)
+        #expect(show.channelA.isRunning)
+        #expect(show.channelA.revisions == aBefore)
+        let after = preview.revisions
+        let detectionAfter = preview.detectionGenerationForTesting
+        preview.completeValidationClipForTesting(generation: generation, cancelled: true)
+        #expect(preview.revisions == after)
+        #expect(preview.detectionGenerationForTesting == detectionAfter)
+    }
+
+    @Test(arguments: ClipCompletion.allCases)
+    private func retiredClipCompletionCannotStopOrInvalidateReplacement(completion: ClipCompletion) throws {
+        let suite = "alfie-clip-stale-\(UUID().uuidString)"
+        let defaults = try #require(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let (show, _) = clipLifecycleShow(defaults: defaults)
+        defer { show.stopShow() }
+        let preview = try #require(show.channel(.b))
+        preview.setRunningForTesting(true)
+        let retired = preview.revisions.sourceGeneration
+        preview.stopCapture()
+        preview.setRunningForTesting(true)
+        let frame = try prepareClipLifecycleFrame(preview)
+        let current = preview.revisions
+        let detection = preview.detectionGenerationForTesting
+        let failure: Error? = completion == .failed ? NSError(domain: "ClipLifecycle", code: 2) : nil
+        preview.completeValidationClipForTesting(generation: retired, cancelled: completion == .cancelled, failure: failure)
+        #expect(preview.isRunning)
+        #expect(preview.revisions == current)
+        #expect(preview.detectionGenerationForTesting == detection)
+        #expect(preview.error == nil)
+        #expect(preview.latestRenderedFrame?.pixelBuffer === frame.pixelBuffer)
+        #expect(show.take() == .committed(newProgram: .b)) // Current healthy Preview remains eligible.
     }
     #endif
 
