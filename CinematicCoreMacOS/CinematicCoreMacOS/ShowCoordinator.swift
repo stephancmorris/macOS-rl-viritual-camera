@@ -91,6 +91,7 @@ final class ShowCoordinator: ObservableObject {
         channel.workScheduler = workScheduler
         channels[id] = channel
         retarget()
+        channelsChangedObserver?(.added(id))
         return channel
     }
 
@@ -101,6 +102,7 @@ final class ShowCoordinator: ObservableObject {
         channel.stopCapture()
         channels[id] = nil
         retarget()
+        channelsChangedObserver?(.removed(id))
     }
 
     /// Show-level Stop: retires every channel's generation and epoch.
@@ -109,6 +111,7 @@ final class ShowCoordinator: ObservableObject {
         editLive = false
         resetProgramToA()
         retarget()
+        channelsChangedObserver?(.showStopped)
     }
 
     /// A new show starts from A as Program with no other channel, whatever
@@ -119,6 +122,27 @@ final class ShowCoordinator: ObservableObject {
         resetProgramToA()
         for id in ChannelID.allCases where id != .a { removeChannel(id) }
         setEditLive(false)
+        channelsChangedObserver?(.newShowPrepared)
+    }
+
+    // MARK: Auto Director (S3 B-03)
+
+    /// Show-level changes the Director must hear about (plan §5.3).
+    enum ChannelChange: Equatable {
+        case added(ChannelID), removed(ChannelID), showStopped, newShowPrepared
+    }
+
+    var channelsChangedObserver: ((ChannelChange) -> Void)?
+
+    /// The Auto Director, owned by the show. Shadow only (no camera effects)
+    /// until B-05; levels come from this rig's qualification records.
+    private(set) lazy var director = DirectorController(
+        show: self, qualifiedLevels: { [weak self] in self?.qualifiedDirectorLevels ?? [] })
+
+    /// Start the Director's shadow when the flag allows it. Every launch is Manual.
+    func startDirectorShadow() {
+        guard DeveloperFlags.runDirectorShadow else { return }
+        director.attach()
     }
 
     private func resetProgramToA() {

@@ -47,7 +47,13 @@ final class ProgramRouter {
     private(set) var programChannel: ChannelID
     /// Increments on every role change; sends are gated on it.
     private(set) var routeGeneration: UInt64 = 0
-    private(set) var state: State = .idle
+    private(set) var state: State = .idle {
+        didSet { if state != oldValue { stateObserver?(state) } }
+    }
+
+    /// S3 B-03: told of each state change (routed / holding / standby / idle).
+    /// Transitions only, never per frame.
+    var stateObserver: ((State) -> Void)?
     private(set) var lastOutputTimestamp: Double = 0
     /// Frames offered by non-Program channels or stale generations (dropped).
     private(set) var framesNotRouted = 0
