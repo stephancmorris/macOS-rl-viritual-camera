@@ -8,9 +8,10 @@ struct InputTileView: View {
     /// `model.renderedImage`, which the gallery and tests use.
     var picture: AnyView?
     let onCue: (InputTileModel.Slot) -> Void
+    /// "AUTO" when Alfie set this input's current shot. Nil leaves the reserved slot empty.
+    var directorBadge: String? = nil
 
-    /// Width kept clear at the top right for the future director badge. Not
-    /// drawn yet; nothing else may be placed there.
+    /// Width kept clear at the top right for the director badge.
     static let directorBadgeReserve: CGFloat = 64
 
     /// Program red 3 pt, Preview green 3 pt, others 1 pt neutral (INPUT-STRIP).
@@ -60,12 +61,12 @@ struct InputTileView: View {
         .buttonStyle(.plain)
         .disabled(!model.isAssigned)
         .accessibilityElement(children: .ignore)
-        .accessibilityLabel(model.accessibilityLabel)
+        .accessibilityLabel(accessibilityLabel)
         .accessibilityHint(model.accessibilityHint)
         .accessibilityAddTraits(.isButton)
     }
 
-    /// "Cam A" and the role badge, top left. The top right stays clear.
+    /// "Cam A" and the role badge, top left. The top right is the AUTO slot.
     private var header: some View {
         HStack(spacing: 6) {
             Text("Cam \(model.slot.rawValue)")
@@ -77,7 +78,8 @@ struct InputTileView: View {
                     .padding(.vertical, 3)
                     .background(badgeColor, in: RoundedRectangle(cornerRadius: 4))
             }
-            Spacer(minLength: Self.directorBadgeReserve)
+            Spacer(minLength: 4)
+            directorBadgeSlot
         }
         .foregroundStyle(.white)
         .shadow(color: .black.opacity(0.6), radius: 2)
@@ -123,6 +125,26 @@ struct InputTileView: View {
         }
         .frame(width: size.width, height: size.height)
         .clipped()
+    }
+
+    /// Occupies the reserved top-right slot. Empty unless Alfie set this shot.
+    private var directorBadgeSlot: some View {
+        Group {
+            if let directorBadge {
+                Text(directorBadge)
+                    .font(.system(size: 10, weight: .bold, design: .monospaced))
+                    .padding(.horizontal, 6)
+                    .padding(.vertical, 3)
+                    .background(ConsoleStyle.previewGreen, in: RoundedRectangle(cornerRadius: 4))
+                    .foregroundStyle(.black)
+            }
+        }
+        .frame(width: Self.directorBadgeReserve, alignment: .trailing)
+    }
+
+    private var accessibilityLabel: String {
+        guard let directorBadge else { return model.accessibilityLabel }
+        return model.accessibilityLabel + ". \(directorBadge), Alfie set this shot"
     }
 
     private var badgeColor: Color {

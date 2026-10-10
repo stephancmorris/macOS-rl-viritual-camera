@@ -95,3 +95,10 @@ The adapter retains at most `capacity` start tokens, pending commands, and recen
 ## Hardware integration
 
 After H1/H3/H4 and a named device are approved, implement `HardwareTransport` in a new adapter and add the exact entitlement for that selected transport. Firmware/device control must enforce watchdog, lease expiry, e-stop and physical limits locally. A host `HardwareLink` heartbeat is observational; it is not a safety deadline. Keep motion disabled until the independent stop and bench qualification gates pass. Do not map digital crop coordinates to actuator stroke.
+
+## C-01 · Missing operator sentences (A-04)
+
+The gallery only shows `DirectorSection` reason text. These contract lines have no typed reason, so they are not in the gallery. Please add reasons if they should appear:
+
+- Assist / Auto when Program's camera is lost and the operator must decide: "Program lost: Take Cam A?"
+- Backup when both inputs are stale: "Both inputs stale"
