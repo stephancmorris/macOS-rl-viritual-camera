@@ -7,6 +7,48 @@
 
 import Foundation
 import os.log
+import Security
+
+/// The code-signing requirement each side of the virtual-camera XPC link
+/// demands of its peer: an Apple-issued certificate, the expected bundle
+/// identifier, and the same team as this process. The service name is
+/// app-group prefixed, but that only limits who can register it; this check
+/// is what proves the peer is our extension (CR-016). The extension applies
+/// the same rule to the host (CR-003). Kept in step with
+/// `ExtensionSecurityPolicy` in CinematicCoreExtensionProvider.swift.
+nonisolated enum XPCPeerRequirement {
+    static let extensionIdentifier = "Morris.CinematicCoreMacOS.CinematicCoreExtension"
+
+    /// The requirement text, or nil when either value could inject into it.
+    static func requirement(identifier: String, teamID: String) -> String? {
+        let teamOK = teamID.count == 10 && teamID.unicodeScalars.allSatisfy {
+            ("A"..."Z").contains($0) || ("0"..."9").contains($0)
+        }
+        let identifierOK = !identifier.isEmpty && identifier.unicodeScalars.allSatisfy {
+            ("A"..."Z").contains($0) || ("a"..."z").contains($0) || ("0"..."9").contains($0) || $0 == "." || $0 == "-"
+        }
+        guard teamOK, identifierOK else { return nil }
+        return "anchor apple generic and identifier \"\(identifier)\" and certificate leaf[subject.OU] = \"\(teamID)\""
+    }
+
+    /// The extension requirement for this build, or nil when this process has
+    /// no team signature to compare against (an unsigned or ad-hoc build).
+    static func forExtension() -> String? {
+        guard let team = ownTeamIdentifier() else { return nil }
+        return requirement(identifier: extensionIdentifier, teamID: team)
+    }
+
+    static func ownTeamIdentifier() -> String? {
+        var code: SecCode?
+        guard SecCodeCopySelf([], &code) == errSecSuccess, let code else { return nil }
+        var staticCode: SecStaticCode?
+        guard SecCodeCopyStaticCode(code, [], &staticCode) == errSecSuccess, let staticCode else { return nil }
+        var info: CFDictionary?
+        guard SecCodeCopySigningInformation(staticCode, SecCSFlags(rawValue: kSecCSSigningInformation), &info) == errSecSuccess,
+              let dictionary = info as? [String: Any] else { return nil }
+        return dictionary[kSecCodeInfoTeamIdentifier as String] as? String
+    }
+}
 
 /// Manages XPC connection to the Camera Extension
 /// Handles connection lifecycle, retries, and error recovery
@@ -88,7 +130,22 @@ final class XPCConnectionManager {
             options: []
         )
         newConnection.remoteObjectInterface = NSXPCInterface(with: CinematicCoreXPCProtocol.self)
-        
+
+        // Only talk to a listener signed as our extension by our team. A
+        // mismatched peer invalidates the connection before a surface id is
+        // sent. Without a team signature there is nothing to verify against,
+        // so refuse rather than connect unchecked.
+        guard let requirement = XPCPeerRequirement.forExtension() else {
+            let message = "This build has no team signature, so the virtual camera extension cannot be verified."
+            logger.error("XPC connect refused: no team signature to verify the extension against")
+            AlfieDiagnosticsLog.append("XPC", "connect refused: no team signature to verify the extension against")
+            lastErrorDescription = message
+            connectionState = .error(message)
+            onStateChange?()
+            return
+        }
+        newConnection.setCodeSigningRequirement(requirement)
+
         connectionGeneration &+= 1
         let generation = connectionGeneration
 
