@@ -13,7 +13,9 @@ struct OperatorCommand {
         /// The single-camera app's only channel.
         static let cameraA = Target.channel(.a)
     }
-    enum Origin: Equatable { case operatorUI, safety, automaticRecovery }
+    /// `director` is the Auto Director (Stage 3). It is an audit label plus a
+    /// narrow allow-list (shot size only), never an authority grant.
+    enum Origin: Equatable { case operatorUI, safety, automaticRecovery, director }
     /// Shared with the nonisolated Director logic (Stage 3), so it is a
     /// plain value: hashable, sendable, no actor isolation.
     nonisolated enum Preset: Hashable, Sendable {
@@ -82,6 +84,14 @@ final class CommandDispatcher {
             guard command.target == .channel(channelID) else { return "Wrong command target" }
         }
         if command.origin == .automaticRecovery { return "Recovery must retain tracking ownership" }
+        if command.origin == .director {
+            // The Director only changes shot size. Return to Wide and mode changes
+            // would drop the subject lock; sessions and subjects stay with people.
+            switch command.action {
+            case .selectPreset, .beginZoom, .endZoom: break
+            default: return "Director may only change shot size"
+            }
+        }
         return nil
     }
 
