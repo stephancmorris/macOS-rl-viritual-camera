@@ -290,7 +290,7 @@ private final class DiagnosticsFileWriter: @unchecked Sendable {
                 at: directory,
                 includingPropertiesForKeys: [.contentModificationDateKey]
             ) else { return }
-            for url in urls where url.pathExtension == "csv" {
+            for url in urls where DiagnosticsLog.isPrunable(url) {
                 let modified = (try? url.resourceValues(forKeys: [.contentModificationDateKey]))?
                     .contentModificationDate
                 if let modified, modified < cutoff {
@@ -319,6 +319,14 @@ final class DiagnosticsLog {
         let documents = FileManager.default
             .urls(for: .documentDirectory, in: .userDomainMask)[0]
         return documents.appendingPathComponent("CinematicCore/Diagnostics", isDirectory: true)
+    }
+
+    /// Session CSVs and their `alfie_session_*.json` manifests age out
+    /// together; a manifest left behind keeps the capture device's name and
+    /// model (CR-025).
+    nonisolated static func isPrunable(_ url: URL) -> Bool {
+        url.pathExtension == "csv"
+            || (url.pathExtension == "json" && url.lastPathComponent.hasPrefix("alfie_session_"))
     }
 
     static func openInFinder() {
