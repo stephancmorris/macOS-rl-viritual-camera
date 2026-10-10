@@ -3,7 +3,9 @@ import Foundation
 /// Isolated review candidate. No runtime grant is restored from preferences.
 nonisolated struct DirectorAuthority: Equatable, Sendable {
     enum ReviewPolicy: Sendable { case conservative }
-    enum Level: Equatable, Sendable { case off, suggest, autoPrepare, autoDirect }
+    /// Off (Manual), Suggest (shadow: proposes, never acts), Assist (prepares
+    /// Preview), Auto and Backup (may also cut, once Take permits land in A-11).
+    enum Level: Equatable, Hashable, Sendable { case off, suggest, assist, auto, backup }
     enum Action: Sendable { case propose, prepare, take }
     struct Prerequisites: Equatable, Sendable {
         let nominationsCurrent: Bool
@@ -11,6 +13,9 @@ nonisolated struct DirectorAuthority: Equatable, Sendable {
         let sourcesHealthy: Bool
         let outputHealthy: Bool
         let admissionCurrent: Bool
+        /// Levels with a current sign-off on this rig (C16 / B-06). Empty by
+        /// default: nothing beyond Suggest can be enabled without a record.
+        var qualifiedLevels: Set<Level> = []
         var satisfied: Bool {
             nominationsCurrent && previewAvailable && sourcesHealthy && outputHealthy && admissionCurrent
         }
@@ -18,18 +23,21 @@ nonisolated struct DirectorAuthority: Equatable, Sendable {
     enum Event: Equatable, Sendable {
         case enable(Level), disable, pause, resume, pin(ChannelID), unpin
         case manualCommand, editLive(Bool), operatorTake, sourceLoss(ChannelID), stopShow, restart
+        /// The operator gives control back (A1). Same contract as `resume`.
+        case handToAlfie
         case navigation, cosmeticEdit, evidenceAvailable(Bool), identityLost(ChannelID)
         case sourceRebound(ChannelID), outputFault, admissionLost, healthRestored
         case policyChanged, nominationChanged
     }
     /// Retires future Director effects only, never already admitted R2 tracking.
     enum Cancellation: Hashable, Sendable { case proposal, prepare, take }
-    enum Refusal: Equatable, Sendable { case autoDirectUnqualified, prerequisites, paused, exhausted }
+    enum Refusal: Equatable, Sendable { case notQualified, prerequisites, paused, exhausted }
     struct Transition: Equatable, Sendable {
         let state: DirectorAuthority
         let cancellations: Set<Cancellation>
         let refusal: Refusal?
     }
+    /// No level may cut yet; one-shot Take permits arrive with A-11.
     static let autoTakeQualified = false
     private(set) var level: Level = .off
     private(set) var paused = false
@@ -44,8 +52,11 @@ nonisolated struct DirectorAuthority: Equatable, Sendable {
     // No default policy. initialEpoch enables the exhaustion boundary test.
     init(reviewPolicy: ReviewPolicy, initialEpoch: UInt64 = 0) { epoch = initialEpoch }
     var mayPropose: Bool { !exhausted && running && healthy && level != .off && !paused && !editLive && pinnedShot == nil }
-    var mayPrepare: Bool { mayPropose && evidenceAvailable && level == .autoPrepare }
+    var mayPrepare: Bool { mayPropose && evidenceAvailable && Self.prepares(level) }
     var mayTake: Bool { false }
+    static func prepares(_ level: Level) -> Bool { level == .assist || level == .auto || level == .backup }
+    static func needsQualification(_ level: Level) -> Bool { prepares(level) }
+
     func authorizes(_ token: UInt64, action: Action) -> Bool {
         guard token == epoch else { return false }
         switch action {
@@ -63,17 +74,25 @@ nonisolated struct DirectorAuthority: Equatable, Sendable {
         var cancellations: Set<Cancellation> = []
         var refusal: Refusal?
         switch event {
-        case .enable(.autoDirect): refusal = .autoDirectUnqualified
+        case .enable(let requested) where Self.needsQualification(requested) && prerequisites != nil
+                && prerequisites?.qualifiedLevels.contains(requested) != true:
+            // Refused, never substituted: level and epoch are unchanged.
+            refusal = exhausted ? .exhausted : .notQualified
         case .enable(.off), .disable, .stopShow:
             retire(); cancellations = all
             level = .off; paused = false; pinnedShot = nil; editLive = false
             if event == .stopShow { running = false }
-        case .enable, .resume:
+        case .enable, .resume, .handToAlfie:
             if exhausted { refusal = .exhausted }
             else if !running || !healthy || editLive || pinnedShot != nil || prerequisites?.satisfied != true {
                 refusal = .prerequisites
             } else if case .enable = event, paused { refusal = .paused }
-            else if event == .resume && level == .off { refusal = .prerequisites }
+            else if (event == .resume || event == .handToAlfie) && level == .off { refusal = .prerequisites }
+            else if (event == .resume || event == .handToAlfie) && Self.needsQualification(level)
+                        && prerequisites?.qualifiedLevels.contains(level) != true {
+                // The rig's sign-off lapsed (e.g. setup changed): never resume unqualified.
+                refusal = .notQualified
+            }
             else {
                 retire(); cancellations = all
                 if !exhausted {
@@ -95,6 +114,10 @@ nonisolated struct DirectorAuthority: Equatable, Sendable {
             retire(); cancellations = all; editLive = true; paused = true
         case .sourceLoss, .sourceRebound, .outputFault, .admissionLost:
             retire(); cancellations = all; healthy = false; paused = true
+        case .operatorTake where level == .suggest || level == .assist:
+            // N1: in Assist (and shadow) a Take is the expected rhythm, not an
+            // override. Retire all work and start fresh on the new Preview.
+            retire(); cancellations = all
         case .pause, .manualCommand, .operatorTake, .identityLost, .policyChanged, .nominationChanged:
             retire(); cancellations = all; paused = true
         }

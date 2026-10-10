@@ -48,7 +48,7 @@ nonisolated struct DirectorReplay {
         let acknowledgementsRejected: Int
         let readyEvaluations: Int
         let staleEffectsCommitted: Int
-        let autoDirectRefusals: Int
+        let unqualifiedRefusals: Int
         let finalLevel: DirectorAuthority.Level
         let finalPaused: Bool
         let clockAnomalies: Int
@@ -75,7 +75,7 @@ nonisolated struct DirectorReplay {
                     maximumProposalAge: TimeInterval, maximumEvidenceAge: TimeInterval, readinessParameters: DirectorReadiness.Parameters) -> Report {
         // Invalid clocks are counted and skipped rather than crashing a replay.
         var authority = DirectorAuthority(reviewPolicy: .conservative)
-        _ = authority.apply(.enable(.autoPrepare), prerequisites: .init(nominationsCurrent: true, previewAvailable: true, sourcesHealthy: true, outputHealthy: true, admissionCurrent: true))
+        _ = authority.apply(.enable(.assist), prerequisites: .init(nominationsCurrent: true, previewAvailable: true, sourcesHealthy: true, outputHealthy: true, admissionCurrent: true, qualifiedLevels: [.assist]))
         var channels: [ChannelID: Channel] = [.a: Channel(), .b: Channel()]
         var program: ChannelID = .a
         var route: UInt64 = 0
@@ -84,7 +84,7 @@ nonisolated struct DirectorReplay {
         var activeRequest: DirectorPreparation.Request?
         var acknowledgements: [(id: String, due: TimeInterval, receipt: DirectorPreparation.Receipt)] = []
         var preparationsCommitted = 0, acknowledgementsAccepted = 0, acknowledgementsRejected = 0
-        var readyEvaluations = 0, autoDirectRefusals = 0, staleEffectsCommitted = 0
+        var readyEvaluations = 0, unqualifiedRefusals = 0, staleEffectsCommitted = 0
         var programStartedAt = 0.0
         var lastWideAt = 0.0
         var previousProgram: ChannelID?
@@ -112,7 +112,8 @@ nonisolated struct DirectorReplay {
         func currentPrerequisites() -> DirectorAuthority.Prerequisites {
             .init(nominationsCurrent: true, previewAvailable: channels[program == .a ? .b : .a] != nil,
                   sourcesHealthy: channels.values.allSatisfy { !$0.missing },
-                  outputHealthy: authority.healthy, admissionCurrent: authority.healthy)
+                  outputHealthy: authority.healthy, admissionCurrent: authority.healthy,
+                  qualifiedLevels: [.assist])
         }
         func recordStale(_ id: Int, _ reasons: [DirectorProposalValidator.StaleReason]) {
             guard rejectedProposalIDs.insert(id).inserted else { return }
@@ -278,7 +279,7 @@ nonisolated struct DirectorReplay {
                 } else { acknowledgementsRejected += 1 }
             case .enable(let level):
                 let transition = authority.apply(.enable(level), prerequisites: currentPrerequisites())
-                if transition.refusal == .autoDirectUnqualified { autoDirectRefusals += 1 }
+                if transition.refusal == .notQualified { unqualifiedRefusals += 1 }
             case .restart: authority.apply(.restart)
             case .navigation: authority.apply(.navigation)
             case .cosmeticEdit: authority.apply(.cosmeticEdit)
@@ -367,7 +368,7 @@ nonisolated struct DirectorReplay {
             duplicateCallbacks: duplicateCallbacks, failedEffects: failedEffects,
             rejectedAttempts: rejectedAttempts, preparationsCommitted: preparationsCommitted,
             acknowledgementsAccepted: acknowledgementsAccepted, acknowledgementsRejected: acknowledgementsRejected,
-            readyEvaluations: readyEvaluations, staleEffectsCommitted: staleEffectsCommitted, autoDirectRefusals: autoDirectRefusals,
+            readyEvaluations: readyEvaluations, staleEffectsCommitted: staleEffectsCommitted, unqualifiedRefusals: unqualifiedRefusals,
             finalLevel: authority.level, finalPaused: authority.paused, clockAnomalies: clockAnomalies,
             wrongSubjectAttempts: wrongAttempts, labelledSubjectAttempts: labelledAttempts,
             proposalsMadeWhilePaused: pausedProposals,

@@ -4,7 +4,7 @@ import Testing
 @MainActor struct DirectorProposalTests {
     @Test func staleDimensions() throws {
         var authority = DirectorAuthority(reviewPolicy: .conservative)
-        authority.apply(.enable(.autoPrepare), prerequisites: .init(nominationsCurrent: true, previewAvailable: true, sourcesHealthy: true, outputHealthy: true, admissionCurrent: true))
+        authority.apply(.enable(.assist), prerequisites: .init(nominationsCurrent: true, previewAvailable: true, sourcesHealthy: true, outputHealthy: true, admissionCurrent: true, qualifiedLevels: [.assist]))
         let revisions = ChannelRevisions(sourceGeneration: 1, controlEpoch: 2, shotRevision: 3)
         let shot = DirectorShot(preset: .stage(.waistUp))
         let p = try #require(DirectorProposal(target: .b, preview: .b, shot: shot, reason: "subject",
@@ -35,7 +35,7 @@ import Testing
 
     @Test func malformedProposalTimeAndExpiryFailClosed() throws {
         var authority = DirectorAuthority(reviewPolicy: .conservative)
-        authority.apply(.enable(.autoPrepare), prerequisites: .init(nominationsCurrent: true, previewAvailable: true, sourcesHealthy: true, outputHealthy: true, admissionCurrent: true))
+        authority.apply(.enable(.assist), prerequisites: .init(nominationsCurrent: true, previewAvailable: true, sourcesHealthy: true, outputHealthy: true, admissionCurrent: true, qualifiedLevels: [.assist]))
         let revisions = ChannelRevisions(sourceGeneration: 1, controlEpoch: 1, shotRevision: 1)
         let live = DirectorLiveState(authority: authority, program: .a, preview: .b,
             revisions: revisions, routeGeneration: 1, sourceMissing: false)
@@ -79,7 +79,7 @@ import Testing
 extension DirectorProposalTests {
     private var prerequisites: DirectorAuthority.Prerequisites {
         .init(nominationsCurrent: true, previewAvailable: true, sourcesHealthy: true,
-              outputHealthy: true, admissionCurrent: true)
+              outputHealthy: true, admissionCurrent: true, qualifiedLevels: [.assist])
     }
     private var thresholds: DirectorReadiness.Parameters {
         .init(minimumSettledTime: 0.2, maximumMotion: 0.1, cutOnMotionAllowed: false,
@@ -87,7 +87,7 @@ extension DirectorProposalTests {
     }
     private func world() -> DirectorLiveState {
         var authority = DirectorAuthority(reviewPolicy: .conservative)
-        authority.apply(.enable(.autoPrepare), prerequisites: prerequisites)
+        authority.apply(.enable(.assist), prerequisites: prerequisites)
         return .init(authority: authority, program: .a, preview: .b,
             revisions: .init(sourceGeneration: 1, controlEpoch: 2, shotRevision: 3),
             routeGeneration: 4, sourceMissing: false, policyRevision: 5,
