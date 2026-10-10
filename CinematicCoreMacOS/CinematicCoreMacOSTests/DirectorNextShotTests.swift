@@ -15,7 +15,7 @@ import Testing
 struct DirectorNextShotTests {
     @Test func directorLineUsesPreparedShotAndStatus() {
         let line = NextShotPanel.directorLine(DirectorNextDemo.preparing)
-        #expect(line == "Cam B · Waist Up · Preparing Cam B Waist Up · subject settled")
+        #expect(line == "Preparing Cam B Waist Up · subject settled")
         let empty = NextShotPanel.directorLine(DirectorNextDemo.nothingPrepared)
         #expect(empty == "No shot prepared · Preview is the wide camera · nothing to prepare")
     }

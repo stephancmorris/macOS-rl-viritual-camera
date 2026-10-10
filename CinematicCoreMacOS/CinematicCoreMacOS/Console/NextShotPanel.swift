@@ -22,8 +22,13 @@ struct NextShotPanel: View {
     }
 
     /// Prepared shot and plain status on one truncating line. Nil when Alfie is not reporting.
+    /// When the status already names the prepared input and shot (preparing
+    /// or ready), it is shown alone so the line doesn't repeat itself.
     static func directorLine(_ section: NextShotStatus.DirectorSection) -> String {
-        "\(section.preparedLine) · \(section.statusLine)"
+        switch section.activity {
+        case .active(.preparing), .active(.ready): section.statusLine
+        default: "\(section.preparedLine) · \(section.statusLine)"
+        }
     }
 
     var body: some View {
