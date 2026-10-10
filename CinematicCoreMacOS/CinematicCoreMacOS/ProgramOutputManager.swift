@@ -30,30 +30,50 @@ enum AlfieDiagnosticsLog {
         return logsDirectory.appendingPathComponent("alfie-diagnostics.log")
     }
 
+    /// Size at which the log rolls over to `alfie-diagnostics.1.log`. One
+    /// previous file is kept, so the pair never exceeds twice this (CR-012).
+    nonisolated static let maxFileBytes: UInt64 = 2 * 1024 * 1024
+
     static func append(_ category: String, _ message: String) {
         let timestamp = ISO8601DateFormatter().string(from: Date())
         let line = "[\(timestamp)] [\(category)] \(message)\n"
 
         queue.async {
-            let url = fileURL
-            let directory = url.deletingLastPathComponent()
             do {
-                try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
-
-                if FileManager.default.fileExists(atPath: url.path) {
-                    let handle = try FileHandle(forWritingTo: url)
-                    defer { try? handle.close() }
-                    try handle.seekToEnd()
-                    if let data = line.data(using: .utf8) {
-                        try handle.write(contentsOf: data)
-                    }
-                } else {
-                    try line.write(to: url, atomically: true, encoding: .utf8)
-                }
+                try write(line, to: fileURL, maxBytes: maxFileBytes)
             } catch {
                 Logger(subsystem: "com.alfie", category: "DiagnosticsFile")
                     .error("Failed to append diagnostics log: \(error.localizedDescription, privacy: .public)")
             }
+        }
+    }
+
+    /// The rotated copy of `url`: `name.log` → `name.1.log`.
+    nonisolated static func rotatedURL(for url: URL) -> URL {
+        url.deletingPathExtension().appendingPathExtension("1").appendingPathExtension(url.pathExtension)
+    }
+
+    /// Append `line`, first rolling the file over when it has reached
+    /// `maxBytes`. Synchronous; `append` calls it on the log queue.
+    nonisolated static func write(_ line: String, to url: URL, maxBytes: UInt64) throws {
+        let fileManager = FileManager.default
+        try fileManager.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
+
+        if let size = (try? fileManager.attributesOfItem(atPath: url.path))?[.size] as? UInt64, size >= maxBytes {
+            let rotated = rotatedURL(for: url)
+            try? fileManager.removeItem(at: rotated)
+            try fileManager.moveItem(at: url, to: rotated)
+        }
+
+        if fileManager.fileExists(atPath: url.path) {
+            let handle = try FileHandle(forWritingTo: url)
+            defer { try? handle.close() }
+            try handle.seekToEnd()
+            if let data = line.data(using: .utf8) {
+                try handle.write(contentsOf: data)
+            }
+        } else {
+            try line.write(to: url, atomically: true, encoding: .utf8)
         }
     }
 }
@@ -211,6 +231,42 @@ final class ProgramOutputManager: ObservableObject {
         let duration: TimeInterval
     }
 
+    /// A time window of samples kept in arrival order. Appends and front
+    /// evictions mutate in place, so a sample no longer copies its stage's
+    /// window or filters the whole array (CR-013). Assumes arrival order is
+    /// time order, which holds for both host-clock latency samples and the
+    /// input timestamps (a backwards input timestamp clears the window first).
+    nonisolated struct SlidingWindow<Element> {
+        private var storage: [Element] = []
+        private var head = 0
+
+        var count: Int { storage.count - head }
+        var isEmpty: Bool { head == storage.count }
+        var first: Element? { isEmpty ? nil : storage[head] }
+        var last: Element? { isEmpty ? nil : storage[storage.count - 1] }
+        var elements: ArraySlice<Element> { storage[head...] }
+
+        mutating func append(_ element: Element) { storage.append(element) }
+
+        mutating func removeAll() {
+            storage.removeAll(keepingCapacity: true)
+            head = 0
+        }
+
+        /// Drop leading elements while `isExpired` holds. Storage is compacted
+        /// only once the dead prefix is over half of it, so this is amortised
+        /// O(1) per element.
+        mutating func dropExpired(while isExpired: (Element) -> Bool) {
+            while head < storage.count, isExpired(storage[head]) { head += 1 }
+            if head == storage.count {
+                removeAll()
+            } else if head > 32, head * 2 > storage.count {
+                storage.removeFirst(head)
+                head = 0
+            }
+        }
+    }
+
     enum Route: String, CaseIterable, Identifiable {
         case virtualCamera
         case display
@@ -320,8 +376,8 @@ final class ProgramOutputManager: ObservableObject {
     private let sinks: [any ProgramOutputSink]
     private var isCaptureRunning = false
     private var dropTimestamps: [Double] = []
-    private var latencySamples: [LatencyStage: [TimedDuration]] = [:]
-    private var inputFrameTimestamps: [Double] = []
+    private var latencySamples: [LatencyStage: SlidingWindow<TimedDuration>] = [:]
+    private var inputFrameTimestamps = SlidingWindow<Double>()
     private static let inputRateWindow: Double = 2.0
 
     // Per-frame counters land here (plain storage), NOT in the @Published
@@ -663,7 +719,7 @@ final class ProgramOutputManager: ObservableObject {
         dropTimestamps = []
         latencySamples = [:]
         stageLatencies = []
-        inputFrameTimestamps = []
+        inputFrameTimestamps.removeAll()
         measuredInputFPS = 0
         gateDropBaseline = nil
         detectionStartNoted = false
@@ -854,7 +910,7 @@ final class ProgramOutputManager: ObservableObject {
         }
         inputFrameTimestamps.append(timestamp)
         let windowStart = timestamp - Self.inputRateWindow
-        inputFrameTimestamps.removeAll { $0 < windowStart }
+        inputFrameTimestamps.dropExpired { $0 < windowStart }
     }
 
     func recordLatency(
@@ -874,11 +930,11 @@ final class ProgramOutputManager: ObservableObject {
             rawFrameMax = max(rawFrameMax, duration)
             rawFrameCount += 1
         }
-        var samples = latencySamples[stage, default: []]
-        samples.append(TimedDuration(timestamp: timestamp, duration: duration))
+        // Modified in place through the dictionary's default subscript: no
+        // copy of the stage's window per sample.
         let windowStart = timestamp - 5
-        samples.removeAll { $0.timestamp < windowStart }
-        latencySamples[stage] = samples
+        latencySamples[stage, default: SlidingWindow()].append(TimedDuration(timestamp: timestamp, duration: duration))
+        latencySamples[stage, default: SlidingWindow()].dropExpired { $0.timestamp < windowStart }
     }
 
     /// Copies the per-frame raw counters into the @Published snapshots at most
@@ -1040,7 +1096,7 @@ final class ProgramOutputManager: ObservableObject {
     private func refreshLatencySnapshot() {
         stageLatencies = LatencyStage.allCases.compactMap { stage in
             guard let samples = latencySamples[stage], !samples.isEmpty else { return nil }
-            let total = samples.reduce(0) { $0 + $1.duration }
+            let total = samples.elements.reduce(0) { $0 + $1.duration }
             return StageLatency(stage: stage, averageDuration: total / Double(samples.count))
         }
     }
