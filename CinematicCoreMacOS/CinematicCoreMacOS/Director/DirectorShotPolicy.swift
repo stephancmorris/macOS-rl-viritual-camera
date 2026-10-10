@@ -9,10 +9,25 @@ nonisolated struct DirectorShotPolicy {
         let maximumMovement: Double
         let cutOnMotionAllowed: Bool
 
-        // Historical unapproved fixture parameters. Study values must be explicitly supplied.
-        static let proposed = Parameters(minimumShotDuration: 8, maximumShotDuration: 35,
-            wideCadence: 90, repetitionWindow: 20, maximumMovement: 0.1,
-            cutOnMotionAllowed: false)
+        init(minimumShotDuration: TimeInterval, maximumShotDuration: TimeInterval,
+             wideCadence: TimeInterval, repetitionWindow: TimeInterval,
+             maximumMovement: Double, cutOnMotionAllowed: Bool) {
+            self.minimumShotDuration = minimumShotDuration
+            self.maximumShotDuration = maximumShotDuration
+            self.wideCadence = wideCadence
+            self.repetitionWindow = repetitionWindow
+            self.maximumMovement = maximumMovement
+            self.cutOnMotionAllowed = cutOnMotionAllowed
+        }
+
+        /// The policy reads its pacing from the segment's style: the single
+        /// source of these values. The soft maximum is advisory dwell only.
+        init(_ style: DirectorStyle) {
+            self.init(minimumShotDuration: style.minimumShotDuration,
+                      maximumShotDuration: style.softMaximumShotDuration,
+                      wideCadence: style.wideCadence, repetitionWindow: style.repetitionWindow,
+                      maximumMovement: style.maximumMovement, cutOnMotionAllowed: style.cutOnMotionAllowed)
+        }
 
         var isValid: Bool {
             minimumShotDuration.isFinite && maximumShotDuration.isFinite &&
