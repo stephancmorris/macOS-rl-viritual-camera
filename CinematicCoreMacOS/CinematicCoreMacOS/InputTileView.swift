@@ -11,7 +11,7 @@ struct InputTileView: View {
     /// "AUTO" when Alfie set this input's current shot. Nil leaves the reserved slot empty.
     var directorBadge: String? = nil
 
-    /// Width kept clear at the top right for the director badge.
+    /// Width kept for the AUTO badge at the top right.
     static let directorBadgeReserve: CGFloat = 64
 
     /// Program red 3 pt, Preview green 3 pt, others 1 pt neutral (INPUT-STRIP).

@@ -31,6 +31,7 @@ struct MultiviewGalleryView: View {
                     MultiviewGallerySection("Next-shot panel · NEXT-PANEL") { NextPanelDemo(model: model) }
                     MultiviewGallerySection("Director · C-01") { DirectorDemo(model: model) }
                     MultiviewGallerySection("Director control · C-02") { DirectorControlDemo() }
+                    MultiviewGallerySection("Director next shot · C-03") { DirectorNextDemo() }
                     MultiviewGallerySection("Input strip · INPUT-STRIP") { StripDemo() }
                     MultiviewGallerySection("Show setup · SHOW-SETUP") { SetupDemo() }
                     MultiviewGallerySection("Operator pill · PILL-TARGET") { PillDemo(model: model) }

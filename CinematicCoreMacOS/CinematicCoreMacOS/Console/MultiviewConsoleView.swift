@@ -24,15 +24,19 @@ struct MultiviewConsoleView<Strip: View, Pill: View>: View {
     var panePicture: ((PaneModel) -> AnyView)?
     /// Show-level controls at the right of the header (live console only).
     var headerTrailing: AnyView?
+    /// Alfie's status. Nil until the live console is given a director controller.
+    var director: NextShotStatus.DirectorSection?
 
     init(
         snapshot: ConsoleSnapshot,
         actions: any ConsoleActions,
+        director: NextShotStatus.DirectorSection? = nil,
         @ViewBuilder strip: () -> Strip,
         @ViewBuilder pill: () -> Pill
     ) {
         self.snapshot = snapshot
         self.actions = actions
+        self.director = director
         self.strip = strip()
         self.pill = pill()
     }
@@ -53,7 +57,7 @@ struct MultiviewConsoleView<Strip: View, Pill: View>: View {
                 pane(.program(from: snapshot))
                     .place(layout.programPane)
 
-                NextShotPanel(status: .make(snapshot, availability: availability))
+                NextShotPanel(status: NextShotStatus.make(snapshot, availability: availability).withDirector(director))
                     .place(layout.nextPanel)
 
                 TakeBarView(
@@ -113,9 +117,10 @@ struct MultiviewConsoleView<Strip: View, Pill: View>: View {
 extension MultiviewConsoleView where Strip == InputStripView, Pill == ConsoleSlotPlaceholder {
     /// Console with the input strip and a placeholder pill, for the gallery
     /// until PILL-TARGET binds the live pill to a channel.
-    init(snapshot: ConsoleSnapshot, actions: any ConsoleActions) {
-        self.init(snapshot: snapshot, actions: actions) {
-            InputStripView(snapshot: snapshot, actions: actions)
+    init(snapshot: ConsoleSnapshot, actions: any ConsoleActions, director: NextShotStatus.DirectorSection? = nil) {
+        let badges = Set(ChannelID.allCases.filter { director?.showsAutoBadge(on: $0) == true })
+        self.init(snapshot: snapshot, actions: actions, director: director) {
+            InputStripView(snapshot: snapshot, actions: actions, autoBadgeChannels: badges)
         } pill: {
             ConsoleSlotPlaceholder(title: "OPERATOR PILL · PILL-TARGET", width: 720, height: 46)
         }
