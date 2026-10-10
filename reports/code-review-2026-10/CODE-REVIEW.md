@@ -51,6 +51,10 @@ Counts and the top 10 are filled in when the file pass finishes. Confirmed so fa
 | CR-037 | Medium | A saved director style never reaches the running controller |
 | CR-039 | Medium | The extension compiles the output manager, which imports SwiftUI, and does not use it |
 | CR-040 | Medium | The shared scheme launches Release |
+| CR-048 | Medium | Preview evidence is not refreshed when Preview changes channel |
+| CR-049 | Medium | Turning Edit Live off leaves the pause reason "editing Program live" |
+| CR-050 | Medium | The same tick can mark health restored while admission is still refused |
+| CR-051 | Medium | Reloading a style number that does not fit in `Int` traps the settings editor |
 
 ## Repo hygiene
 
@@ -378,6 +382,54 @@ Haven't found anything vulnerable or badly coded in: `CapabilityReport.swift`, `
 
 The unit tests scanned below had real assertions. A line-by-line read is still open for the files named under Not reviewed: `CaptureDeviceRegistryTests`, `CaptureProfilePolicyTests`, `ChannelCommandTests`, `ChannelIsolationTests`, `ConsolePresentationTests`, `DegradePolicyTests`, `DirectOutputFormatTests`, `FramingCapabilityTests`, `InputStripTests`, `InstrumentationInvestigationTests`, `MultiviewGallerySnapshotTests`, `NextShotStatusTests`, `OperatorPresetSharingTests`, `OutputRateRegressionTests`, `PillTargetTests`, `PipelineLifecycleTests`, `PrivacyAuditTests`, `RealCameraTests`, `RecoveryStateTests`, `ShowSetupTests`, `SingleCameraConsoleTests`, `TakeBarTests`.
 
+### `CinematicCoreMacOS/CinematicCoreMacOS/Director/DirectorController.swift`
+
+Two proposed High races did not hold. The app target sets `SWIFT_DEFAULT_ACTOR_ISOLATION = MainActor`, and the unit build did not warn on the `sourceMissing` sink or on `LiveConsole.reconnect`. Both types are main-actor by that default. `Task { }` in `reconnect` inherits it.
+
+| ID | Severity | Confidence | Category | Line(s) | Finding | Suggested fix |
+|---|---|---|---|---|---|---|
+| CR-048 | Medium | Confirmed | Correctness | 227–232 | `authority.evidenceAvailable` starts `true` and changes only when the event's channel is the current Preview. An Assist Take does not recompute it, so `mayPrepare` can still describe the previous input. | When Preview changes, set the flag from that channel's adapter state. |
+| CR-049 | Medium | Confirmed | Correctness | 105–106, authority 109 | Turning Edit Live off sends `.editLive(false)`, which clears the flag and does not clear `paused`. `apply` only stores a new pause reason when pausing begins, so the status stays "Paused: editing Program live". | Clear that reason when editing ends, and keep the pause only if another reason still holds. |
+| CR-050 | Medium | Confirmed | Correctness | 217–223, authority 108 | The same `tick()` applies `.admissionLost` and then `.healthRestored` whenever sources and output are healthy. `healthRestored` sets `healthy` back to true and does not look at admission. | Require `admissionCurrent` before `healthRestored`. |
+
+### `CinematicCoreMacOS/CinematicCoreMacOS/Director/DirectorAuthority.swift`
+
+Haven't found a separate defect. CR-049 and CR-050 are the `apply` cases at lines 108–109.
+
+### `CinematicCoreMacOS/CinematicCoreMacOS/Director/DirectorShotPolicy.swift`
+
+| ID | Severity | Confidence | Category | Line(s) | Finding | Suggested fix |
+|---|---|---|---|---|---|---|
+| CR-053 | Low | Confirmed | Dead code | 58–59 | `Abstention.minimumDuration` and `.movement` are never returned. `rank` validates movement fields and does not use them to abstain. | Drop the unused cases, or abstain on them. |
+
+### `CinematicCoreMacOS/CinematicCoreMacOS/Director/Replay/DirectorReplay.swift`
+
+| ID | Severity | Confidence | Category | Line(s) | Finding | Suggested fix |
+|---|---|---|---|---|---|---|
+| CR-054 | Medium | Confirmed | Correctness | 144–157 | `audit` never reports `evidenceUnavailable`, so a commit made without evidence is not counted. Superseded by PR #18. | Start after PR #18 merges. Do not re-implement it on this commit. |
+
+### `CinematicCoreMacOS/CinematicCoreMacOS/Director/UI/DirectorStyleEditor.swift`
+
+| ID | Severity | Confidence | Category | Line(s) | Finding | Suggested fix |
+|---|---|---|---|---|---|---|
+| CR-051 | Medium | Confirmed | Crash | 69–72 | `text()` uses `Int(whole)` for any finite whole number. `DirectorStyle.validated()` allows values outside `Int`, and `Int(_:)` traps on those. Reloading that saved style crashes the editor. | Use `Int(exactly:)` and fall back to the full number. |
+
+### `CinematicCoreMacOS/CinematicCoreMacOS/Director/UI/FakeDirectorConsole.swift`
+
+| ID | Severity | Confidence | Category | Line(s) | Finding | Suggested fix |
+|---|---|---|---|---|---|---|
+| CR-052 | Medium | Confirmed | Correctness | 27–32 | `setLevel` for Assist, Auto, or Backup sets `handedToAlfie` and leaves `activity` at `.paused(.manualMode)`. The gallery still reads as Manual. This stand-in is Group C. | Set activity to `.active(.watching)` when a directing level is accepted. |
+
+### `CinematicCoreMacOS/CinematicCoreMacOS/Console/LiveConsole.swift`
+
+Haven't found anything vulnerable or badly coded. The reconnect task was checked against the app target's main-actor default and dropped. See `DirectorController.swift`.
+
+### `CinematicCoreMacOS/CinematicCoreMacOS/Console/Gallery/DirectorControlDemo.swift`
+
+The main-actor `cards` warning is real and is already fixed on open PR #28. Start after that PR merges. Group C.
+
+Haven't found anything vulnerable or badly coded in the rest of `Director/` (authority, console API, evidence adapter, judge, preferences, proposal, qualification store, replay fixtures, gallery catalog, gallery presentation, mode control, preferences store, style settings view), `DirectorEvidenceReadings.swift`, `Console/` other than the files above, `Speech/`, or `Hardware/`.
+
 ## Checklist
 
 - [ ] `.gitattributes`
@@ -406,30 +458,30 @@ The unit tests scanned below had real assertions. A line-by-line read is still o
 - [x] `CinematicCoreMacOS/CinematicCoreMacOS/CinematicCoreMacOS-Bridging-Header.h`
 - [x] `CinematicCoreMacOS/CinematicCoreMacOS/CinematicCoreMacOS.entitlements`
 - [x] `CinematicCoreMacOS/CinematicCoreMacOS/CinematicCoreMacOSApp.swift`
-- [ ] `CinematicCoreMacOS/CinematicCoreMacOS/Console/ChannelID.swift`
-- [ ] `CinematicCoreMacOS/CinematicCoreMacOS/Console/ConsoleActions.swift`
-- [ ] `CinematicCoreMacOS/CinematicCoreMacOS/Console/ConsolePresentation.swift`
-- [ ] `CinematicCoreMacOS/CinematicCoreMacOS/Console/ConsoleSnapshot.swift`
-- [ ] `CinematicCoreMacOS/CinematicCoreMacOS/Console/FakeConsoleModel.swift`
-- [ ] `CinematicCoreMacOS/CinematicCoreMacOS/Console/Gallery/DirectorControlDemo.swift`
-- [ ] `CinematicCoreMacOS/CinematicCoreMacOS/Console/Gallery/DirectorDemo.swift`
-- [ ] `CinematicCoreMacOS/CinematicCoreMacOS/Console/Gallery/DirectorNextDemo.swift`
-- [ ] `CinematicCoreMacOS/CinematicCoreMacOS/Console/Gallery/MultiviewGallery.swift`
-- [ ] `CinematicCoreMacOS/CinematicCoreMacOS/Console/Gallery/NextPanelDemo.swift`
-- [ ] `CinematicCoreMacOS/CinematicCoreMacOS/Console/Gallery/PanesDemo.swift`
-- [ ] `CinematicCoreMacOS/CinematicCoreMacOS/Console/Gallery/PillDemo.swift`
-- [ ] `CinematicCoreMacOS/CinematicCoreMacOS/Console/Gallery/TakeBarDemo.swift`
-- [ ] `CinematicCoreMacOS/CinematicCoreMacOS/Console/LiveConsole.swift`
-- [ ] `CinematicCoreMacOS/CinematicCoreMacOS/Console/LiveTilePicture.swift`
-- [ ] `CinematicCoreMacOS/CinematicCoreMacOS/Console/MultiviewConsoleView.swift`
-- [ ] `CinematicCoreMacOS/CinematicCoreMacOS/Console/MultiviewLayout.swift`
-- [ ] `CinematicCoreMacOS/CinematicCoreMacOS/Console/NextShotPanel.swift`
-- [ ] `CinematicCoreMacOS/CinematicCoreMacOS/Console/NextShotStatus.swift`
-- [ ] `CinematicCoreMacOS/CinematicCoreMacOS/Console/PaneOverlayState.swift`
-- [ ] `CinematicCoreMacOS/CinematicCoreMacOS/Console/ProgramPreviewPane.swift`
-- [ ] `CinematicCoreMacOS/CinematicCoreMacOS/Console/SingleCameraConsole.swift`
-- [ ] `CinematicCoreMacOS/CinematicCoreMacOS/Console/TakeAvailability.swift`
-- [ ] `CinematicCoreMacOS/CinematicCoreMacOS/Console/TakeBarView.swift`
+- [x] `CinematicCoreMacOS/CinematicCoreMacOS/Console/ChannelID.swift`
+- [x] `CinematicCoreMacOS/CinematicCoreMacOS/Console/ConsoleActions.swift`
+- [x] `CinematicCoreMacOS/CinematicCoreMacOS/Console/ConsolePresentation.swift`
+- [x] `CinematicCoreMacOS/CinematicCoreMacOS/Console/ConsoleSnapshot.swift`
+- [x] `CinematicCoreMacOS/CinematicCoreMacOS/Console/FakeConsoleModel.swift`
+- [x] `CinematicCoreMacOS/CinematicCoreMacOS/Console/Gallery/DirectorControlDemo.swift`
+- [x] `CinematicCoreMacOS/CinematicCoreMacOS/Console/Gallery/DirectorDemo.swift`
+- [x] `CinematicCoreMacOS/CinematicCoreMacOS/Console/Gallery/DirectorNextDemo.swift`
+- [x] `CinematicCoreMacOS/CinematicCoreMacOS/Console/Gallery/MultiviewGallery.swift`
+- [x] `CinematicCoreMacOS/CinematicCoreMacOS/Console/Gallery/NextPanelDemo.swift`
+- [x] `CinematicCoreMacOS/CinematicCoreMacOS/Console/Gallery/PanesDemo.swift`
+- [x] `CinematicCoreMacOS/CinematicCoreMacOS/Console/Gallery/PillDemo.swift`
+- [x] `CinematicCoreMacOS/CinematicCoreMacOS/Console/Gallery/TakeBarDemo.swift`
+- [x] `CinematicCoreMacOS/CinematicCoreMacOS/Console/LiveConsole.swift`
+- [x] `CinematicCoreMacOS/CinematicCoreMacOS/Console/LiveTilePicture.swift`
+- [x] `CinematicCoreMacOS/CinematicCoreMacOS/Console/MultiviewConsoleView.swift`
+- [x] `CinematicCoreMacOS/CinematicCoreMacOS/Console/MultiviewLayout.swift`
+- [x] `CinematicCoreMacOS/CinematicCoreMacOS/Console/NextShotPanel.swift`
+- [x] `CinematicCoreMacOS/CinematicCoreMacOS/Console/NextShotStatus.swift`
+- [x] `CinematicCoreMacOS/CinematicCoreMacOS/Console/PaneOverlayState.swift`
+- [x] `CinematicCoreMacOS/CinematicCoreMacOS/Console/ProgramPreviewPane.swift`
+- [x] `CinematicCoreMacOS/CinematicCoreMacOS/Console/SingleCameraConsole.swift`
+- [x] `CinematicCoreMacOS/CinematicCoreMacOS/Console/TakeAvailability.swift`
+- [x] `CinematicCoreMacOS/CinematicCoreMacOS/Console/TakeBarView.swift`
 - [x] `CinematicCoreMacOS/CinematicCoreMacOS/ContentView.swift`
 - [x] `CinematicCoreMacOS/CinematicCoreMacOS/ControlTarget.swift`
 - [x] `CinematicCoreMacOS/CinematicCoreMacOS/CropEngine.swift`
@@ -442,32 +494,32 @@ The unit tests scanned below had real assertions. A line-by-line read is still o
 - [x] `CinematicCoreMacOS/CinematicCoreMacOS/DetectionSettingsView.swift`
 - [x] `CinematicCoreMacOS/CinematicCoreMacOS/DeveloperFlags.swift`
 - [x] `CinematicCoreMacOS/CinematicCoreMacOS/DiagnosticsLog.swift`
-- [ ] `CinematicCoreMacOS/CinematicCoreMacOS/Director/DirectorAuthority.swift`
-- [ ] `CinematicCoreMacOS/CinematicCoreMacOS/Director/DirectorConsoleAPI.swift`
-- [ ] `CinematicCoreMacOS/CinematicCoreMacOS/Director/DirectorController.swift`
-- [ ] `CinematicCoreMacOS/CinematicCoreMacOS/Director/DirectorEvidenceAdapter.swift`
-- [ ] `CinematicCoreMacOS/CinematicCoreMacOS/Director/DirectorJudge.swift`
-- [ ] `CinematicCoreMacOS/CinematicCoreMacOS/Director/DirectorPreferences.swift`
-- [ ] `CinematicCoreMacOS/CinematicCoreMacOS/Director/DirectorProposal.swift`
-- [ ] `CinematicCoreMacOS/CinematicCoreMacOS/Director/DirectorQualificationStore.swift`
-- [ ] `CinematicCoreMacOS/CinematicCoreMacOS/Director/DirectorShotPolicy.swift`
-- [ ] `CinematicCoreMacOS/CinematicCoreMacOS/Director/Replay/DirectorReplay.swift`
-- [ ] `CinematicCoreMacOS/CinematicCoreMacOS/Director/Replay/DirectorReplayFixtures.swift`
-- [ ] `CinematicCoreMacOS/CinematicCoreMacOS/Director/UI/DirectorGalleryCatalog.swift`
-- [ ] `CinematicCoreMacOS/CinematicCoreMacOS/Director/UI/DirectorGalleryPresentation.swift`
-- [ ] `CinematicCoreMacOS/CinematicCoreMacOS/Director/UI/DirectorModeControl.swift`
-- [ ] `CinematicCoreMacOS/CinematicCoreMacOS/Director/UI/DirectorPreferencesStore.swift`
-- [ ] `CinematicCoreMacOS/CinematicCoreMacOS/Director/UI/DirectorStyleEditor.swift`
-- [ ] `CinematicCoreMacOS/CinematicCoreMacOS/Director/UI/DirectorStyleSettingsView.swift`
-- [ ] `CinematicCoreMacOS/CinematicCoreMacOS/Director/UI/FakeDirectorConsole.swift`
-- [ ] `CinematicCoreMacOS/CinematicCoreMacOS/DirectorEvidenceReadings.swift`
+- [x] `CinematicCoreMacOS/CinematicCoreMacOS/Director/DirectorAuthority.swift`
+- [x] `CinematicCoreMacOS/CinematicCoreMacOS/Director/DirectorConsoleAPI.swift`
+- [x] `CinematicCoreMacOS/CinematicCoreMacOS/Director/DirectorController.swift`
+- [x] `CinematicCoreMacOS/CinematicCoreMacOS/Director/DirectorEvidenceAdapter.swift`
+- [x] `CinematicCoreMacOS/CinematicCoreMacOS/Director/DirectorJudge.swift`
+- [x] `CinematicCoreMacOS/CinematicCoreMacOS/Director/DirectorPreferences.swift`
+- [x] `CinematicCoreMacOS/CinematicCoreMacOS/Director/DirectorProposal.swift`
+- [x] `CinematicCoreMacOS/CinematicCoreMacOS/Director/DirectorQualificationStore.swift`
+- [x] `CinematicCoreMacOS/CinematicCoreMacOS/Director/DirectorShotPolicy.swift`
+- [x] `CinematicCoreMacOS/CinematicCoreMacOS/Director/Replay/DirectorReplay.swift`
+- [x] `CinematicCoreMacOS/CinematicCoreMacOS/Director/Replay/DirectorReplayFixtures.swift`
+- [x] `CinematicCoreMacOS/CinematicCoreMacOS/Director/UI/DirectorGalleryCatalog.swift`
+- [x] `CinematicCoreMacOS/CinematicCoreMacOS/Director/UI/DirectorGalleryPresentation.swift`
+- [x] `CinematicCoreMacOS/CinematicCoreMacOS/Director/UI/DirectorModeControl.swift`
+- [x] `CinematicCoreMacOS/CinematicCoreMacOS/Director/UI/DirectorPreferencesStore.swift`
+- [x] `CinematicCoreMacOS/CinematicCoreMacOS/Director/UI/DirectorStyleEditor.swift`
+- [x] `CinematicCoreMacOS/CinematicCoreMacOS/Director/UI/DirectorStyleSettingsView.swift`
+- [x] `CinematicCoreMacOS/CinematicCoreMacOS/Director/UI/FakeDirectorConsole.swift`
+- [x] `CinematicCoreMacOS/CinematicCoreMacOS/DirectorEvidenceReadings.swift`
 - [x] `CinematicCoreMacOS/CinematicCoreMacOS/DisplayOutputSink.swift`
 - [x] `CinematicCoreMacOS/CinematicCoreMacOS/FaceSignatureExtractor.swift`
 - [x] `CinematicCoreMacOS/CinematicCoreMacOS/FrameWorkScheduler.swift`
 - [x] `CinematicCoreMacOS/CinematicCoreMacOS/FramingCapability.swift`
-- [ ] `CinematicCoreMacOS/CinematicCoreMacOS/Hardware/HardwareLink.swift`
-- [ ] `CinematicCoreMacOS/CinematicCoreMacOS/Hardware/HardwareWireCodec.swift`
-- [ ] `CinematicCoreMacOS/CinematicCoreMacOS/Hardware/SimulatedHardwareDevice.swift`
+- [x] `CinematicCoreMacOS/CinematicCoreMacOS/Hardware/HardwareLink.swift`
+- [x] `CinematicCoreMacOS/CinematicCoreMacOS/Hardware/HardwareWireCodec.swift`
+- [x] `CinematicCoreMacOS/CinematicCoreMacOS/Hardware/SimulatedHardwareDevice.swift`
 - [x] `CinematicCoreMacOS/CinematicCoreMacOS/InputStripView.swift`
 - [x] `CinematicCoreMacOS/CinematicCoreMacOS/InputTileModel.swift`
 - [x] `CinematicCoreMacOS/CinematicCoreMacOS/InputTileView.swift`
@@ -496,8 +548,8 @@ The unit tests scanned below had real assertions. A line-by-line read is still o
 - [x] `CinematicCoreMacOS/CinematicCoreMacOS/ShowSetupModel.swift`
 - [x] `CinematicCoreMacOS/CinematicCoreMacOS/ShowSetupView.swift`
 - [x] `CinematicCoreMacOS/CinematicCoreMacOS/ShowStandard.swift`
-- [ ] `CinematicCoreMacOS/CinematicCoreMacOS/Speech/SpeechCommandGrammar.swift`
-- [ ] `CinematicCoreMacOS/CinematicCoreMacOS/Speech/VoiceCommandAdapter.swift`
+- [x] `CinematicCoreMacOS/CinematicCoreMacOS/Speech/SpeechCommandGrammar.swift`
+- [x] `CinematicCoreMacOS/CinematicCoreMacOS/Speech/VoiceCommandAdapter.swift`
 - [x] `CinematicCoreMacOS/CinematicCoreMacOS/StoppedScreen.swift`
 - [x] `CinematicCoreMacOS/CinematicCoreMacOS/StripDemo.swift`
 - [x] `CinematicCoreMacOS/CinematicCoreMacOS/SystemExtensionActivationManager.swift`
@@ -599,7 +651,7 @@ Not started.
 
 ## Not reviewed
 
-Every unchecked box above. The capture, output, and app/Python passes are written up. Director and console, plus the unit tests listed above, are still open. Open Stage 3 pull requests that are not in this commit: #18 (A-08 replay), #21 (A-09 shadow record), #23 (C-06 next-cut notice), #25 (A-10 assist policy), #26 (A-11 take permit), #28 (C-02 test warnings), #29 (CI docs and workflows, not product code).
+Every unchecked box above. Capture, output, app, Python, director, and console are written up. Docs, and the unit tests named in those sections, are still open. Two proposed High races in the director controller and live console were dropped: the app target's default isolation is MainActor, and the unit build did not warn on those lines. Open Stage 3 pull requests that are not in this commit: #18 (A-08 replay), #21 (A-09 shadow record), #23 (C-06 next-cut notice), #25 (A-10 assist policy), #26 (A-11 take permit), #28 (C-02 test warnings), #29 (CI docs and workflows, not product code).
 
 ## Coverage
 
