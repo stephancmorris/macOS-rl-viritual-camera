@@ -444,7 +444,7 @@ Not started.
 
 ## Not reviewed
 
-Every unchecked box above. Four read-only passes are in progress for capture/crop, output/XPC, director/console, and the remaining app, tests, and Python. Open Stage 3 pull requests that are not in this commit: #18 (A-08 replay), #21 (A-09 shadow record), #23 (C-06 next-cut notice), #25 (A-10 assist policy), #26 (A-11 take permit), #28 (C-02 test warnings), #29 (CI docs and workflows, not product code).
+Every unchecked box above. The output, XPC, and extension pass is written up. Capture/crop, director/console, and the remaining app, tests, and Python passes are still open. Open Stage 3 pull requests that are not in this commit: #18 (A-08 replay), #21 (A-09 shadow record), #23 (C-06 next-cut notice), #25 (A-10 assist policy), #26 (A-11 take permit), #28 (C-02 test warnings), #29 (CI docs and workflows, not product code).
 
 ## Coverage
 
