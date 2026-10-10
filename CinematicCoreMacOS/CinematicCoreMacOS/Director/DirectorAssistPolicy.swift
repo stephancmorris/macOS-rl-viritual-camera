@@ -91,9 +91,10 @@ nonisolated extension DirectorShotPolicy {
         case chosen(DirectorJudgement.Ranked), abstain(AssistAbstention)
     }
 
-    static func candidates(for input: Input, parameters: Parameters, maximumObservationAge: TimeInterval) -> CandidateBuild {
+    static func candidates(for input: Input, parameters: Parameters, maximumObservationAge: TimeInterval, now: TimeInterval) -> CandidateBuild {
         let ladder = input.format.ladder
-        guard parameters.isValid, maximumObservationAge.isFinite, maximumObservationAge >= 0, input.movement.isFinite, input.movement >= 0,
+        guard now.isFinite, now >= 0, input.sampledAt.isFinite, input.sampledAt >= 0, now >= input.sampledAt,
+              parameters.isValid, maximumObservationAge.isFinite, maximumObservationAge >= 0, input.movement.isFinite, input.movement >= 0,
               input.presetScores.allSatisfy({ ladder.contains($0.key) && $0.value.isFinite && (0...1).contains($0.value) }) else {
             return .abstain(.invalidInput)
         }
@@ -104,7 +105,8 @@ nonisolated extension DirectorShotPolicy {
         case .holding: return .abstain(.recoveringSubject)
         case .confirmed:
             guard input.hasNomination, let age = input.observationAge,
-                  age.isFinite, age >= 0, age <= maximumObservationAge else { return .abstain(.evidenceUnavailable) }
+                  age.isFinite, age >= 0, (age + (now - input.sampledAt)).isFinite,
+                  age + (now - input.sampledAt) <= maximumObservationAge else { return .abstain(.evidenceUnavailable) }
             guard let ready = input.prepareReadiness else { return .abstain(.evidenceUnavailable) }
             guard ready.isReady else { return .abstain(.notReady(ready.reasons)) }
             guard parameters.cutOnMotionAllowed || input.movement <= parameters.maximumMovement else {
@@ -146,7 +148,7 @@ nonisolated extension DirectorShotPolicy {
         guard !previewIsSafeWide else { return .abstain(.previewIsSafeWide) }
         guard !p.onePreparationPerTenure || preparationHistory.preparedTenure != tenure else { return .abstain(.alreadyPrepared) }
         let values: [Candidate]
-        switch candidates(for: input, parameters: p.policy, maximumObservationAge: p.maximumObservationAge) {
+        switch candidates(for: input, parameters: p.policy, maximumObservationAge: p.maximumObservationAge, now: timeline.now) {
         case .abstain(let reason): return .abstain(reason)
         case .candidates(let built): values = built
         }

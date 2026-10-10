@@ -68,12 +68,12 @@ nonisolated struct DirectorAssistPolicyTests {
     }
     @Test func candidatesComeFromEachInputsActualPresetLadder() {
         let webcam = DirectorShot(preset: .webcam(.tight)), webcamWide = DirectorShot(preset: .webcam(.wide))
-        guard case .candidates(let stage) = P.candidates(for: input(), parameters: parameters().policy, maximumObservationAge: 2),
-              case .candidates(let web) = P.candidates(for: input(scores: [webcam: 0.8, webcamWide: 0.2], format: .webcam), parameters: parameters().policy, maximumObservationAge: 2) else { Issue.record("expected ladders"); return }
+        guard case .candidates(let stage) = P.candidates(for: input(), parameters: parameters().policy, maximumObservationAge: 2, now: 10),
+              case .candidates(let web) = P.candidates(for: input(scores: [webcam: 0.8, webcamWide: 0.2], format: .webcam), parameters: parameters().policy, maximumObservationAge: 2, now: 10) else { Issue.record("expected ladders"); return }
         #expect(stage.map(\.shot) == [wide, full, tight] && web.map(\.shot) == [webcamWide, webcam])
         #expect(stage.allSatisfy { $0.channel == .b && $0.isWide == $0.shot.isWide })
-        #expect(P.candidates(for: input(scores: [webcam: 0.8]), parameters: parameters().policy, maximumObservationAge: 2) == .abstain(.invalidInput))
-        #expect(P.candidates(for: input(scores: [:]), parameters: parameters().policy, maximumObservationAge: 2) == .abstain(.evidenceUnavailable))
+        #expect(P.candidates(for: input(scores: [webcam: 0.8]), parameters: parameters().policy, maximumObservationAge: 2, now: 10) == .abstain(.invalidInput))
+        #expect(P.candidates(for: input(scores: [:]), parameters: parameters().policy, maximumObservationAge: 2, now: 10) == .abstain(.evidenceUnavailable))
     }
     @Test func protectedWideAndMissingPreviewAlwaysAbstain() {
         #expect(decide(input(), safe: true) == .abstain(.previewIsSafeWide))
@@ -210,6 +210,15 @@ nonisolated struct DirectorAssistPolicyTests {
             sinkFactory: { outcome in sinkCalls += 1; return SimulatedDirectorEffectSink(succeeds: outcome) }, judge: judge)
         #expect(report.proposalCount == 0 && report.preparationsCommitted == 0 && sinkCalls == 0)
         #expect(report.directorCuts == 0 && report.evidence == .synthetic)
+    }
+
+    @Test(arguments: [1.0, 2.0])
+    func observationAgeIncludesTimeElapsedSinceSampling(age: Double) {
+        // sampledAt=9, now=10, maximumObservationAge=2: age=1 is the
+        // exact current-age boundary; age=2 has become stale in the queue.
+        let result = decide(input(sampledAt: 9, age: age))
+        if age == 1 { guard case .chosen = result else { Issue.record("current age boundary should pass"); return } }
+        else { #expect(result == .abstain(.evidenceUnavailable)) }
     }
 
 }
