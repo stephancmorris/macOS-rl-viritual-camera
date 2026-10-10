@@ -36,7 +36,7 @@ These are 1280-point offscreen SwiftUI captures of the INPUT-STRIP, SHOW-SETUP a
 
 ## Director
 
-C-01 gallery cards for every director state. Plain words only. A level without a qualification record is greyed out and reads "not qualified". Every launch card is Manual. The Auto notice uses a 2 second fixture; that length is not a product default. The run sheet strip is the recommended layout; its format is still open. Controls are shown, not wired.
+C-01 gallery cards for every director state, using `NextShotStatus.DirectorSection` sentences. A level without a qualification record is greyed out and reads "not qualified". Every launch card is `atLaunch`. The Auto notice uses a 2 second fixture; that length is not a product default. The run sheet strip is the recommended layout; its format is still open. Controls are shown, not wired. Two contract lines have no typed reason yet and are not shown: "Program lost: Take Cam A?" and "Both inputs stale".
 
 | State | Capture |
 | --- | --- |
@@ -51,6 +51,6 @@ C-01 gallery cards for every director state. Plain words only. A level without a
 | Auto · holding your cut | [director-nudge.png](director-nudge.png) |
 | Backup · next cut, no countdown | [director-backup-next.png](director-backup-next.png) |
 | Backup · paused after fallback | [director-backup-fallback.png](director-backup-fallback.png) |
-| Program lost · operator decides | [director-program-lost.png](director-program-lost.png) |
-| Both inputs stale | [director-both-stale.png](director-both-stale.png) |
+| Paused · camera lost | [director-source-lost.png](director-source-lost.png) |
+| Paused · editing Program live | [director-edit-live.png](director-edit-live.png) |
 | Run sheet · panel | [director-run-sheet.png](director-run-sheet.png) |

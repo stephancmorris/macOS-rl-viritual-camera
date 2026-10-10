@@ -31,7 +31,8 @@ struct DirectorDemo: View {
 struct DirectorStateCard: View {
     let item: DirectorGalleryCase
 
-    private var section: DirectorSectionMirror { item.section }
+    private var section: NextShotStatus.DirectorSection { item.section }
+    private var presentation: DirectorGalleryPresentation { DirectorGalleryPresentation(item.section) }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
@@ -42,7 +43,7 @@ struct DirectorStateCard: View {
             modeRow
             handRow
             statusBlock
-            if let channel = section.badgeChannel {
+            if let channel = presentation.badgeChannel {
                 badgeTile(channel)
             }
             if section.runSheet != nil {
@@ -64,13 +65,13 @@ struct DirectorStateCard: View {
 
     private var modeRow: some View {
         HStack(spacing: 8) {
-            ForEach(section.modeChips, id: \.level) { chip in
+            ForEach(presentation.modeChips, id: \.level) { chip in
                 modeChip(chip)
             }
         }
     }
 
-    private func modeChip(_ chip: DirectorSectionMirror.ModeChip) -> some View {
+    private func modeChip(_ chip: DirectorGalleryPresentation.ModeChip) -> some View {
         VStack(spacing: 2) {
             Text(chip.title)
                 .font(.system(size: 13, weight: chip.selected ? .semibold : .regular))
@@ -97,7 +98,7 @@ struct DirectorStateCard: View {
     }
 
     private var handRow: some View {
-        let hand = section.handControl
+        let hand = presentation.handControl
         return HStack(spacing: 0) {
             handSegment(hand.manualTitle, selected: hand.manualSelected)
             handSegment(hand.handTitle, selected: !hand.manualSelected)
@@ -138,7 +139,7 @@ struct DirectorStateCard: View {
                     .foregroundStyle(.white.opacity(0.85))
                     .fixedSize(horizontal: false, vertical: true)
             }
-            if let next = section.nextCutLine {
+            if let next = section.nextCut?.line {
                 Text(next)
                     .font(.system(size: 13, weight: .semibold))
                     .foregroundStyle(.white)
@@ -150,7 +151,7 @@ struct DirectorStateCard: View {
 
     private func badgeTile(_ channel: ChannelID) -> some View {
         let slot = InputTileModel.Slot(rawValue: channel.letter) ?? .B
-        let shot = section.prepared?.shotName ?? "Wide"
+        let shot = section.prepared?.shot.title ?? "Wide"
         let tile = InputTileModel(
             slot: slot,
             isAssigned: true,
@@ -162,7 +163,7 @@ struct DirectorStateCard: View {
         return InputTileView(
             model: tile,
             onCue: { _ in },
-            directorBadge: section.showsAutoBadge(on: channel) ? DirectorSectionMirror.autoBadge : nil)
+            directorBadge: section.showsAutoBadge(on: channel) ? NextShotStatus.DirectorSection.autoBadge : nil)
     }
 
     private var runSheetRow: some View {
@@ -188,7 +189,7 @@ struct DirectorStateCard: View {
             }
         }
         .accessibilityElement(children: .ignore)
-        .accessibilityLabel(section.runSheetAccessibilityLabel ?? "Run sheet")
+        .accessibilityLabel(presentation.runSheetAccessibilityLabel ?? "Run sheet")
     }
 
     private func sheetColumn(_ label: String, _ value: String) -> some View {
