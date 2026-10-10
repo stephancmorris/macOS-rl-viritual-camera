@@ -97,8 +97,11 @@ final class ShowCoordinator: ObservableObject {
 
     /// Stop and drop a non-Program channel. The Program channel cannot be
     /// removed (the show would have no source); stop the show instead.
+    /// Channel A is never removed either: it is the show's home channel and
+    /// `channelA` relies on it, so after a Take to B, A stays as Preview
+    /// (CR-019).
     func removeChannel(_ id: ChannelID) {
-        guard id != programChannel, let channel = channels[id] else { return }
+        guard id != programChannel, id != .a, let channel = channels[id] else { return }
         channel.stopCapture()
         channels[id] = nil
         retarget()

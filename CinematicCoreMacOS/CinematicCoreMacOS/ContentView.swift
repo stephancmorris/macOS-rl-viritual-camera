@@ -171,6 +171,14 @@ struct ContentView: View {
         } message: { error in
             Text(error.localizedDescription)
         }
+        .alert(systemExtensionManager.summaryText, isPresented: $showSystemExtensionStatus) {
+            if let action = systemExtensionManager.primaryActionTitle {
+                Button(action) { Task { await systemExtensionManager.triggerPrimaryAction() } }
+            }
+            Button("OK", role: .cancel) { showSystemExtensionStatus = false }
+        } message: {
+            Text(systemExtensionManager.detailText)
+        }
     }
 
     /// Preview tap handler. While discovering a subject (operator tapped
@@ -212,10 +220,32 @@ struct ContentView: View {
             let extensionReady = await systemExtensionManager.ensureInstalledForSessionStart()
             if !extensionReady {
                 showSystemExtensionStatus = true
+                // Without the virtual camera, Program would have nowhere to go
+                // unless Direct output is the chosen, connected destination
+                // (CR-036).
+                let directOutputAvailable = ProgramDisplaySelection.resolvedTargetDisplayID()
+                    .flatMap(ProgramDisplaySelection.screen(for:)) != nil
+                if Self.startNeedsVirtualCamera(preferredRoute: cameraManager.programOutput.preferredRoute,
+                                                directOutputAvailable: directOutputAvailable) {
+                    return
+                }
             }
         }
 
         cameraManager.dispatch(command)
+    }
+
+    /// Whether Start must wait for the virtual camera. Direct output on a
+    /// connected port, or the development rehearsal route, carries Program
+    /// without it. Anything else resolves to the virtual camera (it is also
+    /// the fallback when the chosen port is missing).
+    static func startNeedsVirtualCamera(preferredRoute: ProgramOutputManager.Route,
+                                        directOutputAvailable: Bool) -> Bool {
+        switch preferredRoute {
+        case .display: return !directOutputAvailable
+        case .rehearsal: return false
+        case .virtualCamera: return true
+        }
     }
 
     private func toggleCamera() {
