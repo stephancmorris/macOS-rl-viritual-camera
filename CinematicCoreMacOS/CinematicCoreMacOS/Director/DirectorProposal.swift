@@ -15,6 +15,14 @@ nonisolated struct DirectorShot: Equatable, Hashable, Sendable {
         }
     }
 
+    /// The operator's name for the shot, e.g. "Waist Up".
+    var title: String {
+        switch preset {
+        case .stage(let shot): return shot.title
+        case .webcam(let shot): return shot.title
+        }
+    }
+
     /// Total, deterministic order: Stage before Webcam, then each format's
     /// ladder from widest to tightest.
     var order: Int {

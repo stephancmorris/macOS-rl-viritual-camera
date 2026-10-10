@@ -100,9 +100,4 @@ nonisolated struct DirectorAuthority: Equatable, Sendable {
         }
         return Transition(state: self, cancellations: cancellations, refusal: refusal)
     }
-    func section(proposal: ChannelID? = nil, reason: String? = nil) -> NextShotStatus.DirectorSection {
-        let mode: NextShotStatus.DirectorSection.Mode = level == .off ? .off : level == .suggest ? .suggest : .auto
-        return .init(mode: mode, proposal: mayPropose ? proposal : nil, reason: reason,
-                     countdown: nil, authority: mayPrepare ? .directorMayCue : .operatorOnly)
-    }
 }
