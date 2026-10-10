@@ -4,7 +4,7 @@ import Foundation
 nonisolated struct DirectorReplay {
     struct Event: Sendable {
         enum Action: Sendable {
-            case subject(channel: ChannelID, present: Bool, confidence: Double,
+            case subject(channel: ChannelID, present: Bool, identity: IdentityEvidence,
                          intended: Bool, framingReady: Bool, movement: Double)
             case source(channel: ChannelID, missing: Bool)
             case render(channel: ChannelID)
@@ -61,7 +61,7 @@ nonisolated struct DirectorReplay {
     }
     struct Channel: Sendable {
         var present = false
-        var confidence = 0.0
+        var identity = IdentityEvidence.unavailable
         var intended = false
         var framingReady = false
         var movement = 0.0
@@ -129,11 +129,7 @@ nonisolated struct DirectorReplay {
                 evidenceAvailable: channels[target]?.present == true && authority.evidenceAvailable &&
                     channels[target]?.lastEvidenceAt.map { now >= $0 && now - $0 <= maximumEvidenceAge } == true &&
                     channels[target]?.movement.isFinite == true && (channels[target]?.movement ?? -1) >= 0 &&
-                    channels[target]?.confidence.isFinite == true &&
-                    (channels[target]?.confidence ?? 0) >= readinessParameters.minimumIdentityConfidence &&
-                    readinessParameters.minimumIdentityConfidence.isFinite &&
-                    (0...1).contains(readinessParameters.minimumIdentityConfidence) &&
-                    (0...1).contains(channels[target]?.confidence ?? -1))
+                    channels[target]?.identity == .confirmed && readinessParameters.isValid)
             let validation = preparation.validate(effect.request, live: live, now: now)
             if case .stale(let reasons) = validation {
                 recordStale(effect.proposalID, reasons); rejectedAttempts += 1
@@ -210,11 +206,7 @@ nonisolated struct DirectorReplay {
                 evidenceAvailable: channels[target]?.present == true && authority.evidenceAvailable &&
                     channels[target]?.lastEvidenceAt.map { now >= $0 && now - $0 <= maximumEvidenceAge } == true &&
                     channels[target]?.movement.isFinite == true && (channels[target]?.movement ?? -1) >= 0 &&
-                    channels[target]?.confidence.isFinite == true &&
-                    (channels[target]?.confidence ?? 0) >= readinessParameters.minimumIdentityConfidence &&
-                    readinessParameters.minimumIdentityConfidence.isFinite &&
-                    (0...1).contains(readinessParameters.minimumIdentityConfidence) &&
-                    (0...1).contains(channels[target]?.confidence ?? -1))
+                    channels[target]?.identity == .confirmed && readinessParameters.isValid)
             }
             switch event.action {
             case .manualCommand:
@@ -299,10 +291,10 @@ nonisolated struct DirectorReplay {
             case .healthRestored: authority.apply(.healthRestored)
             case .policyChange: policyRevision += 1; authority.apply(.policyChanged)
             case .nominationChange: nominationRevision += 1; authority.apply(.nominationChanged)
-            case .subject(let id, let present, let confidence, let intended, let ready, let movement):
+            case .subject(let id, let present, let identity, let intended, let ready, let movement):
                 channels[id, default: Channel()].lastEvidenceAt = now
                 channels[id, default: Channel()].present = present
-                channels[id, default: Channel()].confidence = confidence
+                channels[id, default: Channel()].identity = identity
                 channels[id, default: Channel()].intended = intended
                 channels[id, default: Channel()].framingReady = ready
                 channels[id, default: Channel()].movement = movement
@@ -329,7 +321,7 @@ nonisolated struct DirectorReplay {
                live(for: preview).evidenceAvailable,
                let renderAt = channel.lastRenderAt, now - renderAt <= maximumProposalAge {
                 let candidate = DirectorShotPolicy.Candidate(channel: preview,
-                    shot: preview == .b ? shotB : shotA, subjectConfidence: channel.confidence,
+                    shot: preview == .b ? shotB : shotA, subjectConfidence: channel.identity == .confirmed ? 1 : 0,
                     movement: channel.movement, isWide: preview == .a)
                 let timeline = DirectorShotPolicy.Timeline(programShot: program == .a ? shotA : shotB,
                     programStartedAt: programStartedAt, lastWideAt: lastWideAt,
@@ -350,9 +342,9 @@ nonisolated struct DirectorReplay {
             let channel = channels[preview] ?? Channel()
             let evidence = DirectorReadiness.Inputs(take: TakeAvailability(program: program, preview: preview,
                 standard: .p50, reason: channel.missing ? .sourceMissing : nil, takePending: false, editLive: authority.editLive),
-                identityConfidence: channel.confidence,
+                identity: channel.identity,
                 framingSettledFor: channel.framingReady ? readinessParameters.minimumSettledTime : 0,
-                motion: channel.movement)
+                motion: channel.movement, cropConverged: channel.framingReady)
             if preparation.refresh(live: live(for: preview), evidence: evidence, parameters: readinessParameters).isReady {
                 readyEvaluations += 1
             }

@@ -118,43 +118,126 @@ nonisolated enum DirectorProposalValidator {
     }
 }
 
+/// What a channel's evidence says about the subject, in discrete terms. There
+/// is no invented confidence number: these are the lock states the camera
+/// already has (plan §5.2).
+nonisolated enum IdentityEvidence: Equatable, Hashable, Sendable {
+    /// Locked, face gallery ready, tracking owns framing, observation fresh.
+    case confirmed
+    /// Learning the face (lock not yet ready). A temporary gap.
+    case acquiring
+    /// Recovering a brief loss. A temporary gap.
+    case holding
+    /// The composer pulled back to wide: the subject has gone (N5).
+    case lost
+    /// More than one plausible person (a crossing, a panel). Use a wider shot (P2).
+    case ambiguous
+    /// No subject, the operator is framing manually, or observations are stale.
+    case unavailable
+
+    /// Classifies one sample. Fails closed: invalid ages read as unavailable.
+    static func classify(_ sample: ChannelEvidenceSample,
+                         maximumObservationAge: TimeInterval) -> IdentityEvidence {
+        if sample.lockPhase == .wideWaiting { return .lost }
+        guard sample.lockPhase != .inactive, sample.lockedTargetID != nil,
+              sample.trackingOwnsControl else { return .unavailable }
+        switch sample.lockPhase {
+        case .acquiring: return .acquiring
+        case .hold: return .holding
+        case .inactive, .wideWaiting: return .unavailable
+        case .tracking: break
+        }
+        guard sample.galleryReady else { return .acquiring }
+        guard maximumObservationAge.isFinite, maximumObservationAge >= 0,
+              let age = sample.observationAge, age.isFinite, age >= 0,
+              age <= maximumObservationAge else { return .unavailable }
+        return sample.observedPersonCount >= 2 ? .ambiguous : .confirmed
+    }
+}
+
+/// One channel's evidence at one moment: the shared contract between the
+/// engine (which reads the camera) and the Director's pure logic. Values only;
+/// no camera, actor or clock access.
+nonisolated struct ChannelEvidenceSample: Equatable, Sendable {
+    let channel: ChannelID
+    /// Host-clock time the sample was taken.
+    let sampledAt: TimeInterval
+    let lockPhase: RecoveryState.Phase
+    let trackingOwnsControl: Bool
+    let galleryReady: Bool
+    let lockedTargetID: UUID?
+    /// Seconds since the newest detection observation; nil if none yet.
+    let observationAge: TimeInterval?
+    /// Smoothed subject speed, normalized frame units per second.
+    let subjectSpeed: Double
+    /// The composer has concluded the subject settled and is holding.
+    let holdingSteady: Bool
+    /// The crop has reached its target (no interpolation or zoom move).
+    let cropConverged: Bool
+    /// The operator has a gesture in flight on this channel (inhibit only).
+    let operatorGestureInProgress: Bool
+    /// People in the newest fresh observation (the subject ROI while locked).
+    let observedPersonCount: Int
+}
+
+/// Two bars (P1): prepare-ready lets the Director set up Preview; cut-ready is
+/// stricter and is required before any automatic cut. Neither ever blocks an
+/// operator Take.
 nonisolated struct DirectorReadiness: Equatable, Sendable {
+    enum Bar: Equatable, Sendable { case prepare, cut }
     struct Inputs: Sendable {
         let take: TakeAvailability
-        let identityConfidence: Double
+        let identity: IdentityEvidence
         let framingSettledFor: TimeInterval
         let motion: Double
+        let cropConverged: Bool
     }
+    /// Study parameters only; there are no defaults. The cut bar must be at
+    /// least as strict as the prepare bar.
     struct Parameters: Sendable {
-        let minimumIdentityConfidence: Double
         let minimumSettledTime: TimeInterval
         let maximumMotion: Double
         let cutOnMotionAllowed: Bool
+        let minimumCutSettledTime: TimeInterval
+        let maximumCutMotion: Double
+
+        var isValid: Bool {
+            minimumSettledTime.isFinite && minimumSettledTime >= 0 &&
+            maximumMotion.isFinite && maximumMotion >= 0 &&
+            minimumCutSettledTime.isFinite && minimumCutSettledTime >= minimumSettledTime &&
+            maximumCutMotion.isFinite && maximumCutMotion >= 0 && maximumCutMotion <= maximumMotion
+        }
     }
     enum Reason: Hashable, Sendable {
-        case compositionUnavailable, evidenceUnavailable, takeUnavailable, invalidParameters, invalidEvidence, identityUncertain, framingUnsettled, moving
+        case compositionUnavailable, evidenceUnavailable, takeUnavailable, invalidParameters, invalidEvidence
+        case identityUncertain, framingUnsettled, moving, cropMoving
     }
     let reasons: [Reason]
     var isReady: Bool { reasons.isEmpty }
-    static func evaluate(_ input: Inputs, parameters: Parameters) -> DirectorReadiness {
+
+    static func evaluate(_ input: Inputs, parameters: Parameters, bar: Bar = .prepare) -> DirectorReadiness {
         var reasons: [Reason] = []
         if !input.take.isEligible { reasons.append(.takeUnavailable) }
-        guard parameters.minimumIdentityConfidence.isFinite,
-              (0...1).contains(parameters.minimumIdentityConfidence),
-              parameters.minimumSettledTime.isFinite, parameters.minimumSettledTime >= 0,
-              parameters.maximumMotion.isFinite, parameters.maximumMotion >= 0 else {
+        guard parameters.isValid else {
             reasons.append(.invalidParameters)
             return .init(reasons: reasons)
         }
-        guard input.identityConfidence.isFinite, (0...1).contains(input.identityConfidence),
-              input.framingSettledFor.isFinite, input.framingSettledFor >= 0,
+        guard input.framingSettledFor.isFinite, input.framingSettledFor >= 0,
               input.motion.isFinite, input.motion >= 0 else {
             reasons.append(.invalidEvidence)
             return .init(reasons: reasons)
         }
-        if input.identityConfidence < parameters.minimumIdentityConfidence { reasons.append(.identityUncertain) }
-        if input.framingSettledFor < parameters.minimumSettledTime { reasons.append(.framingUnsettled) }
-        if !parameters.cutOnMotionAllowed && input.motion > parameters.maximumMotion { reasons.append(.moving) }
+        if input.identity != .confirmed { reasons.append(.identityUncertain) }
+        switch bar {
+        case .prepare:
+            if input.framingSettledFor < parameters.minimumSettledTime { reasons.append(.framingUnsettled) }
+            if !parameters.cutOnMotionAllowed && input.motion > parameters.maximumMotion { reasons.append(.moving) }
+        case .cut:
+            // Not mid-stride and framing landed, whatever the prepare policy allows.
+            if input.framingSettledFor < parameters.minimumCutSettledTime { reasons.append(.framingUnsettled) }
+            if input.motion > parameters.maximumCutMotion { reasons.append(.moving) }
+            if !input.cropConverged { reasons.append(.cropMoving) }
+        }
         return .init(reasons: reasons)
     }
 }
@@ -254,7 +337,8 @@ nonisolated struct DirectorPreparation {
         return true
     }
     mutating func refresh(live: DirectorLiveState, evidence: DirectorReadiness.Inputs,
-                          parameters: DirectorReadiness.Parameters) -> DirectorReadiness {
+                          parameters: DirectorReadiness.Parameters,
+                          bar: DirectorReadiness.Bar = .prepare) -> DirectorReadiness {
         guard let prepared = composition,
               Self.contextValid(prepared.intent, revisions: prepared.revisions, live: live) else {
             composition = nil
@@ -263,6 +347,6 @@ nonisolated struct DirectorPreparation {
         guard live.evidenceAvailable && live.authority.evidenceAvailable else {
             return .init(reasons: [.evidenceUnavailable])
         }
-        return DirectorReadiness.evaluate(evidence, parameters: parameters)
+        return DirectorReadiness.evaluate(evidence, parameters: parameters, bar: bar)
     }
 }
