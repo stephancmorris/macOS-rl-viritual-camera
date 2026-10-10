@@ -336,7 +336,7 @@ final class CameraManager: NSObject, ObservableObject {
 
 
     /// Operation modes for crop control
-    enum OperationMode {
+    nonisolated enum OperationMode: Sendable {
         case wide
         case autoTracking
         case manualCrop
@@ -980,6 +980,11 @@ final class CameraManager: NSObject, ObservableObject {
     func setRunningForTesting(_ running: Bool) { isRunning = running }
     /// Test seam: a rendered frame as if processFrame had produced it.
     func setLatestRenderedFrameForTesting(_ frame: RenderedChannelFrame?) { latestRenderedFrame = frame }
+    /// Test seam: a detection observation as if the frame path consumed it.
+    func recordObservationForTesting(capturedAt: TimeInterval, personCount: Int) {
+        lastObservationCapturedAt = capturedAt
+        lastObservationPersonCount = personCount
+    }
     /// Test seam: mark the source missing as a hot unplug would.
     func setSourceMissingForTesting(_ missing: Bool) { sourceMissing = missing }
     /// Test seam: the identity a configured source would have recorded.
@@ -1394,6 +1399,34 @@ final class CameraManager: NSObject, ObservableObject {
     }
 
     var canDirectlyReacquire: Bool { recoveryState.allowsDirectSelection }
+
+    // MARK: Director evidence (read-only, S3 B-01)
+
+    /// Capture time of the newest detection observation the frame path
+    /// consumed (fresh or repeat). Plain storage, never published.
+    private(set) var lastObservationCapturedAt: TimeInterval?
+    /// People in the newest *fresh* observation. While locked this counts the
+    /// subject ROI only, so 2+ means someone else is crossing the subject.
+    private(set) var lastObservationPersonCount = 0
+
+    /// Seconds since the newest observation was captured, on the host clock.
+    func observationAge(now: TimeInterval = CACurrentMediaTime()) -> TimeInterval? {
+        lastObservationCapturedAt.map { now - $0 }
+    }
+
+    /// An operator gesture that has started but not finished on this channel:
+    /// Detect armed, a tap waiting for its ROI scan, or a zoom move in flight.
+    /// A Director command now would supersede it, so the Director must wait.
+    var operatorGestureInProgress: Bool {
+        detectionDiscoveryActive || tapPending || shotMove != nil
+    }
+
+    /// The crop has reached its target: no interpolation and no zoom move.
+    var cropConverged: Bool {
+        guard let cropEngine else { return false }
+        return !cropEngine.isInterpolating && cropEngine.zoomDirection == nil
+    }
+
 
     /// Operator tapped a point on the preview to pick a subject. Stored for a
     /// one-shot ROI scan on the next frame; the scan finds the single person
@@ -1921,8 +1954,10 @@ final class CameraManager: NSObject, ObservableObject {
             }
         }
         Self.signposter.endInterval("detection", detectionInterval)
-        if let observation = observation.frame {
-            outputPort.recordObservationAge(CACurrentMediaTime() - observation.capturedAt)
+        if let frame = observation.frame {
+            outputPort.recordObservationAge(CACurrentMediaTime() - frame.capturedAt)
+            lastObservationCapturedAt = frame.capturedAt
+            if detectionIsFresh { lastObservationPersonCount = frame.persons.count }
         }
 
         let composeInterval = Self.signposter.beginInterval("compose")
