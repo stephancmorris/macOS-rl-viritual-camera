@@ -58,22 +58,21 @@ import Testing
     @Test func readinessRejectsMalformedEvidenceAndThresholds() {
         let take = TakeAvailability(program: .a, preview: .b, standard: .p50,
             reason: nil, takePending: false, editLive: false)
-        let good = DirectorReadiness.Parameters(minimumIdentityConfidence: 0.7,
-            minimumSettledTime: 0.2, maximumMotion: 0.5, cutOnMotionAllowed: true)
-        for bad in [Double.nan, Double.infinity, -0.1, 1.1] {
-            let evidence = DirectorReadiness.Inputs(take: take, identityConfidence: bad,
-                framingSettledFor: 1, motion: 0)
-            #expect(DirectorReadiness.evaluate(evidence, parameters: good).reasons.contains(.invalidEvidence))
+        let good = DirectorReadiness.Parameters(minimumSettledTime: 0.2, maximumMotion: 0.5,
+            cutOnMotionAllowed: true, minimumCutSettledTime: 0.5, maximumCutMotion: 0.1)
+        for bad in [Double.nan, Double.infinity, -1] {
+            let motion = DirectorReadiness.Inputs(take: take, identity: .confirmed,
+                framingSettledFor: 1, motion: bad, cropConverged: true)
+            #expect(DirectorReadiness.evaluate(motion, parameters: good).reasons.contains(.invalidEvidence))
+            let settled = DirectorReadiness.Inputs(take: take, identity: .confirmed,
+                framingSettledFor: bad, motion: 0, cropConverged: true)
+            #expect(DirectorReadiness.evaluate(settled, parameters: good, bar: .cut).reasons.contains(.invalidEvidence))
         }
-        let negativeMotion = DirectorReadiness.Inputs(take: take, identityConfidence: 1,
-            framingSettledFor: 1, motion: -1)
-        #expect(DirectorReadiness.evaluate(negativeMotion, parameters: good).reasons.contains(.invalidEvidence))
-        let badTime = DirectorReadiness.Inputs(take: take, identityConfidence: 1,
-            framingSettledFor: .nan, motion: 0)
-        #expect(DirectorReadiness.evaluate(badTime, parameters: good).reasons.contains(.invalidEvidence))
-        let invalid = DirectorReadiness.Parameters(minimumIdentityConfidence: .nan,
-            minimumSettledTime: 0, maximumMotion: 0, cutOnMotionAllowed: true)
-        #expect(DirectorReadiness.evaluate(negativeMotion, parameters: invalid).reasons.contains(.invalidParameters))
+        let fine = DirectorReadiness.Inputs(take: take, identity: .confirmed,
+            framingSettledFor: 1, motion: 0, cropConverged: true)
+        let invalid = DirectorReadiness.Parameters(minimumSettledTime: .nan, maximumMotion: 0,
+            cutOnMotionAllowed: true, minimumCutSettledTime: 0, maximumCutMotion: 0)
+        #expect(DirectorReadiness.evaluate(fine, parameters: invalid).reasons.contains(.invalidParameters))
     }
 }
 
@@ -83,8 +82,8 @@ extension DirectorProposalTests {
               outputHealthy: true, admissionCurrent: true)
     }
     private var thresholds: DirectorReadiness.Parameters {
-        .init(minimumIdentityConfidence: 0.7, minimumSettledTime: 0.2,
-              maximumMotion: 0.1, cutOnMotionAllowed: false)
+        .init(minimumSettledTime: 0.2, maximumMotion: 0.1, cutOnMotionAllowed: false,
+              minimumCutSettledTime: 0.5, maximumCutMotion: 0.05)
     }
     private func world() -> DirectorLiveState {
         var authority = DirectorAuthority(reviewPolicy: .conservative)
@@ -104,8 +103,8 @@ extension DirectorProposalTests {
     }
     private func evidence(_ live: DirectorLiveState, settled: Double = 1, motion: Double = 0) -> DirectorReadiness.Inputs {
         .init(take: .init(program: live.program, preview: live.preview, standard: .p50,
-            reason: nil, takePending: false, editLive: false), identityConfidence: 0.95,
-            framingSettledFor: settled, motion: motion)
+            reason: nil, takePending: false, editLive: false), identity: .confirmed,
+            framingSettledFor: settled, motion: motion, cropConverged: true)
     }
 
     @Test func acknowledgedCompositionOutlivesRequestAndRefreshesReadiness() throws {

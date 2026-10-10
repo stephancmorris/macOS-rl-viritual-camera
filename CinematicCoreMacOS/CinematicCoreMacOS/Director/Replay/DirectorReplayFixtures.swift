@@ -3,7 +3,7 @@ import Foundation
 nonisolated enum DirectorReplayFixtures {
     private static func subject(_ at: Double, channel: ChannelID = .b,
                                 intended: Bool = true, movement: Double = 0) -> DirectorReplay.Event {
-        .init(at: at, action: .subject(channel: channel, present: true, confidence: 0.95,
+        .init(at: at, action: .subject(channel: channel, present: true, identity: .confirmed,
             intended: intended, framingReady: true, movement: movement))
     }
     static let calmSermon = DirectorReplay.Fixture(name: "calm sermon", duration: 60,

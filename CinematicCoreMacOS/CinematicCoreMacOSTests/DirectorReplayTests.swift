@@ -5,7 +5,7 @@ import Testing
 @MainActor struct DirectorReplayTests {
     @Test func fiveSyntheticTimelines() {
         let reports = DirectorReplayFixtures.all.map {
-            DirectorReplay.run($0, parameters: .proposed, maximumProposalAge: 5, maximumEvidenceAge: 5, readinessParameters: .init(minimumIdentityConfidence: 0.7, minimumSettledTime: 0.2, maximumMotion: 0.1, cutOnMotionAllowed: false))
+            DirectorReplay.run($0, parameters: .proposed, maximumProposalAge: 5, maximumEvidenceAge: 5, readinessParameters: .replayStudy)
         }
         #expect(reports.count == 5)
         for report in reports {
@@ -33,7 +33,7 @@ import Testing
 
     private func ready(_ at: Double) -> [DirectorReplay.Event] {
         [.init(at: at, action: .render(channel: .b)),
-         .init(at: at, action: .subject(channel: .b, present: true, confidence: 0.95,
+         .init(at: at, action: .subject(channel: .b, present: true, identity: .confirmed,
             intended: true, framingReady: true, movement: 0))]
     }
 
@@ -42,14 +42,14 @@ import Testing
             events: ready(9) + [.init(at: 9, action: .pause)])
         let pausedFirst = DirectorReplay.Fixture(name: "paused first", duration: 20,
             events: [.init(at: 9, action: .pause)] + ready(9))
-        let a = DirectorReplay.run(ordered, parameters: .proposed, maximumProposalAge: 5, maximumEvidenceAge: 5, readinessParameters: .init(minimumIdentityConfidence: 0.7, minimumSettledTime: 0.2, maximumMotion: 0.1, cutOnMotionAllowed: false))
-        let b = DirectorReplay.run(pausedFirst, parameters: .proposed, maximumProposalAge: 5, maximumEvidenceAge: 5, readinessParameters: .init(minimumIdentityConfidence: 0.7, minimumSettledTime: 0.2, maximumMotion: 0.1, cutOnMotionAllowed: false))
+        let a = DirectorReplay.run(ordered, parameters: .proposed, maximumProposalAge: 5, maximumEvidenceAge: 5, readinessParameters: .replayStudy)
+        let b = DirectorReplay.run(pausedFirst, parameters: .proposed, maximumProposalAge: 5, maximumEvidenceAge: 5, readinessParameters: .replayStudy)
         #expect(a.proposalCount == 1)
         #expect(b.proposalCount == 0)
         #expect(a.proposalsMadeWhilePaused == 0)
         let render = DirectorReplay.Fixture(name: "render", duration: 20,
             events: ready(9) + [.init(at: 10, action: .render(channel: .b))])
-        let result = DirectorReplay.run(render, parameters: .proposed, maximumProposalAge: 5, maximumEvidenceAge: 5, readinessParameters: .init(minimumIdentityConfidence: 0.7, minimumSettledTime: 0.2, maximumMotion: 0.1, cutOnMotionAllowed: false))
+        let result = DirectorReplay.run(render, parameters: .proposed, maximumProposalAge: 5, maximumEvidenceAge: 5, readinessParameters: .replayStudy)
         #expect(result.proposalCount == 1)
         #expect(result.staleProposalsRejected[.shotChangedByOperator] == nil)
     }
@@ -58,7 +58,7 @@ import Testing
         let fixture = DirectorReplay.Fixture(name: "stale shadow", duration: 20,
             events: ready(9) + [.init(at: 10, action: .directorAttempt(id: "a", delay: 3, succeeds: true)),
                 .init(at: 11, action: .manualCommand), .init(at: 14, action: .effect(id: "a"))])
-        let report = DirectorReplay.run(fixture, parameters: .proposed, maximumProposalAge: 5, maximumEvidenceAge: 5, readinessParameters: .init(minimumIdentityConfidence: 0.7, minimumSettledTime: 0.2, maximumMotion: 0.1, cutOnMotionAllowed: false))
+        let report = DirectorReplay.run(fixture, parameters: .proposed, maximumProposalAge: 5, maximumEvidenceAge: 5, readinessParameters: .replayStudy)
         #expect(report.directorAttemptCount == 1)
         #expect(report.labelledSubjectAttempts == 1)
         #expect(report.wrongSubjectAttempts == 0)
@@ -75,7 +75,7 @@ import Testing
         let failed = DirectorReplay.Fixture(name: "failed effect", duration: 20,
             events: ready(9) + [.init(at: 10, action: .directorAttempt(id: "failed", delay: 1, succeeds: false)),
                 .init(at: 12, action: .effect(id: "failed"))])
-        let failure = DirectorReplay.run(failed, parameters: .proposed, maximumProposalAge: 5, maximumEvidenceAge: 5, readinessParameters: .init(minimumIdentityConfidence: 0.7, minimumSettledTime: 0.2, maximumMotion: 0.1, cutOnMotionAllowed: false))
+        let failure = DirectorReplay.run(failed, parameters: .proposed, maximumProposalAge: 5, maximumEvidenceAge: 5, readinessParameters: .replayStudy)
         #expect(failure.failedEffects == 1)
         #expect(failure.duplicateCallbacks == 1)
         #expect(failure.directorCuts == 0)
@@ -83,24 +83,24 @@ import Testing
             events: ready(9) + [.init(at: 10, action: .directorAttempt(id: "stopped", delay: 3, succeeds: true)),
                 .init(at: 11, action: .stop), .init(at: 12, action: .fault(.b)),
                 .init(at: 13, action: .render(channel: .b))])
-        let stop = DirectorReplay.run(stopped, parameters: .proposed, maximumProposalAge: 5, maximumEvidenceAge: 5, readinessParameters: .init(minimumIdentityConfidence: 0.7, minimumSettledTime: 0.2, maximumMotion: 0.1, cutOnMotionAllowed: false))
+        let stop = DirectorReplay.run(stopped, parameters: .proposed, maximumProposalAge: 5, maximumEvidenceAge: 5, readinessParameters: .replayStudy)
         #expect(stop.staleProposalsRejected[.authorityRevoked] == 1)
         #expect(stop.rejectedAttempts == 1)
         #expect(stop.directorCuts == 0)
         let faulted = DirectorReplay.Fixture(name: "faulted", duration: 20,
             events: ready(9) + [.init(at: 10, action: .directorAttempt(id: "faulted", delay: 3, succeeds: true)),
                 .init(at: 11, action: .fault(.b))])
-        let fault = DirectorReplay.run(faulted, parameters: .proposed, maximumProposalAge: 5, maximumEvidenceAge: 5, readinessParameters: .init(minimumIdentityConfidence: 0.7, minimumSettledTime: 0.2, maximumMotion: 0.1, cutOnMotionAllowed: false))
+        let fault = DirectorReplay.run(faulted, parameters: .proposed, maximumProposalAge: 5, maximumEvidenceAge: 5, readinessParameters: .replayStudy)
         #expect(fault.staleProposalsRejected[.sourceRestarted] == 1)
         #expect(fault.rejectedAttempts == 1)
         let bad = DirectorReplay.Fixture(name: "clock anomalies", duration: 20,
             events: ready(9) + [.init(at: .nan, action: .manualCommand),
                 .init(at: 10, action: .directorAttempt(id: "bad", delay: .nan, succeeds: true))])
-        let anomalies = DirectorReplay.run(bad, parameters: .proposed, maximumProposalAge: 5, maximumEvidenceAge: 5, readinessParameters: .init(minimumIdentityConfidence: 0.7, minimumSettledTime: 0.2, maximumMotion: 0.1, cutOnMotionAllowed: false))
+        let anomalies = DirectorReplay.run(bad, parameters: .proposed, maximumProposalAge: 5, maximumEvidenceAge: 5, readinessParameters: .replayStudy)
         #expect(anomalies.clockAnomalies == 2)
         #expect(anomalies.rejectedAttempts == 1)
         let invalidExpiry = DirectorReplay.run(failed, parameters: .proposed,
-            maximumProposalAge: .infinity, maximumEvidenceAge: 5, readinessParameters: .init(minimumIdentityConfidence: 0.7, minimumSettledTime: 0.2, maximumMotion: 0.1, cutOnMotionAllowed: false))
+            maximumProposalAge: .infinity, maximumEvidenceAge: 5, readinessParameters: .replayStudy)
         #expect(invalidExpiry.clockAnomalies == 1)
         #expect(invalidExpiry.proposalCount == 0)
     }
@@ -112,8 +112,7 @@ extension DirectorReplayTests {
         DirectorReplay.run(.init(name: "lifecycle review", duration: duration, events: events),
             parameters: .init(minimumShotDuration: 20, maximumShotDuration: 90,
                 wideCadence: 120, repetitionWindow: 20, maximumMovement: 0.1, cutOnMotionAllowed: false),
-            maximumProposalAge: 5, maximumEvidenceAge: 5, readinessParameters: .init(minimumIdentityConfidence: 0.7,
-                minimumSettledTime: 0.2, maximumMotion: 0.1, cutOnMotionAllowed: false))
+            maximumProposalAge: 5, maximumEvidenceAge: 5, readinessParameters: .replayStudy)
     }
 
     @Test(arguments: [DirectorReplay.Event.Action.manualCommand, .refusedOperatorTake,
@@ -151,10 +150,10 @@ extension DirectorReplayTests {
             .init(at: 3, action: .navigation), .init(at: 4, action: .cosmeticEdit),
             .init(at: 10, action: .evidenceGap(true)), .init(at: 20, action: .render(channel: .b)),
             .init(at: 21, action: .evidenceGap(false)),
-            .init(at: 21, action: .subject(channel: .b, present: true, confidence: 0.95,
+            .init(at: 21, action: .subject(channel: .b, present: true, identity: .confirmed,
                 intended: true, framingReady: true, movement: 0)),
             .init(at: 50, action: .render(channel: .b)),
-            .init(at: 50, action: .subject(channel: .b, present: true, confidence: 0.95,
+            .init(at: 50, action: .subject(channel: .b, present: true, identity: .confirmed,
                 intended: true, framingReady: true, movement: 0)),
             .init(at: 51, action: .directorAttempt(id: "reapply", delay: 0, succeeds: true))])
         #expect(report.proposalCount == 1 && report.preparationsCommitted == 1)
@@ -164,7 +163,7 @@ extension DirectorReplayTests {
 
     @Test func earlyMovingPreparationAndLegalManualMovingTake() {
         let events: [DirectorReplay.Event] = [.init(at: 1, action: .render(channel: .b)),
-            .init(at: 1, action: .subject(channel: .b, present: true, confidence: 0.95,
+            .init(at: 1, action: .subject(channel: .b, present: true, identity: .confirmed,
                 intended: true, framingReady: false, movement: 0.5)),
             .init(at: 2, action: .directorAttempt(id: "moving", delay: 0, succeeds: true)),
             .init(at: 3, action: .navigation)]
@@ -245,4 +244,10 @@ struct DirectorEffectAuditTests {
         #expect(DirectorReplay.audit(try effect(age: 0.6)) == [.expired])
         #expect(DirectorReplay.audit(try effect(age: -1)) == [.expired])
     }
+}
+
+extension DirectorReadiness.Parameters {
+    /// Replay study values (test fixture only; never a production default).
+    static let replayStudy = DirectorReadiness.Parameters(minimumSettledTime: 0.2, maximumMotion: 0.1,
+        cutOnMotionAllowed: false, minimumCutSettledTime: 0.2, maximumCutMotion: 0.1)
 }
