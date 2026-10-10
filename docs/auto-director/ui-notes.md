@@ -1,45 +1,33 @@
-# Decisions for Stephan
+# Director console notes
 
-| ID / question | Options | Recommendation / why | Blocks | Reversible? |
-|---|---|---|---|---|
-| U1 Director controls location? | Next-shot panel; pill; separate inspector | Next-shot panel under Preview, state always visible | AD-UI | Yes |
-| U2 Mode presentation? | Generic Auto; explicit four levels; progressive hidden levels | Explicit levels; Auto Direct shows qualification requirement until approved | AD-UI/TAKE | Yes |
+Status: reconciled 2026-10-10 for D-01. [Recorded decisions](../handoff/stage3-4/DECISIONS.md) take precedence over older proposed text. Implementation references describe the open A-07 stack at `ecbf8814b7c77c64edfd2cc4a92ff6c80d892e42`, not merged or qualified behavior. Unrecorded choices and recommendations remain **AWAITING OWNER**. See the [product contract](product-contract.md) and [event contract](event-authority-contract.md).
 
-Status: proposed text wireframes, not a rendered/usability-tested UI. 2026-09-30. Existing `ConsoleSnapshot.swift` describes roles/health/control target and `NextShotStatus.swift` reserves the director section but leaves it nil. `TakeAvailability.swift` remains authority for manual Take refusal copy.
+## Recorded operator contract
 
-## Fit at 1280×800
+U2's visible levels are **Manual · Assist · Auto · Backup**. Every launch is Manual, not handed to Alfie. A level without its own current rig qualification is greyed out with **not qualified**; selecting it is refused, not silently changed to another level. Internal shadow/Suggest is not a fifth operator level or a qualified automation claim.
 
-Retain R2 pane geometry: Preview x24 y64 w600 h338, Program x656 y64 w600 h338; next-shot x24 y414 w600 h70. Use compact two-line layout within that panel, not an overlay on Program. Proposed internal controls are 28 pt high with keyboard/VoiceOver equivalents; accessibility hit-target and truncation verification remains required. Do not shrink video or move Stop/Wide to gain room.
+A1 requires immediate takeover and one **Hand to Alfie** action to give control back. Keep manual camera controls and Return to Wide understandable and reachable. N1 means Assist operator Take starts fresh on the new Preview without pausing; Auto/Backup operator Take is a nudge, while the Manual toggle stops preparing and cutting. Do not label every Take a takeover.
 
-```text
-HEADER: Show / standard                                    [Stop show]
-PREVIEW · B                             PROGRAM · A · Routed
-[actual rendered Preview]               [actual routed frame]
+Alfie uses the operator's app preset names (N3), shows which subject it selected (E1), and allows one-tap nomination override. Uncertainty should read as a practical next step or wider-shot choice, not a probability, revision number or claim to know a person's name. P2 never blocks a legal manual Take.
 
-NEXT · B Waist Up          [Auto Prepare ▾] [Pause] [Pin]
-Ready · Nominated speaker · Take is manual          [Details]
+## Actual A-07 console seam
 
-(existing R2 Take bar, input slots and target-bound operator pill)
-```
+`NextShotStatus.DirectorSection` is a plain value. `Level` is `manual`, `assist`, `auto`, `backup`; `Activity` is `active`, `paused`, `inhibited`, or `abstaining` with typed reasons and plain-language text. Examples include “Paused: you took over”, “Waiting: a camera is not ready”, and “More than one person on Cam B · staying wide”. Diagnostic ages/revisions belong in the inspector.
 
-Proposed next-shot panel layout budget: first-row text 250 pt, mode 130, Pause 64, Pin 48 plus padding/gaps inside 600; second row reason 480 plus Details. Longer content truncates editorial description only, with full accessibility text; never truncate mode, camera identity, fault status or control labels into ambiguity. If localization cannot fit, reduce optional description rather than hide pause.
+`PreparedShot` supplies input/shot; `NextCut` supplies input, optional countdown in seconds and `cancellable`. A missing countdown can represent the proposed Backup display, not a hidden next destination. The model includes `alfieSetShot` badges, per-level `Qualification`, `handedToAlfie`, and an optional `RunSheetLine`. `atLaunch` clears preparation, next cut and badges even if qualification is present.
 
-| State | Panel text / controls |
-|---|---|
-| Off | `Director Off · Take is manual` + mode selector; no proposal |
-| Suggest | `Suggest: B Waist Up · Nominated speaker` + `Prepare` action; no countdown; operator acceptance remains bounded |
-| Auto Prepare / preparing | `Preparing B · Waiting for framing to settle` + Pause / Pin |
-| Paused by manual Take | `Auto Prepare · Paused by you` + Resume / Pin; prior proposal cleared |
-| Pinned | `Pinned Program A · Tracking may continue` + Unpin; unpin leaves paused with Resume |
-| Fault pause | `Paused · B source missing` + Details; Resume disabled with explicit reason; manual controls remain usable |
-| Edit Live | Persistent Program `EDITING LIVE A` banner; director paused, no resume until Done |
-| Later Auto Direct | `AUTO DIRECT · B Waist Up in 3 s` + Cancel / Pin; reason on second row; cancellable countdown only after qualification |
-| Cancelled countdown | `Auto Direct · Paused by you` + Resume; never restarts automatically |
+`DirectorConsoleControlling` exposes `directorSection`, `setLevel`, `handToAlfie`, `takeOver`, `cancelNextCut`, `advanceSegment`, and `overrideSubject(on:at:)`. Views must send those intents through the owner; they do not dispatch camera commands or call the router. A fake gallery can demonstrate layout, never qualification or successful live wiring. A-07's optional Director section and value API do not implement the engine/UI connection.
 
-Mode dropdown is deliberate configuration, not an emergency override. Pause/Cancel, Pin/Unpin and context-appropriate Resume are inline, always operable without Details. Return to Wide stays the existing single action on the **current control target**; it does not silently widen Program when controls target Preview. Edit Live remains explicit. Stop show stays in the header. A director pause must never block either control.
+A-07 has a review finding in countdown formatting for huge finite values overflowing `Int`; display formatting must fail safely before it is relied on in a show. No countdown duration is prescribed here.
 
-Director-ready and manual Take-ready are distinct: show `Take ready · Director waiting for identity` when appropriate; do not reuse R2's disabled reason to impose a new manual policy. Program means Alfie's routed output, not ATEM on-air tally. Proposed `DirectorSection` changes are listed in the authority memo; publish them with route revisions in one snapshot.
+## UI choices — AWAITING OWNER
 
-## Acceptance rehearsal
+| Decision | Options | Recommendation and tradeoff | Evidence |
+|---|---|---|---|
+| U1 placement | Next-shot panel; pill; inspector | Next-shot status plus always-visible Manual / Hand to Alfie as proposed; keeps the next action visible but consumes console space | Full-window operator walkthrough and accessibility checks |
+| A4 notice | Countdown; confirm each cut; no countdown | Auto visible cancellable notice; Backup always names the next cut with notice details to be decided | Real cancellation/readability trials; parameter candidates derived from data |
+| A2 pin | Program intent; person; pixels | Resolve pin meaning before adding an ambiguous pin control | Operator explanation of what keeps moving and how control returns |
 
-Proposed starting study: 6 volunteer operators, each completes normal and fault walkthroughs on a 1280×800 window with one hand; repeat with keyboard and VoiceOver. Target zero mistaken Program/Preview actions and all operators locate Pause/Wide/Stop without opening a menu. Proposed identification target ≤3 s for mode/next action, measured from scripted prompt; choose approved budget before running. Test long labels, missing source, denied resume, pending countdown, focus loss and display scaling. Record task success/errors/time, not preference ratings alone. No UI acceptance is claimed by these text wireframes.
+Do not replace these open choices with fixed geometry, a countdown default, a timed usability budget or a screenshot advertised as release evidence. Check launch, each unqualified level, paused/inhibited/abstaining states, subject override, takeover, cancellation, current/next segment and truthful Program/Preview. N2 on-air motion and R2 fallback need separate approved behavior and qualification before their UI can claim active operation.
+
+Mark synthetic gallery states, recorded evidence and live tests distinctly. No live level is qualified by screenshots or replay. UI/logging must preserve no audio, no show network, metadata-only 30-day retention and explicit export; no media collection without E3.
