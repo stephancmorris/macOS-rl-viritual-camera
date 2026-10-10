@@ -117,10 +117,11 @@ extension NextShotStatus {
 
         enum AbstainReason: Equatable, Sendable {
             case noPreview, previewIsSafeWide, moreThanOnePerson(ChannelID), justUsed, holdingCurrentShot
-            case subjectMoving, nothingBetter, cannotDecide, notSureEnough
+            case subjectMoving, nothingBetter, cannotDecide, notSureEnough, previewAlreadyPrepared
 
             var text: String {
                 switch self {
+                case .previewAlreadyPrepared: return "Preview is prepared · keeping its shot"
                 case .noPreview: return "No Preview camera"
                 case .previewIsSafeWide: return "Preview is the wide camera · nothing to prepare"
                 case .moreThanOnePerson(let input): return "More than one person on \(input.cameraLabel) · staying wide"
