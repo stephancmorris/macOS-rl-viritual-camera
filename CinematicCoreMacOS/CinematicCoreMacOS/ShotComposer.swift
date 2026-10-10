@@ -692,6 +692,14 @@ final class ShotComposer: ObservableObject {
     private enum SteadyState { case following, holding }
     private var steadyState: SteadyState = .following
 
+    /// Smoothed subject speed (normalized frame units per second) that drives
+    /// the velocity-adaptive deadzone. Read-only Director evidence (S3 B-01).
+    var subjectSpeed: Double { Double(subjectVelocity) }
+
+    /// The Steady Following machine has concluded the subject settled and is
+    /// holding the camera. Read-only Director evidence (S3 B-01).
+    var isHoldingSteady: Bool { steadyState == .holding }
+
     /// Fresh-observation timing for the hold → follow and follow → hold
     /// confirmations. These stay in the detection frame's capture-time clock
     /// domain so their feel does not change with camera/detection cadence.
