@@ -4,7 +4,7 @@ import Foundation
 nonisolated struct DirectorAuthority: Equatable, Sendable {
     enum ReviewPolicy: Sendable { case conservative }
     /// Off (Manual), Suggest (shadow: proposes, never acts), Assist (prepares
-    /// Preview), Auto and Backup (may also cut, once Take permits land in A-11).
+    /// Preview), Auto and Backup (may issue one-shot Take permits when qualified).
     enum Level: Equatable, Hashable, Sendable { case off, suggest, assist, auto, backup }
     enum Action: Sendable { case propose, prepare, take }
     struct Prerequisites: Equatable, Sendable {
@@ -37,8 +37,14 @@ nonisolated struct DirectorAuthority: Equatable, Sendable {
         let cancellations: Set<Cancellation>
         let refusal: Refusal?
     }
-    /// No level may cut yet; one-shot Take permits arrive with A-11.
-    static let autoTakeQualified = false
+    struct TakeTiming: Equatable, Sendable {
+        let now: TimeInterval
+        let minimumShotDuration: TimeInterval
+    }
+    enum NudgeHold: Equatable, Sendable { case none, until(TimeInterval), unavailable }
+    private(set) var nudgeHold: NudgeHold = .none
+    private(set) var lastTakeTime: TimeInterval?
+    private var qualifiedGrant = false
     private(set) var level: Level = .off
     private(set) var paused = false
     private(set) var pinnedShot: ChannelID?
@@ -53,7 +59,18 @@ nonisolated struct DirectorAuthority: Equatable, Sendable {
     init(reviewPolicy: ReviewPolicy, initialEpoch: UInt64 = 0) { epoch = initialEpoch }
     var mayPropose: Bool { !exhausted && running && healthy && level != .off && !paused && !editLive && pinnedShot == nil }
     var mayPrepare: Bool { mayPropose && evidenceAvailable && Self.prepares(level) }
-    var mayTake: Bool { false }
+    /// Capability to issue a permit, not permission to dispatch a Take.
+    var mayTake: Bool { mayPrepare && qualifiedGrant && Self.cuts(level) && nudgeHold == .none }
+    static func cuts(_ level: Level) -> Bool { level == .auto || level == .backup }
+    func mayIssueTake(at now: TimeInterval) -> Bool {
+        guard now.isFinite, now >= 0, lastTakeTime.map({ now >= $0 }) ?? true,
+              mayPrepare, qualifiedGrant, Self.cuts(level) else { return false }
+        switch nudgeHold {
+        case .none: return true
+        case .until(let deadline): return now >= deadline
+        case .unavailable: return false
+        }
+    }
     static func prepares(_ level: Level) -> Bool { level == .assist || level == .auto || level == .backup }
     static func needsQualification(_ level: Level) -> Bool { prepares(level) }
 
@@ -62,14 +79,14 @@ nonisolated struct DirectorAuthority: Equatable, Sendable {
         switch action {
         case .propose: return mayPropose
         case .prepare: return mayPrepare
-        case .take: return mayTake
+        case .take: return false // Bare epochs never authorize a cut; consume a TakePermit.
         }
     }
     private mutating func retire() {
         guard epoch < UInt64.max else { exhausted = true; level = .off; paused = true; return }
         epoch += 1
     }
-    @discardableResult mutating func apply(_ event: Event, prerequisites: Prerequisites? = nil) -> Transition {
+    @discardableResult mutating func apply(_ event: Event, prerequisites: Prerequisites? = nil, takeTiming: TakeTiming? = nil) -> Transition {
         let all: Set<Cancellation> = [.proposal, .prepare, .take]
         var cancellations: Set<Cancellation> = []
         var refusal: Refusal?
@@ -81,6 +98,7 @@ nonisolated struct DirectorAuthority: Equatable, Sendable {
         case .enable(.off), .disable, .stopShow:
             retire(); cancellations = all
             level = .off; paused = false; pinnedShot = nil; editLive = false
+            qualifiedGrant = false; nudgeHold = .none
             if event == .stopShow { running = false }
         case .enable, .resume, .handToAlfie:
             if exhausted { refusal = .exhausted }
@@ -97,12 +115,14 @@ nonisolated struct DirectorAuthority: Equatable, Sendable {
                 retire(); cancellations = all
                 if !exhausted {
                     if case .enable(let requested) = event { level = requested }
-                    paused = false
+                    paused = false; nudgeHold = .none
+                    qualifiedGrant = prerequisites?.qualifiedLevels.contains(level) == true
                 }
             }
         case .restart:
             retire(); cancellations = all; running = true; level = .off
             paused = false; pinnedShot = nil; editLive = false
+            qualifiedGrant = false; nudgeHold = .none; lastTakeTime = nil
         case .navigation, .cosmeticEdit: break
         case .evidenceAvailable(let available): evidenceAvailable = available
         case .healthRestored: healthy = true // Never clears Pause.
@@ -114,6 +134,19 @@ nonisolated struct DirectorAuthority: Equatable, Sendable {
             retire(); cancellations = all; editLive = true; paused = true
         case .sourceLoss, .sourceRebound, .outputFault, .admissionLost:
             retire(); cancellations = all; healthy = false; paused = true
+        case .operatorTake where Self.cuts(level):
+            // N1: the operator cut is never blocked. Retire all prior work,
+            // keep authority active and inhibit Director cuts for the full dwell.
+            retire(); cancellations = all
+            guard let timing = takeTiming, timing.now.isFinite, timing.now >= 0,
+                  timing.minimumShotDuration.isFinite, timing.minimumShotDuration >= 0,
+                  lastTakeTime.map({ timing.now >= $0 }) ?? true,
+                  (timing.now + timing.minimumShotDuration).isFinite else {
+                nudgeHold = .unavailable
+                return Transition(state: self, cancellations: cancellations, refusal: nil)
+            }
+            lastTakeTime = timing.now
+            nudgeHold = .until(timing.now + timing.minimumShotDuration)
         case .operatorTake where level == .suggest || level == .assist:
             // N1: in Assist (and shadow) a Take is the expected rhythm, not an
             // override. Retire all work and start fresh on the new Preview.

@@ -153,7 +153,7 @@ extension DirectorAuthorityTests {
         #expect(state.apply(.enable(level), prerequisites: prerequisites(qualified: [])).refusal == .notQualified)
         #expect(state.level == .suggest && state.epoch == epoch)
         #expect(state.apply(.enable(level), prerequisites: prerequisites(qualified: [level])).refusal == nil)
-        #expect(state.level == level && state.mayPrepare && !state.mayTake)
+        #expect(state.level == level && state.mayPrepare && state.mayTake == DirectorAuthority.cuts(level))
     }
 
     @Test func suggestNeedsNoQualificationAndNeverPrepares() {
@@ -174,12 +174,12 @@ extension DirectorAuthorityTests {
         #expect(state.authorizes(state.epoch, action: .propose))
     }
 
-    @Test func operatorTakeOutsideAssistStillPausesUntilNudgeLands() {
-        // Auto/Backup nudge semantics arrive with A-11; until then a Take pauses.
+    @Test func operatorTakeWithoutTimingFailsClosedWithoutPausing() {
+        // Missing integration timing inhibits cuts; it never blocks the operator.
         var state = DirectorAuthority(reviewPolicy: .conservative)
         state.apply(.enable(.auto), prerequisites: prerequisites(qualified: [.auto]))
         state.apply(.operatorTake)
-        #expect(state.paused && !state.mayPrepare)
+        #expect(!state.paused && state.mayPrepare && !state.mayIssueTake(at: 10))
     }
 
     @Test(arguments: [DirectorAuthority.Event.manualCommand, .editLive(true)])
@@ -212,12 +212,11 @@ extension DirectorAuthorityTests {
         #expect(state.paused && state.level == .assist)
     }
 
-    @Test func noLevelMayTakeYet() {
-        #expect(!DirectorAuthority.autoTakeQualified)
+    @Test func bareEpochNeverAuthorizesTake() {
         for level in [DirectorAuthority.Level.suggest, .assist, .auto, .backup] {
             var state = DirectorAuthority(reviewPolicy: .conservative)
             state.apply(.enable(level), prerequisites: prerequisites(qualified: [.assist, .auto, .backup]))
-            #expect(!state.mayTake && !state.authorizes(state.epoch, action: .take))
+            #expect(!state.authorizes(state.epoch, action: .take))
         }
     }
 }
