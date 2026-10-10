@@ -103,8 +103,9 @@ struct DirectorModeControlTests {
         #expect(DirectorHandShortcut.modifiers == [.command, .shift])
     }
 
-    @Test(arguments: DirectorControlGallery.cards)
-    func rendersEachControlState(card: DirectorControlCard) throws {
+    @Test(arguments: DirectorControlGallery.cardIDs)
+    func rendersEachControlState(cardID: String) throws {
+        let card = try #require(DirectorControlGallery.cards.first { $0.id == cardID })
         let cardView = VStack(alignment: .leading, spacing: 8) {
             Text(card.title.uppercased())
                 .font(ConsoleStyle.label(11))
@@ -140,6 +141,6 @@ struct DirectorModeControlTests {
     }
 }
 
-extension DirectorControlCard: CustomTestStringConvertible {
+extension DirectorControlCard: @retroactive CustomTestStringConvertible {
     public nonisolated var testDescription: String { id }
 }
