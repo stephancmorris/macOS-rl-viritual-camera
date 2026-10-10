@@ -824,6 +824,8 @@ final class CameraManager: NSObject, ObservableObject {
         }
     }
     private func choosePreset(_ preset: OperatorCommand.Preset) {
+        applyingInternalShotChange = true
+        defer { applyingInternalShotChange = false }
         switch preset {
         case .stage(let shot): shotComposer.config.shotPreset = shot
         case .webcam(let shot): shotComposer.config.webcamPreset = shot
@@ -892,14 +894,35 @@ final class CameraManager: NSObject, ObservableObject {
         }
     }
 
-    func makeCommand(_ action: OperatorCommand.Action) -> OperatorCommand {
+    func makeCommand(_ action: OperatorCommand.Action,
+                     origin: OperatorCommand.Origin = .operatorUI) -> OperatorCommand {
         let target: OperatorCommand.Target
         switch action { case .startSession, .stopSession: target = .session; default: target = .channel(channelID) }
-        return .init(target: target, epoch: commands.epoch, expiry: CACurrentMediaTime() + 2, action: action)
+        return .init(target: target, origin: origin, epoch: commands.epoch,
+                     expiry: CACurrentMediaTime() + 2, action: action)
     }
+
+    /// Something other than the Director tried to change this camera.
+    enum ManualCameraAction {
+        /// Reported before admission, so refused commands are included.
+        case command(OperatorCommand)
+        /// The shot settings changed outside any command (Settings, format).
+        case settingsChanged
+    }
+
+    /// S3 B-02: the one place every manual change to this camera is seen —
+    /// the ContentView, pill and console paths all reach `dispatch`. The show
+    /// installs it; Director-origin commands are not reported.
+    var manualActionObserver: ((ManualCameraAction) -> Void)?
+
+    /// True while the camera itself writes the shot settings (applying an
+    /// admitted preset or finishing a zoom move), so those writes are not
+    /// mistaken for a manual Settings change.
+    private var applyingInternalShotChange = false
 
     @discardableResult
     func dispatch(_ command: OperatorCommand) -> CommandResult {
+        if command.origin != .director { manualActionObserver?(.command(command)) }
         if let reason = commands.rejection(for: command, now: CACurrentMediaTime()) { return .rejected(reason) }
         switch command.action {
         case .startSession, .stopSession: break
@@ -1655,6 +1678,14 @@ final class CameraManager: NSObject, ObservableObject {
             .sink { [weak self] _ in self?.objectWillChange.send() }.store(in: &cancellables)
         cropEngine?.$isZoomLimited.removeDuplicates().dropFirst()
             .sink { [weak self] _ in self?.objectWillChange.send() }.store(in: &cancellables)
+
+        shotComposer.$config
+            .dropFirst()
+            .sink { [weak self] _ in
+                guard let self, !self.applyingInternalShotChange else { return }
+                self.manualActionObserver?(.settingsChanged)
+            }
+            .store(in: &cancellables)
 
         shotComposer.$config
             .map(\.frameProfile)
