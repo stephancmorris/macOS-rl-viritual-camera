@@ -126,4 +126,14 @@ enum DeveloperFlags {
     #else
     nonisolated static let allowInjectedQualification = false
     #endif
+
+    /// DEVELOPMENT ONLY for now — on in Debug builds, off in Release until the
+    /// owner decides (S3 B-03). Runs the Auto Director in shadow alongside the
+    /// show: it watches, logs `[DIRECTOR]` lines and publishes console status,
+    /// and has no camera effects. Every launch still starts Manual.
+    #if DEBUG
+    nonisolated static let runDirectorShadow = true
+    #else
+    nonisolated static let runDirectorShadow = false
+    #endif
 }
