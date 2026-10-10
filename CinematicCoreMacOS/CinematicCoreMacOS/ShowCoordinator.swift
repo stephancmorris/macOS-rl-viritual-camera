@@ -208,8 +208,13 @@ final class ShowCoordinator: ObservableObject {
     /// cut. Commits only when the output accepts the Preview frame; then roles
     /// swap, Edit Live ends and controls return to the new Preview. Motion on
     /// both channels continues.
+    /// S3 B-02: every Take attempt, reported before any check so refused
+    /// attempts are seen too.
+    var takeAttemptObserver: ((TakeOrigin) -> Void)?
+
     @discardableResult
-    func take(_ request: TakeRequest? = nil) -> TakeResult {
+    func take(_ request: TakeRequest? = nil, origin: TakeOrigin = .operatorUI) -> TakeResult {
+        takeAttemptObserver?(origin)
         guard let request = request ?? makeTakeRequest(), let preview = previewChannel,
               let channel = channels[preview] else {
             return .rejected(.noPreview)

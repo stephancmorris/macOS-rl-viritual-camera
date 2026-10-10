@@ -19,6 +19,12 @@
 import CoreGraphics
 import Foundation
 
+/// Who asked for a Take. Operator Takes keep today's path; Director and
+/// fallback Takes will also need a one-shot permit (S3 B-07).
+nonisolated enum TakeOrigin: Equatable, Sendable {
+    case operatorUI, director, fallback
+}
+
 nonisolated enum TakeRules {
     static let maxRenderAgePeriods = 2.0
     static let maxSourceAgePeriods = 4.0
