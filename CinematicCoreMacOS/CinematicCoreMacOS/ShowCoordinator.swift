@@ -145,6 +145,14 @@ final class ShowCoordinator: ObservableObject {
         director.attach()
     }
 
+    /// Styles saved in Settings reach the running Director (CR-037). Only
+    /// while the shadow can run: where the flag is off nothing else creates
+    /// the Director, and a save must not.
+    func directorPreferencesChanged(_ preferences: DirectorPreferences) {
+        guard DeveloperFlags.runDirectorShadow else { return }
+        director.preferencesChanged(preferences)
+    }
+
     private func resetProgramToA() {
         if programChannel != .a {
             router.setProgram(.a, expectedRouteGeneration: router.routeGeneration)
