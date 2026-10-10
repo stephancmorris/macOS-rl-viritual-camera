@@ -30,12 +30,21 @@ Counts and the top 10 are filled in when the file pass finishes. Confirmed so fa
 |---|---|---|
 | CR-001 | Critical | Personal email and legal name in the public release script |
 | CR-002 | High | Signed app, archive and DMG are tracked (about 142 MB) |
-| CR-003 | Medium | XPC caller check uses the process id, not the audit token |
+| CR-003 | High | XPC caller check uses the process id and the bundle id only; it never validates the signature |
 | CR-004 | Medium | Extension startup crashes with `fatalError` / a force-unwrap if CMIO setup fails |
 | CR-005 | Medium | Virtual-camera device and stream ids are a new UUID on every launch |
 | CR-006 | Medium | Release builds still show the clip-playback module |
 | CR-007 | Medium | Microphone and USB sandbox access are injected by build settings |
 | CR-008 | Medium | Crop render captures a non-Sendable pixel buffer (compiler warning) |
+| CR-010 | Medium | Training recorder writes body boxes and pose keypoints to Documents when consent is on |
+| CR-012 | Medium | `alfie-diagnostics.log` is appended forever, with no cap |
+| CR-013 | Medium | Latency samples are copied and filtered on the main thread for every stage sample |
+| CR-014 | Medium | The first standby frame is a per-pixel fill on the main thread |
+| CR-015 | Medium | Leaving Direct output restores every display's permanent mode |
+| CR-016 | Medium | The host never checks that the Mach listener is the extension |
+| CR-017 | Medium | A failed properties request can still report the extension as installed |
+| CR-018 | Medium | Extension replacement always returns `.replace`, including a downgrade |
+| CR-019 | Medium | Removing channel A after a Take to B makes `channelA` trap |
 
 ## Repo hygiene
 
@@ -69,19 +78,21 @@ The Apple team id appears in `project.pbxproj`, the XPC service name, the extens
 
 ### `CinematicCoreMacOS/CinematicCoreExtension/CinematicCoreExtensionProvider.swift`
 
-Targeted pass of the XPC listener, frame queue, device init, and stream start. A full line-by-line pass is still open, so this file stays unchecked.
+Full pass of the listener, frame queue, device init, and stream start. Re-checked the High item below against the source.
 
 | ID | Severity | Confidence | Category | Line(s) | Finding | Suggested fix |
 |---|---|---|---|---|---|---|
-| CR-003 | Medium | Confirmed | Security | 54–87, 749–759 | The listener does reject unexpected signing identifiers. The lookup uses `connection.processIdentifier` (`kSecGuestAttributePid`). A pid can be reused before `SecCodeCopyGuestWithAttributes` runs. | Read `newConnection.auditToken` and pass `kSecGuestAttributeAudit`. |
+| CR-003 | High | Confirmed | Security | 54–87, 749–759 | The listener rejects a mismatched bundle id, so the check is not a no-op. The guest is resolved with `kSecGuestAttributePid` (`connection.processIdentifier`), which can be reused before `SecCodeCopyGuestWithAttributes` runs. `SecCodeCopySigningInformation` is called and only `kSecCodeInfoIdentifier` is compared to `Morris.CinematicCoreMacOS`. There is no `SecCodeCheckValidity`, and no team-id check. An ad-hoc signature with that identifier passes. `sendVideoFrame` then `IOSurfaceLookup`s whatever id arrived and accepts it when the size and `32BGRA` match. | Read `newConnection.auditToken`, pass `kSecGuestAttributeAudit`, and accept only after `SecCodeCheckValidity` against the host identifier and the team. |
 | CR-004 | Medium | Confirmed | Crash | 211, 221–225, 657–668, 697 | `description!` force-unwraps a format description that `CMVideoFormatDescriptionCreate` may leave nil. `addStream` / `addDevice` failures call `fatalError`, which kills the system extension. `startStream` / `stopStream` also `fatalError` if the source type is unexpected. | Return the `OSStatus` / throw. Keep a stable failure path that does not abort the extension process. |
 | CR-005 | Medium | Confirmed | Correctness | 199–215 | Device and stream ids are `UUID()` on every launch. The comments say to replace them. Clients that bind to a device id see a different camera after the extension restarts. | Persist one device UUID and one stream UUID. |
+| CR-020 | Low | Confirmed | Crash | 272 | `CMTimeCopyAsDictionary(...)!` force-unwraps a nullable return when applying the host frame rate. | Return false from `updatePlayoutFrameRate` when the copy fails. |
+| CR-021 | Low | Confirmed | Correctness | 645–646 | `setStreamProperties` stores a client `activeFormatIndex` and only logs when it is out of range. | Ignore indexes outside `formats`. |
 
-The frame queue stores surface ids only (cap 5) and drains to the newest frame. The host keeps the last 10 pixel buffers in `VirtualCameraOutputSink.recentlySentBuffers` (`CameraManager.swift` around 2711 and 2859). That matches the 10-frame retention rule. `authorizedToStartStream` returns `true` for every CMIO client, which is what a virtual camera is for.
+The frame queue stores surface ids only (cap 5) and drains to the newest frame. The host keeps the last 10 pixel buffers in `VirtualCameraOutputSink.recentlySentBuffers` (`CameraManager.swift` around 2711 and 2859). That retention holds for the real host, so a missing use-count on the extension queue is not a separate High finding. `authorizedToStartStream` returns `true` for every CMIO client, which is what a virtual camera is for. The playout timer holds `stateLock` across lookup and `stream.send` (lines 363–380). That can stall an enqueue; it is not raised on its own because the work inside the lock is one frame.
 
 ### `CinematicCoreMacOS/Shared/CinematicCoreXPCProtocol.swift`
 
-Haven't found anything vulnerable or badly coded. The Mach service name is app-group prefixed and matches the extension `Info.plist`. Message fields are primitive (`surfaceID`, timestamp, width, height).
+Haven't found a separate defect. The Mach service name is app-group prefixed and matches the extension `Info.plist`. `sendVideoFrame` carries a surface id. That is safe only while CR-003 holds: the extension will look the id up globally. The team id is hardcoded here and in `Info.plist`, while the entitlement uses `$(TeamIdentifierPrefix)`. Those three strings have to move together.
 
 ### `CinematicCoreMacOS/CinematicCoreExtension/Info.plist`
 
@@ -125,12 +136,10 @@ Not fully read. The test build warning is confirmed in source:
 
 ### `CinematicCoreMacOS/CinematicCoreMacOS/TrainingDataRecorder.swift`
 
-Not fully read. Confirmed from the record and flush paths:
-
 | ID | Severity | Confidence | Category | Line(s) | Finding | Suggested fix |
 |---|---|---|---|---|---|---|
-| CR-009 | Low | Confirmed | Leak | 487–501, 504–506 | Each flush appends a `Task` to `pendingWriteTasks` and only clears that array in `finishPendingWrites`. A long recording keeps every completed task. | Remove the task in the completion handler. |
-| CR-010 | Low | Confirmed | Privacy | 318–397, 183–185, 198–201 | With consent (default false via `UserDefaults.bool`), each recorded frame writes a body box and pose keypoints to Documents. No pixel buffer is written. `outputDirectory` force-unwraps the documents directory URL. | Keep the consent gate. Replace `first!` with a thrown error. |
+| CR-009 | Low | Confirmed | Leak | 487–501, 504–506 | Each flush appends a `Task` to `pendingWriteTasks` and only clears that array in `finishPendingWrites`. A long recording keeps every completed task. | Remove the task in the completion handler, and cap in-flight batches. |
+| CR-010 | Medium | Confirmed | Privacy | 318–397, 183–186, 198–201, 245 | With consent (default false), each sampled frame writes a body box and head/waist keypoints to plaintext `frames.jsonl` under Documents, kept for 30 days. No pixel buffer is written. The inspector toggle is off in Release (`exposeTrainingRecorderControls` is false), and the writer stays in the app. Session metadata always records `fps: 30`. `outputDirectory` force-unwraps the documents directory URL. | Keep the consent gate. Write the real show rate. Replace `first!` with a thrown error. |
 
 ### `.gitignore`
 
@@ -152,6 +161,68 @@ Haven't found anything vulnerable or badly coded. Floors are pinned with `>=`, n
 |---|---|---|---|---|---|---|
 | CR-011 | Low | Confirmed | Dead code | whole file | This is a `pip` download log committed under a filename that looks like a broken redirect (`=2.14.0`). Same for `training/=7.0`. | Stop tracking both. |
 
+### `CinematicCoreMacOS/CinematicCoreMacOS/ProgramOutputManager.swift`
+
+| ID | Severity | Confidence | Category | Line(s) | Finding | Suggested fix |
+|---|---|---|---|---|---|---|
+| CR-012 | Medium | Confirmed | Leak | 16–57 | `AlfieDiagnosticsLog.append` writes `Library/Logs/Alfie/alfie-diagnostics.log` with no size cap, rotation, or prune. Connect, failure, and retry paths call it. It does not write frames or face data. | Cap or rotate the file. |
+| CR-013 | Medium | Confirmed | Performance | 848–881 | `recordInputFrame` and `recordLatency` run on the main actor. Each sample copies that stage's window and `removeAll`s timestamps outside a 5-second window. `@Published` stats are coalesced; the array copy is not. | Keep one ring per stage and overwrite in place. |
+
+### `CinematicCoreMacOS/CinematicCoreMacOS/ProgramRouter.swift`
+
+| ID | Severity | Confidence | Category | Line(s) | Finding | Suggested fix |
+|---|---|---|---|---|---|---|
+| CR-014 | Medium | Confirmed | Performance | 247–261 | The first standby frame of a given size is filled with a nested per-pixel loop (1920×1080 by default). `faultTick` runs that on the main thread at the moment Program has gone missing. Later ticks reuse `standbyBuffer`. | Fill with `memset` or a cached buffer, off the main thread. |
+| CR-022 | Low | Confirmed | Leak | 266–280 | The watchdog and fault timers are scheduled on `RunLoop.main` and invalidated from `channelStopped`. There is no `deinit`. Releasing the router without that call leaves the timers on the run loop. They capture `self` weakly, so the router itself is not retained. | Invalidate both timers in `deinit`. |
+
+### `CinematicCoreMacOS/CinematicCoreMacOS/ProgramTake.swift`
+
+Haven't found anything vulnerable or badly coded.
+
+### `CinematicCoreMacOS/CinematicCoreMacOS/DisplayOutputSink.swift`
+
+| ID | Severity | Confidence | Category | Line(s) | Finding | Suggested fix |
+|---|---|---|---|---|---|---|
+| CR-015 | Medium | Confirmed | Correctness | 468–472 | `release()` calls `CGRestorePermanentDisplayConfiguration()`, which restores the permanent configuration for every display, not the locked port. Deselecting Direct output can snap other displays back to their permanent mode. | Save the previous mode for that display id and restore only that mode. |
+| CR-023 | Medium | Plausible | Concurrency | 67–73 | `deinit` is nonisolated and then calls `MainActor.assumeIsolated` to close the window. That traps if the last reference is dropped off the main thread. | Hop to the main queue and close the window there. |
+| CR-024 | Medium | Plausible | Lifetime | 162–175 | `lastSentBuffer` keeps one pixel buffer. The comment says releasing the previous one is safe because the compositor has already sampled it. `layer.contents` holds the IOSurface, and this return does not wait for the window server. A second look did not show a torn frame, so this stays Plausible rather than High. | Retain a short ring of sent buffers. |
+
+### `CinematicCoreMacOS/CinematicCoreMacOS/RehearsalOutputSink.swift`
+
+Haven't found anything vulnerable or badly coded.
+
+### `CinematicCoreMacOS/CinematicCoreMacOS/XPCConnectionManager.swift`
+
+| ID | Severity | Confidence | Category | Line(s) | Finding | Suggested fix |
+|---|---|---|---|---|---|---|
+| CR-016 | Medium | Confirmed | Security | 86–90 | The host resumes the Mach connection and later sends surface ids, without checking the listener's audit token, team id, or designated requirement. The service name is app-group prefixed, which blocks an unrelated sandboxed app from registering it. | Before `resume`, require the listener to satisfy the extension identifier and the team. |
+
+### `CinematicCoreMacOS/CinematicCoreMacOS/DiagnosticsLog.swift`
+
+| ID | Severity | Confidence | Category | Line(s) | Finding | Suggested fix |
+|---|---|---|---|---|---|---|
+| CR-025 | Low | Confirmed | Privacy | 293–298 | `prune` deletes only `.csv` files older than 30 days, so `alfie_session_*.json` sidecars accumulate. The manifest stores capture device name and model. It does not write frames, face crops, or keypoints. | Prune the sidecars with the CSVs. |
+
+`DiagnosticsFileWriter` is `@unchecked Sendable` because `handle` is only touched on its serial queue. That annotation is justified. Directory and write failures are swallowed with `try?` (lines 247–261). Low, and covered by the same cleanup as CR-025 rather than a separate id.
+
+### `CinematicCoreMacOS/CinematicCoreMacOS/SystemExtensionActivationManager.swift`
+
+| ID | Severity | Confidence | Category | Line(s) | Finding | Suggested fix |
+|---|---|---|---|---|---|---|
+| CR-017 | Medium | Confirmed | Correctness | 640–647 | If the properties request fails, status becomes `.installed` whenever `alfie.systemExtensionInstalled.<id>` is true. A stale default then reports the virtual camera ready when macOS did not confirm it. | On properties failure, stay `.unknown` until a successful properties or activation result. |
+| CR-018 | Medium | Confirmed | Correctness | 678–686 | `actionForReplacingExtension` always returns `.replace`, including when the bundled build is older than the installed one. | Compare bundle versions and return `.cancel` for a downgrade. |
+| CR-026 | Low | Confirmed | Privacy | 288–294 | Activation logs `Bundle.main.bundleURL.path` with `privacy: .public`. That path contains the home-directory username. | Log the bundle id. |
+
+### `CinematicCoreMacOS/CinematicCoreMacOS/ShowCoordinator.swift`
+
+| ID | Severity | Confidence | Category | Line(s) | Finding | Suggested fix |
+|---|---|---|---|---|---|---|
+| CR-019 | Medium | Confirmed | Crash | 41, 100–102 | `channelA` force-unwraps `channels[.a]`. `removeChannel` drops any channel that is not the current Program channel, so after a Take to B it will remove A. The next `channelA` access traps. Live console code only removes B today. | Return `CameraManager?`, or refuse to remove A. |
+
+### `CinematicCoreMacOS/CinematicCoreMacOS/DebugLaunchHooks.swift`
+
+Haven't found anything vulnerable or badly coded in Release. The window dump is inside `#if DEBUG` and only runs when `ALFIE_DEBUG_WINDOW_DUMP` is set.
+
 ## Checklist
 
 - [ ] `.gitattributes`
@@ -159,7 +230,7 @@ Haven't found anything vulnerable or badly coded. Floors are pinned with `>=`, n
 - [x] `CinematicCoreMacOS/.claude/settings.local.json`
 - [x] `CinematicCoreMacOS/BuildInfo.plist`
 - [x] `CinematicCoreMacOS/CinematicCoreExtension/CinematicCoreExtension.entitlements`
-- [ ] `CinematicCoreMacOS/CinematicCoreExtension/CinematicCoreExtensionProvider.swift`
+- [x] `CinematicCoreMacOS/CinematicCoreExtension/CinematicCoreExtensionProvider.swift`
 - [x] `CinematicCoreMacOS/CinematicCoreExtension/Info.plist`
 - [x] `CinematicCoreMacOS/CinematicCoreExtension/main.swift`
 - [ ] `CinematicCoreMacOS/CinematicCoreMacOS.xcodeproj/project.pbxproj`
@@ -209,13 +280,13 @@ Haven't found anything vulnerable or badly coded. Floors are pinned with `>=`, n
 - [ ] `CinematicCoreMacOS/CinematicCoreMacOS/CropEngine.swift`
 - [ ] `CinematicCoreMacOS/CinematicCoreMacOS/CropPreviewView.swift`
 - [ ] `CinematicCoreMacOS/CinematicCoreMacOS/CropRenderer.metal`
-- [ ] `CinematicCoreMacOS/CinematicCoreMacOS/DebugLaunchHooks.swift`
+- [x] `CinematicCoreMacOS/CinematicCoreMacOS/DebugLaunchHooks.swift`
 - [ ] `CinematicCoreMacOS/CinematicCoreMacOS/DegradePolicy.swift`
 - [ ] `CinematicCoreMacOS/CinematicCoreMacOS/DetectionFrame.swift`
 - [ ] `CinematicCoreMacOS/CinematicCoreMacOS/DetectionOverlayView.swift`
 - [ ] `CinematicCoreMacOS/CinematicCoreMacOS/DetectionSettingsView.swift`
 - [x] `CinematicCoreMacOS/CinematicCoreMacOS/DeveloperFlags.swift`
-- [ ] `CinematicCoreMacOS/CinematicCoreMacOS/DiagnosticsLog.swift`
+- [x] `CinematicCoreMacOS/CinematicCoreMacOS/DiagnosticsLog.swift`
 - [ ] `CinematicCoreMacOS/CinematicCoreMacOS/Director/DirectorAuthority.swift`
 - [ ] `CinematicCoreMacOS/CinematicCoreMacOS/Director/DirectorConsoleAPI.swift`
 - [ ] `CinematicCoreMacOS/CinematicCoreMacOS/Director/DirectorController.swift`
@@ -235,7 +306,7 @@ Haven't found anything vulnerable or badly coded. Floors are pinned with `>=`, n
 - [ ] `CinematicCoreMacOS/CinematicCoreMacOS/Director/UI/DirectorStyleSettingsView.swift`
 - [ ] `CinematicCoreMacOS/CinematicCoreMacOS/Director/UI/FakeDirectorConsole.swift`
 - [ ] `CinematicCoreMacOS/CinematicCoreMacOS/DirectorEvidenceReadings.swift`
-- [ ] `CinematicCoreMacOS/CinematicCoreMacOS/DisplayOutputSink.swift`
+- [x] `CinematicCoreMacOS/CinematicCoreMacOS/DisplayOutputSink.swift`
 - [ ] `CinematicCoreMacOS/CinematicCoreMacOS/FaceSignatureExtractor.swift`
 - [ ] `CinematicCoreMacOS/CinematicCoreMacOS/FrameWorkScheduler.swift`
 - [ ] `CinematicCoreMacOS/CinematicCoreMacOS/FramingCapability.swift`
@@ -255,18 +326,18 @@ Haven't found anything vulnerable or badly coded. Floors are pinned with `>=`, n
 - [ ] `CinematicCoreMacOS/CinematicCoreMacOS/PairCheckPanel.swift`
 - [ ] `CinematicCoreMacOS/CinematicCoreMacOS/PersonDetector.swift`
 - [ ] `CinematicCoreMacOS/CinematicCoreMacOS/PixelBufferPreviewView.swift`
-- [ ] `CinematicCoreMacOS/CinematicCoreMacOS/ProgramOutputManager.swift`
-- [ ] `CinematicCoreMacOS/CinematicCoreMacOS/ProgramRouter.swift`
-- [ ] `CinematicCoreMacOS/CinematicCoreMacOS/ProgramTake.swift`
+- [x] `CinematicCoreMacOS/CinematicCoreMacOS/ProgramOutputManager.swift`
+- [x] `CinematicCoreMacOS/CinematicCoreMacOS/ProgramRouter.swift`
+- [x] `CinematicCoreMacOS/CinematicCoreMacOS/ProgramTake.swift`
 - [ ] `CinematicCoreMacOS/CinematicCoreMacOS/RecorderSettingsView.swift`
 - [ ] `CinematicCoreMacOS/CinematicCoreMacOS/RecoveryState.swift`
-- [ ] `CinematicCoreMacOS/CinematicCoreMacOS/RehearsalOutputSink.swift`
+- [x] `CinematicCoreMacOS/CinematicCoreMacOS/RehearsalOutputSink.swift`
 - [ ] `CinematicCoreMacOS/CinematicCoreMacOS/SettingsWindow.swift`
 - [ ] `CinematicCoreMacOS/CinematicCoreMacOS/SetupCheck.swift`
 - [ ] `CinematicCoreMacOS/CinematicCoreMacOS/SetupDemo.swift`
 - [ ] `CinematicCoreMacOS/CinematicCoreMacOS/ShotComposer.swift`
 - [ ] `CinematicCoreMacOS/CinematicCoreMacOS/ShotComposerSettingsView.swift`
-- [ ] `CinematicCoreMacOS/CinematicCoreMacOS/ShowCoordinator.swift`
+- [x] `CinematicCoreMacOS/CinematicCoreMacOS/ShowCoordinator.swift`
 - [ ] `CinematicCoreMacOS/CinematicCoreMacOS/ShowSetupModel.swift`
 - [ ] `CinematicCoreMacOS/CinematicCoreMacOS/ShowSetupView.swift`
 - [x] `CinematicCoreMacOS/CinematicCoreMacOS/ShowStandard.swift`
@@ -274,10 +345,10 @@ Haven't found anything vulnerable or badly coded. Floors are pinned with `>=`, n
 - [ ] `CinematicCoreMacOS/CinematicCoreMacOS/Speech/VoiceCommandAdapter.swift`
 - [ ] `CinematicCoreMacOS/CinematicCoreMacOS/StoppedScreen.swift`
 - [ ] `CinematicCoreMacOS/CinematicCoreMacOS/StripDemo.swift`
-- [ ] `CinematicCoreMacOS/CinematicCoreMacOS/SystemExtensionActivationManager.swift`
-- [ ] `CinematicCoreMacOS/CinematicCoreMacOS/TrainingDataRecorder.swift`
+- [x] `CinematicCoreMacOS/CinematicCoreMacOS/SystemExtensionActivationManager.swift`
+- [x] `CinematicCoreMacOS/CinematicCoreMacOS/TrainingDataRecorder.swift`
 - [ ] `CinematicCoreMacOS/CinematicCoreMacOS/ValidationClipPlaybackView.swift`
-- [ ] `CinematicCoreMacOS/CinematicCoreMacOS/XPCConnectionManager.swift`
+- [x] `CinematicCoreMacOS/CinematicCoreMacOS/XPCConnectionManager.swift`
 - [ ] `CinematicCoreMacOS/CinematicCoreMacOSTests/CaptureDeviceRegistryTests.swift`
 - [ ] `CinematicCoreMacOS/CinematicCoreMacOSTests/CaptureProfilePolicyTests.swift`
 - [ ] `CinematicCoreMacOS/CinematicCoreMacOSTests/ChannelCommandTests.swift`
