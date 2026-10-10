@@ -285,6 +285,14 @@ final class PersonDetector: ObservableObject {
     /// candidate. Cleared on lock change, stale lock, acceptance, or when the
     /// candidate stops persisting.
     private var lockProbation: LockProbation?
+
+    /// The LOCK-PASS-A state last logged; see `assignTracks`.
+    private struct LockPassLogKey: Equatable {
+        let lockedID: UUID
+        let bound: Bool
+        let probation: Bool
+    }
+    private var lastLockPassLogKey: LockPassLogKey?
     private var processingGeneration: UInt64 = 0
 
     /// Discard any result whose Vision work began before an operator/session change.
@@ -875,8 +883,16 @@ final class PersonDetector: ObservableObject {
         // Diagnostic: when a lock is active and >1 person is in view, log per-
         // detection IoU/distance/score against the locked track plus the
         // probation/coast state. Filter the Console for subsystem com.alfie,
-        // category Vision to capture these.
-        if let diag = lockedDiag, detections.count > 1 {
+        // category Vision to capture these. Logged only when the bind or coast
+        // state changes: this runs on every detection, on the main actor.
+        let passKey = lockedDiag.flatMap { diag in
+            detections.count > 1
+                ? LockPassLogKey(lockedID: diag.lockedID, bound: diag.chosen != nil, probation: lockProbation != nil)
+                : nil
+        }
+        let passChanged = passKey != lastLockPassLogKey
+        lastLockPassLogKey = passKey
+        if passChanged, let diag = lockedDiag, detections.count > 1 {
             let shortID = String(diag.lockedID.uuidString.prefix(8))
             let perDet = detections.enumerated().map { idx, det in
                 let iou = Self.iou(det.boundingBox, diag.referenceBox)

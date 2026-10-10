@@ -117,7 +117,12 @@ struct CropSettingsView: View {
                 Slider(
                     value: Binding(
                         get: { Double(cropEngine.config.transitionSmoothing) },
-                        set: { cropEngine.config.transitionSmoothing = Float($0) }
+                        // The frame path follows the composer's smoothing and
+                        // mirrors it here, so write both (CR-030).
+                        set: {
+                            cameraManager.shotComposer.config.smoothingFactor = Float($0)
+                            cropEngine.config.transitionSmoothing = Float($0)
+                        }
                     ),
                     in: 0.05...0.3
                 )
@@ -138,15 +143,6 @@ struct CropSettingsView: View {
                     VStack(alignment: .leading, spacing: 2) {
                         Text("High Quality Mode")
                         Text("Better image quality, slightly more GPU usage")
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                    }
-                }
-
-                Toggle(isOn: $cropEngine.config.enableVignette) {
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text("Cinematic Vignette")
-                        Text("Subtle edge darkening for cinematic look")
                             .font(.caption)
                             .foregroundStyle(.secondary)
                     }
