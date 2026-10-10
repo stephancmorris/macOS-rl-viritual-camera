@@ -13,6 +13,7 @@ enum SettingsTab: String, CaseIterable, Identifiable {
     case detection
     case crop
     case output
+    case director
 
     var id: String { rawValue }
 
@@ -26,6 +27,8 @@ enum SettingsTab: String, CaseIterable, Identifiable {
             return "Crop"
         case .output:
             return "Output"
+        case .director:
+            return "Director"
         }
     }
 
@@ -39,6 +42,8 @@ enum SettingsTab: String, CaseIterable, Identifiable {
             return "crop.rotate"
         case .output:
             return "video.badge.waveform"
+        case .director:
+            return "film.stack"
         }
     }
 
@@ -52,6 +57,8 @@ enum SettingsTab: String, CaseIterable, Identifiable {
             return "Crop engine quality, output profile, render smoothing, and GPU performance."
         case .output:
             return "Program route health, dropped frames, reconnect controls, and live latency."
+        case .director:
+            return "Pace and framing for each kind of segment. Live event is required. The level is never saved."
         }
     }
 }
@@ -68,6 +75,8 @@ struct SettingsWindow: View {
     @ObservedObject var cameraManager: CameraManager
     @ObservedObject var systemExtensionManager: SystemExtensionActivationManager
     @ObservedObject var controller: SettingsWindowController
+    var onDirectorPreferencesChanged: (DirectorPreferences) -> Void = { _ in }
+    @StateObject private var directorEditor = DirectorStyleEditor.makeForSettings()
 
     var body: some View {
         VStack(spacing: 0) {
@@ -102,6 +111,15 @@ struct SettingsWindow: View {
                         Label(SettingsTab.output.title, systemImage: SettingsTab.output.systemImage)
                     }
                     .tag(SettingsTab.output)
+
+                DirectorStyleSettingsView(editor: directorEditor)
+                    .tabItem {
+                        Label(SettingsTab.director.title, systemImage: SettingsTab.director.systemImage)
+                    }
+                    .tag(SettingsTab.director)
+            }
+            .onAppear {
+                directorEditor.onPreferencesChanged = onDirectorPreferencesChanged
             }
         }
         .frame(minWidth: 760, idealWidth: 860, minHeight: 640, idealHeight: 720)
