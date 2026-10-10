@@ -102,3 +102,7 @@ The gallery only shows `DirectorSection` reason text. These contract lines have 
 
 - Assist / Auto when Program's camera is lost and the operator must decide: "Program lost: Take Cam A?"
 - Backup when both inputs are stale: "Both inputs stale"
+
+## C-03 · Pass the director section into the live console (B-03)
+
+`MultiviewConsoleView` and `InputStripView` accept an optional director section and the channels whose shot Alfie set. The gallery uses them. `LiveConsole.swift` still builds the strip and the panel without that section, so the live AUTO badge and the third line stay off until the live console passes `DirectorConsoleControlling.directorSection` through. Please wire that in B-03. Group C does not edit `LiveConsole.swift`.
