@@ -126,7 +126,13 @@ extension DirectorReplayTests {
         #expect(report.preparationsCommitted == 0 && report.staleEffectsCommitted == 0)
         #expect(report.rejectedAttempts == 1 && report.directorCuts == 0)
         #expect(report.programChangesWithoutAuthority == 0)
-        #expect(report.finalPaused || report.finalLevel == .off)
+        switch action {
+        case .operatorTake, .refusedOperatorTake:
+            // N1: a Take in Assist retires queued work but does not pause.
+            #expect(!report.finalPaused)
+        default:
+            #expect(report.finalPaused || report.finalLevel == .off)
+        }
         if case .operatorTake = action { #expect(report.operatorCuts == 1) }
         if case .refusedOperatorTake = action { #expect(report.operatorCuts == 0 && report.operatorTakeAttempts == 1) }
     }
@@ -177,13 +183,13 @@ extension DirectorReplayTests {
 
     @Test func stopRestartResumeAndUnavailableLevels() {
         let off = replay(ready(1) + [.init(at: 2, action: .stop), .init(at: 3, action: .restart),
-            .init(at: 4, action: .resume), .init(at: 5, action: .enable(.autoDirect))])
-        #expect(off.finalLevel == .off && off.autoDirectRefusals == 1)
+            .init(at: 4, action: .resume), .init(at: 5, action: .enable(.auto))])
+        #expect(off.finalLevel == .off && off.unqualifiedRefusals == 1)
         let suggest = replay([.init(at: 0, action: .enable(.suggest))] + ready(1) + [
             .init(at: 2, action: .directorAttempt(id: "suggest", delay: 0, succeeds: true)),
-            .init(at: 3, action: .enable(.autoDirect))])
+            .init(at: 3, action: .enable(.auto))])
         #expect(suggest.preparationsCommitted == 0 && suggest.rejectedAttempts == 1)
-        #expect(suggest.finalLevel == .suggest && suggest.autoDirectRefusals == 1)
+        #expect(suggest.finalLevel == .suggest && suggest.unqualifiedRefusals == 1)
         let unhealthy = replay(ready(1) + [.init(at: 2, action: .source(channel: .b, missing: true)),
             .init(at: 3, action: .healthRestored), .init(at: 4, action: .resume)])
         #expect(unhealthy.finalPaused && unhealthy.preparationsCommitted == 0)
