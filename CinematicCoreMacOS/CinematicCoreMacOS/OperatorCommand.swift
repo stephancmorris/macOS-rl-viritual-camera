@@ -14,7 +14,11 @@ struct OperatorCommand {
         static let cameraA = Target.channel(.a)
     }
     enum Origin: Equatable { case operatorUI, safety, automaticRecovery }
-    enum Preset: Equatable { case stage(ShotComposer.Config.ShotPreset), webcam(ShotComposer.Config.WebcamPreset) }
+    /// Shared with the nonisolated Director logic (Stage 3), so it is a
+    /// plain value: hashable, sendable, no actor isolation.
+    nonisolated enum Preset: Hashable, Sendable {
+        case stage(ShotComposer.Config.ShotPreset), webcam(ShotComposer.Config.WebcamPreset)
+    }
     enum ZoomDirection: CGFloat { case pullOut = -1, pushIn = 1 }
     enum Action {
         case detect, cancelDetect

@@ -87,7 +87,7 @@ final class ShotComposer: ObservableObject {
             }
         }
 
-        enum ShotPreset: String, CaseIterable, Identifiable, Sendable {
+        nonisolated enum ShotPreset: String, CaseIterable, Identifiable, Sendable {
             case wide
             case fullBody
             case waistUp
@@ -188,7 +188,7 @@ final class ShotComposer: ObservableObject {
 
         /// Operator-facing crop choice in Webcam format. `wide` is just inside a
         /// full frame; `tight` is a head-and-shoulders shot.
-        enum WebcamPreset: String, CaseIterable, Identifiable, Sendable {
+        nonisolated enum WebcamPreset: String, CaseIterable, Identifiable, Sendable {
             case wide
             case tight
 
