@@ -6,8 +6,9 @@
 //  Preview pane. Built from TakeAvailability so the panel's reason is always
 //  the Take button's reason for the same state (NEXT-PANEL card).
 //
-//  R3 seam: `director` is the Auto Director's future home. R2 always leaves it
-//  nil and never renders it; do not add director controls here.
+//  R3 seam: `director` carries the Auto Director's status (S3 A-04). R2 builds
+//  leave it nil; the model and its plain-words text live in
+//  Director/DirectorConsoleAPI.swift.
 //
 
 import Foundation
@@ -25,18 +26,6 @@ nonisolated struct NextShotStatus: Equatable, Sendable {
         case noPreviewCamera
     }
 
-    /// Reserved for the R3 Auto Director (AD-UI / AD-OVERRIDE / AD-TAKE).
-    struct DirectorSection: Equatable, Sendable {
-        enum Mode: Equatable, Sendable { case off, suggest, auto }
-        enum Authority: Equatable, Sendable { case operatorOnly, directorMayCue, directorMayTake }
-
-        var mode: Mode
-        var proposal: ChannelID?
-        var reason: String?
-        var countdown: TimeInterval?
-        var authority: Authority
-    }
-
     static let label = "NEXT"
 
     let preview: ChannelID?
@@ -47,7 +36,7 @@ nonisolated struct NextShotStatus: Equatable, Sendable {
     let statusText: String
     /// Identical to the Take bar's reason for the same snapshot (nil if ready).
     let reasonText: String?
-    /// Always nil in R2.
+    /// nil unless the Auto Director is wired in (S3 B-03).
     let director: DirectorSection?
 
     var accessibilityLabel: String {

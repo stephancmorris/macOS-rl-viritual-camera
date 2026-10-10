@@ -47,14 +47,14 @@ import Testing
         #expect(!state.authorizes(token, action: .propose))
     }
 
-    @Test func sectionHasNoRoutingEffect() {
+    @Test func pauseWithdrawsProposalAndPreparation() {
+        // Replaces the retired section() projection (A-04): status now comes
+        // from the controller; the authority only answers what is allowed.
         var state = DirectorAuthority(reviewPolicy: .conservative)
-        state.apply(.enable(.autoPrepare), prerequisites: .init(nominationsCurrent: true, previewAvailable: true, sourcesHealthy: true, outputHealthy: true, admissionCurrent: true))
-        #expect(state.section(proposal: .b).proposal == .b)
-        #expect(state.section().authority == .directorMayCue)
+        state.apply(.enable(.autoPrepare), prerequisites: good)
+        #expect(state.mayPropose && state.mayPrepare)
         state.apply(.pause)
-        #expect(state.section(proposal: .b).proposal == nil)
-        #expect(state.section().authority == .operatorOnly)
+        #expect(!state.mayPropose && !state.mayPrepare && !state.mayTake)
     }
 }
 
