@@ -51,6 +51,31 @@ private enum ExtensionSecurityPolicy {
 		return Int64(width) * Int64(height) <= maxFrameArea
 	}
 
+	/// The code-signing requirement the host must satisfy: an Apple-issued
+	/// certificate, the host bundle identifier, and this extension's own team.
+	/// Kept in step with `XPCPeerRequirement` in the app's
+	/// XPCConnectionManager.swift. Nil when this process has no team
+	/// signature, in which case every caller is refused.
+	static func hostRequirement() -> String? {
+		guard let teamID = ownTeamIdentifier(),
+			  teamID.count == 10,
+			  teamID.unicodeScalars.allSatisfy({ ("A"..."Z").contains($0) || ("0"..."9").contains($0) }) else {
+			return nil
+		}
+		return "anchor apple generic and identifier \"\(expectedHostBundleIdentifier)\" and certificate leaf[subject.OU] = \"\(teamID)\""
+	}
+
+	static func ownTeamIdentifier() -> String? {
+		var code: SecCode?
+		guard SecCodeCopySelf([], &code) == errSecSuccess, let code else { return nil }
+		var staticCode: SecStaticCode?
+		guard SecCodeCopyStaticCode(code, [], &staticCode) == errSecSuccess, let staticCode else { return nil }
+		var info: CFDictionary?
+		guard SecCodeCopySigningInformation(staticCode, SecCSFlags(rawValue: kSecCSSigningInformation), &info) == errSecSuccess,
+			  let dictionary = info as? [String: Any] else { return nil }
+		return dictionary[kSecCodeInfoTeamIdentifier as String] as? String
+	}
+
 	static func signingIdentifier(for connection: NSXPCConnection) -> String? {
 		let attributes = [
 			kSecGuestAttributePid as String: NSNumber(value: connection.processIdentifier)
@@ -758,7 +783,17 @@ extension CinematicCoreExtensionProviderSource: NSXPCListenerDelegate {
 			)
 			return false
 		}
-		
+
+		// The identifier above is read through the caller's pid, which can be
+		// reused, and is not a signature check. The requirement is enforced by
+		// XPC against the audit token of every message: a caller that is not
+		// the host signed by this team is invalidated before its first frame.
+		guard let requirement = ExtensionSecurityPolicy.hostRequirement() else {
+			os_log(.error, "Rejected XPC connection: extension has no team signature to verify the host against")
+			return false
+		}
+		newConnection.setCodeSigningRequirement(requirement)
+
 		// Configure connection
 		newConnection.exportedInterface = NSXPCInterface(with: CinematicCoreXPCProtocol.self)
 		newConnection.exportedObject = XPCServiceImplementation(deviceSource: deviceSource)
