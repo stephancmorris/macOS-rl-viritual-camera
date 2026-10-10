@@ -75,13 +75,7 @@ nonisolated struct DirectorShotPolicy {
         let sorted = noRepeat.sorted {
             if dueWide && $0.isWide != $1.isWide { return $0.isWide }
             if $0.subjectConfidence != $1.subjectConfidence { return $0.subjectConfidence > $1.subjectConfidence }
-            if $0.shot.preset.rawValue != $1.shot.preset.rawValue {
-                return $0.shot.preset.rawValue < $1.shot.preset.rawValue
-            }
-            if $0.shot.mode.rawValue != $1.shot.mode.rawValue {
-                return $0.shot.mode.rawValue < $1.shot.mode.rawValue
-            }
-            if $0.shot.zoomRung != $1.shot.zoomRung { return $0.shot.zoomRung < $1.shot.zoomRung }
+            if $0.shot.order != $1.shot.order { return $0.shot.order < $1.shot.order }
             if $0.isWide != $1.isWide { return $0.isWide }
             return $0.movement < $1.movement
         }
