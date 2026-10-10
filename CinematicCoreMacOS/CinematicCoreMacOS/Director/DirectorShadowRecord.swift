@@ -254,13 +254,18 @@ nonisolated struct DirectorShadowRecord: Codable, Equatable, Sendable {
         register("context.lastWideAt", context.lastWideAt == nil)
         register("parameters.judgeMaximumAge", parameters.judgeMaximumAge == nil)
         register("parameters.minimumProbability", parameters.minimumProbability == nil)
-        register("event.proposalCreatedAt", event.proposalCreatedAt == nil)
+        if event.kind == .wouldPrepare { register("event.proposalCreatedAt", event.proposalCreatedAt == nil) }
         try require(Set(evidence.map(\.channel)).count == evidence.count)
         for (i, e) in evidence.enumerated() {
             try require(context.inputs.contains(e.channel))
             try require([e.sampledAt, e.observationAge, e.subjectSpeed, e.settledSince, e.framingSettledFor].allSatisfy(scalar))
             try require(e.observedPersonCount.map { $0 >= 0 } ?? true)
             try require(readiness(e.prepareReadiness) && readiness(e.cutReadiness))
+            if e.prepareReadiness != nil || e.cutReadiness != nil { try require(parameters.readiness != nil) }
+            if e.identitySource == .adapter || e.adapterEvidenceAvailable != nil || e.settledSince != nil || e.framingSettledFor != nil {
+                try require(parameters.adapter != nil)
+            }
+            if e.identitySource == .sampleClassifier && e.identity != .unavailable { try require(parameters.adapter != nil) }
             register("evidence[\(i)].sampledAt", e.sampledAt == nil)
             register("evidence[\(i)].observationAge", e.observationAge == nil)
             register("evidence[\(i)].subjectSpeed", e.subjectSpeed == nil)
@@ -270,6 +275,7 @@ nonisolated struct DirectorShadowRecord: Codable, Equatable, Sendable {
         }
         for (i, j) in judgements.enumerated() {
             try require(scalar(j.computedAt))
+            if j.gateResult != .notEvaluated { try require(parameters.judgeMaximumAge != nil) }
             register("judgements[\(i)].computedAt", j.computedAt == nil)
             if let token = j.modelVersion { try require(Self.matches(token, pattern: "[A-Za-z0-9][A-Za-z0-9._-]*")) }
             try require(j.judgeKind != .learned || j.modelVersion != nil)
@@ -316,6 +322,7 @@ nonisolated struct DirectorShadowRecord: Codable, Equatable, Sendable {
         try require(present.isSubset(of: event.allowedKeys))
         switch event.kind {
         case .wouldPrepare, .wouldCut:
+            try require(parameters.status == .available)
             try require(event.decisionID != nil && event.target != nil && event.target == context.preview && event.shot != nil && event.reason != nil)
         case .abstention:
             try require(event.decisionID != nil && event.stage != nil && event.reasons?.isEmpty == false)

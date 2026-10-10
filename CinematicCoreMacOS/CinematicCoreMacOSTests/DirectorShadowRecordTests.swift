@@ -28,6 +28,14 @@ nonisolated struct DirectorShadowRecordTests {
     private func object(_ record: R) throws -> [String: Any] {
         try #require(JSONSerialization.jsonObject(with: JSONEncoder().encode(record)) as? [String: Any])
     }
+    private func evaluationParameters(_ object: [String: Any]) throws -> [String: Any] {
+        var o = object, p = try #require(o["parameters"] as? [String: Any])
+        p["readiness"] = ["minimumSettledTime": 1.0, "minimumCutSettledTime": 2.0,
+            "maximumMotion": 0.2, "maximumCutMotion": 0.1, "cutOnMotionAllowed": false]
+        p["adapter"] = ["maximumObservationAge": 3.0, "debounce": 4.0, "stillSpeed": 0.3]
+        p["judgeMaximumAge"] = 5.0; o["parameters"] = p
+        return o
+    }
     @Test(arguments: ["wouldPrepare", "wouldCut", "abstention", "operatorAction"])
     func allEventKindsRoundTripWithoutActions(kind: String) throws {
         let record = try decode(fixture(kind: kind))
@@ -151,7 +159,7 @@ nonisolated struct DirectorShadowRecordTests {
         #expect(e.hasLockedTarget && e.observationAge == nil && e.framingSettledFor == 0)
         #expect(e.prepareReadiness?.isReady == true && e.cutReadiness?.isReady == false)
         #expect(m.invalidFields == ["evidence[0].observedPersonCount", "evidence[0].sampledAt", "evidence[0].subjectSpeed"])
-        var o = fixture(); o["evidence"] = try JSONSerialization.jsonObject(with: JSONEncoder().encode([e])); o["invalidFields"] = m.invalidFields
+        var o = try evaluationParameters(fixture()); o["evidence"] = try JSONSerialization.jsonObject(with: JSONEncoder().encode([e])); o["invalidFields"] = m.invalidFields
         let r = try decode(o), data = try JSONEncoder().encode(r), text = try #require(String(data: data, encoding: .utf8))
         #expect(!text.contains(subjectID.uuidString) && !text.contains("lockedTargetID") && !text.contains("faceVisible"))
         let reason = R.Reason.selection("Person's name /Users/private/face.png audio pixels")
@@ -189,7 +197,7 @@ nonisolated struct DirectorShadowRecordTests {
         #expect(j.outcome.ranked?[0].candidate.isWide == false && j.outcome.ranked?[1].candidate.isWide == true)
         #expect(j.outcome.ranked?[0].probability == 0 && j.outcome.ranked?[1].probability == 1)
         #expect(j.outcome.ranked?[0].reason.code == .unclassified)
-        var o = fixture(); o["judgements"] = try JSONSerialization.jsonObject(with: JSONEncoder().encode([j]))
+        var o = try evaluationParameters(fixture()); o["judgements"] = try JSONSerialization.jsonObject(with: JSONEncoder().encode([j]))
         let r = try decode(o)
         #expect(try JSONDecoder().decode(R.self, from: JSONEncoder().encode(r)) == r)
         let rules = try R.JudgementSummary(.init(outcome: .ranked([.init(candidate: b.candidate, probability: nil, reason: "subject evidence")]), evidenceRevision: 3, computedAt: 4), kind: .rules, modelVersion: nil, aliases: [.b: "input-2"], path: "judgements[0]", gate: .stale, measurements: &m)
@@ -198,7 +206,7 @@ nonisolated struct DirectorShadowRecordTests {
 
     @Test(arguments: ["rank", "gateReason", "readiness", "evidenceKey", "outcomeKey", "candidateKey", "ruleProbability", "learnedVersion", "negativeMeasurement"])
     func nestedSemanticAndPrivacyFailuresAreRejected(fault: String) throws {
-        var o = fixture()
+        var o = try evaluationParameters(fixture())
         var j: [String: Any] = ["judgeKind": "learned", "modelVersion": "model-1", "evidenceRevision": "4", "computedAt": 1.0, "gateResult": "accepted", "acceptedRank": 0,
             "outcome": ["kind": "ranked", "ranked": [["candidate": ["channel": "input-2", "shot": ["format": "stage", "preset": "wide"], "isWide": true, "subjectConfidence": 0.9, "movement": 0.0], "probability": 1.0, "reason": ["domain": "selection", "code": "subjectEvidence"]]]]]
         var evidence: [String: Any] = ["channel": "input-2", "sampledAt": 1.0, "lockPhase": "tracking", "trackingOwnsControl": true, "galleryReady": true, "hasLockedTarget": true, "holdingSteady": true, "cropConverged": true, "operatorGestureInProgress": false, "identity": "confirmed", "identitySource": "adapter"]
@@ -238,6 +246,33 @@ nonisolated struct DirectorShadowRecordTests {
         #expect(projected.parameters.minimumProbability == 0 && projected.parameters.judgeMaximumAge == 5)
         p["readiness"] = ["minimumSettledTime": 2.0, "minimumCutSettledTime": 1.0,
             "maximumMotion": 0.2, "maximumCutMotion": 0.1, "cutOnMotionAllowed": false]; o["parameters"] = p
+        #expect(throws: (any Error).self) { try decode(o) }
+    }
+
+    @Test(arguments: ["readiness", "adapter", "judgeMaximumAge", "wouldPrepareUnavailable", "wouldCutInvalid"])
+    func evaluatedResultsRequireTheirParameterSnapshots(fault: String) throws {
+        var o = try evaluationParameters(fixture(kind: fault == "wouldCutInvalid" ? "wouldCut" : "wouldPrepare"))
+        var p = try #require(o["parameters"] as? [String: Any])
+        if fault == "wouldPrepareUnavailable" || fault == "wouldCutInvalid" {
+            p = ["status": fault == "wouldPrepareUnavailable" ? "unavailable" : "invalid"]
+        } else if fault == "judgeMaximumAge" {
+            o["judgements"] = [["judgeKind": "rules", "evidenceRevision": "1", "computedAt": 1.0,
+                "outcome": ["kind": "abstain", "reason": ["domain": "policy", "code": "noPreview"]], "gateResult": "stale"]]
+            p.removeValue(forKey: fault)
+        } else {
+            o["evidence"] = [["channel": "input-2", "lockPhase": "tracking", "trackingOwnsControl": true,
+                "galleryReady": true, "hasLockedTarget": true, "holdingSteady": true, "cropConverged": true,
+                "operatorGestureInProgress": false, "identity": "confirmed", "identitySource": "adapter",
+                "prepareReadiness": ["isReady": true, "reasons": []]]]
+            p.removeValue(forKey: fault)
+        }
+        o["parameters"] = p
+        #expect(throws: (any Error).self) { try decode(o) }
+    }
+
+    @Test(arguments: ["wouldCut", "abstention", "operatorAction"])
+    func invalidMarkerMustBelongToTheActualEventPayload(kind: String) throws {
+        var o = fixture(kind: kind); o["invalidFields"] = ["event.proposalCreatedAt"]
         #expect(throws: (any Error).self) { try decode(o) }
     }
 
