@@ -69,8 +69,14 @@ nonisolated struct DirectorShotPolicy {
         timeline.now - timeline.programStartedAt >= parameters.minimumShotDuration
     }
 
-    static func choosePreparation(_ timeline: Timeline, preview: ChannelID,
-                       parameters p: Parameters) -> Decision {
+    /// Every rule-eligible Preview candidate, best first, or why there is none.
+    /// This is the set any judge (rules or learned) is allowed to choose from.
+    enum Ranking: Equatable, Sendable {
+        case ranked([Candidate], dueWide: Bool)
+        case abstain(Abstention)
+    }
+
+    static func rank(_ timeline: Timeline, preview: ChannelID, parameters p: Parameters) -> Ranking {
         guard p.isValid, timeline.now.isFinite, timeline.programStartedAt.isFinite,
               timeline.lastWideAt.isFinite, timeline.now >= timeline.programStartedAt,
               timeline.now >= timeline.lastWideAt,
@@ -94,9 +100,22 @@ nonisolated struct DirectorShotPolicy {
             if $0.isWide != $1.isWide { return $0.isWide }
             return $0.movement < $1.movement
         }
-        guard let selected = sorted.first else { return .abstain(.noEligibleCandidate) }
-        let reason = dueWide && selected.isWide ? "advisory wide reminder" :
+        return .ranked(sorted, dueWide: dueWide)
+    }
+
+    /// Plain reason for preparing `selected` (advisory only; never a cut).
+    static func reason(for selected: Candidate, dueWide: Bool, timeline: Timeline, parameters p: Parameters) -> String {
+        dueWide && selected.isWide ? "advisory wide reminder" :
             timeline.now - timeline.programStartedAt >= p.maximumShotDuration ? "advisory maximum dwell" : "subject evidence"
-        return .chosen(selected, reason)
+    }
+
+    static func choosePreparation(_ timeline: Timeline, preview: ChannelID,
+                       parameters p: Parameters) -> Decision {
+        switch rank(timeline, preview: preview, parameters: p) {
+        case .abstain(let abstention): return .abstain(abstention)
+        case .ranked(let sorted, let dueWide):
+            guard let selected = sorted.first else { return .abstain(.noEligibleCandidate) }
+            return .chosen(selected, reason(for: selected, dueWide: dueWide, timeline: timeline, parameters: p))
+        }
     }
 }
