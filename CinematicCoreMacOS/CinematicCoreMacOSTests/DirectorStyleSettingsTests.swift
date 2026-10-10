@@ -62,6 +62,39 @@ struct DirectorStyleSettingsTests {
         #expect(reopened.message.isEmpty)
     }
 
+    @Test func withoutStorageSavingIsRefusedNotReportedAsSaved() {
+        var saved = false
+        let editor = DirectorStyleEditor(store: DirectorPreferencesStore(fileURL: tempFile()), canSave: false) { _ in saved = true }
+        #expect(editor.message == DirectorStyleEditor.noStorageMessage)
+        editor.drafts[.liveEvent] = DirectorStyleDraft.from(fixtureStyle)
+        editor.save()
+        #expect(editor.message == DirectorStyleEditor.noStorageMessage)
+        #expect(!saved && editor.store.load() == .empty)
+    }
+
+    @Test func savingOverAnUnreadableFileKeepsItBeside() throws {
+        let folder = FileManager.default.temporaryDirectory
+            .appendingPathComponent("alfie-style-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: folder) }
+        let url = folder.appendingPathComponent("DirectorPreferences.json")
+        let newer = Data("{\"version\":99,\"fromANewerAlfie\":true}".utf8)
+        try newer.write(to: url)
+        let editor = DirectorStyleEditor(store: DirectorPreferencesStore(fileURL: url))
+        #expect(editor.message == DirectorPreferencesStore.unreadableMessage)
+        editor.drafts[.liveEvent] = DirectorStyleDraft.from(fixtureStyle)
+        editor.save()
+        #expect(editor.message == DirectorStyleEditor.keptUnreadableMessage)
+        let kept = try FileManager.default.contentsOfDirectory(at: folder, includingPropertiesForKeys: nil)
+            .filter { $0.lastPathComponent.contains("unreadable-") }
+        #expect(kept.count == 1)
+        #expect(try Data(contentsOf: try #require(kept.first)) == newer)
+        guard case .loaded = editor.store.load() else { Issue.record("new styles not saved"); return }
+        // A second save has nothing unreadable to keep.
+        editor.save()
+        #expect(editor.message == DirectorStyleEditor.savedMessage)
+    }
+
     @Test func rendersEmptyCorruptAndSaved() throws {
         let empty = DirectorStyleSettingsView(editor: makeEditor())
         let badURL = tempFile()

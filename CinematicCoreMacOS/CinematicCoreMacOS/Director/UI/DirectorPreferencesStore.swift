@@ -39,6 +39,21 @@ struct DirectorPreferencesStore: Equatable, Sendable {
         }
     }
 
+    /// Moves a file Alfie couldn't read (for example one written by a newer
+    /// Alfie) aside, so saving never destroys it. Returns the new location, or
+    /// nil when there was nothing unreadable to keep.
+    @discardableResult
+    func setAsideUnreadableFile(now: Date = Date()) throws -> URL? {
+        guard case .unreadable = load() else { return nil }
+        let stamp = ISO8601DateFormatter.string(from: now, timeZone: .gmt,
+            formatOptions: [.withYear, .withMonth, .withDay, .withTime])
+        let kept = fileURL.deletingPathExtension()
+            .appendingPathExtension("unreadable-\(stamp)")
+            .appendingPathExtension(fileURL.pathExtension)
+        try FileManager.default.moveItem(at: fileURL, to: kept)
+        return kept
+    }
+
     func save(_ preferences: DirectorPreferences) throws {
         let validated = try preferences.validated()
         let encoder = JSONEncoder()

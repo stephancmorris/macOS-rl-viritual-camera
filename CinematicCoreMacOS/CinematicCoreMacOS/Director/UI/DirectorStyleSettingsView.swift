@@ -18,6 +18,7 @@ struct DirectorStyleSettingsView: View {
                     .font(.system(size: 13, weight: .semibold))
                     .foregroundStyle(editor.message == DirectorPreferencesStore.unreadableMessage
                                      || editor.message == DirectorStyleEditor.cannotSaveMessage
+                                     || editor.message == DirectorStyleEditor.noStorageMessage
                                      ? ConsoleStyle.amber : .primary)
                     .accessibilityLabel(editor.message.isEmpty ? "Using the saved styles." : editor.message)
 
@@ -31,6 +32,7 @@ struct DirectorStyleSettingsView: View {
                 styleFields(editor.binding(for: editor.selected))
 
                 Button("Save styles") { editor.save() }
+                    .disabled(!editor.canSave)
                     .accessibilityLabel("Save styles")
             }
             .padding(24)

@@ -98,25 +98,36 @@ final class DirectorStyleEditor: ObservableObject {
     @Published private(set) var message = "No style set"
 
     let store: DirectorPreferencesStore
+    /// False when this Mac has no place to keep the styles. Saving is refused
+    /// rather than written somewhere temporary and reported as saved.
+    let canSave: Bool
     var onPreferencesChanged: (DirectorPreferences) -> Void
 
     static let emptyMessage = "No style set"
     static let savedMessage = "Saved"
     static let liveEventRequiredMessage = "Enter the Live event style before saving."
     static let cannotSaveMessage = "This style can't be saved."
+    static let noStorageMessage = "Styles can't be saved on this Mac."
+    static let keptUnreadableMessage = "Saved. The old style file Alfie couldn't read was kept beside it."
 
-    /// Settings window store. A missing Application Support folder uses an empty stand-in file.
+    /// Settings window store. Without an Application Support folder the
+    /// screen still opens, but saving is refused.
     static func makeForSettings() -> DirectorStyleEditor {
-        let url = (try? DirectorPreferencesStore.applicationSupportFile())
-            ?? URL(fileURLWithPath: NSTemporaryDirectory(), isDirectory: true)
-                .appendingPathComponent("Alfie-director-styles-unavailable.json")
-        return DirectorStyleEditor(store: DirectorPreferencesStore(fileURL: url))
+        if let url = try? DirectorPreferencesStore.applicationSupportFile() {
+            return DirectorStyleEditor(store: DirectorPreferencesStore(fileURL: url))
+        }
+        let unused = URL(fileURLWithPath: NSTemporaryDirectory(), isDirectory: true)
+            .appendingPathComponent("Alfie-director-styles-unavailable-\(UUID().uuidString).json")
+        return DirectorStyleEditor(store: DirectorPreferencesStore(fileURL: unused), canSave: false)
     }
 
-    init(store: DirectorPreferencesStore, onPreferencesChanged: @escaping (DirectorPreferences) -> Void = { _ in }) {
+    init(store: DirectorPreferencesStore, canSave: Bool = true,
+         onPreferencesChanged: @escaping (DirectorPreferences) -> Void = { _ in }) {
         self.store = store
+        self.canSave = canSave
         self.onPreferencesChanged = onPreferencesChanged
         reload()
+        if !canSave { message = Self.noStorageMessage }
     }
 
     func draft(for segment: SegmentType) -> DirectorStyleDraft {
@@ -144,6 +155,10 @@ final class DirectorStyleEditor: ObservableObject {
     }
 
     func save() {
+        guard canSave else {
+            message = Self.noStorageMessage
+            return
+        }
         guard let live = draft(for: .liveEvent).makeStyle() else {
             message = Self.liveEventRequiredMessage
             return
@@ -160,9 +175,10 @@ final class DirectorStyleEditor: ObservableObject {
         }
         do {
             let preferences = try DirectorPreferences(styles: styles).validated()
+            let kept = try store.setAsideUnreadableFile()
             try store.save(preferences)
             onPreferencesChanged(preferences)
-            message = Self.savedMessage
+            message = kept == nil ? Self.savedMessage : Self.keptUnreadableMessage
         } catch {
             message = Self.cannotSaveMessage
         }
