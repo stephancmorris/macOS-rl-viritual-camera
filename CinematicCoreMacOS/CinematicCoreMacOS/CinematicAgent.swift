@@ -243,6 +243,16 @@ final class CinematicAgent: ObservableObject {
 
     /// Build the 18-dim float observation vector.
     /// Indices match `bc_dataset.py:build_observation()` exactly.
+    /// Per-second speaker velocity from one frame's centre change, clamped to
+    /// [-1, 1] per axis as in `cinematic_env.py` (CR-038).
+    nonisolated static func speakerVelocity(from previous: CGPoint, to current: CGPoint,
+                                            frameRate: Double) -> (x: Float, y: Float) {
+        let rate = Float(frameRate)
+        let x = max(-1.0, min(1.0, Float(current.x - previous.x) * rate))
+        let y = max(-1.0, min(1.0, Float(current.y - previous.y) * rate))
+        return (x, y)
+    }
+
     private func buildObservation(
         person: PersonDetector.DetectedPerson?
     ) -> [Float] {
@@ -283,14 +293,15 @@ final class CinematicAgent: ObservableObject {
         if cropW > 1.0 { cropW = 1.0 }
         let zoomNorm = min(cropZoom / maxZoom, 1.0)
 
-        // Speaker velocity (frames * 30fps ≈ per-second velocity, clamped to [-1, 1])
+        // Speaker velocity: per-frame delta × frame rate ≈ per-second velocity,
+        // clamped to [-1, 1]. The training env multiplies by the session's
+        // frame rate, so the live vector uses the show rate, not a fixed 30.
         var velX: Float = 0
         var velY: Float = 0
         if let prev = previousSpeakerCenter, let p = person {
-            let cx = Float(p.boundingBox.midX)
-            let cy = Float(p.boundingBox.midY)
-            velX = max(-1.0, min(1.0, (cx - Float(prev.x)) * 30.0))
-            velY = max(-1.0, min(1.0, (cy - Float(prev.y)) * 30.0))
+            (velX, velY) = Self.speakerVelocity(
+                from: prev, to: CGPoint(x: p.boundingBox.midX, y: p.boundingBox.midY),
+                frameRate: ShowStandard.activeOrCurrent.frameRate)
         }
         if let p = person {
             previousSpeakerCenter = CGPoint(x: p.boundingBox.midX, y: p.boundingBox.midY)
