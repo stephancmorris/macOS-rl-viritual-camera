@@ -29,6 +29,59 @@ private final class CaptureSessionBox: @unchecked Sendable {
     nonisolated init(_ value: AVCaptureSession) { self.value = value }
 }
 
+/// Coalesces AVCapture `didDrop` callbacks. A drop used to start one
+/// main-actor Task each; under overload that is frame-rate hops onto the actor
+/// that is already behind. Drops are counted here on the capture queue, and
+/// only the first drop of a burst schedules a hop, which records them all.
+nonisolated final class CaptureDropCoalescer: @unchecked Sendable {
+    private let lock = NSLock()
+    private var pending: [Double] = []
+    private var overflow = 0
+    private var flushScheduled = false
+    /// Timestamps kept per flush; beyond this, drops are still counted and
+    /// recorded with the newest timestamp.
+    static let maxPendingTimestamps = 256
+
+    struct Batch: Equatable {
+        var timestamps: [Double] = []
+        /// Drops past the timestamp cap; each is recorded at the newest time.
+        var overflow = 0
+
+        var all: [Double] {
+            guard overflow > 0, let last = timestamps.last else { return timestamps }
+            return timestamps + Array(repeating: last, count: overflow)
+        }
+    }
+
+    init() {}
+
+    /// Record one drop. True when the caller must schedule a flush.
+    func note(timestamp: Double) -> Bool {
+        lock.lock()
+        defer { lock.unlock() }
+        if pending.count < Self.maxPendingTimestamps {
+            pending.append(timestamp)
+        } else {
+            pending[pending.count - 1] = timestamp
+            overflow += 1
+        }
+        guard !flushScheduled else { return false }
+        flushScheduled = true
+        return true
+    }
+
+    /// Take every drop noted since the last flush.
+    func drain() -> Batch {
+        lock.lock()
+        defer { lock.unlock() }
+        let batch = Batch(timestamps: pending, overflow: overflow)
+        pending.removeAll(keepingCapacity: true)
+        overflow = 0
+        flushScheduled = false
+        return batch
+    }
+}
+
 nonisolated final class CaptureFrameProcessingGate: @unchecked Sendable {
     private let lock = NSLock()
     private var activeLease: UInt64?
@@ -616,6 +669,7 @@ final class CameraManager: NSObject, ObservableObject {
     private var cancellables = Set<AnyCancellable>()
     private var clipPlaybackTask: Task<Void, Never>?
     private nonisolated let frameProcessingGate = CaptureFrameProcessingGate()
+    private nonisolated let dropCoalescer = CaptureDropCoalescer()
 
     /// Last source pixel aspect (width/height) forwarded to the shot composer.
     /// Used to skip the per-frame update when aspect is unchanged.
@@ -1145,6 +1199,18 @@ final class CameraManager: NSObject, ObservableObject {
         return lastGoodProgramBuffer
     }
 
+    /// Run `render` holding the shared render slot. Without a scheduler the
+    /// render runs directly. A scheduler that cancels or supersedes this turn
+    /// returns no permit: the frame is skipped (`CancellationError`), not
+    /// rendered outside the slot (CR-031).
+    static func renderInTurn(scheduler: FrameWorkScheduler?, channel: ChannelID,
+                             render: () async throws -> CVPixelBuffer) async throws -> CVPixelBuffer {
+        guard let scheduler else { return try await render() }
+        guard let permit = await scheduler.acquire(.render, for: channel) else { throw CancellationError() }
+        defer { scheduler.release(permit) }
+        return try await render()
+    }
+
     func renderProgramFrame(crop: CropEngine.CropRect, timestamp: Double,
                             render: () async throws -> CVPixelBuffer) async -> CVPixelBuffer? {
         let generation = captureGeneration
@@ -1157,6 +1223,10 @@ final class CameraManager: NSObject, ObservableObject {
               epoch == commands.epoch, running == isRunning else { return nil }
         switch result {
         case .success(let buffer): return selectProgramBuffer(rendered: buffer, crop: crop)
+        case .failure(let error) where error is CancellationError:
+            // A skipped turn is not a render failure: discard the frame and
+            // leave the hold state as it was.
+            return nil
         case .failure(let error):
             cancelOperatorMotion()
             outputPort.recordDroppedFrame(timestamp: timestamp, reason: "Crop processing failed: \(error.localizedDescription)", stage: .renderFailed)
@@ -2059,11 +2129,11 @@ final class CameraManager: NSObject, ObservableObject {
                     let smoothing = CACurrentMediaTime() < fastFramingUntil
                         ? Self.fastFramingSmoothing
                         : shotComposer.config.smoothingFactor
-                    cropEngine.config.transitionSmoothing = smoothing
+                    cropEngine.applyFrameSmoothing(smoothing, operatorSetting: shotComposer.config.smoothingFactor)
                     cropEngine.setTargetCrop(widestSafeCrop())
                 case .autoTracking:
                     if useMLAgent {
-                        cropEngine.config.transitionSmoothing = 0.05
+                        cropEngine.applyFrameSmoothing(0.05, operatorSetting: shotComposer.config.smoothingFactor)
                         let newCrop = cinematicAgent.predict(
                             person: primaryPerson,
                             currentCrop: cropEngine.currentCrop
@@ -2073,7 +2143,7 @@ final class CameraManager: NSObject, ObservableObject {
                         let smoothing = CACurrentMediaTime() < fastFramingUntil
                             ? Self.fastFramingSmoothing
                             : shotComposer.config.smoothingFactor
-                        cropEngine.config.transitionSmoothing = smoothing
+                        cropEngine.applyFrameSmoothing(smoothing, operatorSetting: shotComposer.config.smoothingFactor)
                         if let primaryPerson {
                             frameLog("🔍 DEBUG: Composing shot for person at \(primaryPerson.boundingBox)")
                             if let idealCrop = shotComposer.compose(
@@ -2090,7 +2160,7 @@ final class CameraManager: NSObject, ObservableObject {
                         }
                     }
                 case .manualCrop:
-                    cropEngine.config.transitionSmoothing = shotComposer.config.smoothingFactor
+                    cropEngine.applyFrameSmoothing(shotComposer.config.smoothingFactor, operatorSetting: shotComposer.config.smoothingFactor)
                     let idealCrop = manualCropRect(center: manualCropPoint)
                     cropEngine.setTargetCrop(idealCrop)
                 case .autoPan:
@@ -2113,9 +2183,10 @@ final class CameraManager: NSObject, ObservableObject {
             outputPixelBuffer = await renderProgramFrame(crop: snapshot.crop, timestamp: timestampSeconds) {
                 // The render slot is shared across channels; wait for this
                 // channel's fair turn (immediate with one camera).
-                let permit = await scheduler?.acquire(.render, for: channel)
-                defer { if let permit { scheduler?.release(permit) } }
-                return try await cropEngine.renderCrop(pixelBuffer, crop: snapshot.crop, outputSize: snapshot.outputSize)
+                try await Self.renderInTurn(scheduler: scheduler, channel: channel) {
+                    try await cropEngine.renderCrop(pixelBuffer, crop: snapshot.crop,
+                                                    outputSize: snapshot.outputSize, highQuality: snapshot.highQuality)
+                }
             }
             mainSegmentStart = CACurrentMediaTime()
             cropDuration = CACurrentMediaTime() - cropStart
@@ -3006,12 +3077,15 @@ extension CameraManager: AVCaptureVideoDataOutputSampleBufferDelegate {
         // Performance monitoring: frame drops indicate system overload
         latencyLog("avcapture-drop (system overload upstream of processing gate)")
         let timestampSeconds = CMSampleBufferGetPresentationTimeStamp(sampleBuffer).seconds
+        guard dropCoalescer.note(timestamp: timestampSeconds) else { return }
         Task(priority: .userInitiated) { @MainActor in
-            self.outputPort.recordDroppedFrame(
-                timestamp: timestampSeconds,
-                reason: "AVCapture dropped a frame before processing.",
-                stage: .captureUpstream
-            )
+            for timestamp in self.dropCoalescer.drain().all {
+                self.outputPort.recordDroppedFrame(
+                    timestamp: timestamp,
+                    reason: "AVCapture dropped a frame before processing.",
+                    stage: .captureUpstream
+                )
+            }
         }
     }
 }
