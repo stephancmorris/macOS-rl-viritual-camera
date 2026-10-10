@@ -10,10 +10,15 @@
 import Foundation
 
 enum DeveloperFlags {
-    /// Exposes the Gate 5 validation playback controls so recorded church
-    /// clips can be routed through the same detection/crop pipeline as the
-    /// live camera feed.
+    /// DEVELOPMENT ONLY — on in Debug builds, always off in Release. Exposes
+    /// the Gate 5 validation playback controls so recorded church clips can
+    /// be routed through the same detection/crop pipeline as the live camera
+    /// feed. An operator build must not offer to put a clip on Program.
+    #if DEBUG
     nonisolated static let exposeClipPlaybackControls = true
+    #else
+    nonisolated static let exposeClipPlaybackControls = false
+    #endif
 
     /// Exposes the ML agent toggle, agent settings popover, and enables
     /// `useMLAgent` as a runtime-selectable controller. Church MVP ships
