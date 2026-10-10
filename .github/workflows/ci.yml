@@ -1,0 +1,104 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_call:
+    inputs:
+      timing:
+        description: Run the non-blocking frame-cost test
+        type: boolean
+        default: true
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    name: Build and unit tests
+    runs-on: macos-26
+    timeout-minutes: 60
+    steps:
+      - name: Checkout
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          fetch-depth: 0
+
+      - name: Select Xcode 26.2
+        run: sudo xcode-select -s /Applications/Xcode_26.2.app
+
+      - name: Debug build
+        run: >
+          xcodebuild build
+          -project CinematicCoreMacOS/CinematicCoreMacOS.xcodeproj
+          -scheme CinematicCoreMacOS
+          -configuration Debug
+          -destination 'platform=macOS'
+          CODE_SIGNING_ALLOWED=NO
+
+      - name: Unit tests
+        run: >
+          xcodebuild test
+          -project CinematicCoreMacOS/CinematicCoreMacOS.xcodeproj
+          -scheme CinematicCoreMacOS
+          -destination 'platform=macOS'
+          -only-testing:CinematicCoreMacOSTests
+          -skip-testing:CinematicCoreMacOSTests/ProgramOutputMetricsTests/perFrameInstrumentationCostIsSmall
+          -resultBundlePath ${{ runner.temp }}/unit.xcresult
+          CODE_SIGNING_ALLOWED=NO
+
+      - name: Upload test results
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: unit-xcresult
+          path: ${{ runner.temp }}/unit.xcresult
+          if-no-files-found: ignore
+
+      - name: Release build
+        run: >
+          xcodebuild build
+          -project CinematicCoreMacOS/CinematicCoreMacOS.xcodeproj
+          -scheme CinematicCoreMacOS
+          -configuration Release
+          -destination 'platform=macOS'
+          CODE_SIGNING_ALLOWED=NO
+
+      - name: Diagnostics tests
+        working-directory: CinematicCoreMacOS
+        run: python3 -m unittest scripts/test_diagnostics_report.py
+
+      - name: Training tests
+        run: |
+          python3 -m venv .ci-venv
+          .ci-venv/bin/pip install -r training/requirements.txt
+          .ci-venv/bin/python training/test_env.py
+          .ci-venv/bin/python training/test_training.py
+
+      - name: Consistency
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.before }}
+          ALLOW_ENTITLEMENT_CHANGE: ${{ contains(github.event.pull_request.labels.*.name, 'allow-entitlement-change') && '1' || '0' }}
+        run: bash scripts/ci/check_consistency.sh
+
+  timing:
+    name: Frame-cost timing (not required)
+    if: ${{ github.event_name != 'workflow_call' || inputs.timing }}
+    runs-on: macos-26
+    timeout-minutes: 30
+    steps:
+      - name: Checkout
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+
+      - name: Select Xcode 26.2
+        run: sudo xcode-select -s /Applications/Xcode_26.2.app
+
+      - name: Timing test
+        run: >
+          xcodebuild test
+          -project CinematicCoreMacOS/CinematicCoreMacOS.xcodeproj
+          -scheme CinematicCoreMacOS
+          -destination 'platform=macOS'
+          -only-testing:CinematicCoreMacOSTests/ProgramOutputMetricsTests/perFrameInstrumentationCostIsSmall
+          CODE_SIGNING_ALLOWED=NO
