@@ -61,8 +61,10 @@ final class ShowCoordinator: ObservableObject {
 
     /// - Parameter programOutput: injected in tests; the app passes nil and
     ///   gets the real virtual-camera + Program Display output.
-    init(programOutput: ProgramOutputManager? = nil, admissionRecords: AdmissionRecordStore? = nil) {
+    init(programOutput: ProgramOutputManager? = nil, admissionRecords: AdmissionRecordStore? = nil,
+         qualificationRecords: DirectorQualificationStore? = nil) {
         self.admissionRecords = admissionRecords ?? AdmissionRecordStore()
+        self.qualificationRecords = qualificationRecords ?? .applicationSupport()
         let rehearsal: [any ProgramOutputSink] = DeveloperFlags.allowRehearsalOutput ? [RehearsalOutputSink()] : []
         let output = programOutput
             ?? ProgramOutputManager(sinks: [VirtualCameraOutputSink(), DisplayOutputSink()] + rehearsal)
@@ -154,6 +156,17 @@ final class ShowCoordinator: ObservableObject {
 
     func recordAdmission(_ result: PairAdmissionResult) {
         admissionRecords.record(result.status, for: admissionFingerprint())
+    }
+
+    // MARK: Director qualification (S3 B-06, C16)
+
+    /// Per-level sign-off records bound to the admission fingerprint.
+    let qualificationRecords: DirectorQualificationStore
+
+    /// Director levels this rig may select right now. Empty unless a sign-off
+    /// matches the current fingerprint; any configuration change empties it.
+    var qualifiedDirectorLevels: Set<DirectorAuthority.Level> {
+        qualificationRecords.qualifiedLevels(for: admissionFingerprint())
     }
 
     func pairAdmissionContext(preview: ChannelID) -> PairAdmissionContext {

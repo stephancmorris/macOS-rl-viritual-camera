@@ -116,4 +116,14 @@ enum DeveloperFlags {
     #else
     nonisolated static let allowRehearsalOutput = false
     #endif
+
+    /// DEVELOPMENT ONLY — on in Debug builds, always off in Release. Lets
+    /// tests and rehearsals inject in-memory Director qualification records
+    /// (B-06). They are never written to disk, and a release build reads only
+    /// real sign-off records, so a level can't become selectable by accident.
+    #if DEBUG
+    nonisolated static let allowInjectedQualification = true
+    #else
+    nonisolated static let allowInjectedQualification = false
+    #endif
 }
