@@ -170,4 +170,40 @@ nonisolated struct DirectorEffectSinkTests {
         #expect(sink.appliedReceipts.isEmpty)
     }
 
+    private enum ReceiptFault: CaseIterable { case wrongRequest, programTarget, unchangedRevisions }
+    private struct WrongReceiptSink: DirectorEffectSink {
+        let fault: ReceiptFault
+        mutating func prepare(_ request: DirectorPreparation.Request,
+                              preparation: inout DirectorPreparation,
+                              live: DirectorLiveState, now: TimeInterval) -> DirectorPreparationEffect {
+            var intent = request.intent
+            if fault == .programTarget {
+                guard let wrong = DirectorProposal(target: live.program, preview: live.program,
+                    shot: intent.shot, reason: intent.reason, authorityEpoch: intent.authorityEpoch,
+                    revisions: intent.revisions, routeGeneration: intent.routeGeneration,
+                    createdAt: intent.createdAt) else { return .failed }
+                intent = wrong
+            }
+            let before = request.intent.revisions
+            return .committed(.init(requestID: fault == .wrongRequest ? UUID() : request.id,
+                intent: intent, postRevisions: fault == .unchangedRevisions ? before :
+                    .init(sourceGeneration: before.sourceGeneration, controlEpoch: before.controlEpoch + 1,
+                          shotRevision: before.shotRevision + 1)))
+        }
+    }
+
+    @Test(arguments: ReceiptFault.allCases)
+    private func independentAuditDetectsUnrelatedAndMalformedReceipts(fault: ReceiptFault) {
+        let fixture = DirectorReplay.Fixture(name: "synthetic receipt fault", duration: 3, events: [
+            .init(at: 1, action: .render(channel: .b)),
+            .init(at: 1, action: .subject(channel: .b, present: true, identity: .confirmed,
+                intended: true, framingReady: true, movement: 0)),
+            .init(at: 2, action: .directorAttempt(id: "valid", delay: 0, succeeds: true))])
+        let report = DirectorReplay.run(fixture, parameters: .policyStudy, maximumProposalAge: 5,
+            maximumEvidenceAge: 5, readinessParameters: .replayStudy,
+            sinkFactory: { _ in WrongReceiptSink(fault: fault) })
+        #expect(report.preparationsCommitted == 1 && report.staleEffectsCommitted == 1)
+        #expect(report.directorCuts == 0 && report.evidence == .synthetic)
+    }
+
 }

@@ -163,7 +163,15 @@ nonisolated struct DirectorReplay {
                     policyRevision: policyRevision, nominationRevision: nominationRevision))
                 channels[target]?.revisions = receipt.postRevisions
                 preparationsCommitted += 1
-                if !audit.isEmpty { staleEffectsCommitted += 1 }
+                let before = live.revisions
+                let receiptMatches = receipt.requestID == effect.request.id &&
+                    receipt.intent == effect.request.intent &&
+                    before.map { receipt.postRevisions.sourceGeneration == $0.sourceGeneration &&
+                        receipt.postRevisions.controlEpoch > $0.controlEpoch &&
+                        receipt.postRevisions.shotRevision > $0.shotRevision } == true
+                if !audit.isEmpty || !receiptMatches || !live.evidenceAvailable {
+                    staleEffectsCommitted += 1
+                }
                 acknowledgements.append((effect.id, now + effect.acknowledgementDelay, receipt))
             }
         }
