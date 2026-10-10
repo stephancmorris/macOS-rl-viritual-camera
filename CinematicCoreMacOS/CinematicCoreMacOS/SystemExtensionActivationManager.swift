@@ -65,6 +65,9 @@ final class SystemExtensionActivationManager: NSObject, ObservableObject {
     private var requestInFlight = false
     private var activationWaiters: [CheckedContinuation<Bool, Never>] = []
     private var requestKinds: [ObjectIdentifier: RequestKind] = [:]
+    /// Set when `actionForReplacingExtension` refused a downgrade, so the
+    /// cancellation that follows is reported as that, not as "Install Canceled".
+    private var refusedDowngrade: (installed: String, bundled: String)?
 
     private enum RequestKind {
         case activation
@@ -286,11 +289,11 @@ final class SystemExtensionActivationManager: NSObject, ObservableObject {
         }
 
         logger.notice(
-            "Submitting activation request for \(self.extensionIdentifier, privacy: .public); appBundle=\(Bundle.main.bundleURL.path, privacy: .public); systemExtensionsDir=\(Self.systemExtensionsDirectoryURL().path, privacy: .public)"
+            "Submitting activation request for \(self.extensionIdentifier, privacy: .public); \(Self.hostBundleLogDescription, privacy: .public)"
         )
         AlfieDiagnosticsLog.append(
             "SystemExtension",
-            "Submitting activation request identifier=\(extensionIdentifier) appBundle=\(Bundle.main.bundleURL.path) systemExtensionsDir=\(Self.systemExtensionsDirectoryURL().path)"
+            "Submitting activation request identifier=\(extensionIdentifier) \(Self.hostBundleLogDescription)"
         )
         requestInFlight = true
         status = .activationRequested
@@ -304,13 +307,22 @@ final class SystemExtensionActivationManager: NSObject, ObservableObject {
         OSSystemExtensionManager.shared.submitRequest(request)
     }
 
+    /// Where the host app is, for logs, without its path: the path contains
+    /// the home-directory user name and these lines are public (CR-026).
+    private static var hostBundleLogDescription: String {
+        let bundleURL = Bundle.main.bundleURL.standardizedFileURL
+        let inApplications = isBundleInstalledInApplicationsDirectory(bundleURL)
+        let extensionBundled = FileManager.default.fileExists(atPath: systemExtensionsDirectoryURL().path)
+        return "appBundleID=\(Bundle.main.bundleIdentifier ?? "unknown") inApplications=\(inApplications) extensionsDirPresent=\(extensionBundled)"
+    }
+
     private func refreshInstalledState() {
         logger.notice(
-            "Refreshing system-extension status for \(self.extensionIdentifier, privacy: .public); appBundle=\(Bundle.main.bundleURL.path, privacy: .public)"
+            "Refreshing system-extension status for \(self.extensionIdentifier, privacy: .public); \(Self.hostBundleLogDescription, privacy: .public)"
         )
         AlfieDiagnosticsLog.append(
             "SystemExtension",
-            "Refreshing installed state identifier=\(extensionIdentifier) appBundle=\(Bundle.main.bundleURL.path)"
+            "Refreshing installed state identifier=\(extensionIdentifier) \(Self.hostBundleLogDescription)"
         )
         status = .unknown
 
@@ -638,15 +650,20 @@ extension SystemExtensionActivationManager: @preconcurrency OSSystemExtensionReq
         let kind = requestKinds.removeValue(forKey: ObjectIdentifier(request))
         switch kind {
         case .properties:
+            // A failed lookup says nothing about the install. Do not fall back
+            // to the last remembered result: that could report the camera
+            // ready when macOS never confirmed it (CR-017). Status stays where
+            // it is (`.unknown` after a refresh) until a properties or
+            // activation result arrives; Start then submits an activation.
             logger.error(
-                "System-extension properties request failed: \(Self.diagnosticSummary(for: error), privacy: .public)"
+                "System-extension properties request failed: \(Self.diagnosticSummary(for: error), privacy: .public); status stays \(self.statusLogValue, privacy: .public)"
             )
-            if defaults.bool(forKey: installDefaultsKey) {
-                status = .installed
-            } else {
-                status = .notInstalled
-            }
         case .activation, .none:
+            if let refused = refusedDowngrade {
+                refusedDowngrade = nil
+                markFailed(Self.downgradeRefusedDetails(installed: refused.installed, bundled: refused.bundled))
+                return
+            }
             switch Self.failureDisposition(for: error) {
             case .awaitingApproval:
                 markAwaitingUserApproval()
@@ -680,10 +697,41 @@ extension SystemExtensionActivationManager: @preconcurrency OSSystemExtensionReq
         actionForReplacingExtension existing: OSSystemExtensionProperties,
         withExtension ext: OSSystemExtensionProperties
     ) -> OSSystemExtensionRequest.ReplacementAction {
-        logger.notice(
-            "Replacing existing system extension \(String(describing: existing), privacy: .public) with \(String(describing: ext), privacy: .public)"
+        let action = Self.replacementAction(
+            existingShortVersion: existing.bundleShortVersion, existingVersion: existing.bundleVersion,
+            newShortVersion: ext.bundleShortVersion, newVersion: ext.bundleVersion)
+        let installed = "\(existing.bundleShortVersion) (\(existing.bundleVersion))"
+        let bundled = "\(ext.bundleShortVersion) (\(ext.bundleVersion))"
+        if action == .cancel {
+            logger.notice("Keeping installed system extension \(installed, privacy: .public); refusing downgrade to \(bundled, privacy: .public)")
+            AlfieDiagnosticsLog.append("SystemExtension", "Refused downgrade installed=\(installed) bundled=\(bundled)")
+            refusedDowngrade = (installed, bundled)
+        } else {
+            logger.notice("Replacing system extension \(installed, privacy: .public) with \(bundled, privacy: .public)")
+        }
+        return action
+    }
+
+    /// Replace the installed extension unless the bundled one is older (CR-018).
+    /// The marketing version decides first, then the build number; both are
+    /// compared numerically ("1.10" is newer than "1.9"). An equal version
+    /// replaces, so a rebuilt development copy still installs.
+    nonisolated static func replacementAction(
+        existingShortVersion: String, existingVersion: String,
+        newShortVersion: String, newVersion: String
+    ) -> OSSystemExtensionRequest.ReplacementAction {
+        let byShort = newShortVersion.compare(existingShortVersion, options: .numeric)
+        let order = byShort == .orderedSame ? newVersion.compare(existingVersion, options: .numeric) : byShort
+        return order == .orderedAscending ? .cancel : .replace
+    }
+
+    static func downgradeRefusedDetails(installed: String, bundled: String) -> FailureDetails {
+        FailureDetails(
+            title: "Newer Virtual Camera Installed",
+            summary: "A newer Alfie virtual camera is already installed. This copy of Alfie will not replace it with an older one.",
+            detail: "Installed \(installed), bundled \(bundled). Open the newer Alfie, or update this copy.",
+            recoveryAction: .retryInstall
         )
-        return .replace
     }
 
     func request(_ request: OSSystemExtensionRequest, foundProperties properties: [OSSystemExtensionProperties]) {
