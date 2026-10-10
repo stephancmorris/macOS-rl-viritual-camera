@@ -276,4 +276,36 @@ nonisolated struct DirectorShadowRecordTests {
         #expect(throws: (any Error).self) { try decode(o) }
     }
 
+    @Test(arguments: ["judge", "readiness", "adapter"])
+    func invalidParameterDiagnosticsRoundTripWithoutFabricatingValidParameters(kind: String) throws {
+        var o = fixture(kind: "abstention")
+        o["parameters"] = ["status": "invalid", "parametersVersion": "37", "preferencesVersion": 2]
+        if kind == "judge" {
+            o["invalidFields"] = ["parameters.judgeMaximumAge"]
+            o["judgements"] = [["judgeKind": "rules", "evidenceRevision": "11", "computedAt": 9.0,
+                "gateResult": "stale", "outcome": ["kind": "abstain", "reason": ["domain": "policy", "code": "invalidInput"]]]]
+        } else {
+            var e: [String: Any] = ["channel": "input-2", "lockPhase": "tracking", "trackingOwnsControl": false,
+                "galleryReady": false, "hasLockedTarget": false, "holdingSteady": false, "cropConverged": false,
+                "operatorGestureInProgress": false, "identity": "unavailable", "identitySource": "sampleClassifier"]
+            if kind == "readiness" { e["prepareReadiness"] = ["isReady": false, "reasons": ["takeUnavailable", "invalidParameters"]] }
+            else { e["identitySource"] = "adapter"; e["adapterEvidenceAvailable"] = false }
+            o["evidence"] = [e]
+        }
+        let r = try decode(o)
+        #expect(r.parameters.status == .invalid && r.parameters.resolvedStyle == nil)
+        #expect(try JSONDecoder().decode(R.self, from: JSONEncoder().encode(r)) == r)
+        // Diagnostics cannot be changed into successful evaluations or recommendations.
+        if kind == "judge" {
+            var j = try #require((o["judgements"] as? [[String: Any]])?.first)
+            j["gateResult"] = "accepted"; j["acceptedRank"] = 0; o["judgements"] = [j]
+        } else {
+            var e = try #require((o["evidence"] as? [[String: Any]])?.first)
+            if kind == "readiness" { e["prepareReadiness"] = ["isReady": true, "reasons": []] }
+            else { e["identity"] = "confirmed"; e["adapterEvidenceAvailable"] = true }
+            o["evidence"] = [e]
+        }
+        #expect(throws: (any Error).self) { try decode(o) }
+    }
+
 }

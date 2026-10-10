@@ -225,6 +225,7 @@ nonisolated struct DirectorShadowRecord: Codable, Equatable, Sendable {
         func readiness(_ value: ReadinessSummary?) -> Bool {
             value.map { $0.isReady == $0.reasons.isEmpty } ?? true
         }
+        let diagnostic = parameters.status == .invalid && (event.kind == .abstention || event.kind == .operatorAction)
         try require(schemaVersion == Self.currentSchemaVersion && scalar(eventTime))
         try require(Self.validUTC(recordedAtUTC))
         try require(!context.inputs.isEmpty && Set(context.inputs).count == context.inputs.count &&
@@ -261,9 +262,16 @@ nonisolated struct DirectorShadowRecord: Codable, Equatable, Sendable {
             try require([e.sampledAt, e.observationAge, e.subjectSpeed, e.settledSince, e.framingSettledFor].allSatisfy(scalar))
             try require(e.observedPersonCount.map { $0 >= 0 } ?? true)
             try require(readiness(e.prepareReadiness) && readiness(e.cutReadiness))
-            if e.prepareReadiness != nil || e.cutReadiness != nil { try require(parameters.readiness != nil) }
+            if e.prepareReadiness != nil || e.cutReadiness != nil {
+                let invalidBars = [e.prepareReadiness, e.cutReadiness].compactMap { $0 }.allSatisfy {
+                    !$0.isReady && $0.reasons.contains(.invalidParameters)
+                }
+                try require(parameters.readiness != nil || (diagnostic && invalidBars))
+            }
             if e.identitySource == .adapter || e.adapterEvidenceAvailable != nil || e.settledSince != nil || e.framingSettledFor != nil {
-                try require(parameters.adapter != nil)
+                let unavailableAdapter = diagnostic && e.identity == .unavailable &&
+                    e.adapterEvidenceAvailable != true && e.settledSince == nil
+                try require(parameters.adapter != nil || unavailableAdapter)
             }
             if e.identitySource == .sampleClassifier && e.identity != .unavailable { try require(parameters.adapter != nil) }
             register("evidence[\(i)].sampledAt", e.sampledAt == nil)
@@ -275,7 +283,10 @@ nonisolated struct DirectorShadowRecord: Codable, Equatable, Sendable {
         }
         for (i, j) in judgements.enumerated() {
             try require(scalar(j.computedAt))
-            if j.gateResult != .notEvaluated { try require(parameters.judgeMaximumAge != nil) }
+            if j.gateResult != .notEvaluated {
+                let invalidAge = diagnostic && j.gateResult == .stale && invalidFields.contains("parameters.judgeMaximumAge")
+                try require(parameters.judgeMaximumAge != nil || invalidAge)
+            }
             register("judgements[\(i)].computedAt", j.computedAt == nil)
             if let token = j.modelVersion { try require(Self.matches(token, pattern: "[A-Za-z0-9][A-Za-z0-9._-]*")) }
             try require(j.judgeKind != .learned || j.modelVersion != nil)
