@@ -106,8 +106,8 @@ nonisolated struct DirectorReplay {
         let validClockConfiguration = fixture.duration.isFinite && fixture.duration > 0 &&
             maximumProposalAge.isFinite && maximumProposalAge >= 0 && maximumEvidenceAge.isFinite && maximumEvidenceAge >= 0
         if !validClockConfiguration { clockAnomalies += 1 }
-        let shotA = DirectorShot(preset: .wide, mode: .manualCrop, zoomRung: 0)
-        let shotB = DirectorShot(preset: .waistUp, mode: .autoTracking, zoomRung: 1)
+        let shotA = DirectorShot(preset: .stage(.wide))
+        let shotB = DirectorShot(preset: .stage(.waistUp))
         var history: [DirectorShotPolicy.History] = []
         func currentPrerequisites() -> DirectorAuthority.Prerequisites {
             .init(nominationsCurrent: true, previewAvailable: channels[program == .a ? .b : .a] != nil,

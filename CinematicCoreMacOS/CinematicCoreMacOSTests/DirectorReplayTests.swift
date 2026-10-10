@@ -219,7 +219,7 @@ struct DirectorEffectAuditTests {
                         route: UInt64 = 4, before: ChannelRevisions? = nil, missing: Bool = false,
                         policy: UInt64 = 0, nomination: UInt64 = 0, age: TimeInterval = 0.1) throws -> DirectorReplay.CommittedEffect {
         let proposal = try #require(DirectorProposal(target: .b, preview: .b,
-            shot: DirectorShot(preset: .waistUp, mode: .autoTracking, zoomRung: 1), reason: "test",
+            shot: DirectorShot(preset: .stage(.waistUp)), reason: "test",
             authorityEpoch: 7, revisions: revisions, routeGeneration: 4, createdAt: 10))
         return .init(proposal: proposal, requestIssuedAt: 10, requestMaximumAge: 0.5, appliedAt: 10 + age,
                      program: program, preview: preview, routeGeneration: route,

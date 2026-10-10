@@ -6,7 +6,7 @@ import Testing
         var authority = DirectorAuthority(reviewPolicy: .conservative)
         authority.apply(.enable(.autoPrepare), prerequisites: .init(nominationsCurrent: true, previewAvailable: true, sourcesHealthy: true, outputHealthy: true, admissionCurrent: true))
         let revisions = ChannelRevisions(sourceGeneration: 1, controlEpoch: 2, shotRevision: 3)
-        let shot = DirectorShot(preset: .waistUp, mode: .autoTracking, zoomRung: 1)
+        let shot = DirectorShot(preset: .stage(.waistUp))
         let p = try #require(DirectorProposal(target: .b, preview: .b, shot: shot, reason: "subject",
                                  authorityEpoch: authority.epoch, revisions: revisions,
                                  routeGeneration: 4, createdAt: 10))
@@ -28,7 +28,7 @@ import Testing
 
     @Test func proposalForANonPreviewChannelIsRefusedNotACrash() {
         let revisions = ChannelRevisions(sourceGeneration: 1, controlEpoch: 1, shotRevision: 1)
-        let shot = DirectorShot(preset: .wide, mode: .manualCrop, zoomRung: 0)
+        let shot = DirectorShot(preset: .stage(.wide))
         #expect(DirectorProposal(target: .a, preview: .b, shot: shot, reason: "program", authorityEpoch: 0,
                                  revisions: revisions, routeGeneration: 0, createdAt: 0) == nil)
     }
@@ -39,7 +39,7 @@ import Testing
         let revisions = ChannelRevisions(sourceGeneration: 1, controlEpoch: 1, shotRevision: 1)
         let live = DirectorLiveState(authority: authority, program: .a, preview: .b,
             revisions: revisions, routeGeneration: 1, sourceMissing: false)
-        let shot = DirectorShot(preset: .wide, mode: .manualCrop, zoomRung: 0)
+        let shot = DirectorShot(preset: .stage(.wide))
         for createdAt in [Double.nan, Double.infinity, -Double.infinity] {
             let proposal = try #require(DirectorProposal(target: .b, preview: .b, shot: shot, reason: "test",
                 authorityEpoch: authority.epoch, revisions: revisions, routeGeneration: 1, createdAt: createdAt))
@@ -97,7 +97,7 @@ extension DirectorProposalTests {
     private func intent(_ live: DirectorLiveState, at: Double = 0) throws -> DirectorProposal {
         let revisions = try #require(live.revisions)
         return try #require(DirectorProposal(target: .b, preview: .b,
-            shot: .init(preset: .waistUp, mode: .autoTracking, zoomRung: 1), reason: "study",
+            shot: .init(preset: .stage(.waistUp)), reason: "study",
             authorityEpoch: live.authority.epoch, revisions: revisions,
             routeGeneration: live.routeGeneration, createdAt: at,
             policyRevision: live.policyRevision, nominationRevision: live.nominationRevision))

@@ -3,8 +3,8 @@ import Testing
 @testable import Alfie
 
 @MainActor struct DirectorShotPolicyTests {
-    let a = DirectorShot(preset: .waistUp, mode: .autoTracking, zoomRung: 1)
-    let b = DirectorShot(preset: .medium, mode: .manualCrop, zoomRung: 0)
+    let a = DirectorShot(preset: .stage(.waistUp))
+    let b = DirectorShot(preset: .stage(.fullBody))
 
     @Test func minimumAndRepetition() {
         let candidate = DirectorShotPolicy.Candidate(channel: .b, shot: b, subjectConfidence: 0.9,
@@ -56,9 +56,8 @@ import Testing
     }
 
     @Test func tiesResolveIndependentOfCandidateOrder() {
-        let shots = [DirectorShot(preset: .medium, mode: .autoPan, zoomRung: 2),
-            DirectorShot(preset: .medium, mode: .autoTracking, zoomRung: 1),
-            DirectorShot(preset: .medium, mode: .autoTracking, zoomRung: 0)]
+        let shots = [DirectorShot(preset: .webcam(.tight)), DirectorShot(preset: .stage(.fullBody)),
+            DirectorShot(preset: .webcam(.wide)), DirectorShot(preset: .stage(.wide))]
         let candidates = shots.map { DirectorShotPolicy.Candidate(channel: .b, shot: $0,
             subjectConfidence: 0.9, movement: 0, isWide: false) }
         func selected(_ values: [DirectorShotPolicy.Candidate]) -> DirectorShotPolicy.Decision {
@@ -77,5 +76,40 @@ import Testing
         #expect(throws: DirectorPreferences.ValidationError.conflictingConstraints) {
             try DirectorPreferences.resolve(a, b)
         }
+    }
+}
+
+/// A-01 (N3): the Director speaks the app's own preset vocabulary.
+extension DirectorShotPolicyTests {
+    @Test func shotOrderIsStageThenWebcamWideToTight() {
+        let ordered: [OperatorCommand.Preset] = [.stage(.wide), .stage(.fullBody), .stage(.waistUp),
+                                                 .webcam(.wide), .webcam(.tight)]
+        let orders = ordered.map { DirectorShot(preset: $0).order }
+        #expect(orders == orders.sorted())
+        #expect(Set(orders).count == ordered.count)
+        #expect(ordered.filter { DirectorShot(preset: $0).isWide } == [.stage(.wide), .webcam(.wide)])
+    }
+
+    @Test func everyAppPresetIsADirectorShot() {
+        let all = ShotComposer.Config.ShotPreset.allCases.map { OperatorCommand.Preset.stage($0) } +
+            ShotComposer.Config.WebcamPreset.allCases.map { OperatorCommand.Preset.webcam($0) }
+        #expect(Set(all.map(DirectorShot.init(preset:))).count == all.count)
+    }
+
+    @Test func dueWidePrefersTheWidePresetOtherwiseOrderBreaksTies() {
+        let wide = DirectorShotPolicy.Candidate(channel: .b, shot: DirectorShot(preset: .stage(.wide)),
+            subjectConfidence: 0.9, movement: 0, isWide: true)
+        let full = DirectorShotPolicy.Candidate(channel: .b, shot: DirectorShot(preset: .stage(.fullBody)),
+            subjectConfidence: 0.9, movement: 0, isWide: false)
+        let due = DirectorShotPolicy.Timeline(programShot: a, programStartedAt: 0, lastWideAt: 0,
+            history: [], candidates: [full, wide], now: 100)
+        #expect(DirectorShotPolicy.choosePreparation(due, preview: .b, parameters: .proposed)
+                == .chosen(wide, "advisory wide reminder"))
+        let notDue = DirectorShotPolicy.Timeline(programShot: a, programStartedAt: 0, lastWideAt: 95,
+            history: [], candidates: [full, wide], now: 100)
+        // Equal evidence: the ladder order decides (wide before full body).
+        guard case .chosen(let pick, _) = DirectorShotPolicy.choosePreparation(notDue, preview: .b,
+            parameters: .proposed) else { Issue.record("expected a pick"); return }
+        #expect(pick == wide)
     }
 }

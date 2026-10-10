@@ -1,11 +1,30 @@
 import Foundation
 
+/// A shot the Director may prepare, in the app's own vocabulary (N3): the
+/// Stage and Webcam presets an operator can already pick. There are no
+/// Director-only shot names, modes or zoom rungs.
 nonisolated struct DirectorShot: Equatable, Hashable, Sendable {
-    enum Preset: String, Sendable { case wide, waistUp, medium, closeUp, custom }
-    enum Mode: String, Sendable { case manualCrop, autoTracking, autoPan }
-    let preset: Preset
-    let mode: Mode
-    let zoomRung: Int
+    let preset: OperatorCommand.Preset
+
+    init(preset: OperatorCommand.Preset) { self.preset = preset }
+
+    var isWide: Bool {
+        switch preset {
+        case .stage(.wide), .webcam(.wide): return true
+        default: return false
+        }
+    }
+
+    /// Total, deterministic order: Stage before Webcam, then each format's
+    /// ladder from widest to tightest.
+    var order: Int {
+        switch preset {
+        case .stage(let shot):
+            return ShotComposer.Config.ShotPreset.allCases.firstIndex(of: shot) ?? 0
+        case .webcam(let shot):
+            return 100 + (ShotComposer.Config.WebcamPreset.allCases.firstIndex(of: shot) ?? 0)
+        }
+    }
 }
 
 nonisolated struct DirectorProposal: Equatable, Sendable {
