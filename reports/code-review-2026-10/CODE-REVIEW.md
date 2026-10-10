@@ -45,6 +45,12 @@ Counts and the top 10 are filled in when the file pass finishes. Confirmed so fa
 | CR-017 | Medium | A failed properties request can still report the extension as installed |
 | CR-018 | Medium | Extension replacement always returns `.replace`, including a downgrade |
 | CR-019 | Medium | Removing channel A after a Take to B makes `channelA` trap |
+| CR-027 | High | A hot-unplug leaves capture running, so a later buffer is still rendered and sent |
+| CR-028 | High | Preview layers show an IOSurface without retaining the pixel buffer |
+| CR-036 | Medium | Start still begins the session when virtual-camera install fails |
+| CR-037 | Medium | A saved director style never reaches the running controller |
+| CR-039 | Medium | The extension compiles the output manager, which imports SwiftUI, and does not use it |
+| CR-040 | Medium | The shared scheme launches Release |
 
 ## Repo hygiene
 
@@ -128,11 +134,11 @@ Haven't found anything vulnerable or badly coded. `sessionStandard` is `nonisola
 
 ### `CinematicCoreMacOS/CinematicCoreMacOS/CropEngine.swift`
 
-Not fully read. The test build warning is confirmed in source:
-
 | ID | Severity | Confidence | Category | Line(s) | Finding | Suggested fix |
 |---|---|---|---|---|---|---|
 | CR-008 | Medium | Confirmed | Concurrency | 483–496 | `renderCrop` hops to `renderQueue.async`, a `@Sendable` closure, while capturing `pixelBuffer` (`CVPixelBuffer` is not `Sendable`). The comment says the capture gate and a retained buffer make this safe. It is still a Swift 6 error waiting to happen, and the compiler warned. | Box the buffer the same way `SendablePixelBuffer` is boxed elsewhere, and keep the gate. |
+| CR-034 | Medium | Confirmed | Correctness | 35–38, 547–566 | `Config.useHighQuality` and `Config.enableVignette` are never read. `processCrop` picks Lanczos or bilinear from a hard-coded `0.7` scale and never applies a vignette. The settings form still binds both toggles. | Honor the toggles, or remove them from `Config` and the form. |
+| CR-045 | Low | Confirmed | Performance | 555 | Every strong downscale allocates `CIFilter(name: "CILanczosScaleTransform")!`. A missing filter name traps the render queue. | Cache one filter on `renderQueue`. |
 
 ### `CinematicCoreMacOS/CinematicCoreMacOS/TrainingDataRecorder.swift`
 
@@ -153,7 +159,9 @@ Haven't found a secret. One local absolute path (see hygiene). Low, no separate 
 
 ### `training/requirements.txt`
 
-Haven't found anything vulnerable or badly coded. Floors are pinned with `>=`, not exact versions. No URL downloads in this file.
+| ID | Severity | Confidence | Category | Line(s) | Finding | Suggested fix |
+|---|---|---|---|---|---|---|
+| CR-041 | Medium | Confirmed | Security | 1–8 | Every dependency is a lower bound only (`>=`), with no upper bound and no hashes. A fresh install floats to whatever is current. | Pin exact versions and hashes in a lockfile. |
 
 ### `training/=2.14.0`
 
@@ -223,6 +231,153 @@ Haven't found anything vulnerable or badly coded.
 
 Haven't found anything vulnerable or badly coded in Release. The window dump is inside `#if DEBUG` and only runs when `ALFIE_DEBUG_WINDOW_DUMP` is set.
 
+### `CinematicCoreMacOS/CinematicCoreMacOS/CameraManager.swift`
+
+| ID | Severity | Confidence | Category | Line(s) | Finding | Suggested fix |
+|---|---|---|---|---|---|---|
+| CR-027 | High | Confirmed | Correctness | 1790–1792, 2469–2481 | `handleSourceLost()` bumps `captureGeneration`, clears the hold buffers, and stops the session asynchronously. It leaves `isRunning` true and sets `sourceMissing`. `processFrame` returns only when `isRunning` is false. It never reads `sourceMissing`. A buffer that arrives after the generation bump is rendered and submitted, and it replaces the hold the disconnect just cleared. | Set `isRunning = false` before resetting the gate, and return from `processFrame` when `sourceMissing` is set. |
+| CR-029 | Medium | Confirmed | Leak | 1267–1291, 2383 | `stopCapture()` never calls `setSampleBufferDelegate(nil, queue: nil)` or removes the output. `AVCaptureVideoDataOutput` retains its delegate, so the session keeps the manager after the show drops the channel. | Clear the delegate and remove the output on stop. |
+| CR-030 | Medium | Confirmed | Performance | 2059–2076 | Every wide and tracking frame assigns `cropEngine.config.transitionSmoothing`. `config` is `@Published`, so the setter fires `objectWillChange` at capture rate and overwrites the Crop Settings slider. | Keep the live smoothing factor off `@Published`. Write `config` only when the operator's value changes. |
+| CR-031 | Medium | Confirmed | Correctness | 2113–2118 | A nil render permit still calls `renderCrop`. Nil means both "no scheduler" and "the scheduler cancelled or superseded this turn". A stop during `acquire` therefore queues another crop. | Render without a permit only when `scheduler` itself is nil. |
+| CR-032 | Medium | Confirmed | Correctness | 715–719 | `discoverCameras()` drops any device whose name contains "test". The comment says "TEMP Testing". It is not inside `#if DEBUG`, and it is the list the operator picks from. | Delete the filter. |
+| CR-033 | Medium | Confirmed | Performance | 3001–3014 | `didDrop` starts a `.userInitiated` main-actor `Task` for every system drop. The success path avoids per-drop logging because that work makes overload worse. | Count drops on the capture queue and publish one coalesced total. |
+
+### `CinematicCoreMacOS/CinematicCoreMacOS/CameraChannel.swift`
+
+Haven't found anything vulnerable or badly coded.
+
+### `CinematicCoreMacOS/CinematicCoreMacOS/CameraPreviewView.swift`
+
+Haven't found anything vulnerable or badly coded. `Image.init(decorative:)` and `sharedDisplayContext` (lines 170–187) have no callers. Low, not given an id.
+
+### `CinematicCoreMacOS/CinematicCoreMacOS/CaptureDeviceRegistry.swift`
+
+Haven't found anything vulnerable or badly coded.
+
+### `CinematicCoreMacOS/CinematicCoreMacOS/CaptureProfilePolicy.swift`
+
+Haven't found anything vulnerable or badly coded.
+
+### `CinematicCoreMacOS/CinematicCoreMacOS/ChannelFrame.swift`
+
+Haven't found anything vulnerable or badly coded.
+
+### `CinematicCoreMacOS/CinematicCoreMacOS/CropPreviewView.swift`
+
+The High Quality, Vignette, and smoothing controls write fields that CR-030 and CR-034 already cover. No separate finding.
+
+### `CinematicCoreMacOS/CinematicCoreMacOS/CropRenderer.metal`
+
+| ID | Severity | Confidence | Category | Line(s) | Finding | Suggested fix |
+|---|---|---|---|---|---|---|
+| CR-046 | Low | Confirmed | Dead code | 28–155 | Nothing dispatches `cropAndScale`, `cropAndScaleSmooth`, or `cropWithVignette`. `CropEngine` crops with Core Image. | Delete the shader, or wire one kernel and delete the copies. |
+
+### `CinematicCoreMacOS/CinematicCoreMacOS/DetectionFrame.swift`
+
+Haven't found anything vulnerable or badly coded.
+
+### `CinematicCoreMacOS/CinematicCoreMacOS/DetectionOverlayView.swift`
+
+Haven't found anything vulnerable or badly coded.
+
+### `CinematicCoreMacOS/CinematicCoreMacOS/PersonDetector.swift`
+
+| ID | Severity | Confidence | Category | Line(s) | Finding | Suggested fix |
+|---|---|---|---|---|---|---|
+| CR-035 | Medium | Confirmed | Performance | 875–899 | While a lock is active and Vision returns more than one person, `assignTracks` formats a line per detection and logs it on every update. Detection runs on the main actor at the shipping interval of 2, so a two-person stage logs about 25 times a second. This path is not behind `latencyConsoleLogging`. | Log only when the bind or coast state changes. |
+
+The `nonisolated(unsafe)` on the cached `CIContext` is the compiler warning already listed. The context is `Sendable`, so the annotation is unnecessary.
+
+### `CinematicCoreMacOS/CinematicCoreMacOS/FaceSignatureExtractor.swift`
+
+Haven't found anything vulnerable or badly coded.
+
+### `CinematicCoreMacOS/CinematicCoreMacOS/FrameWorkScheduler.swift`
+
+Haven't found anything vulnerable or badly coded.
+
+### `CinematicCoreMacOS/CinematicCoreMacOS/ShotComposer.swift`
+
+Haven't found a live-path defect. `shotFraming`, `configuredStageRect`, `stagePriorityScore`, and `horizontalPaddingMultiplier` are stored and not read by `composeFromTrackedBounds`. Low dead code.
+
+### `CinematicCoreMacOS/CinematicCoreMacOS/PixelBufferPreviewView.swift`
+
+| ID | Severity | Confidence | Category | Line(s) | Finding | Suggested fix |
+|---|---|---|---|---|---|---|
+| CR-028 | High | Plausible | Lifetime | 76–86 | `display` assigns `takeUnretainedValue()` to `layer.contents` and does not keep the `CVPixelBuffer`. The comment says the published property upstream retains the current buffer. That property is replaced on the next frame, which releases the previous buffer before the layer is guaranteed to have dropped it. `VirtualCameraOutputSink` keeps ten buffers for this reason. The preview and `ProgramDisplayContentView` do not. A torn frame was not reproduced. | Retain the buffer currently installed as `contents` until the next `display` replaces it. |
+
+### `CinematicCoreMacOS/CinematicCoreMacOS/ContentView.swift`
+
+| ID | Severity | Confidence | Category | Line(s) | Finding | Suggested fix |
+|---|---|---|---|---|---|---|
+| CR-036 | Medium | Confirmed | Correctness | 205–218 | `startCamera` still dispatches `.startSession` when `ensureInstalledForSessionStart()` returns false. `showSystemExtensionStatus` is set and has no reader, so there is no alert. | Return before dispatch when install fails, and present the failure. |
+
+### `CinematicCoreMacOS/CinematicCoreMacOS/CinematicCoreMacOSApp.swift`
+
+| ID | Severity | Confidence | Category | Line(s) | Finding | Suggested fix |
+|---|---|---|---|---|---|---|
+| CR-037 | Medium | Confirmed | Correctness | 59–64 | `SettingsWindow` keeps the default `onDirectorPreferencesChanged`, which is `{ _ in }`. `DirectorController.preferencesChanged` is never called from the app, and the controller does not load the style file at launch. A save writes the file and does not update the running director. | Pass a callback that calls `show.director.preferencesChanged`, and load the file when the director attaches. |
+
+### `CinematicCoreMacOS/CinematicCoreMacOS/CinematicAgent.swift`
+
+| ID | Severity | Confidence | Category | Line(s) | Finding | Suggested fix |
+|---|---|---|---|---|---|---|
+| CR-038 | Medium | Confirmed | Correctness | 286–293 | Speaker velocity is always `delta * 30`. The training env multiplies by the session frame rate. At 50, 59.94, or 60 the live observation is not the vector the policy was trained on. The ML agent toggle is off in Release (`exposeMLAgentControls` is false). | Multiply by the show rate. |
+
+### `CinematicCoreMacOS/CinematicCoreMacOS/SettingsWindow.swift`
+
+CR-037. `onDirectorPreferencesChanged` defaults to a no-op and is copied onto the editor in `onAppear` (lines 78, 121–123).
+
+### `CinematicCoreMacOS/CinematicCoreMacOS.xcodeproj/project.pbxproj`
+
+| ID | Severity | Confidence | Category | Line(s) | Finding | Suggested fix |
+|---|---|---|---|---|---|---|
+| CR-039 | Medium | Confirmed | Build | 68–76, 565, 615 | The extension's exception set adds `CropRenderer.metal`, `DiagnosticsLog.swift`, `ProgramOutputManager.swift`, and `ShowStandard.swift`. Extension source uses `ShowStandard` only. `ProgramOutputManager.swift` imports SwiftUI and AppKit, so that UI is compiled into the system extension. `SWIFT_DEFAULT_ACTOR_ISOLATION = MainActor` is set on the app target only. | Drop the three unused files from the extension membership. Set the same isolation on every target that compiles the shared files. Do not edit the project file until the owner agrees. |
+
+### `CinematicCoreMacOS/CinematicCoreMacOS.xcodeproj/xcshareddata/xcschemes/CinematicCoreMacOS.xcscheme`
+
+| ID | Severity | Confidence | Category | Line(s) | Finding | Suggested fix |
+|---|---|---|---|---|---|---|
+| CR-040 | Medium | Confirmed | Build | 57–58 | `LaunchAction` `buildConfiguration` is Release. The test action is Debug. Run from Xcode therefore omits `#if DEBUG` and runs optimized. | Launch Debug. |
+
+### `training/=7.0`
+
+Same accidental pip log as CR-011.
+
+### `training/detector.py`
+
+| ID | Severity | Confidence | Category | Line(s) | Finding | Suggested fix |
+|---|---|---|---|---|---|---|
+| CR-042 | Medium | Confirmed | Correctness | 52–72 | `model_complexity` is accepted and never used. The landmarker is always `pose_landmarker_full.task`. The error text names an unpinned MediaPipe `latest` URL. The script does not download it. | Select the asset from the flag, or remove the flag. Pin a checksum if a URL stays. |
+
+### `training/train_ppo.py`
+
+| ID | Severity | Confidence | Category | Line(s) | Finding | Suggested fix |
+|---|---|---|---|---|---|---|
+| CR-044 | Medium | Plausible | Security | 44–53 | `PPO.load` deserializes a Stable-Baselines3 `.zip`. Current SB3 does that with cloudpickle, so a hostile checkpoint is code execution. This repo does not call `pickle` itself. The same call is in `export_coreml.py`. | Load only a trusted checkpoint, or a weights-only format. |
+
+### `training/export_coreml.py`
+
+CR-044. Same `PPO.load` path, on a path the operator passes.
+
+### `CinematicCoreMacOS/CinematicCoreMacOSUITests/CinematicCoreMacOSUITests.swift`
+
+| ID | Severity | Confidence | Category | Line(s) | Finding | Suggested fix |
+|---|---|---|---|---|---|---|
+| CR-043 | Medium | Confirmed | Tests | 26–32 | `testExample` launches Alfie and does not assert any UI state. | Assert one visible operator state, or delete the test. |
+
+### `CinematicCoreMacOS/CinematicCoreMacOSTests/CinematicCoreMacOSTests.swift`
+
+| ID | Severity | Confidence | Category | Line(s) | Finding | Suggested fix |
+|---|---|---|---|---|---|---|
+| CR-047 | Low | Confirmed | Tests | 15–17 | `example` has no `#expect`. Later crop tests use `try! #require`, so a nil crop crashes the runner instead of recording a failure. | Delete `example`. Use `try #require`. |
+
+No `pickle`, Python `eval`/`exec`, or `subprocess(..., shell=True)` in the training scripts. `downloader.py` passes the URL as an argument list. `build_release.sh` already has CR-001; `set -euo pipefail` is present.
+
+Haven't found anything vulnerable or badly coded in: `CapabilityReport.swift`, `CinematicAgentSettingsView.swift`, `ControlTarget.swift`, `DegradePolicy.swift`, `DetectionSettingsView.swift`, `FramingCapability.swift`, `InputStripView.swift`, `InputTileModel.swift`, `InputTileView.swift`, `InspectorDrawer.swift`, `InspectorShowSection.swift`, `LiveShowSetup.swift`, `MultiInputAdmission.swift`, `OperatorPill.swift`, `OverlayLayer.swift`, `PairCheckPanel.swift`, `RecorderSettingsView.swift`, `RecoveryState.swift`, `SetupCheck.swift`, `ShowSetupModel.swift`, `ShowSetupView.swift`, `StoppedScreen.swift`, `StripDemo.swift`, `ValidationClipPlaybackView.swift`, `CinematicCoreMacOS-Bridging-Header.h`, `diagnostics_report.py`, `source_fingerprint.py`, `test_diagnostics_report.py`, `bc_dataset.py`, `canvas.py`, `cinematic_env.py`, `env_loader.py`, `env_reward.py`, `schema.py`, `make_test_model.py`, `extract_frames.py`, `test_env.py`.
+
+The unit tests scanned below had real assertions. A line-by-line read is still open for the files named under Not reviewed: `CaptureDeviceRegistryTests`, `CaptureProfilePolicyTests`, `ChannelCommandTests`, `ChannelIsolationTests`, `ConsolePresentationTests`, `DegradePolicyTests`, `DirectOutputFormatTests`, `FramingCapabilityTests`, `InputStripTests`, `InstrumentationInvestigationTests`, `MultiviewGallerySnapshotTests`, `NextShotStatusTests`, `OperatorPresetSharingTests`, `OutputRateRegressionTests`, `PillTargetTests`, `PipelineLifecycleTests`, `PrivacyAuditTests`, `RealCameraTests`, `RecoveryStateTests`, `ShowSetupTests`, `SingleCameraConsoleTests`, `TakeBarTests`.
+
 ## Checklist
 
 - [ ] `.gitattributes`
@@ -233,24 +388,24 @@ Haven't found anything vulnerable or badly coded in Release. The window dump is 
 - [x] `CinematicCoreMacOS/CinematicCoreExtension/CinematicCoreExtensionProvider.swift`
 - [x] `CinematicCoreMacOS/CinematicCoreExtension/Info.plist`
 - [x] `CinematicCoreMacOS/CinematicCoreExtension/main.swift`
-- [ ] `CinematicCoreMacOS/CinematicCoreMacOS.xcodeproj/project.pbxproj`
+- [x] `CinematicCoreMacOS/CinematicCoreMacOS.xcodeproj/project.pbxproj`
 - [ ] `CinematicCoreMacOS/CinematicCoreMacOS.xcodeproj/project.xcworkspace/contents.xcworkspacedata`
-- [ ] `CinematicCoreMacOS/CinematicCoreMacOS.xcodeproj/xcshareddata/xcschemes/CinematicCoreMacOS.xcscheme`
+- [x] `CinematicCoreMacOS/CinematicCoreMacOS.xcodeproj/xcshareddata/xcschemes/CinematicCoreMacOS.xcscheme`
 - [ ] `CinematicCoreMacOS/CinematicCoreMacOS/Assets.xcassets/AccentColor.colorset/Contents.json`
 - [ ] `CinematicCoreMacOS/CinematicCoreMacOS/Assets.xcassets/AppIcon.appiconset/Contents.json`
 - [ ] `CinematicCoreMacOS/CinematicCoreMacOS/Assets.xcassets/Contents.json`
-- [ ] `CinematicCoreMacOS/CinematicCoreMacOS/CameraChannel.swift`
-- [ ] `CinematicCoreMacOS/CinematicCoreMacOS/CameraManager.swift`
-- [ ] `CinematicCoreMacOS/CinematicCoreMacOS/CameraPreviewView.swift`
-- [ ] `CinematicCoreMacOS/CinematicCoreMacOS/CapabilityReport.swift`
-- [ ] `CinematicCoreMacOS/CinematicCoreMacOS/CaptureDeviceRegistry.swift`
-- [ ] `CinematicCoreMacOS/CinematicCoreMacOS/CaptureProfilePolicy.swift`
-- [ ] `CinematicCoreMacOS/CinematicCoreMacOS/ChannelFrame.swift`
-- [ ] `CinematicCoreMacOS/CinematicCoreMacOS/CinematicAgent.swift`
-- [ ] `CinematicCoreMacOS/CinematicCoreMacOS/CinematicAgentSettingsView.swift`
-- [ ] `CinematicCoreMacOS/CinematicCoreMacOS/CinematicCoreMacOS-Bridging-Header.h`
+- [x] `CinematicCoreMacOS/CinematicCoreMacOS/CameraChannel.swift`
+- [x] `CinematicCoreMacOS/CinematicCoreMacOS/CameraManager.swift`
+- [x] `CinematicCoreMacOS/CinematicCoreMacOS/CameraPreviewView.swift`
+- [x] `CinematicCoreMacOS/CinematicCoreMacOS/CapabilityReport.swift`
+- [x] `CinematicCoreMacOS/CinematicCoreMacOS/CaptureDeviceRegistry.swift`
+- [x] `CinematicCoreMacOS/CinematicCoreMacOS/CaptureProfilePolicy.swift`
+- [x] `CinematicCoreMacOS/CinematicCoreMacOS/ChannelFrame.swift`
+- [x] `CinematicCoreMacOS/CinematicCoreMacOS/CinematicAgent.swift`
+- [x] `CinematicCoreMacOS/CinematicCoreMacOS/CinematicAgentSettingsView.swift`
+- [x] `CinematicCoreMacOS/CinematicCoreMacOS/CinematicCoreMacOS-Bridging-Header.h`
 - [x] `CinematicCoreMacOS/CinematicCoreMacOS/CinematicCoreMacOS.entitlements`
-- [ ] `CinematicCoreMacOS/CinematicCoreMacOS/CinematicCoreMacOSApp.swift`
+- [x] `CinematicCoreMacOS/CinematicCoreMacOS/CinematicCoreMacOSApp.swift`
 - [ ] `CinematicCoreMacOS/CinematicCoreMacOS/Console/ChannelID.swift`
 - [ ] `CinematicCoreMacOS/CinematicCoreMacOS/Console/ConsoleActions.swift`
 - [ ] `CinematicCoreMacOS/CinematicCoreMacOS/Console/ConsolePresentation.swift`
@@ -275,16 +430,16 @@ Haven't found anything vulnerable or badly coded in Release. The window dump is 
 - [ ] `CinematicCoreMacOS/CinematicCoreMacOS/Console/SingleCameraConsole.swift`
 - [ ] `CinematicCoreMacOS/CinematicCoreMacOS/Console/TakeAvailability.swift`
 - [ ] `CinematicCoreMacOS/CinematicCoreMacOS/Console/TakeBarView.swift`
-- [ ] `CinematicCoreMacOS/CinematicCoreMacOS/ContentView.swift`
-- [ ] `CinematicCoreMacOS/CinematicCoreMacOS/ControlTarget.swift`
-- [ ] `CinematicCoreMacOS/CinematicCoreMacOS/CropEngine.swift`
-- [ ] `CinematicCoreMacOS/CinematicCoreMacOS/CropPreviewView.swift`
-- [ ] `CinematicCoreMacOS/CinematicCoreMacOS/CropRenderer.metal`
+- [x] `CinematicCoreMacOS/CinematicCoreMacOS/ContentView.swift`
+- [x] `CinematicCoreMacOS/CinematicCoreMacOS/ControlTarget.swift`
+- [x] `CinematicCoreMacOS/CinematicCoreMacOS/CropEngine.swift`
+- [x] `CinematicCoreMacOS/CinematicCoreMacOS/CropPreviewView.swift`
+- [x] `CinematicCoreMacOS/CinematicCoreMacOS/CropRenderer.metal`
 - [x] `CinematicCoreMacOS/CinematicCoreMacOS/DebugLaunchHooks.swift`
-- [ ] `CinematicCoreMacOS/CinematicCoreMacOS/DegradePolicy.swift`
-- [ ] `CinematicCoreMacOS/CinematicCoreMacOS/DetectionFrame.swift`
-- [ ] `CinematicCoreMacOS/CinematicCoreMacOS/DetectionOverlayView.swift`
-- [ ] `CinematicCoreMacOS/CinematicCoreMacOS/DetectionSettingsView.swift`
+- [x] `CinematicCoreMacOS/CinematicCoreMacOS/DegradePolicy.swift`
+- [x] `CinematicCoreMacOS/CinematicCoreMacOS/DetectionFrame.swift`
+- [x] `CinematicCoreMacOS/CinematicCoreMacOS/DetectionOverlayView.swift`
+- [x] `CinematicCoreMacOS/CinematicCoreMacOS/DetectionSettingsView.swift`
 - [x] `CinematicCoreMacOS/CinematicCoreMacOS/DeveloperFlags.swift`
 - [x] `CinematicCoreMacOS/CinematicCoreMacOS/DiagnosticsLog.swift`
 - [ ] `CinematicCoreMacOS/CinematicCoreMacOS/Director/DirectorAuthority.swift`
@@ -307,53 +462,53 @@ Haven't found anything vulnerable or badly coded in Release. The window dump is 
 - [ ] `CinematicCoreMacOS/CinematicCoreMacOS/Director/UI/FakeDirectorConsole.swift`
 - [ ] `CinematicCoreMacOS/CinematicCoreMacOS/DirectorEvidenceReadings.swift`
 - [x] `CinematicCoreMacOS/CinematicCoreMacOS/DisplayOutputSink.swift`
-- [ ] `CinematicCoreMacOS/CinematicCoreMacOS/FaceSignatureExtractor.swift`
-- [ ] `CinematicCoreMacOS/CinematicCoreMacOS/FrameWorkScheduler.swift`
-- [ ] `CinematicCoreMacOS/CinematicCoreMacOS/FramingCapability.swift`
+- [x] `CinematicCoreMacOS/CinematicCoreMacOS/FaceSignatureExtractor.swift`
+- [x] `CinematicCoreMacOS/CinematicCoreMacOS/FrameWorkScheduler.swift`
+- [x] `CinematicCoreMacOS/CinematicCoreMacOS/FramingCapability.swift`
 - [ ] `CinematicCoreMacOS/CinematicCoreMacOS/Hardware/HardwareLink.swift`
 - [ ] `CinematicCoreMacOS/CinematicCoreMacOS/Hardware/HardwareWireCodec.swift`
 - [ ] `CinematicCoreMacOS/CinematicCoreMacOS/Hardware/SimulatedHardwareDevice.swift`
-- [ ] `CinematicCoreMacOS/CinematicCoreMacOS/InputStripView.swift`
-- [ ] `CinematicCoreMacOS/CinematicCoreMacOS/InputTileModel.swift`
-- [ ] `CinematicCoreMacOS/CinematicCoreMacOS/InputTileView.swift`
-- [ ] `CinematicCoreMacOS/CinematicCoreMacOS/InspectorDrawer.swift`
-- [ ] `CinematicCoreMacOS/CinematicCoreMacOS/InspectorShowSection.swift`
-- [ ] `CinematicCoreMacOS/CinematicCoreMacOS/LiveShowSetup.swift`
-- [ ] `CinematicCoreMacOS/CinematicCoreMacOS/MultiInputAdmission.swift`
+- [x] `CinematicCoreMacOS/CinematicCoreMacOS/InputStripView.swift`
+- [x] `CinematicCoreMacOS/CinematicCoreMacOS/InputTileModel.swift`
+- [x] `CinematicCoreMacOS/CinematicCoreMacOS/InputTileView.swift`
+- [x] `CinematicCoreMacOS/CinematicCoreMacOS/InspectorDrawer.swift`
+- [x] `CinematicCoreMacOS/CinematicCoreMacOS/InspectorShowSection.swift`
+- [x] `CinematicCoreMacOS/CinematicCoreMacOS/LiveShowSetup.swift`
+- [x] `CinematicCoreMacOS/CinematicCoreMacOS/MultiInputAdmission.swift`
 - [ ] `CinematicCoreMacOS/CinematicCoreMacOS/OperatorCommand.swift`
-- [ ] `CinematicCoreMacOS/CinematicCoreMacOS/OperatorPill.swift`
-- [ ] `CinematicCoreMacOS/CinematicCoreMacOS/OverlayLayer.swift`
-- [ ] `CinematicCoreMacOS/CinematicCoreMacOS/PairCheckPanel.swift`
-- [ ] `CinematicCoreMacOS/CinematicCoreMacOS/PersonDetector.swift`
-- [ ] `CinematicCoreMacOS/CinematicCoreMacOS/PixelBufferPreviewView.swift`
+- [x] `CinematicCoreMacOS/CinematicCoreMacOS/OperatorPill.swift`
+- [x] `CinematicCoreMacOS/CinematicCoreMacOS/OverlayLayer.swift`
+- [x] `CinematicCoreMacOS/CinematicCoreMacOS/PairCheckPanel.swift`
+- [x] `CinematicCoreMacOS/CinematicCoreMacOS/PersonDetector.swift`
+- [x] `CinematicCoreMacOS/CinematicCoreMacOS/PixelBufferPreviewView.swift`
 - [x] `CinematicCoreMacOS/CinematicCoreMacOS/ProgramOutputManager.swift`
 - [x] `CinematicCoreMacOS/CinematicCoreMacOS/ProgramRouter.swift`
 - [x] `CinematicCoreMacOS/CinematicCoreMacOS/ProgramTake.swift`
-- [ ] `CinematicCoreMacOS/CinematicCoreMacOS/RecorderSettingsView.swift`
-- [ ] `CinematicCoreMacOS/CinematicCoreMacOS/RecoveryState.swift`
+- [x] `CinematicCoreMacOS/CinematicCoreMacOS/RecorderSettingsView.swift`
+- [x] `CinematicCoreMacOS/CinematicCoreMacOS/RecoveryState.swift`
 - [x] `CinematicCoreMacOS/CinematicCoreMacOS/RehearsalOutputSink.swift`
-- [ ] `CinematicCoreMacOS/CinematicCoreMacOS/SettingsWindow.swift`
-- [ ] `CinematicCoreMacOS/CinematicCoreMacOS/SetupCheck.swift`
+- [x] `CinematicCoreMacOS/CinematicCoreMacOS/SettingsWindow.swift`
+- [x] `CinematicCoreMacOS/CinematicCoreMacOS/SetupCheck.swift`
 - [ ] `CinematicCoreMacOS/CinematicCoreMacOS/SetupDemo.swift`
-- [ ] `CinematicCoreMacOS/CinematicCoreMacOS/ShotComposer.swift`
+- [x] `CinematicCoreMacOS/CinematicCoreMacOS/ShotComposer.swift`
 - [ ] `CinematicCoreMacOS/CinematicCoreMacOS/ShotComposerSettingsView.swift`
 - [x] `CinematicCoreMacOS/CinematicCoreMacOS/ShowCoordinator.swift`
-- [ ] `CinematicCoreMacOS/CinematicCoreMacOS/ShowSetupModel.swift`
-- [ ] `CinematicCoreMacOS/CinematicCoreMacOS/ShowSetupView.swift`
+- [x] `CinematicCoreMacOS/CinematicCoreMacOS/ShowSetupModel.swift`
+- [x] `CinematicCoreMacOS/CinematicCoreMacOS/ShowSetupView.swift`
 - [x] `CinematicCoreMacOS/CinematicCoreMacOS/ShowStandard.swift`
 - [ ] `CinematicCoreMacOS/CinematicCoreMacOS/Speech/SpeechCommandGrammar.swift`
 - [ ] `CinematicCoreMacOS/CinematicCoreMacOS/Speech/VoiceCommandAdapter.swift`
-- [ ] `CinematicCoreMacOS/CinematicCoreMacOS/StoppedScreen.swift`
-- [ ] `CinematicCoreMacOS/CinematicCoreMacOS/StripDemo.swift`
+- [x] `CinematicCoreMacOS/CinematicCoreMacOS/StoppedScreen.swift`
+- [x] `CinematicCoreMacOS/CinematicCoreMacOS/StripDemo.swift`
 - [x] `CinematicCoreMacOS/CinematicCoreMacOS/SystemExtensionActivationManager.swift`
 - [x] `CinematicCoreMacOS/CinematicCoreMacOS/TrainingDataRecorder.swift`
-- [ ] `CinematicCoreMacOS/CinematicCoreMacOS/ValidationClipPlaybackView.swift`
+- [x] `CinematicCoreMacOS/CinematicCoreMacOS/ValidationClipPlaybackView.swift`
 - [x] `CinematicCoreMacOS/CinematicCoreMacOS/XPCConnectionManager.swift`
 - [ ] `CinematicCoreMacOS/CinematicCoreMacOSTests/CaptureDeviceRegistryTests.swift`
 - [ ] `CinematicCoreMacOS/CinematicCoreMacOSTests/CaptureProfilePolicyTests.swift`
 - [ ] `CinematicCoreMacOS/CinematicCoreMacOSTests/ChannelCommandTests.swift`
 - [ ] `CinematicCoreMacOS/CinematicCoreMacOSTests/ChannelIsolationTests.swift`
-- [ ] `CinematicCoreMacOS/CinematicCoreMacOSTests/CinematicCoreMacOSTests.swift`
+- [x] `CinematicCoreMacOS/CinematicCoreMacOSTests/CinematicCoreMacOSTests.swift`
 - [ ] `CinematicCoreMacOS/CinematicCoreMacOSTests/ConsolePresentationTests.swift`
 - [ ] `CinematicCoreMacOS/CinematicCoreMacOSTests/DegradePolicyTests.swift`
 - [ ] `CinematicCoreMacOS/CinematicCoreMacOSTests/DiagnosticsLogTests.swift`
@@ -404,36 +559,36 @@ Haven't found anything vulnerable or badly coded in Release. The window dump is 
 - [ ] `CinematicCoreMacOS/CinematicCoreMacOSTests/SingleCameraConsoleTests.swift`
 - [ ] `CinematicCoreMacOS/CinematicCoreMacOSTests/SpeechCommandTests.swift`
 - [ ] `CinematicCoreMacOS/CinematicCoreMacOSTests/TakeBarTests.swift`
-- [ ] `CinematicCoreMacOS/CinematicCoreMacOSUITests/CinematicCoreMacOSUITests.swift`
+- [x] `CinematicCoreMacOS/CinematicCoreMacOSUITests/CinematicCoreMacOSUITests.swift`
 - [ ] `CinematicCoreMacOS/CinematicCoreMacOSUITests/CinematicCoreMacOSUITestsLaunchTests.swift`
 - [x] `CinematicCoreMacOS/Shared/CinematicCoreXPCProtocol.swift`
-- [ ] `CinematicCoreMacOS/scripts/diagnostics_report.py`
-- [ ] `CinematicCoreMacOS/scripts/source_fingerprint.py`
-- [ ] `CinematicCoreMacOS/scripts/test_diagnostics_report.py`
+- [x] `CinematicCoreMacOS/scripts/diagnostics_report.py`
+- [x] `CinematicCoreMacOS/scripts/source_fingerprint.py`
+- [x] `CinematicCoreMacOS/scripts/test_diagnostics_report.py`
 - [ ] `LICENSE`
 - [ ] `docs/user-guide/index.html`
 - [ ] `docs/user-guide/styles.css`
 - [ ] `test_decklink`
 - [ ] `test_decklink.cpp`
 - [x] `training/=2.14.0`
-- [ ] `training/=7.0`
-- [ ] `training/bc_dataset.py`
-- [ ] `training/canvas.py`
-- [ ] `training/cinematic_env.py`
-- [ ] `training/detector.py`
+- [x] `training/=7.0`
+- [x] `training/bc_dataset.py`
+- [x] `training/canvas.py`
+- [x] `training/cinematic_env.py`
+- [x] `training/detector.py`
 - [ ] `training/downloader.py`
-- [ ] `training/env_loader.py`
-- [ ] `training/env_reward.py`
-- [ ] `training/export_coreml.py`
-- [ ] `training/extract_frames.py`
-- [ ] `training/make_test_model.py`
+- [x] `training/env_loader.py`
+- [x] `training/env_reward.py`
+- [x] `training/export_coreml.py`
+- [x] `training/extract_frames.py`
+- [x] `training/make_test_model.py`
 - [ ] `training/models/bc_test.zip`
 - [x] `training/requirements.txt`
-- [ ] `training/schema.py`
-- [ ] `training/test_env.py`
+- [x] `training/schema.py`
+- [x] `training/test_env.py`
 - [ ] `training/test_training.py`
 - [ ] `training/train_bc.py`
-- [ ] `training/train_ppo.py`
+- [x] `training/train_ppo.py`
 - [ ] `training/writer.py`
 - [ ] `update_xcode.rb`
 - [x] `CinematicCoreMacOS/build_release.sh`
@@ -444,7 +599,7 @@ Not started.
 
 ## Not reviewed
 
-Every unchecked box above. The output, XPC, and extension pass is written up. Capture/crop, director/console, and the remaining app, tests, and Python passes are still open. Open Stage 3 pull requests that are not in this commit: #18 (A-08 replay), #21 (A-09 shadow record), #23 (C-06 next-cut notice), #25 (A-10 assist policy), #26 (A-11 take permit), #28 (C-02 test warnings), #29 (CI docs and workflows, not product code).
+Every unchecked box above. The capture, output, and app/Python passes are written up. Director and console, plus the unit tests listed above, are still open. Open Stage 3 pull requests that are not in this commit: #18 (A-08 replay), #21 (A-09 shadow record), #23 (C-06 next-cut notice), #25 (A-10 assist policy), #26 (A-11 take permit), #28 (C-02 test warnings), #29 (CI docs and workflows, not product code).
 
 ## Coverage
 
