@@ -1,17 +1,17 @@
 # Auto Director product contract: live-event backup producer
 
-Status: **proposed contract, revised 2026-10-10.** It replaces the 30 Sep sermon-only Auto Prepare contract, which remains in git history. Design: [STAGE3-DESIGN-PLAN.md](../handoff/stage3-4/STAGE3-DESIGN-PLAN.md). Use case: [STAGE3-USE-CASE.md](../handoff/stage3-4/STAGE3-USE-CASE.md). Authority rules: [authority-and-override](authority-and-override.md).
+Status: **contract reconciled with recorded sitting-1 decisions, 2026-10-10; remaining proposals AWAITING OWNER.** It replaces the 30 Sep sermon-only Auto Prepare contract, which remains in git history. Design: [STAGE3-DESIGN-PLAN.md](../handoff/stage3-4/STAGE3-DESIGN-PLAN.md). Use case: [STAGE3-USE-CASE.md](../handoff/stage3-4/STAGE3-USE-CASE.md). Authority rules: [authority-and-override](authority-and-override.md).
 
 **Recorded decisions** (`DECISIONS.md`, 2026-10-10, Stephan):
 - **UC-1:** an operator is always present; unattended operation is out of scope.
 - **E2:** audio is paused; no microphone or audio evidence.
 - **UC-2:** each camera is one input with one shot that Alfie may change; Alfie sends the input that fits best; no virtual inputs.
 
-Every other point below is **proposed, AWAITING OWNER**.
+The same register records sitting 1: **S1, A1, A3, E1, P1, P2, N1, N3, N5, U2, AI-1, AI-2, AI-4 and C3**. Those recorded choices override older proposed wording. All other decision IDs, implementation details and numeric study parameters remain **AWAITING OWNER**. In particular, A4 notice details, N2 on-air moves, N4 preparation frequency, R1/R2 fallback details and Q1–Q3 qualification protocol are not approved by this document. The table and walkthroughs below combine recorded scope with explicitly proposed details; they do not certify any level or say that the open implementation stack is merged. See the [event contract](event-authority-contract.md) for implementation boundaries and owner questions.
 
 | ID / question | Options | Recommendation / why | Blocks | Reversible? |
 |---|---|---|---|---|
-| S1 First directing scope? | Sermon Auto Prepare only; live-event Assist only; **live-event backup producer in qualified steps** | Live-event backup producer with static cameras: shadow → Assist → supervised Auto → Backup, each behind its own gate. This matches the product goal and still earns trust step by step | AD-SCOPE, all Director wiring | Yes; a level can be withdrawn by revoking its qualification |
+| S1 First directing scope? | **RECORDED, sitting 1** | Live-event backup producer with static cameras: shadow → Assist → supervised Auto → Backup, each behind its own gate. Numeric values remain study parameters | AD-SCOPE, all Director wiring | A level can be withdrawn by revoking its qualification |
 | S2 What remains manual? | All cuts; show-level control only; nothing | Show start/stop, output routing, the run sheet and taking control. Nomination optional. Every cut stays manual in Assist | AD-SUBJECT/TAKE | Yes, requalify |
 
 ## The product
@@ -78,14 +78,14 @@ A level can only be selected on a rig with a current sign-off record for that le
 - An output fault or admission loss pauses Alfie at every level.
 - Program camera loss:
   - **Assist / Auto:** Alfie pauses and asks.
-  - **Backup:** Alfie cuts once to a fresh, verified safe wide within the hold window, then pauses.
+  - **Backup (R2 proposal, AWAITING OWNER):** Alfie cuts once to a fresh, verified safe wide within the hold window, then pauses. The open register recommendation includes Auto/Backup; this narrower Backup-only proposal is unresolved, not a recorded choice. See [roles and fallback](roles-and-fallback.md).
 
 **Truthful preview:** a tile badge shows when Alfie set an input's shot, and the next cut is always visible.
 
 **Privacy and connectivity**
 - No audio (E2).
-- No network during a show (recommended AI-2).
-- Director logs are metadata only, with 30-day retention.
+- No network during a show (recorded AI-2).
+- Director logs and training data are bounded metadata only, with 30-day expiry unless explicitly exported (C3, AI-4); export is never a background upload.
 - No video is kept without a separate consented-fixture decision (E3).
 
 ## Supported, gated and unsupported
@@ -117,7 +117,7 @@ These are proposed rehearsal scripts, not timing requirements. A good stable sho
 | Minute | Operator | Alfie / Program |
 |---|---|---|
 | 00 | A wide on Program; selects Auto | Prepares B Waist Up on the presenter |
-| 01 | Watches | "Next: Cam B · 2 s · Esc to cancel" → cuts to B |
+| 01 | Watches | "Next: Cam B · [configured notice] · Esc to cancel" → cuts to B |
 | 02 | Presses Esc during the next notice | That cut is cancelled; A is held for at least the minimum shot length |
 | 03 | Watches | The presenter walks off-centre; no better input is ready, so a slow on-air pull-out on B |
 | 04 | Cuts to A themselves | Nudge: Alfie keeps A for at least the minimum shot length, then continues |
