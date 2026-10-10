@@ -73,16 +73,23 @@ class PixelBufferLayerView: NSView {
         layer?.masksToBounds = true
     }
 
-    /// Point the layer at the buffer's backing IOSurface. Unretained is correct:
-    /// the layer holds the surface for the duration it is displayed, and the
-    /// buffer itself is retained upstream by CameraManager's published property
-    /// (which is what keeps the crop pool from re-vending this surface).
+    /// The buffer whose surface is installed as `contents`. Holding the buffer,
+    /// not just the surface, is what keeps its pool from re-vending the surface
+    /// while the layer still shows it. The upstream published property is
+    /// replaced on the next frame, before this view is told, so it cannot be
+    /// relied on (CR-028). Released when the next `display` replaces it.
+    private var installedBuffer: CVPixelBuffer?
+
+    /// Point the layer at the buffer's backing IOSurface and keep the buffer
+    /// until the next call replaces it.
     func display(_ pixelBuffer: CVPixelBuffer?) {
         guard let pixelBuffer,
               let surface = CVPixelBufferGetIOSurface(pixelBuffer)?.takeUnretainedValue() else {
             layer?.contents = nil
+            installedBuffer = nil
             return
         }
         layer?.contents = surface
+        installedBuffer = pixelBuffer
     }
 }
