@@ -20,23 +20,35 @@ enum DirectorHandShortcut {
     static let title = "Command Shift H"
 }
 
-struct DirectorModeControl: View {
-    @ObservedObject var controller: FakeDirectorConsole
+/// Works with any controller: the live Director (B-03) or the gallery fake.
+/// The view keeps a refusal itself, from the result the controller returns,
+/// so a real controller's refusal is always shown and the level never changes.
+struct DirectorModeControl<Controller: DirectorConsoleControlling & ObservableObject>: View {
+    @ObservedObject var controller: Controller
     /// The gallery's live control owns the shortcut. Snapshot cards leave it off
     /// so a stack of cards does not register the key more than once.
-    var ownsShortcut: Bool = true
+    var ownsShortcut: Bool
+    @State private var refusal: String?
+
+    init(controller: Controller, ownsShortcut: Bool = true, refusal: String? = nil) {
+        self.controller = controller
+        self.ownsShortcut = ownsShortcut
+        _refusal = State(initialValue: refusal)
+    }
 
     private var section: NextShotStatus.DirectorSection { controller.directorSection }
+    /// Chip and toggle wording shared with the C-01 gallery.
+    private var presentation: DirectorGalleryPresentation { DirectorGalleryPresentation(section) }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
             modeRow
             handRow
-            if let message = controller.refusalMessage {
-                Text(message)
+            if let refusal {
+                Text(refusal)
                     .font(.system(size: 12, weight: .semibold))
                     .foregroundStyle(ConsoleStyle.amber)
-                    .accessibilityLabel(message)
+                    .accessibilityLabel(refusal)
             }
             Text(section.statusLine)
                 .font(.system(size: 12))
@@ -58,26 +70,21 @@ struct DirectorModeControl: View {
 
     private var modeRow: some View {
         HStack(spacing: 8) {
-            ForEach(NextShotStatus.DirectorSection.Level.allCases, id: \.self) { level in
-                modeButton(level)
+            ForEach(presentation.modeChips, id: \.level) { chip in
+                modeButton(chip)
             }
         }
     }
 
-    private func modeButton(_ level: NextShotStatus.DirectorSection.Level) -> some View {
-        let selected = level == section.level
-        let allowed = section.canSelect(level)
-        let caption = allowed ? nil : NextShotStatus.DirectorSection.notQualifiedCaption
-        let access = selected
-            ? "\(level.title), selected"
-            : (caption.map { "\(level.title), \($0)" } ?? level.title)
+    private func modeButton(_ chip: DirectorGalleryPresentation.ModeChip) -> some View {
+        let allowed = chip.unqualifiedCaption == nil
         return Button {
-            _ = controller.setLevel(level)
+            show(controller.setLevel(chip.level))
         } label: {
             VStack(spacing: 2) {
-                Text(level.title)
-                    .font(.system(size: 13, weight: selected ? .semibold : .regular))
-                if let caption {
+                Text(chip.title)
+                    .font(.system(size: 13, weight: chip.selected ? .semibold : .regular))
+                if let caption = chip.unqualifiedCaption {
                     Text(caption)
                         .font(.system(size: 9, weight: .medium))
                 }
@@ -88,30 +95,40 @@ struct DirectorModeControl: View {
             .frame(minWidth: 88, minHeight: 44)
             .background(
                 RoundedRectangle(cornerRadius: 8, style: .continuous)
-                    .fill(selected ? Color.white.opacity(0.08) : Color.clear)
+                    .fill(chip.selected ? Color.white.opacity(0.08) : Color.clear)
             )
             .overlay(
                 RoundedRectangle(cornerRadius: 8, style: .continuous)
-                    .strokeBorder(selected ? ConsoleStyle.previewGreen : ConsoleStyle.neutralBorder, lineWidth: selected ? 2 : 1)
+                    .strokeBorder(chip.selected ? ConsoleStyle.previewGreen : ConsoleStyle.neutralBorder,
+                                  lineWidth: chip.selected ? 2 : 1)
             )
         }
         .buttonStyle(.plain)
         .disabled(!allowed)
-        .accessibilityLabel(access)
-        .accessibilityAddTraits(selected ? .isSelected : [])
+        .accessibilityLabel(chip.accessibilityLabel)
+        .accessibilityAddTraits(chip.selected ? .isSelected : [])
+    }
+
+    /// Show a refusal; clear it after an accepted change.
+    private func show(_ result: DirectorControlResult) {
+        switch result {
+        case .accepted: refusal = nil
+        case .refused(let message): refusal = message
+        }
     }
 
     private var handRow: some View {
         HStack(spacing: 0) {
-            handSegment("Manual", selected: !section.handedToAlfie) {
+            handSegment(presentation.handControl.manualTitle, selected: presentation.handControl.manualSelected) {
                 controller.takeOver()
+                refusal = nil
             }
-            handSegment("Hand to Alfie", selected: section.handedToAlfie) {
-                _ = controller.handToAlfie()
+            handSegment(presentation.handControl.handTitle, selected: !presentation.handControl.manualSelected) {
+                show(controller.handToAlfie())
             }
         }
         .accessibilityElement(children: .contain)
-        .accessibilityLabel(section.handedToAlfie ? "Hand to Alfie, selected" : "Manual, selected")
+        .accessibilityLabel(presentation.handControl.accessibilityLabel)
         .accessibilityHint("Shortcut \(DirectorHandShortcut.title)")
         .background {
             if ownsShortcut {
@@ -141,8 +158,9 @@ struct DirectorModeControl: View {
     private func toggleHand() {
         if section.handedToAlfie {
             controller.takeOver()
+            refusal = nil
         } else {
-            _ = controller.handToAlfie()
+            show(controller.handToAlfie())
         }
     }
 }

@@ -24,7 +24,7 @@ struct DirectorControlDemo: View {
                     Text(card.title.uppercased())
                         .font(ConsoleStyle.label(11))
                         .foregroundStyle(.white.opacity(0.55))
-                    DirectorModeControl(controller: card.controller, ownsShortcut: false)
+                    DirectorModeControl(controller: card.controller, ownsShortcut: false, refusal: card.refusal)
                 }
             }
         }
@@ -36,6 +36,8 @@ struct DirectorControlCard: Identifiable {
     var id: String
     var title: String
     var controller: FakeDirectorConsole
+    /// A refusal the card shows as if the controller had just returned it.
+    var refusal: String? = nil
 }
 
 enum DirectorControlGallery {
@@ -65,8 +67,8 @@ enum DirectorControlGallery {
             id: "refused",
             title: "Auto · not qualified",
             controller: FakeDirectorConsole(
-                section: .atLaunch(qualified: .init(assist: true, auto: false, backup: false)),
-                refusalMessage: "Auto, not qualified")),
+                section: .atLaunch(qualified: .init(assist: true, auto: false, backup: false))),
+            refusal: "Auto, not qualified"),
         DirectorControlCard(
             id: "takeover",
             title: "Paused · you took over",

@@ -8,6 +8,8 @@
 //
 
 import AppKit
+import Combine
+import CoreGraphics
 import SwiftUI
 import Testing
 @testable import Alfie
@@ -34,7 +36,6 @@ struct DirectorModeControlTests {
         let result = controller.setLevel(.auto)
         #expect(result == .refused("Auto, not qualified"))
         #expect(controller.directorSection.level == .manual)
-        #expect(controller.refusalMessage == "Auto, not qualified")
     }
 
     @Test func choosingAssistHandsControlToAlfie() {
@@ -43,7 +44,6 @@ struct DirectorModeControlTests {
         #expect(controller.setLevel(.assist) == .accepted)
         #expect(controller.directorSection.level == .assist)
         #expect(controller.directorSection.handedToAlfie)
-        #expect(controller.refusalMessage == nil)
     }
 
     @Test func takeOverStopsAlfieWithoutChangingTheLevel() {
@@ -74,6 +74,29 @@ struct DirectorModeControlTests {
         #expect(resumed.directorSection.statusLine == "Watching · Alfie is not changing shots")
     }
 
+    /// A controller that is not the gallery fake: the view must work with any
+    /// `DirectorConsoleControlling` (the live Director is B-03's).
+    @MainActor private final class OtherController: ObservableObject, DirectorConsoleControlling {
+        @Published var directorSection = NextShotStatus.DirectorSection.atLaunch(qualified: .none)
+        func setLevel(_ level: NextShotStatus.DirectorSection.Level) -> DirectorControlResult { .refused("not qualified") }
+        func handToAlfie() -> DirectorControlResult { .refused("not qualified") }
+        func takeOver() {}
+        func cancelNextCut() {}
+        func advanceSegment() {}
+        func overrideSubject(on channel: ChannelID, at point: CGPoint) {}
+    }
+
+    @Test func worksWithAnyControllerAndTheLiveDirector() throws {
+        _ = DirectorModeControl(controller: OtherController())
+        let show = ShowCoordinator(programOutput: ProgramOutputManager(sinks: []),
+            qualificationRecords: DirectorQualificationStore(storage: nil, acceptsInjectedRecords: false))
+        let live = DirectorModeControl(controller: show.director, ownsShortcut: false)
+        let host = NSHostingView(rootView: live.frame(width: 800))
+        host.frame = CGRect(x: 0, y: 0, width: 800, height: 200)
+        host.layoutSubtreeIfNeeded()
+        #expect(host.fittingSize.height > 0)
+    }
+
     @Test func shortcutIsCommandShiftHAndNotTheStopShortcut() {
         #expect(DirectorHandShortcut.title == "Command Shift H")
         #expect(DirectorHandShortcut.key == KeyEquivalent("h"))
@@ -86,7 +109,7 @@ struct DirectorModeControlTests {
             Text(card.title.uppercased())
                 .font(ConsoleStyle.label(11))
                 .foregroundStyle(.white.opacity(0.7))
-            DirectorModeControl(controller: card.controller, ownsShortcut: false)
+            DirectorModeControl(controller: card.controller, ownsShortcut: false, refusal: card.refusal)
         }
         .padding(24)
         .frame(width: 800, alignment: .topLeading)
