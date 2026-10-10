@@ -201,3 +201,15 @@ B-04 adds writer/clock/expiry/overflow/export tests separately, with injected cl
 A-09 remains pure metadata; B-04 must not perform file I/O in the frame path or insert an `await` between validation and effect. Logging refusal must never inhibit an operator Take. No release enablement or default qualification is introduced. Synthetic tests, recorded replays and live shadow observations remain separately labelled; **none qualifies Assist, Auto or Backup without its explicit per-level sign-off**.
 
 Implementation limitations visible at this source revision: no independent `faceVisible` scalar; no cut policy, notice or Take permit yet; no runtime log writer connected by this ticket. These are truthful absences, not schema-created capabilities. Other open decisions remain AWAITING OWNER; this document sets no numeric study recommendation.
+
+## 10. B-04 integration notes (engine review, PR #15)
+
+- **Extension boundary.** `DiagnosticsLog.swift`, `ProgramOutputManager.swift`, `ShowStandard.swift` and `CropRenderer.metal` also compile into the CMIO camera extension. The B-04 writer and every schema type must live in app-only files and must never be referenced from those shared files. Reusing DiagnosticsLog's folder or prune logic is fine only through an app-only wrapper.
+- **Emission policy: AWAITING OWNER.** The controller evaluates at 4 Hz, so writing every evaluation produces about 14,000 records an hour. Two options:
+  - (a) write every evaluation;
+  - (b) write only when the decision, its reasons or the context change.
+
+  Recommendation: (b), with `sequence` gaps caused by unchanged evaluations **not** counted as loss. That needs a field such as `evaluationsSinceLast` (a schema change) or a statement that schema 1 records changes only. Until the owner chooses, B-04 writes every evaluation.
+- **Reference retention approach.** Use one JSONL file per UTC day of `recordedAtUTC`, deleted when its earliest record expires. Every record is then held for no more than 30 days, and a file's modification time can never extend retention.
+- **`revisions` is optional in practice.** Source generation, control epoch and shot revision are not in B-01's `ChannelEvidenceReadings`, so the producer reads them separately. Readers must accept a summary without `revisions`.
+- **Strict decoding.** "Reject unknown keys" needs custom decoders, because synthesized `Codable` ignores unknown keys. A-09 (#21) implements this.
