@@ -144,6 +144,23 @@ final class FrameQueue {
 
 // MARK: -
 
+/// Startup and stream failures the extension reports instead of aborting.
+/// A `fatalError` here kills the system extension process, and every client
+/// loses the camera; a thrown error fails only the call that hit it.
+enum ExtensionStartupError: Error {
+	case formatDescription(OSStatus)
+	case noStreamFormats
+	case unexpectedDeviceSource
+}
+
+/// Fixed device and stream identifiers. A client that binds to a device id
+/// must find the same camera after the extension restarts, so these never
+/// change between launches.
+enum ExtensionStableIDs {
+	static let device = UUID(uuidString: "6089D528-8D1B-45C5-8D24-E76CD0E2C3BF")!
+	static let videoStream = UUID(uuidString: "830BF1C5-4947-4F99-8A46-5B153C862371")!
+}
+
 class CinematicCoreExtensionDeviceSource: NSObject, CMIOExtensionDeviceSource {
 	
 	private(set) var device: CMIOExtensionDevice!
@@ -192,37 +209,43 @@ class CinematicCoreExtensionDeviceSource: NSObject, CMIOExtensionDeviceSource {
 		CMVideoDimensions(width: 1080, height: 1920),
 	]
 
-	init(localizedName: String) {
+	init(localizedName: String) throws {
 
 		super.init()
 		os_log(.info, "Initializing CMIO extension device source %{public}@", localizedName)
-		let deviceID = UUID() // replace this with your device UUID
-		self.device = CMIOExtensionDevice(localizedName: localizedName, deviceID: deviceID, legacyDeviceID: nil, source: self)
+		self.device = CMIOExtensionDevice(localizedName: localizedName, deviceID: ExtensionStableIDs.device, legacyDeviceID: nil, source: self)
 
 		let dims = currentFrameDimensions
-		CMVideoFormatDescriptionCreate(allocator: kCFAllocatorDefault, codecType: kCVPixelFormatType_32BGRA, width: dims.width, height: dims.height, extensions: nil, formatDescriptionOut: &_videoDescription)
+		var initialDescription: CMFormatDescription?
+		let initialStatus = CMVideoFormatDescriptionCreate(allocator: kCFAllocatorDefault, codecType: kCVPixelFormatType_32BGRA, width: dims.width, height: dims.height, extensions: nil, formatDescriptionOut: &initialDescription)
+		guard initialStatus == noErr, let initialDescription else {
+			throw ExtensionStartupError.formatDescription(initialStatus)
+		}
+		_videoDescription = initialDescription
 
 		let durations = ShowStandard.allCases.map(\.frameDuration)
 		let minDuration = ShowStandard.p60.frameDuration
 		let maxDuration = ShowStandard.p50.frameDuration
-		let videoStreamFormats: [CMIOExtensionStreamFormat] = Self.advertisedDimensions.map { dims in
+		// A size whose description cannot be built is left out of the list
+		// rather than force-unwrapped. The list keeps preference order.
+		let videoStreamFormats: [CMIOExtensionStreamFormat] = Self.advertisedDimensions.compactMap { dims in
 			var description: CMFormatDescription?
-			CMVideoFormatDescriptionCreate(allocator: kCFAllocatorDefault, codecType: kCVPixelFormatType_32BGRA, width: dims.width, height: dims.height, extensions: nil, formatDescriptionOut: &description)
-			return CMIOExtensionStreamFormat(formatDescription: description!, maxFrameDuration: maxDuration, minFrameDuration: minDuration, validFrameDurations: durations)
+			let status = CMVideoFormatDescriptionCreate(allocator: kCFAllocatorDefault, codecType: kCVPixelFormatType_32BGRA, width: dims.width, height: dims.height, extensions: nil, formatDescriptionOut: &description)
+			guard status == noErr, let description else {
+				os_log(.error, "Skipping stream format %{public}dx%{public}d: description failed %{public}d", dims.width, dims.height, status)
+				return nil
+			}
+			return CMIOExtensionStreamFormat(formatDescription: description, maxFrameDuration: maxDuration, minFrameDuration: minDuration, validFrameDurations: durations)
 		}
+		guard !videoStreamFormats.isEmpty else { throw ExtensionStartupError.noStreamFormats }
 
-		let videoID = UUID() // replace this with your video UUID
-		_streamSource = CinematicCoreExtensionStreamSource(localizedName: "Alfie.Video", streamID: videoID, streamFormats: videoStreamFormats, device: device)
+		_streamSource = CinematicCoreExtensionStreamSource(localizedName: "Alfie.Video", streamID: ExtensionStableIDs.videoStream, streamFormats: videoStreamFormats, device: device)
 		// The stream reports the LIVE playout duration (it moves when the host
 		// pushes a new show standard), not the advertised-at-load default.
 		_streamSource.playoutFrameRateProvider = { [weak self] in
 			self?.currentPlayoutRate ?? extensionDefaultFrameRate
 		}
-		do {
-			try device.addStream(_streamSource.stream)
-		} catch let error {
-			fatalError("Failed to add stream: \(error.localizedDescription)")
-		}
+		try device.addStream(_streamSource.stream)
 	}
 	
 	var availableProperties: Set<CMIOExtensionProperty> {
@@ -266,10 +289,15 @@ class CinematicCoreExtensionDeviceSource: NSObject, CMIOExtensionDeviceSource {
 		stateLock.lock(); defer { stateLock.unlock() }
 		guard let standard = ShowStandard.matching(frameRate: frameRate) else { return false }
 		guard _playoutFrameRate != standard.frameRate || !hasLoggedPlayoutRate else { return true }
+		// Build the notification first: if it cannot be built, the rate is
+		// left unchanged and the host is told the update failed.
+		guard let duration = CMTimeCopyAsDictionary(standard.frameDuration, allocator: kCFAllocatorDefault) else {
+			os_log(.error, "Could not encode the %{public}.2f fps frame duration; playout rate unchanged", standard.frameRate)
+			return false
+		}
 		_playoutFrameRate = standard.frameRate
 		hasLoggedPlayoutRate = true
 		rescheduleTimerIfNeeded()
-		let duration = CMTimeCopyAsDictionary(standard.frameDuration, allocator: kCFAllocatorDefault)!
 		_streamSource.stream.notifyPropertiesChanged([
 			.streamFrameDuration: CMIOExtensionPropertyState<AnyObject>(value: duration as AnyObject)
 		])
@@ -643,6 +671,12 @@ class CinematicCoreExtensionStreamSource: NSObject, CMIOExtensionStreamSource {
 	func setStreamProperties(_ streamProperties: CMIOExtensionStreamProperties) throws {
 		
 		if let activeFormatIndex = streamProperties.activeFormatIndex {
+			// A client index outside the advertised formats is ignored, so the
+			// stream never reports a format it does not have.
+			guard _streamFormats.indices.contains(activeFormatIndex) else {
+				os_log(.error, "Ignoring out-of-range active format index %{public}d", activeFormatIndex)
+				return
+			}
 			self.activeFormatIndex = activeFormatIndex
 		}
 	}
@@ -656,7 +690,8 @@ class CinematicCoreExtensionStreamSource: NSObject, CMIOExtensionStreamSource {
 	func startStream() throws {
 		
 		guard let deviceSource = device.source as? CinematicCoreExtensionDeviceSource else {
-			fatalError("Unexpected source type \(String(describing: device.source))")
+			os_log(.error, "Cannot start stream: unexpected device source %{public}@", String(describing: device.source))
+			throw ExtensionStartupError.unexpectedDeviceSource
 		}
 		deviceSource.startStreaming()
 	}
@@ -664,7 +699,8 @@ class CinematicCoreExtensionStreamSource: NSObject, CMIOExtensionStreamSource {
 	func stopStream() throws {
 		
 		guard let deviceSource = device.source as? CinematicCoreExtensionDeviceSource else {
-			fatalError("Unexpected source type \(String(describing: device.source))")
+			os_log(.error, "Cannot stop stream: unexpected device source %{public}@", String(describing: device.source))
+			throw ExtensionStartupError.unexpectedDeviceSource
 		}
 		deviceSource.stopStreaming()
 	}
@@ -676,7 +712,10 @@ class CinematicCoreExtensionProviderSource: NSObject, CMIOExtensionProviderSourc
 	
 	private(set) var provider: CMIOExtensionProvider!
 	
-	private var deviceSource: CinematicCoreExtensionDeviceSource!
+	/// Nil when the device could not be built or added. The provider still
+	/// starts, with no camera published, so the failure is logged instead of
+	/// killing the extension process.
+	private var deviceSource: CinematicCoreExtensionDeviceSource?
 	
 	// XPC Listener for incoming connections from host app
 	private var xpcListener: NSXPCListener?
@@ -689,12 +728,12 @@ class CinematicCoreExtensionProviderSource: NSObject, CMIOExtensionProviderSourc
 		os_log(.info, "Initializing CMIO extension provider source")
 		
 		provider = CMIOExtensionProvider(source: self, clientQueue: clientQueue)
-		deviceSource = CinematicCoreExtensionDeviceSource(localizedName: "Alfie")
-		
 		do {
-			try provider.addDevice(deviceSource.device)
+			let source = try CinematicCoreExtensionDeviceSource(localizedName: "Alfie")
+			try provider.addDevice(source.device)
+			deviceSource = source
 		} catch let error {
-			fatalError("Failed to add device: \(error.localizedDescription)")
+			os_log(.fault, "Alfie virtual camera unavailable: device setup failed: %{public}@", String(describing: error))
 		}
 		
 		// Set up XPC listener
@@ -759,6 +798,11 @@ extension CinematicCoreExtensionProviderSource: NSXPCListenerDelegate {
 			return false
 		}
 		
+		guard let deviceSource else {
+			os_log(.error, "Rejected XPC connection: no virtual camera device was set up")
+			return false
+		}
+
 		// Configure connection
 		newConnection.exportedInterface = NSXPCInterface(with: CinematicCoreXPCProtocol.self)
 		newConnection.exportedObject = XPCServiceImplementation(deviceSource: deviceSource)
