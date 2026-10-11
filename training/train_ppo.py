@@ -107,6 +107,10 @@ def main() -> int:
         "--from-scratch", action="store_true",
         help="Train from random initialization (skip BC)",
     )
+    parser.add_argument(
+        "--trust-checkpoint", action="store_true",
+        help="Load a BC checkpoint from outside training/models/ (it is unpickled)",
+    )
     parser.add_argument("--total-steps", type=int, default=500_000)
     parser.add_argument("--lr", type=float, default=1e-4)
     parser.add_argument("--n-steps", type=int, default=2048)
@@ -121,6 +125,15 @@ def main() -> int:
     bc_path = None
     if not args.from_scratch:
         bc_path = Path(args.bc_model) if args.bc_model else Path("models/bc_pretrained.zip")
+        # Only a file that will actually be loaded needs to be trusted; a
+        # missing one still falls back to training from scratch.
+        if bc_path.exists():
+            from checkpoint_trust import UntrustedCheckpointError, require_trusted
+            try:
+                bc_path = require_trusted(bc_path, allow_untrusted=args.trust_checkpoint)
+            except UntrustedCheckpointError as error:
+                print(f"ERROR: {error}", file=sys.stderr)
+                return 2
 
     train_ppo(
         data_dirs=[Path(args.data_dir)],
