@@ -119,10 +119,20 @@ def main() -> int:
         "--output", type=str, default="models/CinematicFraming.mlpackage",
         help="Output .mlpackage path",
     )
+    parser.add_argument(
+        "--trust-checkpoint", action="store_true",
+        help="Load a checkpoint from outside training/models/ (it is unpickled)",
+    )
 
     args = parser.parse_args()
+    from checkpoint_trust import UntrustedCheckpointError, require_trusted
+    try:
+        model_path = require_trusted(Path(args.model), allow_untrusted=args.trust_checkpoint)
+    except UntrustedCheckpointError as error:
+        print(f"ERROR: {error}", file=sys.stderr)
+        return 2
     export_coreml(
-        model_path=Path(args.model),
+        model_path=model_path,
         output_path=Path(args.output),
     )
     return 0

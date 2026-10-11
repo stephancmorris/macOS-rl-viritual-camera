@@ -79,3 +79,11 @@ AlfieMVP.md
 CinematicCoreMacOS/build_*/
 CinematicCoreMacOS/build_*.log
 !CinematicCoreMacOS/build_out/
+
+# --- Local build caches, logs and binaries (review hygiene, Oct 2026) ---
+# Xcode derived data from agent runs, and a compiled test tool; build it
+# from test_decklink.cpp when needed.
+.codex-derived-data/
+.deriveddata*/
+CinematicCoreMacOS/build.log
+/test_decklink

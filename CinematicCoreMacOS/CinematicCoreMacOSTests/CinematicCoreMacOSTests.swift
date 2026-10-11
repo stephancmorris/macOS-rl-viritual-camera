@@ -10,13 +10,6 @@ import Foundation
 import CoreGraphics
 @testable import Alfie
 
-struct CinematicCoreMacOSTests {
-
-    @Test func example() async throws {
-        // Write your test here and use APIs like `#expect(...)` to check expected conditions.
-    }
-}
-
 /// Regression tests for the detection cadence gate
 /// (`CameraManager.detectionSlotIsDue`). The intermediate bug this locks out:
 /// testing `(counter + 1) % interval == 0` while only advancing the counter on
@@ -85,19 +78,19 @@ struct CropStabilityTests {
         )
     }
 
-    @Test func stationarySubjectKeepsStableCropSize() {
+    @Test func stationarySubjectKeepsStableCropSize() throws {
         let composer = ShotComposer()
         composer.config.shotPreset = .waistUp
 
         // First sighting establishes the emitted size (waistUp fraction 1.15).
         let first = composer.compose(person: person(x: 0.40, y: 0.30, w: 0.20, h: 0.40))
-        let firstSize = try! #require(first?.size)
+        let firstSize = try #require(first?.size)
         #expect(abs(firstSize.height - 0.46) < 0.001)
 
         // Same subject, Vision noise wobbles bbox height by ~2.4% (<5%
         // hysteresis): the crop SIZE must not change…
         let jittered = composer.compose(person: person(x: 0.40, y: 0.295, w: 0.20, h: 0.41))
-        let jitteredSize = try! #require(jittered?.size)
+        let jitteredSize = try #require(jittered?.size)
         #expect(jitteredSize.height == firstSize.height,
                 "sub-hysteresis bbox jitter must not reshape the crop")
 
@@ -117,26 +110,26 @@ struct CropStabilityTests {
                 "crop center follows the subject even while size is hysteresis-frozen")
     }
 
-    @Test func realApproachReframesPastHysteresisBand() {
+    @Test func realApproachReframesPastHysteresisBand() throws {
         let composer = ShotComposer()
         composer.config.shotPreset = .waistUp
 
-        let firstSize = try! #require(composer.compose(person: person(x: 0.40, y: 0.30, w: 0.20, h: 0.40))?.size)
+        let firstSize = try #require(composer.compose(person: person(x: 0.40, y: 0.30, w: 0.20, h: 0.40))?.size)
         // Subject walks toward the camera: +25% bbox height — far outside the
         // 5% band, so the crop must reframe.
         let grown = composer.compose(person: person(x: 0.38, y: 0.22, w: 0.24, h: 0.50))
-        let grownSize = try! #require(grown?.size)
+        let grownSize = try #require(grown?.size)
         #expect(grownSize.height > firstSize.height + 0.05,
                 "a genuine approach must enlarge the crop despite hysteresis")
     }
 
-    @Test func widePresetIsACappedCropNotTheFullPicture() {
+    @Test func widePresetIsACappedCropNotTheFullPicture() throws {
         let composer = ShotComposer()
         composer.config.shotPreset = .wide
 
         // A small/distant subject would frame-fit to the full frame without
         // the cap; the Wide preset must stop at 85%.
-        let crop = try! #require(composer.compose(person: person(x: 0.45, y: 0.10, w: 0.10, h: 0.30)))
+        let crop = try #require(composer.compose(person: person(x: 0.45, y: 0.10, w: 0.10, h: 0.30)))
         #expect(crop.size.height <= 0.8501,
                 "Wide stays a visible crop; Return to Wide is the uncropped view")
         #expect(crop.size.height >= 0.70 - 0.001, "…and still respects its floor")
@@ -148,40 +141,40 @@ struct CropStabilityTests {
 
     // MARK: Close-range presets keep travel to follow
 
-    @Test func closeRangeWaistUpStaysCappedAndFollowable() {
+    @Test func closeRangeWaistUpStaysCappedAndFollowable() throws {
         let composer = ShotComposer()
         composer.config.shotPreset = .waistUp
 
         // 5 ft from the camera: bbox ~70% of frame. Subject-relative framing
         // wants 0.7 × 1.15 ≈ 0.805+; the cap must stop it at 0.80 so the crop
         // keeps horizontal travel and can still FOLLOW.
-        let crop = try! #require(composer.compose(person: person(x: 0.35, y: 0.10, w: 0.30, h: 0.70)))
+        let crop = try #require(composer.compose(person: person(x: 0.35, y: 0.10, w: 0.30, h: 0.70)))
         #expect(crop.size.height <= 0.8001, "Waist Up caps at 0.80 even when the subject fills the sensor")
         #expect(crop.size.width < 1.0, "travel must remain — a full-width crop cannot follow")
     }
 
-    @Test func closeRangeFullBodyStaysCappedAndFollowable() {
+    @Test func closeRangeFullBodyStaysCappedAndFollowable() throws {
         let composer = ShotComposer()
         composer.config.shotPreset = .fullBody
 
         // bbox 50% × 3.0 → wants 1.5 → frame-fit would give the FULL frame;
         // cap at 0.95 so some travel survives.
-        let crop = try! #require(composer.compose(person: person(x: 0.30, y: 0.05, w: 0.25, h: 0.50)))
+        let crop = try #require(composer.compose(person: person(x: 0.30, y: 0.05, w: 0.25, h: 0.50)))
         #expect(crop.size.height <= 0.9501)
         #expect(crop.size.width < 1.0)
     }
 
     // MARK: Vertical head-bob damping (tight shots)
 
-    @Test func tightShotDampsVerticalHeadBob() {
+    @Test func tightShotDampsVerticalHeadBob() throws {
         let composer = ShotComposer()
         composer.config.shotPreset = .waistUp
 
-        let first = try! #require(composer.compose(person: person(x: 0.40, y: 0.20, w: 0.20, h: 0.40)))
+        let first = try #require(composer.compose(person: person(x: 0.40, y: 0.20, w: 0.20, h: 0.40)))
         // Head bobs up by 3% of frame (a natural speaking motion).
         let bobbedRawY = first.origin.y - 0.03 * 1.15  // anchor moves with desired height
         _ = bobbedRawY
-        let second = try! #require(composer.compose(person: person(x: 0.40, y: 0.17, w: 0.20, h: 0.40)))
+        let second = try #require(composer.compose(person: person(x: 0.40, y: 0.17, w: 0.20, h: 0.40)))
 
         // The emitted anchor must move PART of the raw delta (damped), not
         // none (still responsive) and not all (jumpy).
