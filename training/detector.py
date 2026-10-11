@@ -48,8 +48,37 @@ _RIGHT_HIP = 24
 # Core body landmarks for overall confidence
 _CORE_LANDMARKS = [_NOSE, _LEFT_SHOULDER, _RIGHT_SHOULDER, _LEFT_HIP, _RIGHT_HIP]
 
-# Default model path (relative to this file)
-_DEFAULT_MODEL = Path(__file__).parent / "pose_landmarker_full.task"
+# MediaPipe pose models by --model-complexity (0=lite, 1=full, 2=heavy),
+# pinned to model version 1 rather than `latest`. The md5 is what Google
+# Cloud Storage reports for that object; check a download with `md5 -q`.
+_MODEL_URL = (
+    "https://storage.googleapis.com/mediapipe-models/pose_landmarker/"
+    "{name}/float16/1/{name}.task"
+)
+_MODELS = {
+    0: ("pose_landmarker_lite", "04a75ddf7c811ac7a1a4523266dd7d88"),
+    1: ("pose_landmarker_full", "83879689d373d143be094c972355e48e"),
+    2: ("pose_landmarker_heavy", "453dec4d02ccc4d3ce812b6de84fa516"),
+}
+
+
+def default_model_path(model_complexity: int) -> Path:
+    """The model file for a complexity level, next to this file."""
+    if model_complexity not in _MODELS:
+        raise ValueError(f"model_complexity must be 0, 1 or 2, got {model_complexity}")
+    name, _ = _MODELS[model_complexity]
+    return Path(__file__).parent / f"{name}.task"
+
+
+def _download_instructions(model_complexity: int, destination: Path) -> str:
+    name, md5 = _MODELS[model_complexity]
+    url = _MODEL_URL.format(name=name)
+    return (
+        "Download it with:\n"
+        f"  curl -L -o {destination} {url}\n"
+        "and check it with:\n"
+        f"  md5 -q {destination}   # expect {md5}"
+    )
 
 
 class PersonDetector:
@@ -61,15 +90,12 @@ class PersonDetector:
     ):
         self.confidence_threshold = confidence_threshold
 
-        model = model_path or _DEFAULT_MODEL
+        # model_complexity picks the asset (lite / full / heavy). An explicit
+        # model_path still wins. Default 1 is the full model, as before.
+        model = model_path or default_model_path(model_complexity)
         if not model.exists():
-            raise FileNotFoundError(
-                f"MediaPipe model not found at {model}.\n"
-                "Download it with:\n"
-                "  curl -L -o training/pose_landmarker_full.task "
-                "https://storage.googleapis.com/mediapipe-models/pose_landmarker/"
-                "pose_landmarker_full/float16/latest/pose_landmarker_full.task"
-            )
+            hint = _download_instructions(model_complexity, model) if model_path is None else ""
+            raise FileNotFoundError(f"MediaPipe model not found at {model}.\n{hint}")
 
         options = PoseLandmarkerOptions(
             base_options=BaseOptions(model_asset_path=str(model)),
