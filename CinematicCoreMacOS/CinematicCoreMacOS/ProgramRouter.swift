@@ -210,6 +210,7 @@ final class ProgramRouter {
             state = .holding(since: now)
             output.noteDiagnostics("program source lost: holding last good frame")
             startFaultTicker()
+            prepareStandbyFrame()
         case .holding(let since) where now - since >= Self.holdDuration:
             state = .standby
             output.noteDiagnostics("program source missing: standby")
@@ -232,16 +233,44 @@ final class ProgramRouter {
         }
     }
 
+    /// Size of the standby frame: the last Program frame's (1920×1080 if none).
+    private var standbySize: (width: Int, height: Int) {
+        (lastGoodBuffer.map(CVPixelBufferGetWidth) ?? 1920, lastGoodBuffer.map(CVPixelBufferGetHeight) ?? 1080)
+    }
+
+    private func standbyMatches(width: Int, height: Int) -> Bool {
+        guard let standbyBuffer else { return false }
+        return CVPixelBufferGetWidth(standbyBuffer) == width && CVPixelBufferGetHeight(standbyBuffer) == height
+    }
+
     /// Black frame the size of the last Program frame (1920×1080 if none).
+    /// Normally prepared off the main thread when holding begins; built here
+    /// only if that has not landed yet.
     private func standbyFrame() -> CVPixelBuffer? {
-        let width = lastGoodBuffer.map(CVPixelBufferGetWidth) ?? 1920
-        let height = lastGoodBuffer.map(CVPixelBufferGetHeight) ?? 1080
-        if let standbyBuffer,
-           CVPixelBufferGetWidth(standbyBuffer) == width, CVPixelBufferGetHeight(standbyBuffer) == height {
-            return standbyBuffer
-        }
+        let (width, height) = standbySize
+        if standbyMatches(width: width, height: height) { return standbyBuffer }
         standbyBuffer = Self.makeBlackFrame(width: width, height: height)
         return standbyBuffer
+    }
+
+    /// Carries a finished standby frame back to the main actor.
+    private struct StandbyFrameBox: @unchecked Sendable { let buffer: CVPixelBuffer? }
+
+    /// Build the standby frame off the main thread while the router holds, so
+    /// the hold → standby tick does not pay for a full-frame fill (CR-014).
+    private func prepareStandbyFrame() {
+        let (width, height) = standbySize
+        guard !standbyMatches(width: width, height: height) else { return }
+        Task.detached(priority: .userInitiated) { [weak self] in
+            let box = StandbyFrameBox(buffer: Self.makeBlackFrame(width: width, height: height))
+            await self?.adoptStandbyFrame(box, width: width, height: height)
+        }
+    }
+
+    private func adoptStandbyFrame(_ box: StandbyFrameBox, width: Int, height: Int) {
+        guard let buffer = box.buffer, !standbyMatches(width: width, height: height),
+              standbySize == (width, height) else { return }
+        standbyBuffer = buffer
     }
 
     nonisolated static func makeBlackFrame(width: Int, height: Int) -> CVPixelBuffer? {
@@ -252,12 +281,10 @@ final class ProgramRouter {
         CVPixelBufferLockBaseAddress(buffer, [])
         defer { CVPixelBufferUnlockBaseAddress(buffer, []) }
         guard let base = CVPixelBufferGetBaseAddress(buffer) else { return nil }
-        let bytesPerRow = CVPixelBufferGetBytesPerRow(buffer)
-        // BGRA black, opaque: B=G=R=0, A=255.
-        for row in 0..<height {
-            let pixels = base.advanced(by: row * bytesPerRow).assumingMemoryBound(to: UInt32.self)
-            for column in 0..<width { pixels[column] = UInt32(0xFF00_0000).littleEndian }
-        }
+        // BGRA black, opaque: B=G=R=0, A=255. One pattern fill over the whole
+        // plane (row padding included) instead of a per-pixel loop.
+        var pattern = UInt32(0xFF00_0000).littleEndian
+        memset_pattern4(base, &pattern, CVPixelBufferGetDataSize(buffer))
         return buffer
     }
 
@@ -291,6 +318,13 @@ final class ProgramRouter {
         watchdog?.invalidate()
         watchdog = nil
         stopFaultTicker()
+    }
+
+    /// Releasing the router without `channelStopped` must not leave its timers
+    /// on the main run loop (CR-022). Isolated, so a release off the main
+    /// thread still invalidates them on the thread that scheduled them.
+    isolated deinit {
+        stopTimers()
     }
 }
 

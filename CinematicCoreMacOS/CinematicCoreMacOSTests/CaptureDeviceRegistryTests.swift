@@ -7,6 +7,7 @@
 //  auto-selects, and a stale lease cannot release someone else's claim.
 //
 
+import CoreVideo
 import Testing
 @testable import Alfie
 
@@ -105,5 +106,21 @@ struct CaptureDeviceRegistryTests {
         let manager = CameraManager(channelID: .b, programOutput: ProgramOutputManager(sinks: []), routed: false)
         manager.handleSourceLost()
         #expect(!manager.sourceMissing)
+    }
+
+    // CR-027: after a hot unplug the session is still running for output hold, so a
+    // buffer the stopping session delivers late must not reach the frame path.
+    @Test func bufferArrivingAfterSourceLossIsNotProcessed() async throws {
+        let manager = CameraManager(channelID: .b, programOutput: ProgramOutputManager(sinks: []), routed: false)
+        manager.setRunningForTesting(true)
+        manager.handleSourceLost()
+        #expect(manager.sourceMissing)
+        var buffer: CVPixelBuffer?
+        let attributes = [kCVPixelBufferIOSurfacePropertiesKey: [:]] as CFDictionary
+        CVPixelBufferCreate(kCFAllocatorDefault, 64, 36, kCVPixelFormatType_32BGRA, attributes, &buffer)
+        await manager.processFrameForTesting(try #require(buffer), timestampSeconds: 1)
+        #expect(manager.currentFrameBuffer == nil)
+        #expect(manager.croppedFrameBuffer == nil)
+        #expect(manager.latestRenderedFrame == nil)
     }
 }

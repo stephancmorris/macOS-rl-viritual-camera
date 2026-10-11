@@ -162,7 +162,9 @@ final class TrainingDataRecorder: ObservableObject {
 
     private var sessionDirectory: URL?
     private var sessionWriter: TrainingDataSessionWriter?
-    private var pendingWriteTasks: [Task<Int64, Error>] = []
+    /// In-flight batch writes, removed as each completes so a long recording
+    /// does not keep every finished task until stop (CR-009).
+    private var pendingWriteTasks: [UUID: Task<Int64, Error>] = [:]
     private var frameIndex: Int = 0
     private var sessionStartTime: Date?
     private var sessionId: String?
@@ -179,11 +181,37 @@ final class TrainingDataRecorder: ObservableObject {
         self.hasUserConsentedToTrainingData = defaults.bool(forKey: Self.consentDefaultsKey)
     }
 
-    /// Base output directory for all training data sessions
-    var outputDirectory: URL {
-        let docs = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first!
-        return docs.appendingPathComponent("CinematicCore/TrainingData", isDirectory: true)
+    enum RecorderError: LocalizedError {
+        case noDocumentsDirectory
+
+        var errorDescription: String? {
+            switch self {
+            case .noDocumentsDirectory: return "This Mac has no Documents folder for training data."
+            }
+        }
     }
+
+    /// Base output directory for all training data sessions. Throws rather
+    /// than trapping when the app has no Documents folder (CR-010).
+    var outputDirectory: URL {
+        get throws {
+            guard let docs = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first else {
+                throw RecorderError.noDocumentsDirectory
+            }
+            return docs.appendingPathComponent("CinematicCore/TrainingData", isDirectory: true)
+        }
+    }
+
+    /// Rows per second in `frames.jsonl`: the show rate divided by the
+    /// subsample stride. The training env multiplies per-row deltas by this,
+    /// so it must be the real rate, not a fixed 30 (CR-010).
+    nonisolated static func recordedFrameRate(showRate: Double, subsampleRate: Int) -> Int {
+        max(1, Int((showRate / Double(max(1, subsampleRate))).rounded()))
+    }
+
+    /// At most this many batch writes may be in flight; a further batch is
+    /// counted as dropped instead of queueing without bound (CR-009).
+    static let maxInFlightWrites = 8
 
     // MARK: - Public Methods
 
@@ -209,10 +237,12 @@ final class TrainingDataRecorder: ObservableObject {
         let id = "session_\(timestamp)"
 
         // Create session directory
-        let sessionDir = outputDirectory.appendingPathComponent(id, isDirectory: true)
+        let sessionDir: URL
         do {
+            sessionDir = try outputDirectory.appendingPathComponent(id, isDirectory: true)
             try FileManager.default.createDirectory(at: sessionDir, withIntermediateDirectories: true)
         } catch {
+            lastErrorDescription = "Failed to create the training session folder: \(error.localizedDescription)"
             Self.logger.error("Failed to create session directory: \(error.localizedDescription, privacy: .public)")
             return
         }
@@ -233,7 +263,7 @@ final class TrainingDataRecorder: ObservableObject {
         sessionStartTime = Date()
         frameIndex = 0
         buffer = []
-        pendingWriteTasks = []
+        pendingWriteTasks = [:]
         stats = .init()
         lastErrorDescription = nil
 
@@ -242,7 +272,8 @@ final class TrainingDataRecorder: ObservableObject {
         pendingMetadata = SessionMetadata(
             sessionId: id,
             startTime: isoFormatter.string(from: Date()),
-            fps: 30,
+            fps: Self.recordedFrameRate(showRate: ShowStandard.activeOrCurrent.frameRate,
+                                        subsampleRate: config.subsampleRate),
             resolution: ResolutionData(width: Int(resolution.width), height: Int(resolution.height)),
             cameraName: cameraName,
             labelSource: manualCropOverride != nil ? "manual" : "auto",
@@ -422,7 +453,8 @@ final class TrainingDataRecorder: ObservableObject {
 
     /// Open the output directory in Finder
     func openInFinder() {
-        NSWorkspace.shared.open(outputDirectory)
+        guard let directory = try? outputDirectory else { return }
+        NSWorkspace.shared.open(directory)
     }
 
     func deleteExpiredSessions() {
@@ -432,9 +464,10 @@ final class TrainingDataRecorder: ObservableObject {
         do {
             let now = Date()
             let fileManager = FileManager.default
-            guard fileManager.fileExists(atPath: outputDirectory.path) else { return }
+            let directory = try outputDirectory
+            guard fileManager.fileExists(atPath: directory.path) else { return }
             let sessionURLs = try fileManager.contentsOfDirectory(
-                at: outputDirectory,
+                at: directory,
                 includingPropertiesForKeys: [.contentModificationDateKey],
                 options: [.skipsHiddenFiles]
             )
@@ -458,9 +491,10 @@ final class TrainingDataRecorder: ObservableObject {
 
         do {
             let fileManager = FileManager.default
-            guard fileManager.fileExists(atPath: outputDirectory.path) else { return }
+            let directory = try outputDirectory
+            guard fileManager.fileExists(atPath: directory.path) else { return }
             let sessionURLs = try fileManager.contentsOfDirectory(
-                at: outputDirectory,
+                at: directory,
                 includingPropertiesForKeys: nil,
                 options: [.skipsHiddenFiles]
             )
@@ -482,14 +516,23 @@ final class TrainingDataRecorder: ObservableObject {
             return
         }
 
+        guard pendingWriteTasks.count < Self.maxInFlightWrites else {
+            stats.droppedFrames += batch.count
+            lastErrorDescription = "Training data writes are behind; frames were dropped."
+            Self.logger.error("Training data writer behind: dropped a batch of \(batch.count) frames")
+            return
+        }
+
         let combined = batch.reduce(Data()) { $0 + $1 }
 
         let writeTask = Task {
             try await writer.write(combined)
         }
-        pendingWriteTasks.append(writeTask)
+        let id = UUID()
+        pendingWriteTasks[id] = writeTask
 
         Task { @MainActor [weak self] in
+            defer { self?.pendingWriteTasks[id] = nil }
             do {
                 let byteCount = try await writeTask.value
                 self?.stats.fileSizeBytes += byteCount
@@ -502,8 +545,8 @@ final class TrainingDataRecorder: ObservableObject {
     }
 
     private func finishPendingWrites() async {
-        let tasks = pendingWriteTasks
-        pendingWriteTasks = []
+        let tasks = Array(pendingWriteTasks.values)
+        pendingWriteTasks = [:]
 
         for task in tasks {
             do {
