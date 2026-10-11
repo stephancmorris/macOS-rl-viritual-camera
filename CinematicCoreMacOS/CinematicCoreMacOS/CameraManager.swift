@@ -1010,6 +1010,10 @@ final class CameraManager: NSObject, ObservableObject {
     }
     /// Test seam: mark the source missing as a hot unplug would.
     func setSourceMissingForTesting(_ missing: Bool) { sourceMissing = missing }
+    /// Test seam: feed one captured buffer through the frame path.
+    func processFrameForTesting(_ pixelBuffer: CVPixelBuffer, timestampSeconds: Double) async {
+        await processFrame(pixelBuffer: pixelBuffer, timestampSeconds: timestampSeconds)
+    }
     /// Test seam: the identity a configured source would have recorded.
     func setSourceIdentityForTesting(_ source: DiagnosticsSessionIdentity.Source) { recordSourceIdentity(source) }
     #endif
@@ -1789,7 +1793,11 @@ final class CameraManager: NSObject, ObservableObject {
 
     private func processFrame(pixelBuffer: CVPixelBuffer, timestampSeconds: Double) async {
         let sessionGeneration = captureGeneration
-        guard isRunning else { return }
+        // A hot unplug retires the generation but keeps `isRunning` so the
+        // output holds and then sends standby. A buffer the stopping session
+        // still delivers would start under the new generation, so refuse it
+        // here: it must not be rendered, sent, or replace the cleared hold.
+        guard isRunning, !sourceMissing else { return }
         // NOTE: a `CIImage(cvPixelBuffer:)` used to be built here and never
         // used — one wasted image object per frame on the exact path the memory
         // investigation is looking at. Removed so it cannot muddy attribution.
