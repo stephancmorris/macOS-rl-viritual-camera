@@ -28,14 +28,15 @@ final class DisplayOutputSink: ProgramOutputSink {
 
     private let program = ProgramDisplayWindowController()
 
-    /// The last buffer handed to the window. The layer holds the backing
-    /// IOSurface *unretained*, so this strong reference is the only thing
-    /// stopping the CropEngine's `CVPixelBufferPool` from re-vending a surface
-    /// that is still on screen. Replaced (not appended) each frame — one frame
-    /// of retention is enough because the compositor samples the previous
-    /// surface synchronously before we swap in the next. This codebase has a
-    /// documented history of exactly that surface-recycling tear.
-    private var lastSentBuffer: CVPixelBuffer?
+    /// The last few buffers handed to the window, newest last. The layer holds
+    /// the backing IOSurface *unretained*, so these strong references are what
+    /// stop the CropEngine's `CVPixelBufferPool` from re-vending a surface that
+    /// may still be on screen. Setting `contents` does not wait for the window
+    /// server, so one frame of retention is not a guarantee; a short ring is
+    /// (CR-024). This codebase has a documented history of exactly that
+    /// surface-recycling tear.
+    private var recentSentBuffers: [CVPixelBuffer] = []
+    static let sentBufferRetention = 3
 
     private var isCaptureRunning = false
     private var lastError: String?
@@ -64,13 +65,12 @@ final class DisplayOutputSink: ProgramOutputSink {
         )
     }
 
-    deinit {
+    /// Isolated: if the last reference is dropped off the main thread, the
+    /// runtime runs this on the main actor instead of trapping (CR-023). The
+    /// controller owns the NSWindow, so tearing it down closes the window.
+    isolated deinit {
         NotificationCenter.default.removeObserver(self)
-        // `deinit` is nonisolated; tear the window down on the MainActor. The
-        // controller owns the NSWindow, so releasing it there closes the window.
-        MainActor.assumeIsolated {
-            program.teardown()
-        }
+        program.teardown()
     }
 
     /// The `CGDirectDisplayID` the operator selected, or the default (first
@@ -139,7 +139,7 @@ final class DisplayOutputSink: ProgramOutputSink {
 
     func disconnect() {
         program.teardown()
-        lastSentBuffer = nil
+        recentSentBuffers.removeAll()
         onStateChange?()
     }
 
@@ -168,11 +168,12 @@ final class DisplayOutputSink: ProgramOutputSink {
             lastError = "Program frame has no IOSurface backing."
             return false
         }
-        // Retain the just-shown buffer so the crop pool cannot recycle its
-        // surface while the compositor is still reading it. Replacing the
-        // previous reference releases the frame before last, which is safe: the
-        // compositor has already sampled it.
-        lastSentBuffer = pixelBuffer
+        // Retain the just-shown buffer, and the few before it, so the crop
+        // pool cannot recycle a surface the compositor may still be reading.
+        recentSentBuffers.append(pixelBuffer)
+        if recentSentBuffers.count > Self.sentBufferRetention {
+            recentSentBuffers.removeFirst(recentSentBuffers.count - Self.sentBufferRetention)
+        }
         lastError = nil
         return true
     }
@@ -187,7 +188,7 @@ final class DisplayOutputSink: ProgramOutputSink {
     private func refreshWindowPresence() {
         guard let screen = targetScreen else {
             program.teardown()
-            lastSentBuffer = nil
+            recentSentBuffers.removeAll()
             return
         }
         if isCaptureRunning {
@@ -195,10 +196,10 @@ final class DisplayOutputSink: ProgramOutputSink {
         } else if isSelected && reservesPort {
             program.present(on: screen)
             program.showStandby()
-            lastSentBuffer = nil
+            recentSentBuffers.removeAll()
         } else {
             program.teardown()
-            lastSentBuffer = nil
+            recentSentBuffers.removeAll()
         }
     }
 
@@ -208,7 +209,7 @@ final class DisplayOutputSink: ProgramOutputSink {
             // Target display vanished (hot-unplug) — close the window. The
             // manager marks the route missing; it does not re-route mid-show.
             program.teardown()
-            lastSentBuffer = nil
+            recentSentBuffers.removeAll()
             Self.logger.notice("Program display disappeared; closing window and re-routing.")
         } else {
             // Reconfiguration: the target might have moved/resized, or come
@@ -430,6 +431,9 @@ nonisolated enum DirectOutputFormat {
 @MainActor
 final class DirectOutputFormatLock {
     private(set) var lockedDisplayID: CGDirectDisplayID?
+    /// The port's mode before the lock changed it; restored on release so only
+    /// that port is touched (CR-015).
+    private var previousMode: CGDisplayMode?
     /// Why the last lock could not set the show format, for the bring-up check.
     private(set) var lastFailure: String?
     private static let logger = Logger(subsystem: "com.alfie", category: "DisplayOutput")
@@ -449,6 +453,7 @@ final class DirectOutputFormatLock {
             Self.logger.warning("Direct output: no 1080 mode at \(frameRate, privacy: .public) Hz on display \(displayID)")
             return
         }
+        let modeBeforeLock = CGDisplayCopyDisplayMode(displayID)
         var config: CGDisplayConfigRef?
         guard CGBeginDisplayConfiguration(&config) == .success, let config else {
             lastFailure = "macOS refused the display change."
@@ -458,6 +463,7 @@ final class DirectOutputFormatLock {
         let result = CGCompleteDisplayConfiguration(config, .forAppOnly)
         if result == .success {
             lockedDisplayID = displayID
+            previousMode = modeBeforeLock
             Self.logger.notice("Direct output: set \(DirectOutputFormat.Mode(modes[index]).title, privacy: .public) on display \(displayID)")
         } else {
             lastFailure = "macOS refused the display change (\(result.rawValue))."
@@ -466,10 +472,25 @@ final class DirectOutputFormatLock {
     }
 
     func release() {
-        guard lockedDisplayID != nil else { return }
-        // App-only changes are not permanent; this returns the port to the
-        // operator's own System Settings format.
+        guard let displayID = lockedDisplayID else { return }
+        defer {
+            lockedDisplayID = nil
+            previousMode = nil
+        }
+        // Put back the mode this port had before the lock, on this port only.
+        // `CGRestorePermanentDisplayConfiguration` would reset every display.
+        // Still app-only, so macOS also reverts it if Alfie quits.
+        if let previousMode {
+            var config: CGDisplayConfigRef?
+            if CGBeginDisplayConfiguration(&config) == .success, let config {
+                CGConfigureDisplayWithDisplayMode(config, displayID, previousMode, nil)
+                let result = CGCompleteDisplayConfiguration(config, .forAppOnly)
+                if result == .success { return }
+                Self.logger.error("Direct output: restoring display \(displayID) failed \(result.rawValue)")
+            }
+        }
+        // No saved mode, or the targeted restore failed: fall back to the
+        // operator's System Settings formats.
         CGRestorePermanentDisplayConfiguration()
-        lockedDisplayID = nil
     }
 }
