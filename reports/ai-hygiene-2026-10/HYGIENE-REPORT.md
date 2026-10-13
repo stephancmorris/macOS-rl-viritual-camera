@@ -43,14 +43,14 @@ Counts below are only findings already verified against this SHA. They will grow
 
 | Category | Confirmed | Of which Needs owner |
 |---|---|---|
-| C comments | 23 | 0 |
-| D duplication | 1 | 0 |
-| X dead code | 2 | 0 |
+| C comments | 29 | 0 |
+| D duplication | 7 | 1 |
+| X dead code | 10 | 0 |
 | E swallowed errors | 2 | 2 |
 | S concurrency | 6 | 0 |
-| T tests | 2 | 0 |
+| T tests | 7 | 1 |
 | P Python | 4 | 0 |
-| **Total confirmed** | **40** | **3** (HY-0005, HY-0035, HY-0042) |
+| **Total confirmed** | **65** | **5** (HY-0005, HY-0035, HY-0042, HY-0060, HY-0067) |
 
 Severity of the 37: **0 High, 5 Medium, 32 Low.** The medium ones are the three compiler warnings, the duplicated team-identifier helper, and the DeckLink scripts that would reintroduce a removed route.
 
@@ -845,7 +845,6 @@ Clean: no changes proposed.
 - `CinematicCoreMacOS/CinematicCoreMacOSTests/RealCameraTests.swift` (opt-in; prints sit next to `#expect`)
 - `CinematicCoreMacOS/CinematicCoreMacOSTests/InstrumentationInvestigationTests.swift` (opt-in study; prints are the dumped JSON)
 - `training/schema.py`
-- `training/writer.py`
 
 ## Cross-file duplication
 
@@ -902,6 +901,14 @@ Leave `CameraDevice` and `InputSource` nested. Moving them would rename `CameraM
 
 None recorded beyond HY-0021 and HY-0035, which are already tracked. The LiveShowSetup warning is a Swift 5 isolation warning, not yet a demonstrated wrong camera list.
 
+Noted and not investigated:
+
+- `InspectorShowDetailTests.previewRateIsSampledFromRenderCountersNotPublished` only expects nil before one second, so a sampler that never returns a rate still passes.
+- `LiveConsoleTests.programPaneFollowsTheChannelWhileRouted` only expects a nil held buffer.
+- `CinematicAgent.applyCropUpdate` does not set `cropZoom = 1 / h` after clamping width, which `CinematicFramingEnv._apply_action` does.
+- `extract_frames.py` handles only `KeyboardInterrupt`, so any other exception can leave `frames.jsonl` open without `metadata.json`.
+- `diagnostics_report.window_seconds` treats `window_s` of `0.0` as missing because the check is `if explicit:`.
+
 ## Refuted in verification
 
 Checked and dropped:
@@ -915,13 +922,19 @@ Checked and dropped:
 7. **Created-by file headers** stay. Intentional pattern 6.
 8. **Empty `CropRenderer.metal`** stays. The comment says both targets list it and the kernels were removed. Only the ticket line is HY-0013.
 9. **`DeveloperFlags.exposeMultiviewGallery = true` is not reachable in Release.** The scene is `#if DEBUG`.
-10. **Opt-in test prints** in `RealCameraTests` and `InstrumentationInvestigationTests` sit next to real `#expect`s. Not deleted.
+10. **Opt-in test prints stay** in `RealCameraTests`, `InstrumentationInvestigationTests`, and the gallery snapshot print behind `ALFIE_GALLERY_SNAPSHOTS`. They record camera names, pixel format, or the written path, which the `#expect` lines do not. HY-0036 still deletes the pill-width print, because that assertion already includes the numbers.
 11. **`source_fingerprint.py` printing the digest** is the script. ruff T201 there is not a finding.
 12. **ruff T201 on training CLIs** (`downloader`, `export_coreml`, `extract_frames`, `train_bc`, `train_ppo`, `make_test_model`, `test_env`, `test_training`, `checkpoint_trust`) is progress output of `__main__`. Not a finding. Unused imports are.
 13. **`FrameWorkScheduler`'s "no longer the hidden owner"** explains why a permit exists. Kept.
 14. **CameraManager comments that detection used to be awaited inline** explain why the frame path schedules detection instead of awaiting it. Kept. The CIImage note does not explain any current line, so HY-0004 stands.
 15. **`ChannelID.c` and `.d`** are reserved slots with a comment that says they are not instantiated. Not dead cases.
 16. **Pooled XPC output surfaces** were not reported. Intentional pattern 7.
+
+17. **`checkpoint_trust.require_trusted` keeps its warning print.** It is the warning on the unpickle bypass, not a debug leftover. Moving it to two CLIs would hide it from the next caller.
+18. **Do not add `warnings.warn` in `env_loader.py` as the hygiene fix.** HY-0041 drops the impossible `KeyError`. Whether a broken `metadata.json` should keep training at 30 fps is HY-0042.
+19. **Do not fold the frame-path 15 Hz timers into `LiveConsoleModel.refreshInterval`.** `PersonDetector`, `ShotComposer`, and `CropEngine` publish `displayed*` mirrors on that interval (intentional pattern 1). Only the input-tile copy is HY-0059.
+20. **`DirectorReplay.liveState` cannot be a method on the type.** The two copies close over locals of `run`. HY-0050 says so.
+21. **`.gitignore` lines for `test_decklink` stay.** Deleting the two source files (HY-0024) does not require editing the ignore file.
 
 ## Leads not yet confirmed
 
@@ -982,6 +995,324 @@ Files that will share a batch once assigned, because one finding touches both:
 | HY-0040 | confirmed, batch withheld |
 | HY-0041 | confirmed, batch withheld |
 | HY-0042 | Needs owner |
+| HY-0043 | confirmed, batch withheld |
+| HY-0044 | confirmed, batch withheld |
+| HY-0045 | confirmed, batch withheld (same file as HY-0025) |
+| HY-0046 | confirmed, batch withheld |
+| HY-0047 | confirmed, after PR #26, #25, and #18 |
+| HY-0048 | confirmed, batch withheld |
+| HY-0049 | confirmed, batch withheld |
+| HY-0050 | confirmed, after PR #25 and #18 |
+| HY-0051 | confirmed, after PR #25 and #18 |
+| HY-0052 | confirmed, batch withheld |
+| HY-0053 | confirmed, batch withheld |
+| HY-0054 | confirmed, batch withheld |
+| HY-0055 | confirmed, batch withheld |
+| HY-0056 | confirmed, batch withheld |
+| HY-0057 | confirmed, batch withheld |
+| HY-0058 | confirmed, batch withheld |
+| HY-0059 | confirmed, batch withheld |
+| HY-0060 | Needs owner |
+| HY-0061 | confirmed, batch withheld |
+| HY-0062 | confirmed, batch withheld |
+| HY-0063 | confirmed, batch withheld |
+| HY-0064 | confirmed, batch withheld |
+| HY-0065 | confirmed, batch withheld |
+| HY-0066 | confirmed, batch withheld |
+| HY-0067 | Needs owner |
+
+## Second-pass findings
+
+Checked against `272c065` after a full read of the tests, `training/` and scripts, and the Director, Console, and Speech trees. Gallery files under `Console/Gallery/` are `#if DEBUG` and were not mined. Open-PR files are tagged and stay out of any batch that also edits other files.
+
+### `CinematicCoreMacOS/CinematicCoreMacOSTests/DirectorConsoleAPITests.swift`
+
+#### HY-0043 · T1 test of a stub · Medium · Confirmed
+**Where:** `DirectorConsoleAPITests.swift:77-104`
+**Current:** `FakeController` is declared in the test file, and `unqualifiedLevelIsRefusedNotSubstituted` calls only that stub.
+**Proposed:** delete lines 77–104.
+**Why:** The assertions re-check the stub's own `setLevel`. Production refusal is already covered by `DirectorControllerTests.unqualifiedLevelIsRefusedNeverSubstituted` and `DirectorAuthorityTests.unqualifiedLevelsAreRefusedWithoutSubstitution`.
+**Evidence:** `git grep FakeController` returns only this file.
+**Behaviour change:** None
+**Verify:** unit tests
+
+### `CinematicCoreMacOS/CinematicCoreMacOSTests/LockedTrackMatcherTests.swift`
+
+#### HY-0044 · T1 test reimplements the formula · Medium · Confirmed
+**Where:** `LockedTrackMatcherTests.swift:310-340`
+**Current:** the test computes `expectedRadius = min(0.35, 0.12 + velocity * time)`, expects `0.32`, then passes that radius into `lockedMatchScore`.
+**Proposed:** call `PersonDetector.resolveLockedAssignment`. A candidate 0.25 away, velocity 1, time 0.2, starts probation (`assignedIndex == nil`, `probation?.framesAgreed == 1`). The same candidate at velocity 0 and time 0 is rejected (`probation == nil`). Delete the arithmetic `#expect`.
+**Why:** `resolveLockedAssignment` (`PersonDetector.swift:981-984`) computes the radius and calls `lockedMatchScore`. The current test stays green if that formula changes. A non-overlapping candidate starts probation at `framesAgreed == 1` (`PersonDetector.swift:1032-1034`). No match returns `probation: nil` (`1003-1005`).
+**Evidence:** the test and `resolveLockedAssignment` were both read.
+**Behaviour change:** None. The test starts exercising the production function.
+**Verify:** `LockedTrackMatcherTests`
+
+### `CinematicCoreMacOS/CinematicCoreMacOSTests/XPCPeerRequirementTests.swift`
+
+#### HY-0045 · T2 silent skip · Low · Confirmed
+**Where:** `XPCPeerRequirementTests.swift:53-58`
+**Current:** `guard XPCPeerRequirement.ownTeamIdentifier() == nil else { return }` then the `#expect`.
+**Proposed:**
+```swift
+    @Test(.enabled(if: XPCPeerRequirement.ownTeamIdentifier() == nil,
+                   "Signed hosts are outside the unsigned-build case"))
+    func unsignedBuildHasNoExtensionRequirement() {
+        #expect(XPCPeerRequirement.forExtension() == nil)
+    }
+```
+**Why:** On a signed Mac the test returns before the assertion and is reported as passed.
+**Evidence:** the guard is the only skip. Apply together with HY-0025, which edits this file.
+**Behaviour change:** None. The assertion is unchanged when the host has no team id.
+**Verify:** unit tests
+
+### `CinematicCoreMacOS/CinematicCoreMacOSTests/DirectorStyleHookTests.swift`
+
+#### HY-0046 · T2 silent skip · Low · Confirmed
+**Where:** `DirectorStyleHookTests.swift:18` and `28`
+**Current:** `guard DeveloperFlags.runDirectorShadow else { return }` at the start of both tests.
+**Proposed:** `@Test(.enabled(if: DeveloperFlags.runDirectorShadow, "Director shadow is off in this build"))` on each, and delete the guards.
+**Why:** Release sets the flag false (`DeveloperFlags.swift:141-142`). Those runs pass without reaching `#expect`.
+**Evidence:** both tests. Debug sets the flag true, so a Debug run still executes the bodies.
+**Behaviour change:** None
+**Verify:** unit tests
+
+### `Director/DirectorAuthority.swift` · after PR #26, #25, and #18
+
+#### HY-0047 · X1 ignored parameter · Low · Confirmed
+**Where:** `DirectorAuthority.swift:5` and `52-53`
+**Current:**
+```swift
+    enum ReviewPolicy: Sendable { case conservative }
+    init(reviewPolicy: ReviewPolicy, initialEpoch: UInt64 = 0) { epoch = initialEpoch }
+```
+**Proposed:** delete `ReviewPolicy`. The initializer becomes `init(initialEpoch: UInt64 = 0)`. Every call site drops `reviewPolicy: .conservative`.
+**Why:** The argument is not stored and cannot change a transition.
+**Evidence:** `git grep DirectorAuthority(` hits `DirectorController.swift:57`, `DirectorReplay.swift:77`, `DirectorAuthorityTests`, `DirectorProposalTests`, and `DirectorQualificationStoreTests.swift:133`. `ReviewPolicy` appears only at the enum and the initializer.
+**Behaviour change:** None
+**Verify:** those tests, plus a build. Do not start until PRs #26, #25, and #18 have merged. This edit touches `DirectorAuthority.swift`, `DirectorAuthorityTests.swift`, and `DirectorReplay.swift`.
+
+### `Director/DirectorShotPolicy.swift`
+
+#### HY-0048 · X1 unused enum cases · Low · Confirmed
+**Where:** `DirectorShotPolicy.swift:58-59`
+**Current:** `case invalidInput, minimumDuration, noEligibleCandidate, repetition, movement, noPreview`
+**Proposed:** `case invalidInput, noEligibleCandidate, repetition, noPreview`
+**Why:** `rank` returns `.invalidInput`, `.noPreview`, or `.repetition`. `choosePreparation` adds `.noEligibleCandidate`. Nothing constructs `.minimumDuration` or `.movement`. Minimum duration is `recommendationDue` (line 66), which returns `Bool`.
+**Evidence:** `$0.movement` in `rank` is a candidate property, not the enum case. No other Swift file names those two cases.
+**Behaviour change:** None
+**Verify:** `DirectorShotPolicyTests`, `DirectorJudgeTests`
+
+### `Director/DirectorProposal.swift`
+
+#### HY-0049 · X1 unused type · Low · Confirmed
+**Where:** `DirectorProposal.swift:76-96`
+**Current:** `protocol DirectorWorld` and `class ShowDirectorWorld`.
+**Proposed:** delete lines 76–96. Keep `DirectorLiveState`.
+**Why:** No Swift caller constructs `ShowDirectorWorld`. The class comment says ShowCoordinator has no director field; `ShowCoordinator.swift:142` owns `director`.
+**Evidence:** `git grep ShowDirectorWorld` and `protocol DirectorWorld` match only this file.
+**Behaviour change:** None
+**Verify:** `DirectorProposalTests`
+
+### `Director/Replay/DirectorReplay.swift` · after PR #25 and #18
+
+#### HY-0050 · D1 duplicated live-state expression · Low · Confirmed
+**Where:** `DirectorReplay.swift:126-133` and `202-210`
+**Current:** `completeEffect` builds a `DirectorLiveState` inline. `live(for:)` builds the same value. Both close over locals of `run`.
+**Proposed:** one nested function inside `run`, before `completeEffect`:
+```swift
+func liveState(for target: ChannelID, at now: TimeInterval) -> DirectorLiveState {
+    DirectorLiveState(authority: authority, program: program,
+        preview: program == .a ? .b : .a, revisions: channels[target]?.revisions,
+        routeGeneration: route, sourceMissing: channels[target]?.missing ?? true,
+        policyRevision: policyRevision, nominationRevision: nominationRevision,
+        evidenceAvailable: channels[target]?.present == true && authority.evidenceAvailable &&
+            channels[target]?.lastEvidenceAt.map { now >= $0 && now - $0 <= maximumEvidenceAge } == true &&
+            channels[target]?.movement.isFinite == true && (channels[target]?.movement ?? -1) >= 0 &&
+            channels[target]?.identity == .confirmed && readinessParameters.isValid)
+}
+```
+`completeEffect` calls `liveState(for: target, at: now)`. Delete `live(for:)` and call `liveState(for:at:)`. Do not make this a method on `DirectorReplay`: the inputs are locals of `run`. Do not fold the shorter check in `completeAcknowledgement`, which is only `channels[target]?.present == true`.
+**Why:** The two expressions match, including the `now` each site already uses.
+**Evidence:** both blocks were read.
+**Behaviour change:** None
+**Verify:** `DirectorReplayTests`. Wait for PRs #25 and #18.
+
+#### HY-0051 · C1 stale comment · Low · Confirmed
+**Where:** `DirectorReplay.swift:353`
+**Current:** `// There is deliberately no director route mutation: qualification is false.`
+**Proposed:** `// Director effects never assign Program here. Assist was qualified at start; mayTake is still false, so directorCuts stays 0.`
+**Why:** Line 78 enables Assist with `qualifiedLevels: [.assist]`. Qualification is not false. `directorCuts` is the literal `0` at line 366.
+**Evidence:** lines 78, 353, and 366.
+**Behaviour change:** None
+**Verify:** read-only. Same PR hold as HY-0050.
+
+### `Speech/VoiceCommandAdapter.swift`
+
+#### HY-0052 · X1 unused protocol · Low · Confirmed
+**Where:** `VoiceCommandAdapter.swift:3-14`
+**Current:** `protocol SpeechTranscriptSource` and `struct FakeSpeechTranscriptSource`.
+**Proposed:** delete both. Keep `SpeechFinalTranscript`.
+**Why:** `accept` takes `SpeechFinalTranscript` values. Nothing calls `finalTranscripts()`.
+**Evidence:** `git grep SpeechTranscriptSource` and `FakeSpeechTranscriptSource` match only this file. `SpeechCommandTests` builds `SpeechFinalTranscript` directly.
+**Behaviour change:** None
+**Verify:** `SpeechCommandTests`
+
+### `OperatorPill.swift`
+
+#### HY-0053 · D1 duplicated preset segment · Low · Confirmed
+**Where:** `OperatorPill.swift:380-398` and `419-437`
+**Current:** `shotPresetSegment` and `webcamPresetSegment` are the same button. Only the preset type differs. Both use `option.operatorTitle`.
+**Proposed:** one `presetSegment(title:isOn:action:)` with that body. Each `ForEach` passes `option.operatorTitle` and `.selectPreset(.stage(option))` or `.selectPreset(.webcam(option))`.
+**Why:** The two controls are one view.
+**Evidence:** both functions were read. No other caller.
+**Behaviour change:** None
+**Verify:** `PillTargetTests`
+
+#### HY-0054 · D1 duplicated mode-button face · Low · Confirmed
+**Where:** `OperatorPill.swift:469-561`
+**Current:** `cropToggleButton`, `manualCropButton`, and `autoPanButton` share the same circle, title, padding, and rounded fill.
+**Proposed:** one `modeFace(title:isOn:enabled:)` for that stack. Keep each button's action, `enabled` rule, `targetLabel`, and `.disabled`. Crop's `.help` stays on the `Button`. Pan's `.help("Sweep the program crop across the stage")` stays on the label. Manual has no help.
+**Why:** Three copies of one face. Crop also requires a lock; that rule stays at the call site.
+**Evidence:** all three buttons were read.
+**Behaviour change:** None if the help modifiers are not moved.
+**Verify:** stage pill shows Crop, Manual, and Auto Pan; webcam shows Crop only
+
+### `Console/MultiviewConsoleView.swift`
+
+#### HY-0055 · C1 stale comment · Medium · Confirmed
+**Where:** `MultiviewConsoleView.swift:11`
+**Current:** `//  Not wired into ContentView yet: live pane pictures need ROUTER.`
+**Proposed:** delete line 11.
+**Why:** `ContentView.swift:57-58` shows `LiveMultiviewConsole` when `ConsolePresentation.resolve` is `.multiview`.
+**Evidence:** `ContentView.multiviewShow` at lines 44–48.
+**Behaviour change:** None
+**Verify:** build only
+
+### `Console/ConsolePresentation.swift`
+
+#### HY-0056 · C1 stale comment · Medium · Confirmed
+**Where:** `ConsolePresentation.swift:8-9`
+**Current:** `ContentView resolves this once integration lands`
+**Proposed:** `ContentView resolves this from the capture profile`
+**Why:** `ContentView.swift:48` already calls `ConsolePresentation.resolve(for:)`.
+**Evidence:** that call.
+**Behaviour change:** None
+**Verify:** build only
+
+### `Console/ProgramPreviewPane.swift`
+
+#### HY-0057 · C1 stale comment · Medium · Confirmed
+**Where:** `ProgramPreviewPane.swift:11` and `241`
+**Current:** `Until ROUTER lands, callers pass PanePlaceholderPicture.` and `Stand-in picture until ROUTER supplies rendered buffers.`
+**Proposed:** line 11 becomes `The live console passes rendered buffers. The gallery uses PanePlaceholderPicture.` Line 241 becomes `Gallery stand-in when the caller does not pass a picture.`
+**Why:** The placeholder is still the gallery default (the convenience init at line 236). It is not what the live console is waiting on.
+**Evidence:** the convenience init still installs `PanePlaceholderPicture`.
+**Behaviour change:** None
+**Verify:** build only
+
+### `Console/FakeConsoleModel.swift`
+
+#### HY-0058 · C1 stale comment · Low · Confirmed
+**Where:** `FakeConsoleModel.swift:190`
+**Current:** `/// C-01 fixtures. Local mirror of A-04's DirectorSection until that type merges.`
+**Proposed:** delete the comment. Keep `directorStates`.
+**Why:** The property is `DirectorGalleryCatalog.cases`, not a stand-in waiting on a type.
+**Evidence:** the next line assigns `DirectorGalleryCatalog.cases`.
+**Behaviour change:** None
+**Verify:** `GalleryDirectorStateTests`
+
+### `Console/LiveTilePicture.swift`
+
+#### HY-0059 · D3 copied refresh interval · Low · Confirmed
+**Where:** `LiveTilePicture.swift:33` and `LiveConsole.swift:108`
+**Current:** both are `static let refreshInterval: TimeInterval = 1.0 / 15.0`. The console constant is on `LiveConsoleModel`.
+**Proposed:** `static let refreshInterval: TimeInterval = LiveConsoleModel.refreshInterval`
+**Why:** The tile comment says it uses the console's 15 Hz budget. A copied literal can drift.
+**Evidence:** both declarations. Do not fold in the frame-path timers at `PersonDetector.swift:380`, `ShotComposer.swift:629`, and `CropEngine.swift:458`. Those are intentional pattern 1.
+**Behaviour change:** None while both expressions are `1.0 / 15.0`.
+**Verify:** build only
+
+### `DirectorQualificationStore.swift` and `DirectorPreferencesStore.swift`
+
+#### HY-0060 · D2 parallel path helpers · Needs owner
+**Where:** `DirectorQualificationStore.swift:51-59` and `DirectorPreferencesStore.swift:15-20`
+**Question:** Both build `~/Library/Application Support/Alfie/<file>.json`. Preferences creates the folder and throws. Qualification returns nil and creates the folder only on write. Which behaviour wins if they share a helper? Recommendation: do not merge.
+**Behaviour change:** Yes, if merged.
+
+### `training/bc_dataset.py` and `training/cinematic_env.py`
+
+#### HY-0061 · D1 duplicated observation builder · Medium · Confirmed
+**Where:** `bc_dataset.py:31-76` and `cinematic_env.py:242-299`
+**Current:** `build_observation` and `CinematicFramingEnv._build_observation` emit the same 18 floats in the same order, including `z / 10`, `zoom / MAX_ZOOM`, and `nan_to_num`.
+**Proposed:** move `build_observation` into `cinematic_env.py` unchanged. Replace `_build_observation` with a call that passes `self._current_frames[self._step_idx]` and the env's crop and zoom fields. `bc_dataset.py` imports `build_observation` and deletes its copy. Do not merge this with `CinematicAgent.buildObservation`.
+**Why:** BC targets and PPO observations are two copies of one contract.
+**Evidence:** both functions were read. Drop `ASPECT_RATIO` from the bc_dataset import in the same edit (HY-0026).
+**Behaviour change:** None if the moved body is the current one.
+**Verify:** `python3 test_training.py` and `python3 test_env.py` from `training/`
+
+#### HY-0062 · X1 unused constant and a stale comment · Low · Confirmed
+**Where:** `cinematic_env.py:29-30`
+**Current:**
+```python
+# Crop constraints (matching ShotComposer.clampCropToFrame)
+MIN_CROP_H = 0.25       # max zoom 4x
+```
+**Proposed:** delete both lines. Keep `MAX_ZOOM = 4.0`. Do not retune `MAX_ZOOM`.
+**Why:** `MIN_CROP_H` is never read. `_apply_action` clamps with `MAX_ZOOM`. ShotComposer minimum crop heights are per-shot tunings, not 0.25.
+**Evidence:** `git grep MIN_CROP_H` returns only this line.
+**Behaviour change:** None
+**Verify:** `python3 test_env.py`
+
+### `training/env_reward.py`
+
+#### HY-0063 · C1 stale doc pointer · Low · Confirmed
+**Where:** `env_reward.py:4`
+**Current:** `Five components matching the ROADMAP.md specification:`
+**Proposed:** `Five components:`
+**Why:** No `ROADMAP.md` is tracked. The five bullets under the line are the spec.
+**Evidence:** `git ls-files` has no roadmap file.
+**Behaviour change:** None
+**Verify:** none
+
+### `training/downloader.py`
+
+#### HY-0064 · X1 unused fields · Low · Confirmed
+**Where:** `downloader.py:16-20`, the duration parse in `_download_video`, and both `VideoInfo(` constructions
+**Current:** `duration` and `is_downloaded` are stored. The comment says OpenCV will read `duration`.
+**Proposed:** delete both fields, the duration parse, and the constructor arguments. Keep the yt-dlp call that reads `title`.
+**Why:** `extract_frames.py` computes duration as `frame_idx / source_fps` and never reads `video_info.duration` or `is_downloaded`.
+**Evidence:** those names in `training/` are writes in `downloader.py` only, plus a different local in `extract_frames.py:189`.
+**Behaviour change:** None for in-repo callers
+**Verify:** `extract_frames.py` still imports `acquire_video`
+
+### `training/writer.py`
+
+#### HY-0065 · X1 unused counter · Low · Confirmed
+**Where:** `writer.py:36` and `65`
+**Current:** `self._frame_count = 0` and `self._frame_count += 1`
+**Proposed:** delete both lines.
+**Why:** `finalize` takes `total_frames` and never reads `_frame_count`.
+**Evidence:** `git grep _frame_count` returns only these two lines.
+**Behaviour change:** None
+**Verify:** none beyond import
+
+### `training/canvas.py`
+
+#### HY-0066 · X1 unread field · Low · Confirmed
+**Where:** `canvas.py` `CanvasState.zoom` and the `zoom=` arguments of both `CanvasState(...)` calls
+**Current:** the field is stored. Output zoom is a local `1.0 / state.crop_h`.
+**Proposed:** delete the field and those two arguments. Keep the local `zoom` that sizes the crop and fills `CropData`.
+**Why:** nothing reads `state.zoom`.
+**Evidence:** `git grep state.zoom` in `training/` returns nothing.
+**Behaviour change:** None
+**Verify:** `embed_in_canvas` still imports
+
+### UITests launch performance · Needs owner
+
+#### HY-0067 · T1 measure-without-a-baseline · Needs owner
+**Where:** `CinematicCoreMacOSUITests.swift:25-31`
+**Question:** `testLaunchPerformance` records an `XCTApplicationLaunchMetric` and passes whenever launch does not crash. Should that test be deleted? HY-0031 already removes its template comment. HY-0032 still adds a foreground assertion to `testLaunch`.
+**Behaviour change:** Yes, if the test is deleted.
 
 ## Resume checklist
 
@@ -1002,29 +1333,29 @@ Files that will share a batch once assigned, because one finding touches both:
 - [x] `CinematicCoreMacOS/CinematicCoreMacOS/CinematicCoreMacOS-Bridging-Header.h`
 - [ ] `CinematicCoreMacOS/CinematicCoreMacOS/CinematicCoreMacOSApp.swift`
 - [x] `CinematicCoreMacOS/CinematicCoreMacOS/Console/ChannelID.swift`
-- [ ] `CinematicCoreMacOS/CinematicCoreMacOS/Console/ConsoleActions.swift`
-- [ ] `CinematicCoreMacOS/CinematicCoreMacOS/Console/ConsolePresentation.swift`
-- [ ] `CinematicCoreMacOS/CinematicCoreMacOS/Console/ConsoleSnapshot.swift`
-- [ ] `CinematicCoreMacOS/CinematicCoreMacOS/Console/FakeConsoleModel.swift`
-- [ ] `CinematicCoreMacOS/CinematicCoreMacOS/Console/Gallery/DirectorControlDemo.swift`
-- [ ] `CinematicCoreMacOS/CinematicCoreMacOS/Console/Gallery/DirectorDemo.swift`
-- [ ] `CinematicCoreMacOS/CinematicCoreMacOS/Console/Gallery/DirectorNextDemo.swift`
-- [ ] `CinematicCoreMacOS/CinematicCoreMacOS/Console/Gallery/MultiviewGallery.swift`
-- [ ] `CinematicCoreMacOS/CinematicCoreMacOS/Console/Gallery/NextPanelDemo.swift`
-- [ ] `CinematicCoreMacOS/CinematicCoreMacOS/Console/Gallery/PanesDemo.swift`
-- [ ] `CinematicCoreMacOS/CinematicCoreMacOS/Console/Gallery/PillDemo.swift`
-- [ ] `CinematicCoreMacOS/CinematicCoreMacOS/Console/Gallery/TakeBarDemo.swift`
-- [ ] `CinematicCoreMacOS/CinematicCoreMacOS/Console/LiveConsole.swift`
-- [ ] `CinematicCoreMacOS/CinematicCoreMacOS/Console/LiveTilePicture.swift`
-- [ ] `CinematicCoreMacOS/CinematicCoreMacOS/Console/MultiviewConsoleView.swift`
-- [ ] `CinematicCoreMacOS/CinematicCoreMacOS/Console/MultiviewLayout.swift`
-- [ ] `CinematicCoreMacOS/CinematicCoreMacOS/Console/NextShotPanel.swift`
-- [ ] `CinematicCoreMacOS/CinematicCoreMacOS/Console/NextShotStatus.swift`
-- [ ] `CinematicCoreMacOS/CinematicCoreMacOS/Console/PaneOverlayState.swift`
-- [ ] `CinematicCoreMacOS/CinematicCoreMacOS/Console/ProgramPreviewPane.swift`
-- [ ] `CinematicCoreMacOS/CinematicCoreMacOS/Console/SingleCameraConsole.swift`
-- [ ] `CinematicCoreMacOS/CinematicCoreMacOS/Console/TakeAvailability.swift`
-- [ ] `CinematicCoreMacOS/CinematicCoreMacOS/Console/TakeBarView.swift`
+- [x] `CinematicCoreMacOS/CinematicCoreMacOS/Console/ConsoleActions.swift`
+- [x] `CinematicCoreMacOS/CinematicCoreMacOS/Console/ConsolePresentation.swift`
+- [x] `CinematicCoreMacOS/CinematicCoreMacOS/Console/ConsoleSnapshot.swift`
+- [x] `CinematicCoreMacOS/CinematicCoreMacOS/Console/FakeConsoleModel.swift`
+- [x] `CinematicCoreMacOS/CinematicCoreMacOS/Console/Gallery/DirectorControlDemo.swift`
+- [x] `CinematicCoreMacOS/CinematicCoreMacOS/Console/Gallery/DirectorDemo.swift`
+- [x] `CinematicCoreMacOS/CinematicCoreMacOS/Console/Gallery/DirectorNextDemo.swift`
+- [x] `CinematicCoreMacOS/CinematicCoreMacOS/Console/Gallery/MultiviewGallery.swift`
+- [x] `CinematicCoreMacOS/CinematicCoreMacOS/Console/Gallery/NextPanelDemo.swift`
+- [x] `CinematicCoreMacOS/CinematicCoreMacOS/Console/Gallery/PanesDemo.swift`
+- [x] `CinematicCoreMacOS/CinematicCoreMacOS/Console/Gallery/PillDemo.swift`
+- [x] `CinematicCoreMacOS/CinematicCoreMacOS/Console/Gallery/TakeBarDemo.swift`
+- [x] `CinematicCoreMacOS/CinematicCoreMacOS/Console/LiveConsole.swift`
+- [x] `CinematicCoreMacOS/CinematicCoreMacOS/Console/LiveTilePicture.swift`
+- [x] `CinematicCoreMacOS/CinematicCoreMacOS/Console/MultiviewConsoleView.swift`
+- [x] `CinematicCoreMacOS/CinematicCoreMacOS/Console/MultiviewLayout.swift`
+- [x] `CinematicCoreMacOS/CinematicCoreMacOS/Console/NextShotPanel.swift`
+- [x] `CinematicCoreMacOS/CinematicCoreMacOS/Console/NextShotStatus.swift`
+- [x] `CinematicCoreMacOS/CinematicCoreMacOS/Console/PaneOverlayState.swift`
+- [x] `CinematicCoreMacOS/CinematicCoreMacOS/Console/ProgramPreviewPane.swift`
+- [x] `CinematicCoreMacOS/CinematicCoreMacOS/Console/SingleCameraConsole.swift`
+- [x] `CinematicCoreMacOS/CinematicCoreMacOS/Console/TakeAvailability.swift`
+- [x] `CinematicCoreMacOS/CinematicCoreMacOS/Console/TakeBarView.swift`
 - [ ] `CinematicCoreMacOS/CinematicCoreMacOS/ContentView.swift`
 - [x] `CinematicCoreMacOS/CinematicCoreMacOS/ControlTarget.swift`
 - [~] `CinematicCoreMacOS/CinematicCoreMacOS/CropEngine.swift`
@@ -1037,25 +1368,25 @@ Files that will share a batch once assigned, because one finding touches both:
 - [ ] `CinematicCoreMacOS/CinematicCoreMacOS/DetectionSettingsView.swift`
 - [x] `CinematicCoreMacOS/CinematicCoreMacOS/DeveloperFlags.swift`
 - [ ] `CinematicCoreMacOS/CinematicCoreMacOS/DiagnosticsLog.swift`
-- [ ] `CinematicCoreMacOS/CinematicCoreMacOS/Director/DirectorAuthority.swift`
-- [ ] `CinematicCoreMacOS/CinematicCoreMacOS/Director/DirectorConsoleAPI.swift`
-- [ ] `CinematicCoreMacOS/CinematicCoreMacOS/Director/DirectorController.swift`
-- [ ] `CinematicCoreMacOS/CinematicCoreMacOS/Director/DirectorEvidenceAdapter.swift`
-- [ ] `CinematicCoreMacOS/CinematicCoreMacOS/Director/DirectorJudge.swift`
-- [ ] `CinematicCoreMacOS/CinematicCoreMacOS/Director/DirectorPreferences.swift`
-- [ ] `CinematicCoreMacOS/CinematicCoreMacOS/Director/DirectorProposal.swift`
-- [ ] `CinematicCoreMacOS/CinematicCoreMacOS/Director/DirectorQualificationStore.swift`
-- [ ] `CinematicCoreMacOS/CinematicCoreMacOS/Director/DirectorShotPolicy.swift`
-- [ ] `CinematicCoreMacOS/CinematicCoreMacOS/Director/Replay/DirectorReplay.swift`
-- [ ] `CinematicCoreMacOS/CinematicCoreMacOS/Director/Replay/DirectorReplayFixtures.swift`
-- [ ] `CinematicCoreMacOS/CinematicCoreMacOS/Director/UI/DirectorGalleryCatalog.swift`
-- [ ] `CinematicCoreMacOS/CinematicCoreMacOS/Director/UI/DirectorGalleryPresentation.swift`
-- [ ] `CinematicCoreMacOS/CinematicCoreMacOS/Director/UI/DirectorModeControl.swift`
-- [ ] `CinematicCoreMacOS/CinematicCoreMacOS/Director/UI/DirectorPreferencesStore.swift`
-- [ ] `CinematicCoreMacOS/CinematicCoreMacOS/Director/UI/DirectorStyleEditor.swift`
-- [ ] `CinematicCoreMacOS/CinematicCoreMacOS/Director/UI/DirectorStyleSettingsView.swift`
-- [ ] `CinematicCoreMacOS/CinematicCoreMacOS/Director/UI/FakeDirectorConsole.swift`
-- [ ] `CinematicCoreMacOS/CinematicCoreMacOS/DirectorEvidenceReadings.swift`
+- [x] `CinematicCoreMacOS/CinematicCoreMacOS/Director/DirectorAuthority.swift`
+- [x] `CinematicCoreMacOS/CinematicCoreMacOS/Director/DirectorConsoleAPI.swift`
+- [x] `CinematicCoreMacOS/CinematicCoreMacOS/Director/DirectorController.swift`
+- [x] `CinematicCoreMacOS/CinematicCoreMacOS/Director/DirectorEvidenceAdapter.swift`
+- [x] `CinematicCoreMacOS/CinematicCoreMacOS/Director/DirectorJudge.swift`
+- [x] `CinematicCoreMacOS/CinematicCoreMacOS/Director/DirectorPreferences.swift`
+- [x] `CinematicCoreMacOS/CinematicCoreMacOS/Director/DirectorProposal.swift`
+- [x] `CinematicCoreMacOS/CinematicCoreMacOS/Director/DirectorQualificationStore.swift`
+- [x] `CinematicCoreMacOS/CinematicCoreMacOS/Director/DirectorShotPolicy.swift`
+- [x] `CinematicCoreMacOS/CinematicCoreMacOS/Director/Replay/DirectorReplay.swift`
+- [x] `CinematicCoreMacOS/CinematicCoreMacOS/Director/Replay/DirectorReplayFixtures.swift`
+- [x] `CinematicCoreMacOS/CinematicCoreMacOS/Director/UI/DirectorGalleryCatalog.swift`
+- [x] `CinematicCoreMacOS/CinematicCoreMacOS/Director/UI/DirectorGalleryPresentation.swift`
+- [x] `CinematicCoreMacOS/CinematicCoreMacOS/Director/UI/DirectorModeControl.swift`
+- [x] `CinematicCoreMacOS/CinematicCoreMacOS/Director/UI/DirectorPreferencesStore.swift`
+- [x] `CinematicCoreMacOS/CinematicCoreMacOS/Director/UI/DirectorStyleEditor.swift`
+- [x] `CinematicCoreMacOS/CinematicCoreMacOS/Director/UI/DirectorStyleSettingsView.swift`
+- [x] `CinematicCoreMacOS/CinematicCoreMacOS/Director/UI/FakeDirectorConsole.swift`
+- [x] `CinematicCoreMacOS/CinematicCoreMacOS/DirectorEvidenceReadings.swift`
 - [ ] `CinematicCoreMacOS/CinematicCoreMacOS/DisplayOutputSink.swift`
 - [~] `CinematicCoreMacOS/CinematicCoreMacOS/FaceSignatureExtractor.swift`
 - [x] `CinematicCoreMacOS/CinematicCoreMacOS/FrameWorkScheduler.swift`
@@ -1070,8 +1401,8 @@ Files that will share a batch once assigned, because one finding touches both:
 - [ ] `CinematicCoreMacOS/CinematicCoreMacOS/InspectorShowSection.swift`
 - [x] `CinematicCoreMacOS/CinematicCoreMacOS/LiveShowSetup.swift`
 - [ ] `CinematicCoreMacOS/CinematicCoreMacOS/MultiInputAdmission.swift`
-- [ ] `CinematicCoreMacOS/CinematicCoreMacOS/OperatorCommand.swift`
-- [ ] `CinematicCoreMacOS/CinematicCoreMacOS/OperatorPill.swift`
+- [x] `CinematicCoreMacOS/CinematicCoreMacOS/OperatorCommand.swift`
+- [x] `CinematicCoreMacOS/CinematicCoreMacOS/OperatorPill.swift`
 - [ ] `CinematicCoreMacOS/CinematicCoreMacOS/OverlayLayer.swift`
 - [ ] `CinematicCoreMacOS/CinematicCoreMacOS/PairCheckPanel.swift`
 - [~] `CinematicCoreMacOS/CinematicCoreMacOS/PersonDetector.swift`
@@ -1091,102 +1422,102 @@ Files that will share a batch once assigned, because one finding touches both:
 - [ ] `CinematicCoreMacOS/CinematicCoreMacOS/ShowSetupModel.swift`
 - [ ] `CinematicCoreMacOS/CinematicCoreMacOS/ShowSetupView.swift`
 - [x] `CinematicCoreMacOS/CinematicCoreMacOS/ShowStandard.swift`
-- [ ] `CinematicCoreMacOS/CinematicCoreMacOS/Speech/SpeechCommandGrammar.swift`
-- [ ] `CinematicCoreMacOS/CinematicCoreMacOS/Speech/VoiceCommandAdapter.swift`
+- [x] `CinematicCoreMacOS/CinematicCoreMacOS/Speech/SpeechCommandGrammar.swift`
+- [x] `CinematicCoreMacOS/CinematicCoreMacOS/Speech/VoiceCommandAdapter.swift`
 - [ ] `CinematicCoreMacOS/CinematicCoreMacOS/StoppedScreen.swift`
 - [ ] `CinematicCoreMacOS/CinematicCoreMacOS/StripDemo.swift`
 - [ ] `CinematicCoreMacOS/CinematicCoreMacOS/SystemExtensionActivationManager.swift`
 - [~] `CinematicCoreMacOS/CinematicCoreMacOS/TrainingDataRecorder.swift`
 - [ ] `CinematicCoreMacOS/CinematicCoreMacOS/ValidationClipPlaybackView.swift`
 - [~] `CinematicCoreMacOS/CinematicCoreMacOS/XPCConnectionManager.swift`
-- [ ] `CinematicCoreMacOS/CinematicCoreMacOSTests/CaptureDeviceRegistryTests.swift`
-- [ ] `CinematicCoreMacOS/CinematicCoreMacOSTests/CaptureFramePathTests.swift`
-- [ ] `CinematicCoreMacOS/CinematicCoreMacOSTests/CaptureProfilePolicyTests.swift`
-- [ ] `CinematicCoreMacOS/CinematicCoreMacOSTests/ChannelCommandTests.swift`
-- [ ] `CinematicCoreMacOS/CinematicCoreMacOSTests/ChannelIsolationTests.swift`
+- [x] `CinematicCoreMacOS/CinematicCoreMacOSTests/CaptureDeviceRegistryTests.swift`
+- [x] `CinematicCoreMacOS/CinematicCoreMacOSTests/CaptureFramePathTests.swift`
+- [x] `CinematicCoreMacOS/CinematicCoreMacOSTests/CaptureProfilePolicyTests.swift`
+- [x] `CinematicCoreMacOS/CinematicCoreMacOSTests/ChannelCommandTests.swift`
+- [x] `CinematicCoreMacOS/CinematicCoreMacOSTests/ChannelIsolationTests.swift`
 - [x] `CinematicCoreMacOS/CinematicCoreMacOSTests/CinematicAgentVelocityTests.swift`
-- [ ] `CinematicCoreMacOS/CinematicCoreMacOSTests/CinematicCoreMacOSTests.swift`
-- [ ] `CinematicCoreMacOS/CinematicCoreMacOSTests/ConsolePresentationTests.swift`
-- [ ] `CinematicCoreMacOS/CinematicCoreMacOSTests/DegradePolicyTests.swift`
-- [ ] `CinematicCoreMacOS/CinematicCoreMacOSTests/DiagnosticsLogTests.swift`
-- [ ] `CinematicCoreMacOS/CinematicCoreMacOSTests/DirectOutputFormatTests.swift`
-- [ ] `CinematicCoreMacOS/CinematicCoreMacOSTests/DirectorAuthorityTests.swift`
-- [ ] `CinematicCoreMacOS/CinematicCoreMacOSTests/DirectorConsoleAPITests.swift`
-- [ ] `CinematicCoreMacOS/CinematicCoreMacOSTests/DirectorControllerTests.swift`
-- [ ] `CinematicCoreMacOS/CinematicCoreMacOSTests/DirectorEvidenceAdapterTests.swift`
-- [ ] `CinematicCoreMacOS/CinematicCoreMacOSTests/DirectorEvidenceReadingsTests.swift`
-- [ ] `CinematicCoreMacOS/CinematicCoreMacOSTests/DirectorJudgeTests.swift`
-- [ ] `CinematicCoreMacOS/CinematicCoreMacOSTests/DirectorModeControlTests.swift`
-- [ ] `CinematicCoreMacOS/CinematicCoreMacOSTests/DirectorNextShotTests.swift`
-- [ ] `CinematicCoreMacOS/CinematicCoreMacOSTests/DirectorPreferencesTests.swift`
-- [ ] `CinematicCoreMacOS/CinematicCoreMacOSTests/DirectorProposalTests.swift`
-- [ ] `CinematicCoreMacOS/CinematicCoreMacOSTests/DirectorQualificationStoreTests.swift`
-- [ ] `CinematicCoreMacOS/CinematicCoreMacOSTests/DirectorReplayTests.swift`
-- [ ] `CinematicCoreMacOS/CinematicCoreMacOSTests/DirectorShotPolicyTests.swift`
-- [ ] `CinematicCoreMacOS/CinematicCoreMacOSTests/DirectorStyleHookTests.swift`
-- [ ] `CinematicCoreMacOS/CinematicCoreMacOSTests/DirectorStyleSettingsTests.swift`
-- [ ] `CinematicCoreMacOS/CinematicCoreMacOSTests/FrameWorkSchedulerTests.swift`
-- [ ] `CinematicCoreMacOS/CinematicCoreMacOSTests/FramingCapabilityTests.swift`
-- [ ] `CinematicCoreMacOS/CinematicCoreMacOSTests/FramingRegressionTests.swift`
-- [ ] `CinematicCoreMacOS/CinematicCoreMacOSTests/GalleryDirectorStateTests.swift`
-- [ ] `CinematicCoreMacOS/CinematicCoreMacOSTests/HardwareLinkTests.swift`
-- [ ] `CinematicCoreMacOS/CinematicCoreMacOSTests/IdentityEvidenceTests.swift`
-- [ ] `CinematicCoreMacOS/CinematicCoreMacOSTests/IdentityRegressionTests.swift`
-- [ ] `CinematicCoreMacOS/CinematicCoreMacOSTests/InputStripTests.swift`
-- [ ] `CinematicCoreMacOS/CinematicCoreMacOSTests/InspectorShowDetailTests.swift`
+- [x] `CinematicCoreMacOS/CinematicCoreMacOSTests/CinematicCoreMacOSTests.swift`
+- [x] `CinematicCoreMacOS/CinematicCoreMacOSTests/ConsolePresentationTests.swift`
+- [x] `CinematicCoreMacOS/CinematicCoreMacOSTests/DegradePolicyTests.swift`
+- [x] `CinematicCoreMacOS/CinematicCoreMacOSTests/DiagnosticsLogTests.swift`
+- [x] `CinematicCoreMacOS/CinematicCoreMacOSTests/DirectOutputFormatTests.swift`
+- [x] `CinematicCoreMacOS/CinematicCoreMacOSTests/DirectorAuthorityTests.swift`
+- [x] `CinematicCoreMacOS/CinematicCoreMacOSTests/DirectorConsoleAPITests.swift`
+- [x] `CinematicCoreMacOS/CinematicCoreMacOSTests/DirectorControllerTests.swift`
+- [x] `CinematicCoreMacOS/CinematicCoreMacOSTests/DirectorEvidenceAdapterTests.swift`
+- [x] `CinematicCoreMacOS/CinematicCoreMacOSTests/DirectorEvidenceReadingsTests.swift`
+- [x] `CinematicCoreMacOS/CinematicCoreMacOSTests/DirectorJudgeTests.swift`
+- [x] `CinematicCoreMacOS/CinematicCoreMacOSTests/DirectorModeControlTests.swift`
+- [x] `CinematicCoreMacOS/CinematicCoreMacOSTests/DirectorNextShotTests.swift`
+- [x] `CinematicCoreMacOS/CinematicCoreMacOSTests/DirectorPreferencesTests.swift`
+- [x] `CinematicCoreMacOS/CinematicCoreMacOSTests/DirectorProposalTests.swift`
+- [x] `CinematicCoreMacOS/CinematicCoreMacOSTests/DirectorQualificationStoreTests.swift`
+- [x] `CinematicCoreMacOS/CinematicCoreMacOSTests/DirectorReplayTests.swift`
+- [x] `CinematicCoreMacOS/CinematicCoreMacOSTests/DirectorShotPolicyTests.swift`
+- [x] `CinematicCoreMacOS/CinematicCoreMacOSTests/DirectorStyleHookTests.swift`
+- [x] `CinematicCoreMacOS/CinematicCoreMacOSTests/DirectorStyleSettingsTests.swift`
+- [x] `CinematicCoreMacOS/CinematicCoreMacOSTests/FrameWorkSchedulerTests.swift`
+- [x] `CinematicCoreMacOS/CinematicCoreMacOSTests/FramingCapabilityTests.swift`
+- [x] `CinematicCoreMacOS/CinematicCoreMacOSTests/FramingRegressionTests.swift`
+- [x] `CinematicCoreMacOS/CinematicCoreMacOSTests/GalleryDirectorStateTests.swift`
+- [x] `CinematicCoreMacOS/CinematicCoreMacOSTests/HardwareLinkTests.swift`
+- [x] `CinematicCoreMacOS/CinematicCoreMacOSTests/IdentityEvidenceTests.swift`
+- [x] `CinematicCoreMacOS/CinematicCoreMacOSTests/IdentityRegressionTests.swift`
+- [x] `CinematicCoreMacOS/CinematicCoreMacOSTests/InputStripTests.swift`
+- [x] `CinematicCoreMacOS/CinematicCoreMacOSTests/InspectorShowDetailTests.swift`
 - [x] `CinematicCoreMacOS/CinematicCoreMacOSTests/InstrumentationInvestigationTests.swift`
-- [ ] `CinematicCoreMacOS/CinematicCoreMacOSTests/LiveConsoleTests.swift`
-- [ ] `CinematicCoreMacOS/CinematicCoreMacOSTests/LockedTrackMatcherTests.swift`
-- [ ] `CinematicCoreMacOS/CinematicCoreMacOSTests/ManualActionHookTests.swift`
-- [ ] `CinematicCoreMacOS/CinematicCoreMacOSTests/MultiInputAdmissionTests.swift`
-- [ ] `CinematicCoreMacOS/CinematicCoreMacOSTests/MultiviewGallerySnapshotTests.swift`
-- [ ] `CinematicCoreMacOS/CinematicCoreMacOSTests/NextShotStatusTests.swift`
-- [ ] `CinematicCoreMacOS/CinematicCoreMacOSTests/OperatorPresetSharingTests.swift`
-- [ ] `CinematicCoreMacOS/CinematicCoreMacOSTests/OutputRateRegressionTests.swift`
-- [~] `CinematicCoreMacOS/CinematicCoreMacOSTests/PillTargetTests.swift`
-- [ ] `CinematicCoreMacOS/CinematicCoreMacOSTests/PipelineLifecycleTests.swift`
-- [ ] `CinematicCoreMacOS/CinematicCoreMacOSTests/PixelBufferPreviewTests.swift`
-- [ ] `CinematicCoreMacOS/CinematicCoreMacOSTests/PrivacyAuditTests.swift`
-- [ ] `CinematicCoreMacOS/CinematicCoreMacOSTests/ProgramOutputReviewTests.swift`
-- [ ] `CinematicCoreMacOS/CinematicCoreMacOSTests/ProgramPreviewPaneTests.swift`
-- [ ] `CinematicCoreMacOS/CinematicCoreMacOSTests/ProgramRouterTests.swift`
-- [ ] `CinematicCoreMacOS/CinematicCoreMacOSTests/ProgramTakeTests.swift`
-- [ ] `CinematicCoreMacOS/CinematicCoreMacOSTests/ReadinessEvaluationTests.swift`
+- [x] `CinematicCoreMacOS/CinematicCoreMacOSTests/LiveConsoleTests.swift`
+- [x] `CinematicCoreMacOS/CinematicCoreMacOSTests/LockedTrackMatcherTests.swift`
+- [x] `CinematicCoreMacOS/CinematicCoreMacOSTests/ManualActionHookTests.swift`
+- [x] `CinematicCoreMacOS/CinematicCoreMacOSTests/MultiInputAdmissionTests.swift`
+- [x] `CinematicCoreMacOS/CinematicCoreMacOSTests/MultiviewGallerySnapshotTests.swift`
+- [x] `CinematicCoreMacOS/CinematicCoreMacOSTests/NextShotStatusTests.swift`
+- [x] `CinematicCoreMacOS/CinematicCoreMacOSTests/OperatorPresetSharingTests.swift`
+- [x] `CinematicCoreMacOS/CinematicCoreMacOSTests/OutputRateRegressionTests.swift`
+- [x] `CinematicCoreMacOS/CinematicCoreMacOSTests/PillTargetTests.swift`
+- [x] `CinematicCoreMacOS/CinematicCoreMacOSTests/PipelineLifecycleTests.swift`
+- [x] `CinematicCoreMacOS/CinematicCoreMacOSTests/PixelBufferPreviewTests.swift`
+- [x] `CinematicCoreMacOS/CinematicCoreMacOSTests/PrivacyAuditTests.swift`
+- [x] `CinematicCoreMacOS/CinematicCoreMacOSTests/ProgramOutputReviewTests.swift`
+- [x] `CinematicCoreMacOS/CinematicCoreMacOSTests/ProgramPreviewPaneTests.swift`
+- [x] `CinematicCoreMacOS/CinematicCoreMacOSTests/ProgramRouterTests.swift`
+- [x] `CinematicCoreMacOS/CinematicCoreMacOSTests/ProgramTakeTests.swift`
+- [x] `CinematicCoreMacOS/CinematicCoreMacOSTests/ReadinessEvaluationTests.swift`
 - [x] `CinematicCoreMacOS/CinematicCoreMacOSTests/RealCameraTests.swift`
-- [ ] `CinematicCoreMacOS/CinematicCoreMacOSTests/RecoveryStateTests.swift`
-- [ ] `CinematicCoreMacOS/CinematicCoreMacOSTests/SetupCheckTests.swift`
-- [ ] `CinematicCoreMacOS/CinematicCoreMacOSTests/ShowSetupTests.swift`
-- [ ] `CinematicCoreMacOS/CinematicCoreMacOSTests/SingleCameraConsoleTests.swift`
-- [ ] `CinematicCoreMacOS/CinematicCoreMacOSTests/SpeechCommandTests.swift`
+- [x] `CinematicCoreMacOS/CinematicCoreMacOSTests/RecoveryStateTests.swift`
+- [x] `CinematicCoreMacOS/CinematicCoreMacOSTests/SetupCheckTests.swift`
+- [x] `CinematicCoreMacOS/CinematicCoreMacOSTests/ShowSetupTests.swift`
+- [x] `CinematicCoreMacOS/CinematicCoreMacOSTests/SingleCameraConsoleTests.swift`
+- [x] `CinematicCoreMacOS/CinematicCoreMacOSTests/SpeechCommandTests.swift`
 - [x] `CinematicCoreMacOS/CinematicCoreMacOSTests/StartGateTests.swift`
-- [ ] `CinematicCoreMacOS/CinematicCoreMacOSTests/SystemExtensionReplacementTests.swift`
-- [ ] `CinematicCoreMacOS/CinematicCoreMacOSTests/TakeBarTests.swift`
-- [ ] `CinematicCoreMacOS/CinematicCoreMacOSTests/TrainingRecorderReviewTests.swift`
-- [~] `CinematicCoreMacOS/CinematicCoreMacOSTests/XPCPeerRequirementTests.swift`
+- [x] `CinematicCoreMacOS/CinematicCoreMacOSTests/SystemExtensionReplacementTests.swift`
+- [x] `CinematicCoreMacOS/CinematicCoreMacOSTests/TakeBarTests.swift`
+- [x] `CinematicCoreMacOS/CinematicCoreMacOSTests/TrainingRecorderReviewTests.swift`
+- [x] `CinematicCoreMacOS/CinematicCoreMacOSTests/XPCPeerRequirementTests.swift`
 - [x] `CinematicCoreMacOS/CinematicCoreMacOSUITests/CinematicCoreMacOSUITests.swift`
 - [x] `CinematicCoreMacOS/CinematicCoreMacOSUITests/CinematicCoreMacOSUITestsLaunchTests.swift`
 - [~] `CinematicCoreMacOS/Shared/CinematicCoreXPCProtocol.swift`
 - [x] `CinematicCoreMacOS/build_release.sh`
-- [ ] `CinematicCoreMacOS/scripts/diagnostics_report.py`
+- [x] `CinematicCoreMacOS/scripts/diagnostics_report.py`
 - [x] `CinematicCoreMacOS/scripts/source_fingerprint.py`
-- [ ] `CinematicCoreMacOS/scripts/test_diagnostics_report.py`
+- [x] `CinematicCoreMacOS/scripts/test_diagnostics_report.py`
 - [x] `test_decklink.cpp`
 - [x] `training/bc_dataset.py`
-- [ ] `training/canvas.py`
-- [ ] `training/checkpoint_trust.py`
-- [~] `training/cinematic_env.py`
-- [ ] `training/detector.py`
-- [ ] `training/downloader.py`
+- [x] `training/canvas.py`
+- [x] `training/checkpoint_trust.py`
+- [x] `training/cinematic_env.py`
+- [x] `training/detector.py`
+- [x] `training/downloader.py`
 - [x] `training/env_loader.py`
-- [ ] `training/env_reward.py`
-- [ ] `training/export_coreml.py`
-- [ ] `training/extract_frames.py`
+- [x] `training/env_reward.py`
+- [x] `training/export_coreml.py`
+- [x] `training/extract_frames.py`
 - [x] `training/make_test_model.py`
 - [x] `training/schema.py`
-- [ ] `training/test_checkpoint_trust.py`
-- [ ] `training/test_env.py`
-- [ ] `training/test_training.py`
+- [x] `training/test_checkpoint_trust.py`
+- [x] `training/test_env.py`
+- [x] `training/test_training.py`
 - [x] `training/train_bc.py`
-- [ ] `training/train_ppo.py`
+- [x] `training/train_ppo.py`
 - [x] `training/writer.py`
 - [x] `update_xcode.rb`
