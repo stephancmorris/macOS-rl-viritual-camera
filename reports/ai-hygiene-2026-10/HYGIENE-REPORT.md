@@ -1,6 +1,6 @@
 # AI-code hygiene report
 
-**Status: in progress.** This commit records confirmed findings and the resume checklist. Batches are withheld until every in-scope file has been read, so a file is not locked into a batch before its other findings are known. Do not hand Prompt B out against this revision.
+**Status: complete at `272c065`.** All 202 in-scope files were read. Six findings need an owner and are not in a batch. Structural splits of `CameraManager` and `ShotComposer` wait until the hygiene batch for that file has merged.
 
 ## Header
 
@@ -10,7 +10,7 @@
 | Date | 2026-10-14 |
 | Worktree | `/Users/stephanmorris/Documents/alfie-hygiene`, branch `review/ai-hygiene-2026-10` |
 | Build | `xcodebuild build` scheme `CinematicCoreMacOS`, `platform=macOS`, `CODE_SIGNING_ALLOWED=NO`, derived data `/private/tmp/hygiene-dd`. **BUILD SUCCEEDED.** |
-| Files | 202 in scope. This revision has finished a full read of the files marked read below. The rest are unchecked on the resume checklist. |
+| Files | 202 in scope, 202 read. The checklist at the bottom is all `[x]`. |
 | Tools | `ruff 0.15.10` on `training/` and `CinematicCoreMacOS/scripts/` (`F401`, `F841`, `E722`, `T201`). `periphery`, `jscpd`, and `vulture` are not installed; they were not installed. |
 
 ### Build warnings
@@ -43,14 +43,16 @@ Counts below are only findings already verified against this SHA. They will grow
 
 | Category | Confirmed | Of which Needs owner |
 |---|---|---|
-| C comments | 29 | 0 |
-| D duplication | 7 | 1 |
-| X dead code | 10 | 0 |
-| E swallowed errors | 2 | 2 |
-| S concurrency | 6 | 0 |
-| T tests | 7 | 1 |
+| C comments | 34 | 0 |
+| D duplication | 9 | 1 |
+| X dead code | 24 | 1 |
+| E swallowed errors | 3 | 3 |
+| S concurrency | 10 | 0 |
+| T tests | 6 | 1 |
 | P Python | 4 | 0 |
-| **Total confirmed** | **65** | **5** (HY-0005, HY-0035, HY-0042, HY-0060, HY-0067) |
+| **Total confirmed** | **90** | **6** (HY-0005, HY-0035, HY-0042, HY-0060, HY-0067, HY-0089) |
+
+Four findings are **High**, all stale comments: HY-0012 (smoothing is a spring, not a 10% lerp), HY-0068 (`captureGeneration`), HY-0069 (full-frame scan), HY-0070 (quality zoom still described as 2×).
 
 Severity of the 37: **0 High, 5 Medium, 32 Low.** The medium ones are the three compiler warnings, the duplicated team-identifier helper, and the DeckLink scripts that would reintroduce a removed route.
 
@@ -355,7 +357,7 @@ The gallery comment adds: "The gallery value is copied into that task; its metho
 
 Partial read (header, render queue, `init?()`).
 
-#### HY-0012 · C3 ticket provenance · Low · Confirmed
+#### HY-0012 · C1 stale smoothing comment · High · Confirmed
 **Where:** `CropEngine.swift:6` and `30-32`
 **Current:**
 ```swift
@@ -369,11 +371,11 @@ and
 ```
 **Proposed:** delete line 6. Replace the smoothing comment with:
 ```swift
-        /// Smoothing factor for crop transitions (0 = instant, 1 = very smooth).
-        /// 0.10 moves 10% of the remaining distance per frame.
+        /// Spring stiffness for crop motion. 0.10 is the default (k = 60).
+        /// Higher is stiffer and snaps faster. The UI range is about 0.05–0.30.
 ```
-**Why:** The ticket ids are provenance. The 10% figure is the actual constant and stays.
-**Evidence:** n/a
+**Why:** `updateInterpolation` (`CropEngine.swift:691-706`) maps this value to spring stiffness (`effectiveSmoothing * 600`). A larger value is faster, not smoother, and it is not a 10%-per-frame lerp. The earlier draft of this finding repeated the lerp claim. That wording was wrong.
+**Evidence:** the spring comment and `let stiffness = CGFloat(effectiveSmoothing) * 600.0`.
 **Behaviour change:** None
 **Verify:** build only
 
@@ -589,8 +591,8 @@ Partial read.
                 }
             }
 ```
-`restartWithCamera` (`CameraManager.swift:1695-1715`) stops the session, then `try await startCapture()`. A throw leaves the session stopped.
-**Question:** When that restart throws, should the drawer set `cameraManager.error` (or otherwise show the existing camera error UI) instead of discarding the error with `try?`?
+`restartWithCamera` (`CameraManager.swift:1695-1715`) calls `stopCapture()`, sleeps 500 ms, then `try await startCapture()`. A throw leaves the session stopped. A Stop during that sleep can be undone when `startCapture()` runs anyway. `startCapture` does not set `cameraManager.error` on every throw, and `ContentView` alerts only that property.
+**Question:** When a camera switch fails, or the operator stops during the 500 ms gap, should the drawer surface the error and should a stop during the sleep cancel the restart?
 **Behaviour change:** Yes. Not in a batch.
 
 ### `CinematicCoreMacOS/CinematicCoreMacOS/XPCConnectionManager.swift`
@@ -936,6 +938,11 @@ Checked and dropped:
 20. **`DirectorReplay.liveState` cannot be a method on the type.** The two copies close over locals of `run`. HY-0050 says so.
 21. **`.gitignore` lines for `test_decklink` stay.** Deleting the two source files (HY-0024) does not require editing the ignore file.
 
+22. **The diagnostics CSV comment in `ProgramOutputManager` stays.** It explains why the file opens on the first processed frame rather than the first Vision frame.
+23. **`FaceSignatureExtractor`'s inner pixel-buffer box already has a safety comment** (line 61). Only the class-level annotation was missing one (HY-0090).
+24. **Do not delete `DiagnosticsLog.visionMeanMS`.** HY-0082 removes only the unread copy on the capability report. Tests and the diagnostics window still use the log field.
+25. **HY-0012 must not say the smoothing value is a 10%-per-frame lerp.** `CropEngine.updateInterpolation` maps it to spring stiffness. The finding was corrected.
+
 ## Leads not yet confirmed
 
 - `FaceSignatureExtractor` is `final class …: @unchecked Sendable` (line 31). The class comment does not say why. The inner pixel-buffer box does (line 61). Confirm after reading the rest of the class whether mutable state is confined to `processingQueue`. Plausible, not batched.
@@ -943,83 +950,177 @@ Checked and dropped:
 
 ## Batches
 
-**Withheld.** Assigning a file to a batch now would block a later finding in that same file from a different batch. The resume pass will group confirmed, behaviour-preserving findings with no file in two batches, open-PR files in their own batches tagged `after PR #N`, structural splits last, and this order: comments, dead code, dedup, errors, concurrency, tests, then splits.
+No file is in two batches. A file with several findings takes the later category, so the whole file stays in one pull request. Needs-owner findings are not included. Apply in this order when two batches would otherwise touch the same file; batches that do not share a file can run together.
 
-Files that will share a batch once assigned, because one finding touches both:
+### B01 · Comment-only UI, scripts, and headers · Sol 6.1
+View and test comments, plus the release-script step numbers. No frame-path code.
+**Findings:** HY-0015, HY-0017, HY-0018, HY-0022, HY-0023, HY-0031, HY-0032, HY-0037, HY-0038, HY-0040, HY-0055, HY-0056, HY-0057, HY-0058, HY-0063
+**Files:** `CinematicAgentSettingsView.swift`, `CropPreviewView.swift`, `RecorderSettingsView.swift`, `DeveloperFlags.swift`, `build_release.sh`, `training/env_reward.py`, `Console/MultiviewConsoleView.swift`, `Console/ConsolePresentation.swift`, `Console/ProgramPreviewPane.swift`, `Console/FakeConsoleModel.swift`, `CinematicAgentVelocityTests.swift`, `StartGateTests.swift`, `CinematicCoreMacOSUITests.swift`, `CinematicCoreMacOSUITestsLaunchTests.swift`
+**Verify:** build for the Swift files. Do not delete `testLaunchPerformance` (HY-0067).
+**Not included:** HY-0067.
 
-- HY-0021 touches `LiveShowSetup.swift` and `CameraManager.swift`.
-- HY-0025 touches `CinematicCoreXPCProtocol.swift`, `XPCConnectionManager.swift`, `CinematicCoreExtensionProvider.swift`, and `XPCPeerRequirementTests.swift`.
+### B02 · Comment-only engine labels · Opus 5.5
+Comments on the agent, the empty metal file, the display sink, and the show owner.
+**Findings:** HY-0013, HY-0014, HY-0070, HY-0086, HY-0087
+**Files:** `CinematicAgent.swift`, `CropRenderer.metal`, `DisplayOutputSink.swift`, `ShowCoordinator.swift`
+**Verify:** build, including the extension target because `CropRenderer.metal` is in both.
+
+### B03 · Dead code outside the frame path · Sol 6.1
+**Findings:** HY-0016, HY-0024, HY-0048, HY-0049, HY-0052, HY-0064, HY-0065, HY-0066, HY-0077, HY-0079, HY-0081, HY-0082, HY-0083
+**Files:** `ShotComposerSettingsView.swift`, `update_xcode.rb`, `test_decklink.cpp`, `DirectorShotPolicy.swift`, `DirectorProposal.swift`, `Speech/VoiceCommandAdapter.swift`, `training/downloader.py`, `training/writer.py`, `training/canvas.py`, `ContentView.swift`, `ShowSetupModel.swift`, `CapabilityReport.swift`, `InputStripView.swift`, `InputTileModel.swift`
+**Verify:** unit tests for the Director and setup files; build for `ContentView`. Do not delete `DiagnosticsLog.visionMeanMS` (HY-0082).
+
+### B04 · Dead code on the engine · Opus 5.5
+**Findings:** HY-0012, HY-0019, HY-0020, HY-0072, HY-0074, HY-0076, HY-0078, HY-0080, HY-0088
+**Files:** `CropEngine.swift`, `TrainingDataRecorder.swift`, `SystemExtensionActivationManager.swift`, `CameraPreviewView.swift`, `CameraChannel.swift`
+**Verify:** build and `FramingRegressionTests`, `TrainingRecorderReviewTests`, `ChannelIsolationTests`.
+
+### B05 · Dedup for the pill, setup checks, and training · Sol 6.1
+**Findings:** HY-0026, HY-0027, HY-0028, HY-0029, HY-0030, HY-0041, HY-0053, HY-0054, HY-0059, HY-0061, HY-0062, HY-0085
+**Files:** `OperatorPill.swift`, `Console/LiveConsole.swift`, `Console/LiveTilePicture.swift`, `SetupCheck.swift`, `MultiInputAdmission.swift`, `training/bc_dataset.py`, `training/cinematic_env.py`, `training/train_bc.py`, `training/make_test_model.py`, `training/env_loader.py`
+**Verify:** `PillTargetTests`, `SetupCheckTests`, `MultiInputAdmissionTests`, and `python3 test_env.py` plus `python3 test_training.py` from `training/`. Do not change the 30 fps fallback (HY-0042). Do not retune `MAX_ZOOM`.
+
+### B06 · Capture, detection, and live setup · Opus 5.5
+One finding ties these files together (HY-0069, HY-0021).
+**Findings:** HY-0001, HY-0002, HY-0003, HY-0004, HY-0006, HY-0007, HY-0008, HY-0021, HY-0033, HY-0068, HY-0069, HY-0073, HY-0084
+**Files:** `CameraManager.swift`, `PersonDetector.swift`, `LiveShowSetup.swift`
+**Verify:** build. The two LiveShowSetup warnings and the `PersonDetector` `nonisolated(unsafe)` warning must be gone.
+**Not included:** HY-0005 (the "Test" camera filter) and HY-0089 (format re-assert). Leave both as they are.
+
+### B07 · Composer and face signatures · Opus 5.5
+**Findings:** HY-0009, HY-0010, HY-0011, HY-0071, HY-0090
+**Files:** `ShotComposer.swift`, `FaceSignatureExtractor.swift`
+**Verify:** build and `FramingRegressionTests`. The unused `MainActor.run` warning at `ShotComposer.swift:1501` must be gone. Do not delete stage-margin settings (HY-0071).
+
+### B08 · XPC identity and show standard · Opus 5.5
+Shared with the extension.
+**Findings:** HY-0025, HY-0034, HY-0045, HY-0075, HY-0091
+**Files:** `Shared/CinematicCoreXPCProtocol.swift`, `XPCConnectionManager.swift`, `CinematicCoreExtension/CinematicCoreExtensionProvider.swift`, `XPCPeerRequirementTests.swift`, `ShowStandard.swift`
+**Verify:** app build and extension build, plus `XPCPeerRequirementTests`.
+
+### B09 · Test strength · Sol 6.1
+**Findings:** HY-0036, HY-0043, HY-0044, HY-0046
+**Files:** `PillTargetTests.swift`, `DirectorConsoleAPITests.swift`, `LockedTrackMatcherTests.swift`, `DirectorStyleHookTests.swift`
+**Verify:** those four test suites.
+
+### B10 · Director authority and replay · after PR #26, #25, and #18 · Sol 6.1
+Do not start until those three pull requests have merged.
+**Findings:** HY-0047, HY-0050, HY-0051
+**Files:** `Director/DirectorAuthority.swift`, `DirectorAuthorityTests.swift`, `Director/DirectorController.swift`, `Director/Replay/DirectorReplay.swift`, `DirectorProposalTests.swift`, `DirectorQualificationStoreTests.swift`
+**Verify:** `DirectorAuthorityTests`, `DirectorReplayTests`, `DirectorProposalTests`, `DirectorQualificationStoreTests`.
+`liveState` in HY-0050 is a nested function inside `run`, not a method on the type.
+
+### B11 · Split `ProgramOutputManager` · Opus 5.5
+Structural only. No other batch edits this file. Follow the seams in the Structural section. Keep extension membership on every file the extension already compiles.
+**Findings:** none (structure only)
+**Files:** `ProgramOutputManager.swift` and the new files named in the Structural section
+**Verify:** app build and extension build
+
+### B12 · Split `CameraManager` · after B06 merges · Opus 5.5
+**Findings:** none beyond the seams in the Structural section
+**Files:** `CameraManager.swift` and the new files
+**Verify:** build
+
+### B13 · Split `ShotComposer` · after B07 merges · Opus 5.5
+**Findings:** none beyond the seams in the Structural section
+**Files:** `ShotComposer.swift` and the new files
+**Verify:** build and `FramingRegressionTests`
 
 ## Coverage
 
 | ID | State |
 |---|---|
-| HY-0001 | confirmed, batch withheld (file not fully read) |
-| HY-0002 | confirmed, batch withheld |
-| HY-0003 | confirmed, batch withheld |
-| HY-0004 | confirmed, batch withheld |
+| HY-0001 | B06 |
+| HY-0002 | B06 |
+| HY-0003 | B06 |
+| HY-0004 | B06 |
 | HY-0005 | Needs owner |
-| HY-0006 | confirmed, batch withheld |
-| HY-0007 | confirmed, batch withheld |
-| HY-0008 | confirmed, batch withheld |
-| HY-0009 | confirmed, batch withheld |
-| HY-0010 | confirmed, batch withheld |
-| HY-0011 | confirmed, batch withheld |
-| HY-0012 | confirmed, batch withheld |
-| HY-0013 | confirmed, batch withheld (shared with extension) |
-| HY-0014 | confirmed, batch withheld |
-| HY-0015 | confirmed, batch withheld |
-| HY-0016 | confirmed, batch withheld |
-| HY-0017 | confirmed, batch withheld |
-| HY-0018 | confirmed, batch withheld |
-| HY-0019 | confirmed, batch withheld |
-| HY-0020 | confirmed, batch withheld |
-| HY-0021 | confirmed, batch withheld |
-| HY-0022 | confirmed, batch withheld |
-| HY-0023 | confirmed, batch withheld |
-| HY-0024 | confirmed, batch withheld until the surrounding scripts are read (`build_release.sh` still pending) |
-| HY-0025 | confirmed, batch withheld (extension provider not fully read) |
-| HY-0026 | confirmed, batch withheld |
-| HY-0027 | confirmed, batch withheld (`cinematic_env.py` not fully read) |
-| HY-0028 | confirmed, batch withheld |
-| HY-0029 | confirmed, batch withheld |
-| HY-0030 | confirmed, batch withheld |
-| HY-0031 | confirmed, batch withheld |
-| HY-0032 | confirmed, batch withheld |
-| HY-0033 | confirmed, batch withheld |
-| HY-0034 | confirmed, batch withheld |
+| HY-0006 | B06 |
+| HY-0007 | B06 |
+| HY-0008 | B06 |
+| HY-0009 | B07 |
+| HY-0010 | B07 |
+| HY-0011 | B07 |
+| HY-0012 | B04 |
+| HY-0013 | B02 |
+| HY-0014 | B02 |
+| HY-0015 | B01 |
+| HY-0016 | B03 |
+| HY-0017 | B01 |
+| HY-0018 | B01 |
+| HY-0019 | B04 |
+| HY-0020 | B04 |
+| HY-0021 | B06 |
+| HY-0022 | B01 |
+| HY-0023 | B01 |
+| HY-0024 | B03 |
+| HY-0025 | B08 |
+| HY-0026 | B05 |
+| HY-0027 | B05 |
+| HY-0028 | B05 |
+| HY-0029 | B05 |
+| HY-0030 | B05 |
+| HY-0031 | B01 |
+| HY-0032 | B01 |
+| HY-0033 | B06 |
+| HY-0034 | B08 |
 | HY-0035 | Needs owner |
-| HY-0036 | confirmed, batch withheld |
-| HY-0037 | confirmed, batch withheld |
-| HY-0038 | confirmed, batch withheld |
-| HY-0040 | confirmed, batch withheld |
-| HY-0041 | confirmed, batch withheld |
+| HY-0036 | B09 |
+| HY-0037 | B01 |
+| HY-0038 | B01 |
+| HY-0040 | B01 |
+| HY-0041 | B05 |
 | HY-0042 | Needs owner |
-| HY-0043 | confirmed, batch withheld |
-| HY-0044 | confirmed, batch withheld |
-| HY-0045 | confirmed, batch withheld (same file as HY-0025) |
-| HY-0046 | confirmed, batch withheld |
-| HY-0047 | confirmed, after PR #26, #25, and #18 |
-| HY-0048 | confirmed, batch withheld |
-| HY-0049 | confirmed, batch withheld |
-| HY-0050 | confirmed, after PR #25 and #18 |
-| HY-0051 | confirmed, after PR #25 and #18 |
-| HY-0052 | confirmed, batch withheld |
-| HY-0053 | confirmed, batch withheld |
-| HY-0054 | confirmed, batch withheld |
-| HY-0055 | confirmed, batch withheld |
-| HY-0056 | confirmed, batch withheld |
-| HY-0057 | confirmed, batch withheld |
-| HY-0058 | confirmed, batch withheld |
-| HY-0059 | confirmed, batch withheld |
+| HY-0043 | B09 |
+| HY-0044 | B09 |
+| HY-0045 | B08 |
+| HY-0046 | B09 |
+| HY-0047 | B10 |
+| HY-0048 | B03 |
+| HY-0049 | B03 |
+| HY-0050 | B10 |
+| HY-0051 | B10 |
+| HY-0052 | B03 |
+| HY-0053 | B05 |
+| HY-0054 | B05 |
+| HY-0055 | B01 |
+| HY-0056 | B01 |
+| HY-0057 | B01 |
+| HY-0058 | B01 |
+| HY-0059 | B05 |
 | HY-0060 | Needs owner |
-| HY-0061 | confirmed, batch withheld |
-| HY-0062 | confirmed, batch withheld |
-| HY-0063 | confirmed, batch withheld |
-| HY-0064 | confirmed, batch withheld |
-| HY-0065 | confirmed, batch withheld |
-| HY-0066 | confirmed, batch withheld |
+| HY-0061 | B05 |
+| HY-0062 | B05 |
+| HY-0063 | B01 |
+| HY-0064 | B03 |
+| HY-0065 | B03 |
+| HY-0066 | B03 |
 | HY-0067 | Needs owner |
+| HY-0068 | B06 |
+| HY-0069 | B06 |
+| HY-0070 | B02 |
+| HY-0071 | B07 |
+| HY-0072 | B04 |
+| HY-0073 | B06 |
+| HY-0074 | B04 |
+| HY-0075 | B08 |
+| HY-0076 | B04 |
+| HY-0077 | B03 |
+| HY-0078 | B04 |
+| HY-0079 | B03 |
+| HY-0080 | B04 |
+| HY-0081 | B03 |
+| HY-0082 | B03 |
+| HY-0083 | B03 |
+| HY-0084 | B06 |
+| HY-0085 | B05 |
+| HY-0086 | B02 |
+| HY-0087 | B02 |
+| HY-0088 | B04 |
+| HY-0089 | Needs owner |
+| HY-0090 | B07 |
+| HY-0091 | B08 |
+
 
 ## Second-pass findings
 
@@ -1314,24 +1415,296 @@ MIN_CROP_H = 0.25       # max zoom 4x
 **Question:** `testLaunchPerformance` records an `XCTApplicationLaunchMetric` and passes whenever launch does not crash. Should that test be deleted? HY-0031 already removes its template comment. HY-0032 still adds a foreground assertion to `testLaunch`.
 **Behaviour change:** Yes, if the test is deleted.
 
+## Third-pass findings
+
+Checked against `272c065` after a full read of the frame path, output, extension, and the remaining app UI. Ticket-only comments already filed above are not repeated. `ownTeamIdentifier` stays HY-0025. The inspector `try?` stays HY-0035, with the 500 ms sleep added to that question.
+
+### `CameraManager.swift`
+
+#### HY-0068 · C1 stale comment on `captureGeneration` · High · Confirmed
+**Where:** `CameraManager.swift:481-485`
+**Current:**
+```swift
+    /// Bumped whenever a detection completes. Comparing against
+    /// `consumedDetectionRevision` tells a frame whether its detections are new
+    /// or a repeat of the previous frame's — which matters because several
+    /// framing rules count *consecutive frames* and a repeat is not evidence.
+    private var captureGeneration: UInt64 = 0
+```
+**Proposed:**
+```swift
+    /// Bumped when a capture source starts, stops, or rebinds. In-flight frames
+    /// from an older value are retired.
+    private var captureGeneration: UInt64 = 0
+```
+**Why:** `consumedDetectionRevision` does not exist. The counter increments at session start (`CameraManager.swift:1251`), not when detection completes. A later edit that bumped it on detection would retire the capture session.
+**Evidence:** `git grep consumedDetectionRevision` returns only this comment.
+**Behaviour change:** None
+**Verify:** build only
+
+#### HY-0069 · C1 "no full-frame scan" · High · Confirmed
+**Where:** `CameraManager.swift:427-429` and `PersonDetector.swift:108-111`
+**Current:** both say a full-frame multi-person scan never runs.
+**Proposed:** In `CameraManager`, delete the sentence `No full-frame multi-person scan ever runs.` In `PersonDetector`, replace the overview with: passive by default; `.acquiring` and `.lockedROI` scan a region of interest; `.reacquiring` runs the face request on the full frame.
+**Why:** `DetectionMode.reacquiring` (`PersonDetector.swift:127-129`) is that full-frame scan. Hold and wide-waiting select it. The case comment four lines under the overview already says so.
+**Evidence:** both comments and the enum case were read.
+**Behaviour change:** None
+**Verify:** build only
+
+#### HY-0084 · D4 hardcoded output size · Medium · Confirmed
+**Where:** `CameraManager.swift:1793-1798`
+**Current:** the livestream arm builds `CGSize(width: 1920, height: 1080)`. Portrait calls `profile.defaultOutputSize`.
+**Proposed:** `let desiredSize = profile.defaultOutputSize` and delete the switch.
+**Why:** `FrameProfile.defaultOutputSize` (`ShotComposer.swift:80-86`) already returns 1920×1080 for livestream and 1080×1920 for portrait.
+**Evidence:** both sites read.
+**Behaviour change:** None
+**Verify:** build only
+
+#### HY-0089 · E1 format re-assert only logs · Needs owner
+**Where:** `CameraManager.swift:2745-2753`
+**Current:** `reassertConfiguredFormatIfNeeded` catches a failed `lockForConfiguration` and logs `Failed to re-assert capture format`. Capture keeps running.
+**Question:** If the format lock fails after start, should the session stop and surface `CameraError.sessionConfigurationFailed`, or is a log enough because a later size check updates `captureProfileStatus`?
+**Behaviour change:** Yes, if the session starts failing closed.
+
+### `PersonDetector.swift`
+
+#### HY-0073 · X1 unused `pixelBoundingBox` · Medium · Confirmed
+**Where:** `PersonDetector.swift:84-92`
+**Current:** `func pixelBoundingBox(imageSize:) -> CGRect` on the detected-person type.
+**Proposed:** delete the method.
+**Why:** Nothing calls it.
+**Evidence:** `git grep pixelBoundingBox` returns only the definition.
+**Behaviour change:** None
+**Verify:** build only
+
+### `CinematicAgent.swift`
+
+#### HY-0070 · C1 quality-zoom comment still says 2× · High · Confirmed
+**Where:** `CinematicAgent.swift:47-50` and `152-156`
+**Current:** both say the smallest crop is one resolution tier down, for example 4K to 1080p, which is 2×.
+**Proposed:** say the floor is `CropEngine.QualityFloor`: crop height at least `source / 4`, and never under 240 px, so a 4K frame is about 4×. Leave `maxZoom = 4.0` and the `qualityMaxZoom` math unchanged.
+**Why:** `QualityFloor.forSource` (`CropEngine.swift:294-301`) is `max(height / 4, 240)`. The comments describe the rule that comment replaced.
+**Evidence:** `qualityMaxZoom(forSourceHeight:)` delegates to that function. The property default `2.0` is only the value before the first format update.
+**Behaviour change:** None
+**Verify:** build only
+
+### `ShotComposer.swift`
+
+#### HY-0071 · X1 unread framing helpers · Medium · Confirmed
+**Where:** `ShotComposer.swift` `FramingTuning.horizontalPaddingMultiplier` (489, and the initializer arguments at 2188–2283), `GeometrySnapshot` (521), `currentGeometrySnapshot` (608), `scoreFreshness` (930), `lastTrackingPoint` (1092, writes at 1612 and 2123), `configuredStageRect` (2137), `stagePriorityScore` (2149).
+**Proposed:** delete those symbols, the two `lastTrackingPoint` assignments, and the `horizontalPaddingMultiplier:` arguments. Do not delete `stageHorizontalMargin` or `stageVerticalMargin`.
+**Why:** `horizontalPaddingMultiplier` is stored and never read. `currentGeometrySnapshot` is never written. `scoreFreshness` is never read. `lastTrackingPoint` is only written. `stagePriorityScore` is the only caller of `configuredStageRect`, and nothing calls `stagePriorityScore`. `GeometrySnapshot` exists only for the unread property.
+**Evidence:** `git grep` of each name stays inside `ShotComposer.swift`, and the hits are the declarations, the initializer arguments, and the two writes.
+**Behaviour change:** None
+**Verify:** `FramingRegressionTests` and a build
+
+### `CropEngine.swift`
+
+#### HY-0072 · X1 unused crop helpers · Medium · Confirmed
+**Where:** `CropEngine.swift` `CropRect.framing` (about 348–371), `CropRect.lerp` (about 422–435), and `gpuUtilization` (249).
+**Proposed:** delete all three.
+**Why:** No caller. Crop construction goes through `setTargetCrop`, `widest`, and `fullFrame`. Interpolation is the spring in `updateInterpolation`. `gpuUtilization` is never written and stays 0.
+**Evidence:** `git grep` of `func framing`, `func lerp`, and `gpuUtilization` shows the CropEngine definitions only (`func framing` in `ShotComposer` is a different function and stays).
+**Behaviour change:** None. The published stats snapshot loses a field that was always zero.
+**Verify:** build and `FramingRegressionTests`
+
+### `TrainingDataRecorder.swift`
+
+#### HY-0074 · X1 write-only `sessionId` · Medium · Confirmed
+**Where:** `TrainingDataRecorder.swift:170`, assignments at 262 and 341
+**Current:** `private var sessionId: String?`
+**Proposed:** delete the property and those two assignments. Keep the local `id` and `SessionMetadata(sessionId: id, ...)`.
+**Why:** The stored property is never read. The id that is persisted is the local and the Codable field.
+**Evidence:** `git grep sessionId` in this file. Lines 129 and 273 are the Codable member, not reads of the property.
+**Behaviour change:** None
+**Verify:** `TrainingRecorderReviewTests`
+
+### `DisplayOutputSink.swift`
+
+#### HY-0086 · C1 log says the window re-routes · Medium · Confirmed
+**Where:** `DisplayOutputSink.swift:209-213`
+**Current:** the comment says a vanished display does not re-route mid-show. The log says `closing window and re-routing.`
+**Proposed:** change the log string to `Program display disappeared; closing window.`
+**Why:** The branch only tears the window down and clears `recentSentBuffers`. Re-routing is the manager's later decision, and the comment says that does not happen mid-show.
+**Evidence:** the function was read.
+**Behaviour change:** None for the picture. The log line changes.
+**Verify:** build only
+
+### `XPCConnectionManager.swift`
+
+#### HY-0091 · S2 redundant `MainActor.run` · Medium · Confirmed
+**Where:** `XPCConnectionManager.swift:355`
+**Current:** inside `reconnectTask = Task { [weak self] in`, after the sleep, `await MainActor.run { ... }`.
+**Proposed:** drop `await MainActor.run` and run that body directly. The type is `@MainActor`, so the task is already on it.
+**Why:** The hop does not change isolation. The build did not warn here. The unused-result warning is the other `MainActor.run`, HY-0010.
+**Evidence:** `XPCConnectionManager` is `@MainActor` (line 55). The task is created from an instance method.
+**Behaviour change:** None
+**Verify:** build only
+
+### `CinematicCoreExtensionProvider.swift`
+
+#### HY-0075 · X1 unused `playoutFrameDuration()` · Medium · Confirmed
+**Where:** `CinematicCoreExtensionProvider.swift:301-305`
+**Current:** `private func playoutFrameDuration() -> CMTime`
+**Proposed:** delete the method.
+**Why:** Nothing calls it. `updatePlayoutFrameRate` uses `standard.frameDuration` (line 319), which is the exact 60000-timescale value. This helper uses `CMTime(seconds: 1.0 / rate)`, the approximation `ShowStandard.captureDuration` warns against.
+**Evidence:** `git grep playoutFrameDuration` returns only the definition.
+**Behaviour change:** None
+**Verify:** extension build
+
+### `SystemExtensionActivationManager.swift`
+
+#### HY-0076 · X1 unused status helpers · Medium · Confirmed
+**Where:** `SystemExtensionActivationManager.swift:113-141` and `877-884`
+**Current:** `badgeSystemImage`, `badgeTint`, and `userFacingErrorMessage(for:)`.
+**Proposed:** delete all three.
+**Why:** The status UI uses `badgeTitle`, `summaryText`, `detailText`, and `primaryActionTitle`. Failures already go through `failureDisposition`. Nothing calls `userFacingErrorMessage`.
+**Evidence:** `git grep` of each name returns only its definition.
+**Behaviour change:** None
+**Verify:** build only
+
+### `ShowCoordinator.swift`
+
+#### HY-0087 · C1 future-tense header · Medium · Confirmed
+**Where:** `ShowCoordinator.swift:10-14`
+**Current:** "This first step…" and "ROUTER moves the routing decision (and Take) here; DEVICES adds exclusive device leases…"
+**Proposed:**
+```swift
+//  ProgramRouter owns which channel feeds program output, the output clock,
+//  and route generations. CaptureDeviceRegistry leases devices. Commands are
+//  bound to a channel id. Channel A starts routed. A second channel is added
+//  unrouted.
+```
+**Why:** `router`, `deviceRegistry`, and `workScheduler` are properties of this type (lines 30–40). The header describes them as not landed yet.
+**Evidence:** those properties.
+**Behaviour change:** None
+**Verify:** build only
+
+### `CameraChannel.swift`
+
+#### HY-0088 · C1 future-tense router sentence · Medium · Confirmed
+**Where:** `CameraChannel.swift:17-18`
+**Current:** `ROUTER replaces the "routed channel = the output" shortcut with a ProgramRouter…`
+**Proposed:** `ProgramRouter owns route generations and the output clock. The routed channel's port is that router, not the output itself.`
+**Why:** `ShowCoordinator.router` already exists. The sentence is written as a future change.
+**Evidence:** `ShowCoordinator.swift:30-33`.
+**Behaviour change:** None
+**Verify:** build only
+
+#### HY-0080 · X1 unread `framesOffered` · Low · Confirmed
+**Where:** `CameraChannel.swift:81` and the increment in `sendFrame`
+**Proposed:** delete the property and the increment. Leave `sendFrame` empty. Shorten the doc comment so it no longer says the counter exists for tests.
+**Why:** No test reads `framesOffered`.
+**Evidence:** `git grep framesOffered` returns only this file.
+**Behaviour change:** None
+**Verify:** `ChannelIsolationTests`
+
+### `CameraPreviewView.swift`
+
+#### HY-0078 · X1 unused CIImage image helper · Medium · Confirmed
+**Where:** `CameraPreviewView.swift` the `Image` extension that builds a decorative image from a `CIImage` (about 170–188), and `import CoreImage` if nothing else in the file uses it.
+**Proposed:** delete that extension. Delete `import CoreImage` only if the file no longer references Core Image.
+**Why:** No caller. The live preview is the pixel-buffer view.
+**Evidence:** `git grep 'decorative ciImage'` returns only the definition.
+**Behaviour change:** None
+**Verify:** build only
+
+### `ContentView.swift`
+
+#### HY-0077 · X1 unused dock chrome · Medium · Confirmed
+**Where:** `ContentView.swift` `toggleCamera`, `LiquidPreviewCard`, `GlassCapsuleButtonStyle`, and `glassPanel`, plus a logger used only by those.
+**Proposed:** delete them. Keep `LiquidGlassBackdrop` (used by the live window) and `CameraListView`'s own logger.
+**Why:** Nothing calls `toggleCamera` or the glass card. The session control lives on the app menu and the console.
+**Evidence:** `git grep` of `toggleCamera`, `LiquidPreviewCard`, `GlassCapsuleButtonStyle`, and `glassPanel` returns only this file.
+**Behaviour change:** None
+**Verify:** build only
+
+### `ShotComposerSettingsView.swift`
+
+#### HY-0079 · X1 unused switch views · Medium · Confirmed
+**Where:** `ShotComposerSettingsView.swift` `LiquidPresetSwitch` and `LiquidFramingSwitch`
+**Proposed:** delete both types. If `LiquidTuningSwitch`'s comment names `LiquidPresetSwitch`, delete that name from the comment.
+**Why:** The live controls are `LiquidTuningSwitch` and `LiquidAutoPanSpeedSwitch`. Nothing constructs the other two.
+**Evidence:** `git grep` of both names returns only this file.
+**Behaviour change:** None
+**Verify:** build only
+
+### `CapabilityReport.swift`
+
+#### HY-0082 · X1 unread report fields · Low · Confirmed
+**Where:** `CapabilityReport.swift` `admittedFPS`, `frameWallMaxMS`, and the report's own `visionMeanMS`, plus the accumulator that exists only to fill that last field.
+**Proposed:** delete those three fields and the assignments that only write them.
+**Why:** Setup and pair admission do not read them. Do not touch `DiagnosticsLog.visionMeanMS` or `DiagnosticsWindow.visionMeanMS`. Tests set that window field, and `ProgramOutputManager` writes it.
+**Evidence:** `git grep admittedFPS` and `frameWallMaxMS` stay in this file. `visionMeanMS` also appears on the diagnostics window, which stays.
+**Behaviour change:** None
+**Verify:** `SetupCheckTests`, `MultiInputAdmissionTests`
+
+### `InputStripView.swift` and `InputTileModel.swift`
+
+#### HY-0083 · X1 unused strip initializer and slot index · Low · Confirmed
+**Where:** `InputStripView.swift:36-39` `init(tiles:onCue:)` and `InputTileModel.swift:10` `var index`.
+**Proposed:** delete both.
+**Why:** Every caller uses `InputStripView(snapshot:)`. `Slot` already has `id` and `rawValue`. The index force-unwrap has no reader.
+**Evidence:** `git grep 'InputStripView(tiles'` returns nothing. `firstIndex(of: self)` appears only on that property.
+**Behaviour change:** None
+**Verify:** `InputStripTests`
+
+### `ShowSetupModel.swift`
+
+#### HY-0081 · X1 unused `endCheck` · Low · Confirmed
+**Where:** `ShowSetupModel.swift:216`
+**Proposed:** delete the method.
+**Why:** Nothing calls it. `beginCheck` is what the gallery and tests use. Selecting a device, standard, or output already clears the checking flag.
+**Evidence:** `git grep endCheck` returns only this line.
+**Behaviour change:** None
+**Verify:** `ShowSetupTests`
+
+### `SetupCheck.swift` and `MultiInputAdmission.swift`
+
+#### HY-0085 · D2 copied warm-up gate · Medium · Confirmed
+**Where:** `SetupCheck.swift:104-106` and `MultiInputAdmission.swift:313`
+**Current:** both ignore a window that started before `startedAt + warmUpSeconds - 0.25`.
+**Proposed:** one method on `DiagnosticsWindow`:
+```swift
+func beganAfterWarmUp(closedAt now: TimeInterval, measurementStartedAt startedAt: TimeInterval, warmUp: TimeInterval) -> Bool {
+    now - windowSeconds >= startedAt + warmUp - 0.25
+}
+```
+Each `ingest` keeps its own partial-window cancel. The cancel strings stay as they are (`reason:` versus the admission enum).
+**Why:** The slack and the comparison are one policy. The two cancel paths are not the same type and must not be merged.
+**Evidence:** both guards were read. `warmUpSeconds - 0.25` appears only at these two sites.
+**Behaviour change:** None
+**Verify:** `SetupCheckTests`, `MultiInputAdmissionTests`
+
+### `FaceSignatureExtractor.swift`
+
+#### HY-0090 · S1 class-level `@unchecked Sendable` · Medium · Confirmed
+**Where:** `FaceSignatureExtractor.swift:31`
+**Current:** `final class FaceSignatureExtractor: @unchecked Sendable`
+**Proposed:** add to the type comment: the extractor is handed to a detached task; `CIContext` is safe to share; Vision work runs on `processingQueue`; the extractor does not mutate the caller's pixel buffer.
+**Why:** The class annotation has no safety comment. The inner `SendablePixelBuffer` at line 61 already has one. Do not remove `@unchecked`.
+**Evidence:** the type declaration and the queue comment were read.
+**Behaviour change:** None
+**Verify:** build only
+
 ## Resume checklist
 
 `[x]` full read, done. `[~]` partial read, findings above may be incomplete. `[ ]` not read in full yet.
 
 
-- [~] `CinematicCoreMacOS/CinematicCoreExtension/CinematicCoreExtensionProvider.swift`
+- [x] `CinematicCoreMacOS/CinematicCoreExtension/CinematicCoreExtensionProvider.swift`
 - [x] `CinematicCoreMacOS/CinematicCoreExtension/main.swift`
 - [x] `CinematicCoreMacOS/CinematicCoreMacOS/CameraChannel.swift`
-- [~] `CinematicCoreMacOS/CinematicCoreMacOS/CameraManager.swift`
-- [~] `CinematicCoreMacOS/CinematicCoreMacOS/CameraPreviewView.swift`
-- [ ] `CinematicCoreMacOS/CinematicCoreMacOS/CapabilityReport.swift`
+- [x] `CinematicCoreMacOS/CinematicCoreMacOS/CameraManager.swift`
+- [x] `CinematicCoreMacOS/CinematicCoreMacOS/CameraPreviewView.swift`
+- [x] `CinematicCoreMacOS/CinematicCoreMacOS/CapabilityReport.swift`
 - [x] `CinematicCoreMacOS/CinematicCoreMacOS/CaptureDeviceRegistry.swift`
-- [ ] `CinematicCoreMacOS/CinematicCoreMacOS/CaptureProfilePolicy.swift`
+- [x] `CinematicCoreMacOS/CinematicCoreMacOS/CaptureProfilePolicy.swift`
 - [x] `CinematicCoreMacOS/CinematicCoreMacOS/ChannelFrame.swift`
-- [~] `CinematicCoreMacOS/CinematicCoreMacOS/CinematicAgent.swift`
-- [~] `CinematicCoreMacOS/CinematicCoreMacOS/CinematicAgentSettingsView.swift`
+- [x] `CinematicCoreMacOS/CinematicCoreMacOS/CinematicAgent.swift`
+- [x] `CinematicCoreMacOS/CinematicCoreMacOS/CinematicAgentSettingsView.swift`
 - [x] `CinematicCoreMacOS/CinematicCoreMacOS/CinematicCoreMacOS-Bridging-Header.h`
-- [ ] `CinematicCoreMacOS/CinematicCoreMacOS/CinematicCoreMacOSApp.swift`
+- [x] `CinematicCoreMacOS/CinematicCoreMacOS/CinematicCoreMacOSApp.swift`
 - [x] `CinematicCoreMacOS/CinematicCoreMacOS/Console/ChannelID.swift`
 - [x] `CinematicCoreMacOS/CinematicCoreMacOS/Console/ConsoleActions.swift`
 - [x] `CinematicCoreMacOS/CinematicCoreMacOS/Console/ConsolePresentation.swift`
@@ -1356,18 +1729,18 @@ MIN_CROP_H = 0.25       # max zoom 4x
 - [x] `CinematicCoreMacOS/CinematicCoreMacOS/Console/SingleCameraConsole.swift`
 - [x] `CinematicCoreMacOS/CinematicCoreMacOS/Console/TakeAvailability.swift`
 - [x] `CinematicCoreMacOS/CinematicCoreMacOS/Console/TakeBarView.swift`
-- [ ] `CinematicCoreMacOS/CinematicCoreMacOS/ContentView.swift`
+- [x] `CinematicCoreMacOS/CinematicCoreMacOS/ContentView.swift`
 - [x] `CinematicCoreMacOS/CinematicCoreMacOS/ControlTarget.swift`
-- [~] `CinematicCoreMacOS/CinematicCoreMacOS/CropEngine.swift`
-- [~] `CinematicCoreMacOS/CinematicCoreMacOS/CropPreviewView.swift`
+- [x] `CinematicCoreMacOS/CinematicCoreMacOS/CropEngine.swift`
+- [x] `CinematicCoreMacOS/CinematicCoreMacOS/CropPreviewView.swift`
 - [x] `CinematicCoreMacOS/CinematicCoreMacOS/CropRenderer.metal`
 - [x] `CinematicCoreMacOS/CinematicCoreMacOS/DebugLaunchHooks.swift`
-- [ ] `CinematicCoreMacOS/CinematicCoreMacOS/DegradePolicy.swift`
+- [x] `CinematicCoreMacOS/CinematicCoreMacOS/DegradePolicy.swift`
 - [x] `CinematicCoreMacOS/CinematicCoreMacOS/DetectionFrame.swift`
-- [ ] `CinematicCoreMacOS/CinematicCoreMacOS/DetectionOverlayView.swift`
-- [ ] `CinematicCoreMacOS/CinematicCoreMacOS/DetectionSettingsView.swift`
+- [x] `CinematicCoreMacOS/CinematicCoreMacOS/DetectionOverlayView.swift`
+- [x] `CinematicCoreMacOS/CinematicCoreMacOS/DetectionSettingsView.swift`
 - [x] `CinematicCoreMacOS/CinematicCoreMacOS/DeveloperFlags.swift`
-- [ ] `CinematicCoreMacOS/CinematicCoreMacOS/DiagnosticsLog.swift`
+- [x] `CinematicCoreMacOS/CinematicCoreMacOS/DiagnosticsLog.swift`
 - [x] `CinematicCoreMacOS/CinematicCoreMacOS/Director/DirectorAuthority.swift`
 - [x] `CinematicCoreMacOS/CinematicCoreMacOS/Director/DirectorConsoleAPI.swift`
 - [x] `CinematicCoreMacOS/CinematicCoreMacOS/Director/DirectorController.swift`
@@ -1387,49 +1760,49 @@ MIN_CROP_H = 0.25       # max zoom 4x
 - [x] `CinematicCoreMacOS/CinematicCoreMacOS/Director/UI/DirectorStyleSettingsView.swift`
 - [x] `CinematicCoreMacOS/CinematicCoreMacOS/Director/UI/FakeDirectorConsole.swift`
 - [x] `CinematicCoreMacOS/CinematicCoreMacOS/DirectorEvidenceReadings.swift`
-- [ ] `CinematicCoreMacOS/CinematicCoreMacOS/DisplayOutputSink.swift`
-- [~] `CinematicCoreMacOS/CinematicCoreMacOS/FaceSignatureExtractor.swift`
+- [x] `CinematicCoreMacOS/CinematicCoreMacOS/DisplayOutputSink.swift`
+- [x] `CinematicCoreMacOS/CinematicCoreMacOS/FaceSignatureExtractor.swift`
 - [x] `CinematicCoreMacOS/CinematicCoreMacOS/FrameWorkScheduler.swift`
-- [ ] `CinematicCoreMacOS/CinematicCoreMacOS/FramingCapability.swift`
-- [ ] `CinematicCoreMacOS/CinematicCoreMacOS/Hardware/HardwareLink.swift`
-- [ ] `CinematicCoreMacOS/CinematicCoreMacOS/Hardware/HardwareWireCodec.swift`
-- [ ] `CinematicCoreMacOS/CinematicCoreMacOS/Hardware/SimulatedHardwareDevice.swift`
-- [ ] `CinematicCoreMacOS/CinematicCoreMacOS/InputStripView.swift`
-- [ ] `CinematicCoreMacOS/CinematicCoreMacOS/InputTileModel.swift`
-- [ ] `CinematicCoreMacOS/CinematicCoreMacOS/InputTileView.swift`
-- [~] `CinematicCoreMacOS/CinematicCoreMacOS/InspectorDrawer.swift`
-- [ ] `CinematicCoreMacOS/CinematicCoreMacOS/InspectorShowSection.swift`
+- [x] `CinematicCoreMacOS/CinematicCoreMacOS/FramingCapability.swift`
+- [x] `CinematicCoreMacOS/CinematicCoreMacOS/Hardware/HardwareLink.swift`
+- [x] `CinematicCoreMacOS/CinematicCoreMacOS/Hardware/HardwareWireCodec.swift`
+- [x] `CinematicCoreMacOS/CinematicCoreMacOS/Hardware/SimulatedHardwareDevice.swift`
+- [x] `CinematicCoreMacOS/CinematicCoreMacOS/InputStripView.swift`
+- [x] `CinematicCoreMacOS/CinematicCoreMacOS/InputTileModel.swift`
+- [x] `CinematicCoreMacOS/CinematicCoreMacOS/InputTileView.swift`
+- [x] `CinematicCoreMacOS/CinematicCoreMacOS/InspectorDrawer.swift`
+- [x] `CinematicCoreMacOS/CinematicCoreMacOS/InspectorShowSection.swift`
 - [x] `CinematicCoreMacOS/CinematicCoreMacOS/LiveShowSetup.swift`
-- [ ] `CinematicCoreMacOS/CinematicCoreMacOS/MultiInputAdmission.swift`
+- [x] `CinematicCoreMacOS/CinematicCoreMacOS/MultiInputAdmission.swift`
 - [x] `CinematicCoreMacOS/CinematicCoreMacOS/OperatorCommand.swift`
 - [x] `CinematicCoreMacOS/CinematicCoreMacOS/OperatorPill.swift`
-- [ ] `CinematicCoreMacOS/CinematicCoreMacOS/OverlayLayer.swift`
-- [ ] `CinematicCoreMacOS/CinematicCoreMacOS/PairCheckPanel.swift`
-- [~] `CinematicCoreMacOS/CinematicCoreMacOS/PersonDetector.swift`
-- [ ] `CinematicCoreMacOS/CinematicCoreMacOS/PixelBufferPreviewView.swift`
-- [ ] `CinematicCoreMacOS/CinematicCoreMacOS/ProgramOutputManager.swift`
-- [ ] `CinematicCoreMacOS/CinematicCoreMacOS/ProgramRouter.swift`
-- [ ] `CinematicCoreMacOS/CinematicCoreMacOS/ProgramTake.swift`
-- [~] `CinematicCoreMacOS/CinematicCoreMacOS/RecorderSettingsView.swift`
+- [x] `CinematicCoreMacOS/CinematicCoreMacOS/OverlayLayer.swift`
+- [x] `CinematicCoreMacOS/CinematicCoreMacOS/PairCheckPanel.swift`
+- [x] `CinematicCoreMacOS/CinematicCoreMacOS/PersonDetector.swift`
+- [x] `CinematicCoreMacOS/CinematicCoreMacOS/PixelBufferPreviewView.swift`
+- [x] `CinematicCoreMacOS/CinematicCoreMacOS/ProgramOutputManager.swift`
+- [x] `CinematicCoreMacOS/CinematicCoreMacOS/ProgramRouter.swift`
+- [x] `CinematicCoreMacOS/CinematicCoreMacOS/ProgramTake.swift`
+- [x] `CinematicCoreMacOS/CinematicCoreMacOS/RecorderSettingsView.swift`
 - [x] `CinematicCoreMacOS/CinematicCoreMacOS/RecoveryState.swift`
 - [x] `CinematicCoreMacOS/CinematicCoreMacOS/RehearsalOutputSink.swift`
-- [ ] `CinematicCoreMacOS/CinematicCoreMacOS/SettingsWindow.swift`
-- [ ] `CinematicCoreMacOS/CinematicCoreMacOS/SetupCheck.swift`
-- [ ] `CinematicCoreMacOS/CinematicCoreMacOS/SetupDemo.swift`
-- [~] `CinematicCoreMacOS/CinematicCoreMacOS/ShotComposer.swift`
-- [~] `CinematicCoreMacOS/CinematicCoreMacOS/ShotComposerSettingsView.swift`
-- [ ] `CinematicCoreMacOS/CinematicCoreMacOS/ShowCoordinator.swift`
-- [ ] `CinematicCoreMacOS/CinematicCoreMacOS/ShowSetupModel.swift`
-- [ ] `CinematicCoreMacOS/CinematicCoreMacOS/ShowSetupView.swift`
+- [x] `CinematicCoreMacOS/CinematicCoreMacOS/SettingsWindow.swift`
+- [x] `CinematicCoreMacOS/CinematicCoreMacOS/SetupCheck.swift`
+- [x] `CinematicCoreMacOS/CinematicCoreMacOS/SetupDemo.swift`
+- [x] `CinematicCoreMacOS/CinematicCoreMacOS/ShotComposer.swift`
+- [x] `CinematicCoreMacOS/CinematicCoreMacOS/ShotComposerSettingsView.swift`
+- [x] `CinematicCoreMacOS/CinematicCoreMacOS/ShowCoordinator.swift`
+- [x] `CinematicCoreMacOS/CinematicCoreMacOS/ShowSetupModel.swift`
+- [x] `CinematicCoreMacOS/CinematicCoreMacOS/ShowSetupView.swift`
 - [x] `CinematicCoreMacOS/CinematicCoreMacOS/ShowStandard.swift`
 - [x] `CinematicCoreMacOS/CinematicCoreMacOS/Speech/SpeechCommandGrammar.swift`
 - [x] `CinematicCoreMacOS/CinematicCoreMacOS/Speech/VoiceCommandAdapter.swift`
-- [ ] `CinematicCoreMacOS/CinematicCoreMacOS/StoppedScreen.swift`
-- [ ] `CinematicCoreMacOS/CinematicCoreMacOS/StripDemo.swift`
-- [ ] `CinematicCoreMacOS/CinematicCoreMacOS/SystemExtensionActivationManager.swift`
-- [~] `CinematicCoreMacOS/CinematicCoreMacOS/TrainingDataRecorder.swift`
-- [ ] `CinematicCoreMacOS/CinematicCoreMacOS/ValidationClipPlaybackView.swift`
-- [~] `CinematicCoreMacOS/CinematicCoreMacOS/XPCConnectionManager.swift`
+- [x] `CinematicCoreMacOS/CinematicCoreMacOS/StoppedScreen.swift`
+- [x] `CinematicCoreMacOS/CinematicCoreMacOS/StripDemo.swift`
+- [x] `CinematicCoreMacOS/CinematicCoreMacOS/SystemExtensionActivationManager.swift`
+- [x] `CinematicCoreMacOS/CinematicCoreMacOS/TrainingDataRecorder.swift`
+- [x] `CinematicCoreMacOS/CinematicCoreMacOS/ValidationClipPlaybackView.swift`
+- [x] `CinematicCoreMacOS/CinematicCoreMacOS/XPCConnectionManager.swift`
 - [x] `CinematicCoreMacOS/CinematicCoreMacOSTests/CaptureDeviceRegistryTests.swift`
 - [x] `CinematicCoreMacOS/CinematicCoreMacOSTests/CaptureFramePathTests.swift`
 - [x] `CinematicCoreMacOS/CinematicCoreMacOSTests/CaptureProfilePolicyTests.swift`
@@ -1496,7 +1869,7 @@ MIN_CROP_H = 0.25       # max zoom 4x
 - [x] `CinematicCoreMacOS/CinematicCoreMacOSTests/XPCPeerRequirementTests.swift`
 - [x] `CinematicCoreMacOS/CinematicCoreMacOSUITests/CinematicCoreMacOSUITests.swift`
 - [x] `CinematicCoreMacOS/CinematicCoreMacOSUITests/CinematicCoreMacOSUITestsLaunchTests.swift`
-- [~] `CinematicCoreMacOS/Shared/CinematicCoreXPCProtocol.swift`
+- [x] `CinematicCoreMacOS/Shared/CinematicCoreXPCProtocol.swift`
 - [x] `CinematicCoreMacOS/build_release.sh`
 - [x] `CinematicCoreMacOS/scripts/diagnostics_report.py`
 - [x] `CinematicCoreMacOS/scripts/source_fingerprint.py`
