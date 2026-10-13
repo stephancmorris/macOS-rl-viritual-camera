@@ -1,0 +1,45 @@
+name: Release DMG
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  gates:
+    uses: ./.github/workflows/ci.yml
+    with:
+      timing: false
+
+  dmg:
+    name: Notarize and staple
+    needs: gates
+    runs-on: macos-26
+    environment: release
+    timeout-minutes: 90
+    steps:
+      - name: Checkout
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+
+      - name: Require release secrets
+        env:
+          KEY_ID: ${{ secrets.APPLE_API_KEY_ID }}
+          ISSUER: ${{ secrets.APPLE_API_ISSUER_ID }}
+          P8: ${{ secrets.APPLE_API_KEY_P8 }}
+          CERT: ${{ secrets.DEVELOPER_ID_APPLICATION_P12 }}
+          CERT_PASSWORD: ${{ secrets.DEVELOPER_ID_APPLICATION_PASSWORD }}
+        run: |
+          missing=0
+          for name in KEY_ID ISSUER P8 CERT CERT_PASSWORD; do
+            if [[ -z "${!name}" ]]; then
+              echo "missing secret ${name}" >&2
+              missing=1
+            fi
+          done
+          if [[ "$missing" != 0 ]]; then
+            echo "Developer ID release is not configured. The owner adds the secrets in docs/ci/README.md." >&2
+            exit 1
+          fi
+          echo "Secrets are present. Wiring them into build_release.sh is the next owner step."
+          exit 1
