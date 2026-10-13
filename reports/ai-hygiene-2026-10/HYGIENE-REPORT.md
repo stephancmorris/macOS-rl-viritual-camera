@@ -43,14 +43,14 @@ Counts below are only findings already verified against this SHA. They will grow
 
 | Category | Confirmed | Of which Needs owner |
 |---|---|---|
-| C comments | 22 | 0 |
+| C comments | 23 | 0 |
 | D duplication | 1 | 0 |
-| X dead code | 1 (two files) | 0 |
-| E swallowed errors | 1 | 1 |
+| X dead code | 2 | 0 |
+| E swallowed errors | 2 | 2 |
 | S concurrency | 6 | 0 |
 | T tests | 2 | 0 |
 | P Python | 4 | 0 |
-| **Total confirmed** | **37** | **2** (plus one behaviour question filed as its own finding, HY-0005) |
+| **Total confirmed** | **40** | **3** (HY-0005, HY-0035, HY-0042) |
 
 Severity of the 37: **0 High, 5 Medium, 32 Low.** The medium ones are the three compiler warnings, the duplicated team-identifier helper, and the DeckLink scripts that would reintroduce a removed route.
 
@@ -743,6 +743,51 @@ Partial read (header and constructor). The unused-import claim was checked again
 **Behaviour change:** None
 **Verify:** `ruff check training/make_test_model.py`
 
+### `CinematicCoreMacOS/build_release.sh`
+
+#### HY-0040 · C1 stale step numbers · Low · Confirmed
+**Where:** `build_release.sh:51-91`
+**Current:**
+```bash
+# --- Step 4: Archive --------------------------------------------------------
+echo "==> [1/6] Archiving…"
+```
+The same gap repeats: comment steps 5 through 9 against echo steps 2/6 through 6/6.
+**Proposed:** renumber the six comments to `Step 1` … `Step 6`, matching the echoes.
+**Why:** The comments describe steps that no longer exist. The echo on the next line is the real sequence.
+**Evidence:** the comment says Step 4; the echo says `[1/6]`.
+**Behaviour change:** None
+**Verify:** none
+
+### `training/env_loader.py`
+
+#### HY-0041 · X2 exception that cannot be raised · Low · Confirmed
+**Where:** `env_loader.py:64-74`
+**Current:**
+```python
+                try:
+                    with open(metadata_path, encoding="utf-8") as f:
+                        meta = json.load(f)
+                    fps = meta.get("fps", 30)
+                    label_source = meta.get("label_source", "")
+                    if "youtube" in label_source:
+                        source = "youtube"
+                    elif label_source in ("auto", "manual"):
+                        source = "live"
+                except (json.JSONDecodeError, KeyError):
+                    pass
+```
+**Proposed:** `except json.JSONDecodeError:`.
+**Why:** Both metadata reads use `dict.get`, which does not raise `KeyError`. `json.load` raises `JSONDecodeError` for a broken file. The `KeyError` arm never runs.
+**Evidence:** the only operations inside the `try` are `json.load` and `.get`.
+**Behaviour change:** None
+**Verify:** `python -m unittest` is not wired here; a one-line read of the function is enough. Training tests if they import `scan_sessions`.
+
+#### HY-0042 · E1 bad metadata becomes 30 fps · Needs owner
+**Where:** the same `except` in `env_loader.py:73-74`
+**Question:** A `metadata.json` that is not valid JSON is ignored and the session is kept at `fps = 30` (`env_loader.py:60`). Speaker velocity in `bc_dataset.py` multiplies by that fps. Should a broken metadata file skip the session, or fail the scan, instead of training as if the clip were 30 fps?
+**Behaviour change:** Yes, if the fallback is removed. Not in a batch.
+
 ### `CinematicCoreMacOS/CinematicCoreMacOSTests/PillTargetTests.swift`
 
 Partial read (the width test).
@@ -799,6 +844,8 @@ Clean: no changes proposed.
 - `CinematicCoreMacOS/CinematicCoreMacOS/Console/ChannelID.swift` (C and D are reserved slots, not dead cases; the comment says they are not instantiated)
 - `CinematicCoreMacOS/CinematicCoreMacOSTests/RealCameraTests.swift` (opt-in; prints sit next to `#expect`)
 - `CinematicCoreMacOS/CinematicCoreMacOSTests/InstrumentationInvestigationTests.swift` (opt-in study; prints are the dumped JSON)
+- `training/schema.py`
+- `training/writer.py`
 
 ## Cross-file duplication
 
@@ -932,6 +979,9 @@ Files that will share a batch once assigned, because one finding touches both:
 | HY-0036 | confirmed, batch withheld |
 | HY-0037 | confirmed, batch withheld |
 | HY-0038 | confirmed, batch withheld |
+| HY-0040 | confirmed, batch withheld |
+| HY-0041 | confirmed, batch withheld |
+| HY-0042 | Needs owner |
 
 ## Resume checklist
 
@@ -1116,7 +1166,7 @@ Files that will share a batch once assigned, because one finding touches both:
 - [x] `CinematicCoreMacOS/CinematicCoreMacOSUITests/CinematicCoreMacOSUITests.swift`
 - [x] `CinematicCoreMacOS/CinematicCoreMacOSUITests/CinematicCoreMacOSUITestsLaunchTests.swift`
 - [~] `CinematicCoreMacOS/Shared/CinematicCoreXPCProtocol.swift`
-- [ ] `CinematicCoreMacOS/build_release.sh`
+- [x] `CinematicCoreMacOS/build_release.sh`
 - [ ] `CinematicCoreMacOS/scripts/diagnostics_report.py`
 - [x] `CinematicCoreMacOS/scripts/source_fingerprint.py`
 - [ ] `CinematicCoreMacOS/scripts/test_diagnostics_report.py`
@@ -1127,16 +1177,16 @@ Files that will share a batch once assigned, because one finding touches both:
 - [~] `training/cinematic_env.py`
 - [ ] `training/detector.py`
 - [ ] `training/downloader.py`
-- [~] `training/env_loader.py`
+- [x] `training/env_loader.py`
 - [ ] `training/env_reward.py`
 - [ ] `training/export_coreml.py`
 - [ ] `training/extract_frames.py`
 - [x] `training/make_test_model.py`
-- [ ] `training/schema.py`
+- [x] `training/schema.py`
 - [ ] `training/test_checkpoint_trust.py`
 - [ ] `training/test_env.py`
 - [ ] `training/test_training.py`
 - [x] `training/train_bc.py`
 - [ ] `training/train_ppo.py`
-- [ ] `training/writer.py`
+- [x] `training/writer.py`
 - [x] `update_xcode.rb`
