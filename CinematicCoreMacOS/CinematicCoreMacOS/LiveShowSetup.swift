@@ -169,7 +169,7 @@ final class LiveShowSetupModel: ObservableObject {
         return show.channelA.availableCameras.first { $0.uniqueID == id }
     }
 
-    private static func device(_ camera: CameraManager.CameraDevice) -> ShowSetupModel.Device {
+    private nonisolated static func device(_ camera: CameraManager.CameraDevice) -> ShowSetupModel.Device {
         .init(uniqueID: camera.uniqueID, name: camera.name, modelID: camera.modelID)
     }
 

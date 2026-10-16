@@ -13,6 +13,8 @@ import IOSurface
 import OSLog
 import os
 
+/// `CVPixelBuffer` is not `Sendable`. The frame path hands this box across a
+/// task and does not touch the buffer again until that task finishes.
 private final class SendablePixelBufferBox: @unchecked Sendable {
     nonisolated(unsafe) let pixelBuffer: CVPixelBuffer
 
@@ -205,7 +207,6 @@ enum CameraError: LocalizedError {
 }
 
 /// Manages the AVCaptureSession pipeline for 4K video capture
-/// Ticket: APP-01 - AVCaptureSession Pipeline
 @MainActor
 final class CameraManager: NSObject, ObservableObject {
     private nonisolated static let logger = Logger(subsystem: "com.alfie", category: "Camera")
@@ -266,16 +267,12 @@ final class CameraManager: NSObject, ObservableObject {
     /// Operator-facing summary of the current playback harness state.
     @Published private(set) var validationClipStatus: String = "Select a validation clip to route file playback through Alfie's camera pipeline."
     
-    /// Person detector (Task 2.1)
     let personDetector = PersonDetector()
     
-    /// Crop engine (Task 2.2 - GFX-01)
     let cropEngine: CropEngine?
 
-    /// Shot composer (Task 2.3 - LOGIC-01)
     let shotComposer = ShotComposer()
 
-    /// RL-trained CoreML agent (Task APP-02)
     let cinematicAgent = CinematicAgent()
 
     /// When true, the cinematic agent drives the crop instead of ShotComposer.
@@ -291,7 +288,6 @@ final class CameraManager: NSObject, ObservableObject {
         }
     }
 
-    /// Training data recorder (Task 3.1 - RL-01)
     let trainingDataRecorder = TrainingDataRecorder()
 
     /// Routes the processed program feed to the currently active output sink.
@@ -426,7 +422,7 @@ final class CameraManager: NSObject, ObservableObject {
     //
     // Detection is off by default. The operator taps "Detect" to enter the
     // tap-a-subject state; tapping a point seeds a one-shot ROI scan that finds
-    // and acquires that single person. No full-frame multi-person scan ever runs.
+    // and acquires that single person.
 
     /// True after the operator taps Detect and before a subject is selected.
     /// Drives the `.awaitingTap` detection mode and the preview tap affordance.
@@ -478,10 +474,8 @@ final class CameraManager: NSObject, ObservableObject {
     /// queue detections faster than they complete and spawn unbounded work.
     private var detectionInFlight = false
 
-    /// Bumped whenever a detection completes. Comparing against
-    /// `consumedDetectionRevision` tells a frame whether its detections are new
-    /// or a repeat of the previous frame's — which matters because several
-    /// framing rules count *consecutive frames* and a repeat is not evidence.
+    /// Bumped when a capture source starts, stops, or rebinds. In-flight frames
+    /// from an older value are retired.
     private var captureGeneration: UInt64 = 0
 
     /// Frame counter driving `DeveloperFlags.detectionFrameInterval`.
@@ -728,7 +722,6 @@ final class CameraManager: NSObject, ObservableObject {
         self.outputPort = outputPort
         self.commands = CommandDispatcher(channelID: channelID)
         self.sessionQueue = DispatchQueue(label: "com.alfie.capture-session.\(channelID.letter)", qos: .userInitiated)
-        // Initialize crop engine (Task 2.2 - GFX-01)
         self.cropEngine = CropEngine()
         
         super.init()
@@ -771,11 +764,6 @@ final class CameraManager: NSObject, ObservableObject {
         let devices = allDevices.filter { device in
             !device.localizedName.lowercased().contains("Test")
         }
-//        
-//        print("   Found \(devices.count) camera(s) (excluding MacBook Pro for testing)")
-//        if devices.count != allDevices.count {
-//            print("   ⚠️ Filtered out: \(allDevices.count - devices.count) camera(s)")
-//        }
         
         if devices.isEmpty {
             availableCameras = []
@@ -1790,13 +1778,7 @@ final class CameraManager: NSObject, ObservableObject {
     private func applyFrameProfile(_ profile: ShotComposer.Config.FrameProfile) {
         guard let cropEngine else { return }
 
-        let desiredSize: CGSize
-        switch profile {
-        case .livestream:
-            desiredSize = CGSize(width: 1920, height: 1080)
-        case .portrait:
-            desiredSize = profile.defaultOutputSize
-        }
+        let desiredSize = profile.defaultOutputSize
         if cropEngine.config.outputSize != desiredSize {
             cropEngine.config.outputSize = desiredSize
         }
@@ -1868,9 +1850,6 @@ final class CameraManager: NSObject, ObservableObject {
         // still delivers would start under the new generation, so refuse it
         // here: it must not be rendered, sent, or replace the cleared hold.
         guard isRunning, !sourceMissing else { return }
-        // NOTE: a `CIImage(cvPixelBuffer:)` used to be built here and never
-        // used — one wasted image object per frame on the exact path the memory
-        // investigation is looking at. Removed so it cannot muddy attribution.
         let bufferWidth = CGFloat(CVPixelBufferGetWidth(pixelBuffer))
         let bufferHeight = CGFloat(CVPixelBufferGetHeight(pixelBuffer))
 
