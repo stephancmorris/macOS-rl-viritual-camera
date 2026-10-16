@@ -10,8 +10,6 @@ import OSLog
 import SwiftUI
 
 struct ContentView: View {
-    private static let logger = Logger(subsystem: "com.alfie", category: "ContentView")
-
     @ObservedObject var cameraManager: CameraManager
     @ObservedObject var systemExtensionManager: SystemExtensionActivationManager
     @ObservedObject var settingsWindowController: SettingsWindowController
@@ -248,13 +246,6 @@ struct ContentView: View {
         }
     }
 
-    private func toggleCamera() {
-        if cameraManager.isRunning {
-            cameraManager.dispatch(cameraManager.makeCommand(.stopSession))
-        } else {
-            Task { await startCamera() }
-        }
-    }
 }
 
 
@@ -431,115 +422,6 @@ struct LiquidGlassBackdrop: View {
     }
 }
 
-struct LiquidPreviewCard<Content: View>: View {
-    let title: String
-    let subtitle: String
-    let accent: Color
-    let content: Content
-
-    init(
-        title: String,
-        subtitle: String,
-        accent: Color,
-        @ViewBuilder content: () -> Content
-    ) {
-        self.title = title
-        self.subtitle = subtitle
-        self.accent = accent
-        self.content = content()
-    }
-
-    var body: some View {
-        VStack(spacing: 0) {
-            ZStack(alignment: .topLeading) {
-                content
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
-                    .clipShape(RoundedRectangle(cornerRadius: 28, style: .continuous))
-
-                VStack(alignment: .leading, spacing: 4) {
-                    Text(title)
-                        .font(.system(size: 14, weight: .semibold, design: .rounded))
-                        .foregroundStyle(.white.opacity(0.96))
-                    Text(subtitle)
-                        .font(.system(size: 11, weight: .medium, design: .rounded))
-                        .foregroundStyle(.white.opacity(0.68))
-                }
-                .padding(.horizontal, 14)
-                .padding(.vertical, 10)
-                .background(.ultraThinMaterial, in: Capsule(style: .continuous))
-                .overlay(
-                    Capsule(style: .continuous)
-                        .strokeBorder(.white.opacity(0.14), lineWidth: 1)
-                )
-                .padding(16)
-            }
-        }
-        .background {
-            RoundedRectangle(cornerRadius: 30, style: .continuous)
-                .fill(Color.black.opacity(0.62))
-                .overlay(
-                    RoundedRectangle(cornerRadius: 30, style: .continuous)
-                        .strokeBorder(
-                            LinearGradient(
-                                colors: [accent.opacity(0.85), .white.opacity(0.16)],
-                                startPoint: .topLeading,
-                                endPoint: .bottomTrailing
-                            ),
-                            lineWidth: 1.5
-                        )
-                )
-                .overlay(
-                    RoundedRectangle(cornerRadius: 30, style: .continuous)
-                        .fill(
-                            LinearGradient(
-                                colors: [.white.opacity(0.12), .clear, .clear],
-                                startPoint: .topLeading,
-                                endPoint: .bottomTrailing
-                            )
-                        )
-                )
-                .shadow(color: accent.opacity(0.18), radius: 22, y: 10)
-        }
-    }
-}
-
-struct GlassCapsuleButtonStyle: ButtonStyle {
-    var tint: Color = .white.opacity(0.6)
-    var isPrimary: Bool = false
-
-    func makeBody(configuration: Configuration) -> some View {
-        configuration.label
-            .font(.system(size: 13, weight: .semibold, design: .rounded))
-            .foregroundStyle(isPrimary ? Color.white : Color.white.opacity(0.88))
-            .padding(.horizontal, 14)
-            .padding(.vertical, 10)
-            .background {
-                Capsule(style: .continuous)
-                    .fill(.ultraThinMaterial)
-                    .overlay(
-                        Capsule(style: .continuous)
-                            .fill(
-                                LinearGradient(
-                                    colors: [
-                                        tint.opacity(isPrimary ? 0.7 : 0.34),
-                                        .white.opacity(isPrimary ? 0.12 : 0.06)
-                                    ],
-                                    startPoint: .topLeading,
-                                    endPoint: .bottomTrailing
-                                )
-                            )
-                    )
-                    .overlay(
-                        Capsule(style: .continuous)
-                            .strokeBorder(.white.opacity(configuration.isPressed ? 0.26 : 0.14), lineWidth: 1)
-                    )
-                    .shadow(color: tint.opacity(isPrimary ? 0.28 : 0.14), radius: 12, y: 6)
-            }
-            .scaleEffect(configuration.isPressed ? 0.98 : 1.0)
-            .animation(.easeOut(duration: 0.16), value: configuration.isPressed)
-    }
-}
-
 struct GlassPanelModifier: ViewModifier {
     var cornerRadius: CGFloat
     var tint: Color = .white.opacity(0.1)
@@ -566,12 +448,6 @@ struct GlassPanelModifier: ViewModifier {
                     )
                     .shadow(color: .black.opacity(0.22), radius: 30, y: 14)
             }
-    }
-}
-
-extension View {
-    func glassPanel(cornerRadius: CGFloat, tint: Color = .white.opacity(0.1), opacity: CGFloat = 0.18) -> some View {
-        modifier(GlassPanelModifier(cornerRadius: cornerRadius, tint: tint, opacity: opacity))
     }
 }
 

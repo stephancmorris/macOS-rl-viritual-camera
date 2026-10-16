@@ -122,12 +122,9 @@ nonisolated struct CapabilityMeasurements: Equatable, Sendable {
     var windows = 0
     var seconds: Double = 0
     var deliveredFPS: Double = 0
-    var admittedFPS: Double = 0
     var handoffFPS: Double = 0
     var gateSkipRatio: Double = 0
     var frameWallMeanMS: Double = 0
-    var frameWallMaxMS: Double = 0
-    var visionMeanMS: Double = 0
     var observationAgeMeanMS: Double = 0
     var detections = 0
     var memoryGrowthMBPerMinute: Double = 0
@@ -238,7 +235,6 @@ nonisolated struct CapabilityReport: Equatable, Sendable {
         guard !samples.isEmpty else { return result }
         var counts = PipelineCounters()
         var frameWallWeighted = 0.0
-        var visionWeighted = 0.0
         var observationWeighted = 0.0
         for sample in samples {
             let w = sample.window
@@ -255,16 +251,13 @@ nonisolated struct CapabilityReport: Equatable, Sendable {
             counts.repeated += c.repeated
             result.detections += w.detections
             frameWallWeighted += w.frameMeanMS * Double(c.admitted)
-            visionWeighted += w.visionMeanMS * Double(w.detections)
             observationWeighted += w.observationMeanMS * Double(w.detections)
-            result.frameWallMaxMS = max(result.frameWallMaxMS, w.frameMaxMS)
             result.worstThermal = max(result.worstThermal, sample.thermal)
         }
         result.windows = samples.count
         result.counts = counts
         if result.seconds > 0 {
             result.deliveredFPS = Double(counts.delivered) / result.seconds
-            result.admittedFPS = Double(counts.admitted) / result.seconds
             result.handoffFPS = Double(counts.handoffAccepted) / result.seconds
         }
         if counts.delivered > 0 {
@@ -272,7 +265,6 @@ nonisolated struct CapabilityReport: Equatable, Sendable {
         }
         if counts.admitted > 0 { result.frameWallMeanMS = frameWallWeighted / Double(counts.admitted) }
         if result.detections > 0 {
-            result.visionMeanMS = visionWeighted / Double(result.detections)
             result.observationAgeMeanMS = observationWeighted / Double(result.detections)
         }
         // Footprint trend: first window to last, over the time between them.

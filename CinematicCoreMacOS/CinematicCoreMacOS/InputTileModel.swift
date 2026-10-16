@@ -7,7 +7,6 @@ struct InputTileModel: Identifiable {
         case A, B, C, D
 
         var id: String { rawValue }
-        var index: Int { Self.allCases.firstIndex(of: self)! }
     }
 
     enum Role {

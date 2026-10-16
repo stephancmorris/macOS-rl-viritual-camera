@@ -73,28 +73,6 @@ nonisolated struct DirectorLiveState: Sendable {
     var evidenceAvailable: Bool = false
 }
 
-nonisolated protocol DirectorWorld {
-    func directorState() -> DirectorLiveState
-}
-
-/// Main-actor boundary over R2's existing observable state. Authority is injected
-/// because ShowCoordinator intentionally has no director field yet.
-@MainActor final class ShowDirectorWorld: DirectorWorld {
-    let show: ShowCoordinator
-    var authority: DirectorAuthority
-    init(show: ShowCoordinator, authority: DirectorAuthority) {
-        self.show = show; self.authority = authority
-    }
-    func directorState() -> DirectorLiveState {
-        let preview = show.previewChannel
-        let channel = preview.flatMap(show.channel)
-        return DirectorLiveState(authority: authority, program: show.programChannel,
-            preview: preview, revisions: channel?.revisions,
-            routeGeneration: show.router.routeGeneration,
-            sourceMissing: channel?.sourceMissing ?? true)
-    }
-}
-
 nonisolated enum DirectorProposalValidator {
     enum StaleReason: Hashable, Sendable {
         case authorityRevoked, routeChanged, sourceRestarted, shotChangedByOperator
