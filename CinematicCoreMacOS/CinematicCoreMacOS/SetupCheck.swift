@@ -102,8 +102,8 @@ final class SetupCheck: ObservableObject {
             return
         }
         // Only windows that began after the warm-up count.
-        let windowStart = now - window.windowSeconds
-        guard windowStart >= startedAt + warmUpSeconds - 0.25 else { return }
+        guard window.beganAfterWarmUp(closedAt: now, measurementStartedAt: startedAt,
+                                     warmUp: warmUpSeconds) else { return }
 
         samples.append(CapabilitySample(window: window, thermal: thermal))
         if samples.count >= sampleWindows {
@@ -144,5 +144,12 @@ final class SetupCheck: ObservableObject {
             belowShowRate: source.belowShowRate,
             source: described.isEmpty ? source.inputKind : described,
             route: identity.output.route)
+    }
+}
+
+extension DiagnosticsWindow {
+    func beganAfterWarmUp(closedAt now: TimeInterval, measurementStartedAt startedAt: TimeInterval,
+                          warmUp: TimeInterval) -> Bool {
+        now - windowSeconds >= startedAt + warmUp - 0.25
     }
 }

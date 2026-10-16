@@ -2,7 +2,7 @@
 Expert demonstration dataset for Behavioral Cloning.
 
 Derives (observation, expert_action) pairs from JSONL sessions that contain
-ideal_crop data (YouTube/reference clips from Task 3.1b). Expert actions are
+ideal_crop data (YouTube/reference clips from extract_frames.py). Expert actions are
 computed as the velocity needed to move from ideal_crop[t] to ideal_crop[t+1].
 
 Usage:
@@ -19,61 +19,12 @@ import torch
 from torch.utils.data import Dataset
 
 from cinematic_env import (
-    ASPECT_RATIO,
     MAX_PAN_SPEED,
     MAX_TILT_SPEED,
-    MAX_ZOOM,
     MAX_ZOOM_SPEED,
+    build_observation,
 )
 from env_loader import scan_sessions
-
-
-def build_observation(
-    frame: dict,
-    crop_x: float,
-    crop_y: float,
-    crop_w: float,
-    crop_h: float,
-    zoom: float,
-    vel_x: float,
-    vel_y: float,
-) -> np.ndarray:
-    """Build the 18-dim observation vector from frame data and crop state.
-
-    Mirrors CinematicFramingEnv._build_observation() for consistency.
-    """
-    speaker = frame.get("speaker")
-    keypoints = frame.get("keypoints")
-
-    has_person = 1.0 if speaker else 0.0
-    sp_x = speaker["x"] if speaker else 0.0
-    sp_y = speaker["y"] if speaker else 0.0
-    sp_z = min(speaker["z"] / 10.0, 1.0) if speaker else 0.0
-
-    head_x = keypoints["head_x"] if keypoints else 0.0
-    head_y = keypoints["head_y"] if keypoints else 0.0
-    waist_x = keypoints["waist_x"] if keypoints else 0.0
-    waist_y = keypoints["waist_y"] if keypoints else 0.0
-    pose_conf = keypoints["pose_confidence"] if keypoints else 0.0
-
-    zoom_norm = min(zoom / MAX_ZOOM, 1.0)
-
-    if crop_h > 0.01 and has_person > 0.5:
-        head_rel_y = np.clip((head_y - crop_y) / crop_h, 0.0, 1.0)
-        waist_rel_y = np.clip((waist_y - crop_y) / crop_h, 0.0, 1.0)
-    else:
-        head_rel_y = 0.0
-        waist_rel_y = 0.0
-
-    obs = np.array([
-        has_person, sp_x, sp_y, sp_z,
-        head_x, head_y, waist_x, waist_y,
-        crop_x, crop_y, crop_w, crop_h,
-        zoom_norm, vel_x, vel_y,
-        head_rel_y, waist_rel_y, pose_conf,
-    ], dtype=np.float32)
-
-    return np.nan_to_num(obs, nan=0.0, posinf=1.0, neginf=-1.0)
 
 
 class ExpertDataset(Dataset):

@@ -1,8 +1,8 @@
 """
 CinematicFramingEnv-v0: Gymnasium environment for cinematic framing RL.
 
-Replays recorded sessions (JSONL from Tasks 3.1/3.1b) and lets an RL agent
-learn to frame a speaker using velocity-based crop adjustments. The agent
+Replays recorded sessions (JSONL from TrainingDataRecorder and extract_frames.py)
+and lets an RL agent learn to frame a speaker using velocity-based crop adjustments. The agent
 observes speaker position + current crop and outputs pan/tilt/zoom velocities.
 
 Usage:
@@ -18,7 +18,7 @@ from pathlib import Path
 import gymnasium
 import numpy as np
 
-from env_loader import SessionData, scan_sessions
+from env_loader import scan_sessions
 from env_reward import compute_reward
 
 # Action scaling constants (per frame)
@@ -26,10 +26,56 @@ MAX_PAN_SPEED = 0.02    # max 2% of canvas per frame
 MAX_TILT_SPEED = 0.02
 MAX_ZOOM_SPEED = 0.05   # max 5% zoom change per frame
 
-# Crop constraints (matching ShotComposer.clampCropToFrame)
-MIN_CROP_H = 0.25       # max zoom 4x
 MAX_ZOOM = 4.0
 ASPECT_RATIO = 16.0 / 9.0
+
+
+def build_observation(
+    frame: dict,
+    crop_x: float,
+    crop_y: float,
+    crop_w: float,
+    crop_h: float,
+    zoom: float,
+    vel_x: float,
+    vel_y: float,
+) -> np.ndarray:
+    """Build the 18-dim observation vector from frame data and crop state.
+
+    Mirrors CinematicFramingEnv._build_observation() for consistency.
+    """
+    speaker = frame.get("speaker")
+    keypoints = frame.get("keypoints")
+
+    has_person = 1.0 if speaker else 0.0
+    sp_x = speaker["x"] if speaker else 0.0
+    sp_y = speaker["y"] if speaker else 0.0
+    sp_z = min(speaker["z"] / 10.0, 1.0) if speaker else 0.0
+
+    head_x = keypoints["head_x"] if keypoints else 0.0
+    head_y = keypoints["head_y"] if keypoints else 0.0
+    waist_x = keypoints["waist_x"] if keypoints else 0.0
+    waist_y = keypoints["waist_y"] if keypoints else 0.0
+    pose_conf = keypoints["pose_confidence"] if keypoints else 0.0
+
+    zoom_norm = min(zoom / MAX_ZOOM, 1.0)
+
+    if crop_h > 0.01 and has_person > 0.5:
+        head_rel_y = np.clip((head_y - crop_y) / crop_h, 0.0, 1.0)
+        waist_rel_y = np.clip((waist_y - crop_y) / crop_h, 0.0, 1.0)
+    else:
+        head_rel_y = 0.0
+        waist_rel_y = 0.0
+
+    obs = np.array([
+        has_person, sp_x, sp_y, sp_z,
+        head_x, head_y, waist_x, waist_y,
+        crop_x, crop_y, crop_w, crop_h,
+        zoom_norm, vel_x, vel_y,
+        head_rel_y, waist_rel_y, pose_conf,
+    ], dtype=np.float32)
+
+    return np.nan_to_num(obs, nan=0.0, posinf=1.0, neginf=-1.0)
 
 
 class CinematicFramingEnv(gymnasium.Env):
@@ -241,59 +287,8 @@ class CinematicFramingEnv(gymnasium.Env):
 
     def _build_observation(self, vel_x: float, vel_y: float) -> np.ndarray:
         """Build the 18-dim observation vector from current state."""
-        frame = self._current_frames[self._step_idx]
-        speaker = frame.get("speaker")
-        keypoints = frame.get("keypoints")
-
-        has_person = 1.0 if speaker else 0.0
-
-        # Speaker position
-        sp_x = speaker["x"] if speaker else 0.0
-        sp_y = speaker["y"] if speaker else 0.0
-        sp_z = min(speaker["z"] / 10.0, 1.0) if speaker else 0.0
-
-        # Keypoints
-        head_x = keypoints["head_x"] if keypoints else 0.0
-        head_y = keypoints["head_y"] if keypoints else 0.0
-        waist_x = keypoints["waist_x"] if keypoints else 0.0
-        waist_y = keypoints["waist_y"] if keypoints else 0.0
-        pose_conf = keypoints["pose_confidence"] if keypoints else 0.0
-
-        # Crop state
-        crop_x = self._crop_x
-        crop_y = self._crop_y
-        crop_w = self._crop_w
-        crop_h = self._crop_h
-        zoom_norm = min(self._zoom / MAX_ZOOM, 1.0)
-
-        # Relative positions within crop
-        if crop_h > 0.01 and has_person > 0.5:
-            head_rel_y = np.clip((head_y - crop_y) / crop_h, 0.0, 1.0)
-            waist_rel_y = np.clip((waist_y - crop_y) / crop_h, 0.0, 1.0)
-        else:
-            head_rel_y = 0.0
-            waist_rel_y = 0.0
-
-        obs = np.array([
-            has_person,       # 0
-            sp_x,             # 1
-            sp_y,             # 2
-            sp_z,             # 3
-            head_x,           # 4
-            head_y,           # 5
-            waist_x,          # 6
-            waist_y,          # 7
-            crop_x,           # 8
-            crop_y,           # 9
-            crop_w,           # 10
-            crop_h,           # 11
-            zoom_norm,        # 12
-            vel_x,            # 13
-            vel_y,            # 14
-            head_rel_y,       # 15
-            waist_rel_y,      # 16
-            pose_conf,        # 17
-        ], dtype=np.float32)
-
-        # Safety: replace any NaN/Inf
-        return np.nan_to_num(obs, nan=0.0, posinf=1.0, neginf=-1.0)
+        return build_observation(
+            self._current_frames[self._step_idx],
+            self._crop_x, self._crop_y, self._crop_w, self._crop_h,
+            self._zoom, vel_x, vel_y,
+        )
