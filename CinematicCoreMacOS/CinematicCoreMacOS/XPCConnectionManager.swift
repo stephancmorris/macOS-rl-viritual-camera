@@ -34,19 +34,8 @@ nonisolated enum XPCPeerRequirement {
     /// The extension requirement for this build, or nil when this process has
     /// no team signature to compare against (an unsigned or ad-hoc build).
     static func forExtension() -> String? {
-        guard let team = ownTeamIdentifier() else { return nil }
+        guard let team = XPCSigningIdentity.ownTeamIdentifier() else { return nil }
         return requirement(identifier: extensionIdentifier, teamID: team)
-    }
-
-    static func ownTeamIdentifier() -> String? {
-        var code: SecCode?
-        guard SecCodeCopySelf([], &code) == errSecSuccess, let code else { return nil }
-        var staticCode: SecStaticCode?
-        guard SecCodeCopyStaticCode(code, [], &staticCode) == errSecSuccess, let staticCode else { return nil }
-        var info: CFDictionary?
-        guard SecCodeCopySigningInformation(staticCode, SecCSFlags(rawValue: kSecCSSigningInformation), &info) == errSecSuccess,
-              let dictionary = info as? [String: Any] else { return nil }
-        return dictionary[kSecCodeInfoTeamIdentifier as String] as? String
     }
 }
 
@@ -352,18 +341,16 @@ final class XPCConnectionManager {
                 return
             }
 
-            await MainActor.run {
-                guard self.shouldMaintainConnection else {
-                    self.reconnectTask = nil
-                    self.nextReconnectDelay = nil
-                    self.onStateChange?()
-                    return
-                }
-
+            guard self.shouldMaintainConnection else {
                 self.reconnectTask = nil
                 self.nextReconnectDelay = nil
-                self.connect()
+                self.onStateChange?()
+                return
             }
+
+            self.reconnectTask = nil
+            self.nextReconnectDelay = nil
+            self.connect()
         }
     }
 

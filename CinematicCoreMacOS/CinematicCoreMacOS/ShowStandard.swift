@@ -26,6 +26,7 @@ nonisolated enum ShowStandard: String, CaseIterable, Identifiable {
     /// to the next capture. Keep that selected standard stable until output
     /// stops, including if the virtual-camera XPC link reconnects.
     private static let sessionLock = NSLock()
+    /// Read and written only while `sessionLock` is held.
     nonisolated(unsafe) private static var sessionStandard: ShowStandard?
 
     /// Human-readable label for the settings picker.

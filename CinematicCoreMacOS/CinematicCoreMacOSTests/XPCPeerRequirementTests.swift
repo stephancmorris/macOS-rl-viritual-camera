@@ -50,10 +50,11 @@ struct XPCPeerRequirementTests {
         #expect(SecCodeCheckValidity(selfCode, [], compiled) != errSecSuccess)
     }
 
-    @Test func unsignedBuildHasNoExtensionRequirement() {
+    @Test(.enabled(if: XPCSigningIdentity.ownTeamIdentifier() == nil,
+                   "Signed hosts are outside the unsigned-build case"))
+    func unsignedBuildHasNoExtensionRequirement() {
         // Without a team signature there is nothing to verify the peer against;
         // the host then refuses to connect instead of connecting unchecked.
-        guard XPCPeerRequirement.ownTeamIdentifier() == nil else { return }
         #expect(XPCPeerRequirement.forExtension() == nil)
     }
 }
