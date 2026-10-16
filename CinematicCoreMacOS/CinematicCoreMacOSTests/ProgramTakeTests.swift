@@ -110,6 +110,18 @@ struct ProgramTakeTests {
         #expect(rig.show.programOutput.currentSessionIdentity().source.deviceName == "Band side")
     }
 
+    // CR-019: after a Take to B, A is Preview. Removing it would make
+    // `channelA` trap, so A is never removed.
+    @Test func channelAIsNotRemovedAfterTakeToB() throws {
+        let rig = rig()
+        try prepare(rig.b, rig: rig)
+        #expect(rig.show.take() == .committed(newProgram: .b))
+        rig.show.removeChannel(.a)
+        #expect(rig.show.channel(.a) != nil)
+        #expect(rig.show.channelA.channelID == .a)
+        #expect(rig.show.previewChannel == .a)
+    }
+
     @Test func stopShowNeverCarriesRolesIntoTheNextShow() throws {
         let rig = rig()
         try prepare(rig.b, rig: rig)

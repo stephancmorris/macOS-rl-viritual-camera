@@ -1,46 +1,38 @@
-# Decisions for Stephan
+# Shot style for live events
 
-| ID / question | Options | Recommendation / why | Blocks | Reversible? |
-|---|---|---|---|---|
-| T1 Sermon pace? | Fixed timer; bounded duration suggestions; event-only | Bounded suggestions with soft maximum; never manufacture a cut to satisfy time | AD-STYLE/PREFS | Yes, requalify |
-| T2 Cuts into movement? | Allowed; settled only; motion-class whitelist | Settled only first; simplifies volunteer prediction and evaluation | AD-STYLE/PREPARE | Yes, requalify |
-| T3 Scheduled Wide? | Mandatory interval; soft contextual reminder; none | Soft reminder, fixed safe-wide role; no cut forced by timer | AD-STYLE/ROLES | Yes |
+Status: reconciled 2026-10-10 for D-01. [Recorded decisions](../handoff/stage3-4/DECISIONS.md) take precedence over older proposed text. Implementation references describe the open A-07 stack at `ecbf8814b7c77c64edfd2cc4a92ff6c80d892e42`, not merged or qualified behavior. Unrecorded choices and recommendations remain **AWAITING OWNER**. See the [product contract](product-contract.md) and [event contract](event-authority-contract.md).
 
-Status: proposed, 2026-09-30. Every number in the parameter table is a **proposed starting value** for study, not a broadcast standard or approved setting.
+## Recorded scope and implementation
 
-## Practice and current implementation
+S1 covers static-camera live events with qualified steps and a present operator, not a sermon-only fixed timer. UC-2 has one shot per input. N3 uses app presets: Stage Wide / Full Body / Waist Up and Webcam Wide / Tight. `DirectorShot(preset:)` wraps `OperatorCommand.Preset`; `isWide`, `title` and deterministic `order` derive from that preset. There is no independent Director mode/zoom-rung mapping to maintain.
 
-Blackmagic describes preparing a source on Preview before using Cut, which supports Alfie's existing preview-first workflow ([ATEM Television Studio features](https://www.blackmagicdesign.com/products/atemtelevisionstudio/features), accessed 2026-09-30). This does not establish a sermon shot-duration rule. BBC R&D's [WHP402 multicamera production dataset](https://downloads.bbc.co.uk/rd/pubs/whp/whp-pdf-files/WHP402.pdf) (accessed 2026-09-30) is a relevant evaluation precedent, not church footage or permission to use its assets without checking terms. No authoritative universal minimum duration, Wide frequency or movement speed was verified; the values below are editorial hypotheses to test.
+The A-07 `SegmentType` cases are `presenter`, `panel`, `performance`, `videoBreak`, `liveEvent`. A style affects ranking and pacing; a segment never grants authority. The no-run-sheet profile is `liveEvent`. The run-sheet authoring/advancement policy remains F3 open.
 
-`ShotComposer.swift` / `Config.ShotPreset` provides Wide, Full Body, Waist Up; `CameraManager` and `CropEngine.swift` provide existing one-rung moves and interpolation. `ProgramTake.swift` allows technically ready moving shots in manual R2. Proposed director policy restricts its own choices; it does not rewrite those controls or substitute a new crop engine.
+## Explicit style parameters
 
-## Proposed DirectorShotPolicy parameter contract
+| `DirectorStyle` field | Unit / validation |
+|---|---|
+| `minimumShotDuration`, `preferredShotDuration`, `softMaximumShotDuration` | Finite nonnegative seconds; minimum ≤ preferred ≤ soft maximum |
+| `wideCadence` | Finite positive seconds |
+| `repetitionWindow`, `settleTime` | Finite nonnegative seconds |
+| `maximumMovement` | Finite nonnegative normalized frame units/s |
+| `onAirMoveRate` | Finite positive shot-ladder steps/s; storing it does not implement or approve N2 |
+| `cutOnMotionAllowed` | Boolean; does not relax the stricter cut-ready bar |
 
-All names are proposed adapters until matched to Sol's final types. Units must be explicit; log-scale speed is dimensionless per second; center speed uses normalized **source** coordinates. Existing engine/quality restrictions always win.
+All values are injected study parameters. This document removes the old sermon timing/motion starting values rather than turning them into production defaults. Select candidate values from labelled shadow evidence and freeze a complete parameter revision before a scored run.
 
-| Parameter | Proposed starting value | Rationale / how measured |
-|---|---|---|
-| minimumShotSeconds | 20 s | Reduce restless sermon cuts; compare reviewer distraction and missed moments |
-| preferredShotSeconds | 45 s | First point to consider variation, not a timer trigger; measure useful-proposal rate |
-| maximumShotSeconds | 90 s, soft | Prompt a check on static coverage; allow indefinite hold if no better eligible candidate |
-| wideReminderSeconds | 120 s since last full-stage view | Context reminder; measure accept/ignore rate |
-| wideMinimumSeconds | 8 s | Give context time to read; reviewer comprehension check |
-| repeatHistoryCount | 2 committed shot descriptions | Penalize repeated equivalent framing, not A/B route alternation itself |
-| minimumDistinctScaleRatio | 1.25 | Suppress near-identical size jump; compare rendered crop heights, also respect different genuine angles |
-| maximumCenterSpeedPerSecond | 0.02 | Conservative settled-shot ceiling; crop-trajectory replay and visual review |
-| maximumLogScaleSpeedPerSecond | 0.02 | Detect residual zoom; review source-rate-normalized trajectory |
-| settledWindowSeconds | 0.75 s | Continuous stability before director readiness; evaluate latency vs false-ready |
-| minimumFreshObservations | 3 | Require independent evidence within window; don't count repeats |
-| observationMaxAgeSeconds | 0.15 s | Initial perception freshness hypothesis; measure at decision time |
-| proposalIntentTTLSeconds | 5 s | Bound stale editorial intent; count expiry/reproposal churn |
-| takeNoticeSeconds | 3 s, only later Auto Direct | Gives chance to cancel; timed volunteer trials |
-| allowMovingShotTake | false | No cut during pan/zoom; ongoing plan vetoes a slow endpoint |
-| allowDirectorLiveMoves | false | Off-air preparation first; existing Program tracking is not a new director move |
-| forceWideOnTimer / forceCutAtMaximum | false / false | Soft editorial limits cannot override readiness or authority |
-| faultSafeTakeEnabled | false | Matches fault revocation recommendation |
+`DirectorShotPolicy` ranks eligible Preview candidates using explicit parameters. It may recommend preparing Preview before the current Program shot's minimum duration has elapsed. `recommendationDue`, soft maximum and wide cadence are advisory, never a forced cut, readiness waiver or permit. Abstentions are `invalidInput`, `minimumDuration`, `noEligibleCandidate`, `repetition`, `movement`, `noPreview`.
 
-Precedence: safety/authority and R2 eligibility → subject/role/motion → minimum duration → repetition/pace preference. A qualified later emergency fallback, if ever approved, needs its own exception; no ordinary maximum-duration rule overrides minimum duration. Safe-wide dwell uses `wideMinimumSeconds` instead of ordinary minimum so returning to the speaker is not blocked unnecessarily. Manual cuts ignore director pace restrictions and pause direction.
+AI-1 restricts judges to rule-allowed candidates; optional probabilities are calibrated model outputs, not fabricated identity confidence. Low-confidence handling must preserve eligibility and authority even when preferring a wider shot. The current rule judge supplies no probability.
 
-Repetition key: physical-person nomination + shot size + camera viewpoint, not UUID alone or channel role. If only one valid shot exists, remain on it and show “No useful alternate”; do not oscillate just because minimum time expired. Program tracking follows existing engine constraints; a speed exceeding director entry threshold blocks a new cut, not the live stream.
+## Style choices — AWAITING OWNER
 
-Acceptance: freeze these candidates before replay; report cuts/hour, duration distribution, below-minimum count, Wide reminder acceptance, near-identical cut pairs, motion-on-entry count and reviewer-rated bad movement per rendered minute. Compare manual baseline, Suggest and Auto Prepare. Parameter sweep uses training split only; publish abstention and worst case as well as averages. Risk: fixed-frame movement limits are viewpoint dependent; named rigs and reviewer evidence determine qualified settings.
+| Decision | Options | Recommendation and tradeoff | Evidence |
+|---|---|---|---|
+| T1 pace | Fixed timer; bounded suggestions; event-only | Per-segment style with soft suggestions, preserving a useful stable shot instead of cutting on a timer; may feel less predictable | Operator cuts and would-cut timing, rejected/accepted preparation opportunities |
+| T2 movement | Allow cuts into motion; require settlement; limited exceptions | Keep P1's stricter cut bar and prefer a wide during movement; trades dramatic timing for clarity | Motion/landing annotations and wrong-time cuts, separate from synthetic gate tests |
+| T3 wide frequency | Mandatory timer; soft reminder; none | Soft profile-based cadence; avoids a bad cut but can leave a long hold | Useful-wide opportunities, repeated-shot and missed-wide counts |
+
+P2's ambiguity rule and N1's operator nudge override aesthetic pressure. Assist starts fresh after an operator Take; Auto/Backup respect the configured minimum hold after a nudge. N2 on-air motion and N4 once-per-Preview-tenure preparation are still open details, not granted by these style fields.
+
+Evidence classes stay synthetic, recorded and live. No audio or show network; Director study logs contain metadata only, expire after 30 days unless explicitly exported, and contain no media without a separate E3 decision. No profile or synthetic score qualifies a level without its sign-off.

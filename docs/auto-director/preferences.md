@@ -1,39 +1,31 @@
-# Decisions for Stephan
+# Director preferences and the optional run sheet
 
-| ID / question | Options | Recommendation / why | Blocks | Reversible? |
-|---|---|---|---|---|
-| F1 Preference input? | Structured controls; free text; both executable | Structured first; free text may draft a reviewed structured change later | AD-PREFS, voice direction | Yes |
-| F2 Mid-show edits? | Locked; immediate; apply with pause | Apply with global pause and explicit resume; no cue/edit may cut | AD-PREFS/OVERRIDE | Yes |
-| F3 Rundown execution? | Timed automatic cues; operator-advanced cues; none | Operator-advanced cues constrain policy, never grant authority | AD-PREFS/SCOPE | Yes |
+Status: reconciled 2026-10-10 for D-01. [Recorded decisions](../handoff/stage3-4/DECISIONS.md) take precedence over older proposed text. Implementation references describe the open A-07 stack at `ecbf8814b7c77c64edfd2cc4a92ff6c80d892e42`, not merged or qualified behavior. Unrecorded choices and recommendations remain **AWAITING OWNER**. See the [product contract](product-contract.md) and [event contract](event-authority-contract.md).
 
-Status: proposed schema and defaults, 2026-09-30. `origin/s34/sol:Director/DirectorPreferences.swift` already supplies versioned Codable validation and migration hook; its provisional style defaults differ from this recommendation. `DirectorShotPolicy.swift` selects candidates but is unwired. Existing `ShowCoordinator.makeCommand`/`ChannelRevisions` remain integration boundaries.
+## Actual A-07 schema
 
-## Proposed structured document
+`DirectorPreferences.currentVersion` is **2**. The persisted value contains `version` and `styles: [SegmentType: DirectorStyle]`. Supported segment keys are `presenter`, `panel`, `performance`, `videoBreak`, `liveEvent`. `liveEvent` is required and supplies the fallback for a segment without an explicit style. See [shot-style](shot-style.md) for the exact fields, units and validation constraints.
 
-| Field | Default / validation |
-|---|---|
-| schemaVersion / policyVersion | Proposed schema 1 plus immutable policy hash; unknown future schema rejected, migrations explicit and tested |
-| serviceUseCase | sermon; worship/panel/wholeService unavailable for authority in initial qualified scope |
-| desiredMode | Off on launch/show start; stored preference never restores permission |
-| roleAssignments | Explicit device/channel→safeWide or speaker; no inferred assignment; rebind invalidates verification |
-| subjectNominations | Runtime per-channel lock references and operator aliases; do not persist face galleries or automatically reacquire at launch |
-| style | Full parameter set in [shot-style](shot-style.md), units retained; no independent defaults copied into UI |
-| cues | Ordered cue ID, label, allowed roles/presets, nomination requirement, optional planned duration; all advance explicitly |
-| privacy | Audio disabled; ephemeral-only if later approved; recording consent is a separate field, never implied |
-| qualification | Read-only reference to approved scope/rig/policy evidence; cannot be enabled by importing preferences |
+`validated()` rejects unsupported versions, missing Live-event style, invalid durations/movement and conflicting constraints. `migrate` accepts only schema 2; schema 1 was never persisted in this implementation and has no supported migration. Unknown/future versions fail closed. These facts describe the open stack, not deployment history or completed console persistence.
 
-Validate finite positive durations/ages, min ≤ preferred ≤ soft max, permitted enum values, available channels, and role consistency. A safe-wide camera cannot simultaneously require a tight tracking composition. Reject invalid imports with field-level errors; retain previous valid document. A future version is not silently downgraded. Persist versioned settings, not live authority tokens, pin state or countdown.
+There is no saved authority level, grant, cut permit, countdown, live composition, nomination gallery or qualification approval in this schema. Launch starts Manual with no handback, even when qualification records allow other levels. A preferences file cannot select an unqualified level or authorize a cut.
 
-Conflict order: locked safety/qualification → operator pause/pin/manual → role/identity restrictions → active cue → user style → default. Intersect allowed capabilities; combine quantitative limits only when their meanings/units match (e.g. slower speed ceiling, longer minimum). Empty intersection is invalid, not an excuse to invent a new maximum. Wide cadence and maximum duration are soft reminders; taking their minimum does not create a safety guarantee. Unknown or contradictory natural language produces no executable configuration.
+`DirectorStyle.resolve` resolves explicit style conflicts conservatively. `DirectorPreferences.resolve` currently merges explicit dictionary keys; a review finding notes that a one-sided segment can ignore the other input's effective Live-event fallback. Do not claim the current merge is conservative across all effective profiles until that is resolved and tested. No defaults are supplied for study numbers.
 
-## Cues and example
+## Product requirements and open choices — AWAITING OWNER
 
-| Cue | Allowed behavior | Transition |
-|---|---|---|
-| Welcome | Director Off; manual R2 | Operator advances |
-| Sermon | Nominated speaker, safe-wide alternative, selected qualified mode | Advance pauses; verify nominations/roles then Resume |
-| Prayer / worship | Off in initial scope | No timer or transcript automatically advances |
+A run sheet is optional guidance for a live-event backup producer. E1 allows a position hint, but the shown subject remains overridable and an operator nomination wins. A person's name is operator-supplied display metadata, never inferred identity. N1, A1 and A3 remain binding regardless of segment or style.
 
-A cue duration is planning metadata, not a scheduled Take. Changing a cue, role, nomination, style or privacy permission increments proposed policy/cue revision, invalidates proposals and pauses. Applying a stricter safety restriction takes effect immediately; resumption still needs explicit action.
+| Decision | Options | Recommendation and tradeoff | Evidence required |
+|---|---|---|---|
+| F1 authoring | Structured controls; executable free text; reviewed drafts | Versioned structured controls, with any future text producing a reviewed draft; less flexible but auditable | Round-trip validation and operator understanding |
+| F2 live edits | Lock during show; immediate apply; pause then apply | Invalidate proposals and pause before applying a new policy revision, explicit handback; safer provenance at the cost of interruption | Races with dispatch, pending cuts and takeover |
+| F3 run sheet | Timed automatic advancement; operator advancement; none | Optional operator-advanced segments, style hints only; adds a small operator task without treating the schedule as authority | Segment transitions and unscripted events, with and without a run sheet |
 
-Acceptance: encode/decode equality; unknown-version and nonfinite-value rejection; migration preserves meaning; contradictory roles and conflicting bounds fail; settings change during countdown cancels before Take; restarts never restore authority. Risks: too many settings burden volunteers; expose a single “Sermon · Calm” proposal and scope controls, with numeric tuning in rehearsal settings and immutable approved policy IDs for service use.
+These remain open choices. At A-07 `RunSheetLine` is only console display text and the console protocol exposes `advanceSegment`; that does not supply the later run-sheet model or an automatic scheduler. `SegmentType.performance` is not permission to analyze music or collect audio.
+
+## Storage and evidence boundaries
+
+C3/AI-4 authorize bounded Director metadata with 30-day expiry and explicit export, including metadata-only training datasets. Do not serialize frames, crops, face signatures/embeddings, audio, transcripts, inferred names or children as targets. E3 and AI-3 remain open for any separate media collection/offline transfer. AI-2 forbids network during a show; no background upload or cloud parser is implied by preference authoring.
+
+Keep schema version, policy/parameter revision and evidence provenance separate. A sample number in a synthetic fixture is not a production default. Reports must identify synthetic, recorded and live sources and the frozen parameter set; only explicit per-level sign-off qualifies operation on the rig.

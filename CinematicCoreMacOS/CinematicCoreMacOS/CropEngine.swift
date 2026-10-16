@@ -3,7 +3,6 @@
 //  CinematicCoreMacOS
 //
 //  Created by Stephan Morris on 2/5/2026.
-//  Ticket: GFX-01 - Metal Crop Engine
 //
 
 import Metal
@@ -27,18 +26,33 @@ final class CropEngine: ObservableObject {
         /// Output resolution (default: 1920x1080 for ATEM)
         var outputSize: CGSize = CGSize(width: 1920, height: 1080)
 
-        /// Smoothing factor for crop transitions (0 = instant, 1 = very smooth)
-        /// 10% per frame as specified by LOGIC-01
+        /// Spring stiffness for crop motion. 0.10 is the default (k = 60).
+        /// Higher is stiffer and snaps faster. The UI range is about 0.05–0.30.
         var transitionSmoothing: Float = 0.10
 
-        /// Use high-quality sampling (slightly slower but better quality)
+        /// Lanczos resampling on strong downscales (see `processCrop`). Off,
+        /// every frame uses the cheaper bilinear transform.
         var useHighQuality: Bool = true
-
-        /// Enable vignette effect for cinematic look
-        var enableVignette: Bool = false
     }
 
+    /// Operator settings. Published for the settings forms, so the frame path
+    /// must not write it per frame; see `applyFrameSmoothing`.
     @Published var config = Config()
+
+    /// Smoothing for the current frame, chosen by the frame path (fast-framing
+    /// boost, ML agent, or the operator's setting). Plain storage: it changes
+    /// at capture rate, and a publish per frame would also overwrite the Crop
+    /// Settings slider. Nil uses `config.transitionSmoothing`.
+    var liveSmoothing: Float?
+
+    private var effectiveSmoothing: Float { liveSmoothing ?? config.transitionSmoothing }
+
+    /// Frame-path entry: set this frame's smoothing and mirror the operator's
+    /// setting into `config` only when that setting changed.
+    func applyFrameSmoothing(_ live: Float, operatorSetting: Float) {
+        liveSmoothing = live
+        if config.transitionSmoothing != operatorSetting { config.transitionSmoothing = operatorSetting }
+    }
 
     // MARK: - State
 
@@ -231,7 +245,6 @@ final class CropEngine: ObservableObject {
         var lastRenderTime: TimeInterval = 0
         var averageRenderTime: TimeInterval = 0
         var totalFramesRendered: Int = 0
-        var gpuUtilization: Float = 0
     }
 
     /// Per-frame stats accumulate here (plain storage); the @Published `stats`
@@ -330,31 +343,6 @@ final class CropEngine: ObservableObject {
             )
         }
 
-        /// Create crop to frame a bounding box (with padding)
-        static func framing(
-            boundingBox: CGRect,
-            padding: CGFloat = 0.1
-        ) -> CropRect {
-            // Add padding
-            let paddedBox = boundingBox.insetBy(
-                dx: -boundingBox.width * padding,
-                dy: -boundingBox.height * padding
-            )
-            
-            // Clamp to 0-1 range
-            let clampedOrigin = CGPoint(
-                x: max(0, min(1 - paddedBox.width, paddedBox.origin.x)),
-                y: max(0, min(1 - paddedBox.height, paddedBox.origin.y))
-            )
-            
-            let clampedSize = CGSize(
-                width: min(1, paddedBox.width),
-                height: min(1, paddedBox.height)
-            )
-            
-            return CropRect(origin: clampedOrigin, size: clampedSize)
-        }
-        
         /// Clamp crop to valid 0-1 range
         func clamped() -> CropRect {
             let clampedWidth = max(0.001, min(1, size.width))
@@ -403,21 +391,6 @@ final class CropEngine: ObservableObject {
                 size: CGSize(width: w, height: h)
             )
         }
-
-        /// Interpolate between two crop rectangles
-        func lerp(to target: CropRect, factor: Float) -> CropRect {
-            let f = CGFloat(factor)
-            return CropRect(
-                origin: CGPoint(
-                    x: origin.x + (target.origin.x - origin.x) * f,
-                    y: origin.y + (target.origin.y - origin.y) * f
-                ),
-                size: CGSize(
-                    width: size.width + (target.size.width - size.width) * f,
-                    height: size.height + (target.size.height - size.height) * f
-                )
-            )
-        }
     }
     
     // MARK: - Initialization
@@ -457,9 +430,9 @@ final class CropEngine: ObservableObject {
     /// the values the render needs. Call this from `processFrame` before
     /// handing off to `renderCrop` so only the GPU work leaves the main thread.
     @MainActor
-    func tickInterpolation(now: TimeInterval = CACurrentMediaTime()) -> (crop: CropRect, outputSize: CGSize, smoothingFactor: Float) {
+    func tickInterpolation(now: TimeInterval = CACurrentMediaTime()) -> (crop: CropRect, outputSize: CGSize, smoothingFactor: Float, highQuality: Bool) {
         updateInterpolation(now: now)
-        return (currentCrop, config.outputSize, config.transitionSmoothing)
+        return (currentCrop, config.outputSize, effectiveSmoothing, config.useHighQuality)
     }
 
     /// Serial queue for crop renders. The render used to run synchronously on
@@ -473,6 +446,21 @@ final class CropEngine: ObservableObject {
         autoreleaseFrequency: .workItem
     )
 
+    /// One Lanczos filter reused for every strong downscale instead of one
+    /// allocation per frame. `CIFilter` is not thread-safe; it is touched only
+    /// from `renderQueue` (serial), inside `processCrop`. Nil if Core Image
+    /// does not provide the filter, in which case the bilinear path is used.
+    private nonisolated(unsafe) static let lanczosFilter = CIFilter(name: "CILanczosScaleTransform")
+
+    /// Carries the source buffer onto `renderQueue`. `CVPixelBuffer` is not
+    /// `Sendable`; this is safe because the frame path hands the buffer over
+    /// and does not touch it again until the render returns (the capture gate
+    /// keeps one frame in flight), and the box's reference keeps the capture
+    /// pool from reclaiming it meanwhile.
+    private struct RenderSource: @unchecked Sendable {
+        let pixelBuffer: CVPixelBuffer
+    }
+
     /// Off-MainActor crop render. Snapshot (crop rect + output size) must have
     /// been taken on the MainActor via `tickInterpolation()` first; only the
     /// Core Image render runs on `renderQueue`. Safety notes: CIContext is
@@ -483,12 +471,14 @@ final class CropEngine: ObservableObject {
     nonisolated func renderCrop(
         _ pixelBuffer: CVPixelBuffer,
         crop: CropRect,
-        outputSize: CGSize
+        outputSize: CGSize,
+        highQuality: Bool = true
     ) async throws -> CVPixelBuffer {
-        try await withCheckedThrowingContinuation { continuation in
+        let source = RenderSource(pixelBuffer: pixelBuffer)
+        return try await withCheckedThrowingContinuation { continuation in
             Self.renderQueue.async {
                 do {
-                    let buffer = try self.processCrop(pixelBuffer, crop: crop, outputSize: outputSize)
+                    let buffer = try self.processCrop(source.pixelBuffer, crop: crop, outputSize: outputSize, highQuality: highQuality)
                     continuation.resume(returning: buffer)
                 } catch {
                     continuation.resume(throwing: error)
@@ -502,11 +492,12 @@ final class CropEngine: ObservableObject {
     /// serial render queue so it never occupies the MainActor. (See git history
     /// for the Metal compute path that this replaces; it hit an Apple Silicon
     /// GPU power-state issue where isolated compute kernels were scheduled into
-    /// a 30-45ms idle slot.)
-    nonisolated func processCrop(
+    /// a 30-45ms idle slot.) Runs on `renderQueue` only.
+    private nonisolated func processCrop(
         _ pixelBuffer: CVPixelBuffer,
         crop: CropRect,
-        outputSize: CGSize
+        outputSize: CGSize,
+        highQuality: Bool
     ) throws -> CVPixelBuffer {
         let cropInterval = Self.signposter.beginInterval("cropRender")
         defer {
@@ -548,17 +539,19 @@ final class CropEngine: ObservableObject {
         let scaleY = outputSize.height / cropRect.height
         let scaleX = outputSize.width / cropRect.width
         let scaled: CIImage
-        if min(scaleX, scaleY) < lanczosScaleThreshold {
+        if highQuality, min(scaleX, scaleY) < lanczosScaleThreshold, let lanczos = Self.lanczosFilter {
             // Strong downscale: Lanczos. `scale` sets the vertical factor;
             // `aspectRatio` adds any extra horizontal stretch when the crop's
             // aspect differs from the output's (possible during interpolation).
-            let lanczos = CIFilter(name: "CILanczosScaleTransform")!
             lanczos.setValue(translated, forKey: kCIInputImageKey)
             lanczos.setValue(scaleY, forKey: kCIInputScaleKey)
             lanczos.setValue(scaleX / scaleY, forKey: kCIInputAspectRatioKey)
             scaled = lanczos.outputImage ?? translated.transformed(
                 by: CGAffineTransform(scaleX: scaleX, y: scaleY)
             )
+            // The output image already holds the graph; drop the filter's own
+            // reference so the cached filter does not keep the source buffer.
+            lanczos.setValue(nil, forKey: kCIInputImageKey)
         } else {
             // Mild downscale or upscale: cheap bilinear.
             scaled = translated.transformed(
@@ -639,7 +632,7 @@ final class CropEngine: ObservableObject {
         lastInterpolationTime = now
         
         if zoomHeight != nil {
-            let omega = sqrt(CGFloat(config.transitionSmoothing) * 600)
+            let omega = sqrt(CGFloat(effectiveSmoothing) * 600)
             func spring(_ x: CGFloat, _ target: CGFloat, _ velocity: inout CGFloat) -> CGFloat {
                 let offset = x - target
                 let c = velocity + omega * offset
@@ -668,7 +661,7 @@ final class CropEngine: ObservableObject {
         // unchanged (Locked Down 0.06 → k=36 smoothest, Fast Follow 0.20 →
         // k=120 snappiest); band exits additionally run the
         // fastFramingTransition window (see CameraManager).
-        let stiffness = CGFloat(config.transitionSmoothing) * 600.0
+        let stiffness = CGFloat(effectiveSmoothing) * 600.0
         let damping = 2.0 * sqrt(stiffness) // Critically damped
         
         // Spring physics: acceleration = (target - current) * stiffness - velocity * damping

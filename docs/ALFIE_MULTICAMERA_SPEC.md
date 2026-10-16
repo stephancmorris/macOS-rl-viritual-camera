@@ -1,6 +1,6 @@
 # Alfie multi-camera Program / Preview design (Multiview console)
 
-**Status:** implementation-ready design for R2; no multi-camera implementation is present at `aded5a3` (release build 3). This document is authoritative for R2 over the older S2/S3 dual-HDMI briefs. The console direction (Option 3 · Multiview) and the up-to-four-input layout goal were recorded on 28 Sep 2026 (SPEC-MV); where this text and a Trello card disagree, update the card or this document so they match. It does not certify R1 or R2 for release. R1 has positive manual feedback, while its full soak and readiness gates remain open.
+**Status:** R2 design with historical implementation notes; the original baseline was `aded5a3` (release build 3). Multi-camera implementation is now present. The default Multiview flag below was rechecked against main `7d62c77` on 10 Oct 2026; this is not a fresh validation of every historical implementation note. This document is authoritative for R2 over the older S2/S3 dual-HDMI briefs. The console direction (Option 3 · Multiview) and the up-to-four-input layout goal were recorded on 28 Sep 2026 (SPEC-MV); where this text and a Trello card disagree, update the card or this document so they match. It does not certify R1 or R2 for release. R1 has positive manual feedback, while its full soak and readiness gates remain open.
 
 ## Product contract
 
@@ -22,9 +22,9 @@ Alfie has two cinematic formats (`ShotComposer.Config.CinematicFormat`), and thi
 
 `ConsolePresentation.resolve(for:)` is the single mapping from format to view. Switching format swaps the whole console, so it is refused while a multi-camera show is running; the operator stops the show first. A single-camera session switches as it does today. A Webcam-mode camera running below the show rate is paced into the output at the show standard, so the virtual camera repeats frames and the existing frame-rate-match bring-up check shows a warning. That is accepted for video calls and never applies to Stage.
 
-## Implementation status (branch `r2/engine`, 28 Sep 2026)
+## Historical implementation status (branch `r2/engine`, 28 Sep 2026; flag corrected 10 Oct)
 
-The engine work units exist in code with unit tests; none has run on two real cameras yet. The Multiview console is wired to them (`Console/LiveConsole.swift`) behind `DeveloperFlags.useMultiviewConsole` (off by default), in Stage format while capture runs: live snapshot at ≤15 Hz, rendered pane pictures, Source view with Detect taps through the show's control-target binding, pill bound to the control target, Take / Edit Live / reconnect / Stop show, header controls to add or remove Cam B and measure the pair. Not yet wired: input-tile thumbnails, SHOW-SETUP on the stopped screen, admission / reconnect detail in the inspector.
+The engine work units exist in code with unit tests; none has run on two real cameras yet. The Multiview console is wired to them (`Console/LiveConsole.swift`) behind `DeveloperFlags.useMultiviewConsole` (**true** in main `7d62c77`; rechecked 10 Oct 2026), in Stage format while capture runs: live snapshot at ≤15 Hz, rendered pane pictures, Source view with Detect taps through the show's control-target binding, pill bound to the control target, Take / Edit Live / reconnect / Stop show, header controls to add or remove Cam B and measure the pair. Not yet wired: input-tile thumbnails, SHOW-SETUP on the stopped screen, admission / reconnect detail in the inspector.
 
 | Unit | Where | Notes |
 | --- | --- | --- |
@@ -105,6 +105,8 @@ The R2 technical release ships **exactly two** running inputs (A and B). The con
 **N-input Preview rule.** With two inputs, Preview is always the other channel. With three or four, Preview is whichever non-Program input the operator (or, in R3, the director) **cues**; cueing never cuts. All tile taps route through a single `ShowCoordinator.cue(ChannelID)` entry point, which R2 implements as a no-op for two inputs; tapping the Program tile shows `Cam A is Program · use Edit Live to change it`.
 
 ### Auto Director seam (R3)
+
+The paragraph below describes the R2 seam. Stage 3 adds the [live-event backup-producer contract](auto-director/product-contract.md), [recorded decisions](handoff/stage3-4/DECISIONS.md) and the open-stack [Director API](ALFIE_ENGINEERING_SPEC.md#22-stage-3-director-api-open-stack-snapshot). It does not grant automation or imply qualification.
 
 The next-shot panel is the only R3 UI slot. The director acts only by cueing Preview and requesting the same Take the operator uses; there is no second output, second Take path or director-only route. `NextShotStatus` carries an optional director section (mode, proposal, reason, countdown, authority) that R2 always leaves nil and never renders. R2 adds no Auto Director controls, disabled or otherwise.
 

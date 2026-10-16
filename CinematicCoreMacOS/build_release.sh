@@ -7,10 +7,14 @@
 #   1. A "Developer ID Application" certificate in your keychain.
 #   2. A stored notary profile named "alfie-notary":
 #        xcrun notarytool store-credentials "alfie-notary" \
-#          --apple-id "stephancmorris@gmail.com" --team-id "EPZDEPSV69" \
+#          --apple-id "<your-apple-id>" --team-id "EPZDEPSV69" \
 #          --password "<app-specific-password>"
+#      Keep the Apple ID out of this file; it lives only in the keychain profile.
 #
 # Usage:  ALFIE_RELEASE_OUT=build_release_3 ALFIE_DMG_NAME=AlfieBeta.dmg ./build_release.sh
+#         ALFIE_DEV_ID optionally names the signing identity (full common name or
+#         SHA-1). By default codesign matches the keychain's one Developer ID
+#         Application certificate.
 # Output: $ALFIE_RELEASE_OUT/$ALFIE_DMG_NAME (notarized + stapled)
 
 set -euo pipefail
@@ -20,7 +24,7 @@ PROJECT="CinematicCoreMacOS.xcodeproj"
 SCHEME="CinematicCoreMacOS"
 APP_NAME="Alfie"
 NOTARY_PROFILE="alfie-notary"
-DEV_ID="Developer ID Application: Stephan Morris (EPZDEPSV69)"
+DEV_ID="${ALFIE_DEV_ID:-Developer ID Application}"
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 cd "$SCRIPT_DIR"

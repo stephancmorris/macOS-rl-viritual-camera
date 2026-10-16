@@ -10,10 +10,15 @@
 import Foundation
 
 enum DeveloperFlags {
-    /// Exposes the Gate 5 validation playback controls so recorded church
-    /// clips can be routed through the same detection/crop pipeline as the
-    /// live camera feed.
+    /// DEVELOPMENT ONLY — on in Debug builds, always off in Release. Exposes
+    /// the Gate 5 validation playback controls so recorded church clips can
+    /// be routed through the same detection/crop pipeline as the live camera
+    /// feed. An operator build must not offer to put a clip on Program.
+    #if DEBUG
     nonisolated static let exposeClipPlaybackControls = true
+    #else
+    nonisolated static let exposeClipPlaybackControls = false
+    #endif
 
     /// Exposes the ML agent toggle, agent settings popover, and enables
     /// `useMLAgent` as a runtime-selectable controller. Church MVP ships
@@ -115,5 +120,25 @@ enum DeveloperFlags {
     nonisolated static let allowRehearsalOutput = true
     #else
     nonisolated static let allowRehearsalOutput = false
+    #endif
+
+    /// DEVELOPMENT ONLY — on in Debug builds, always off in Release. Lets
+    /// tests and rehearsals inject in-memory Director qualification records
+    /// (B-06). They are never written to disk, and a release build reads only
+    /// real sign-off records, so a level can't become selectable by accident.
+    #if DEBUG
+    nonisolated static let allowInjectedQualification = true
+    #else
+    nonisolated static let allowInjectedQualification = false
+    #endif
+
+    /// DEVELOPMENT ONLY for now — on in Debug builds, off in Release until the
+    /// owner decides (S3 B-03). Runs the Auto Director in shadow alongside the
+    /// show: it watches, logs `[DIRECTOR]` lines and publishes console status,
+    /// and has no camera effects. Every launch still starts Manual.
+    #if DEBUG
+    nonisolated static let runDirectorShadow = true
+    #else
+    nonisolated static let runDirectorShadow = false
     #endif
 }

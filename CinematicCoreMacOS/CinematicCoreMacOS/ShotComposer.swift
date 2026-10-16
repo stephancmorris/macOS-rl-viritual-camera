@@ -3,7 +3,6 @@
 //  CinematicCoreMacOS
 //
 //  Created by Stephan Morris on 2/7/2026.
-//  Ticket: LOGIC-01 - Rule-Based Shot Composer
 //
 
 import Foundation
@@ -486,7 +485,6 @@ final class ShotComposer: ObservableObject {
         /// Wide (the uncropped full picture). Everything else allows up to a
         /// full frame-fit.
         let maximumCropHeight: CGFloat
-        let horizontalPaddingMultiplier: CGFloat
         let trackedWidthMultiplier: CGFloat
         let trackedAspectFloor: CGFloat
         let poseHeadroomMultiplier: CGFloat
@@ -497,7 +495,6 @@ final class ShotComposer: ObservableObject {
 
         init(minimumCropHeight: CGFloat,
              maximumCropHeight: CGFloat = 1.0,
-             horizontalPaddingMultiplier: CGFloat,
              trackedWidthMultiplier: CGFloat,
              trackedAspectFloor: CGFloat,
              poseHeadroomMultiplier: CGFloat,
@@ -507,7 +504,6 @@ final class ShotComposer: ObservableObject {
              cropLowerMarginMultiplier: CGFloat) {
             self.minimumCropHeight = minimumCropHeight
             self.maximumCropHeight = maximumCropHeight
-            self.horizontalPaddingMultiplier = horizontalPaddingMultiplier
             self.trackedWidthMultiplier = trackedWidthMultiplier
             self.trackedAspectFloor = trackedAspectFloor
             self.poseHeadroomMultiplier = poseHeadroomMultiplier
@@ -516,11 +512,6 @@ final class ShotComposer: ObservableObject {
             self.cropHeadroomMultiplier = cropHeadroomMultiplier
             self.cropLowerMarginMultiplier = cropLowerMarginMultiplier
         }
-    }
-
-    struct GeometrySnapshot: Equatable, Sendable {
-        let trackedSubjectRect: CGRect
-        let programCropRect: CropEngine.CropRect
     }
 
     // MARK: - State
@@ -601,11 +592,6 @@ final class ShotComposer: ObservableObject {
     /// The tighter subject box used to derive the visible program crop.
     /// Plain per-frame storage; UI reads `displayedTrackedBounds`.
     private(set) var currentTrackedBounds: CGRect?
-
-    /// The latest deterministic tracked-subject/program-crop pair. No
-    /// producers currently write it; kept plain (non-published) so a future
-    /// per-frame writer can't reintroduce per-frame SwiftUI invalidations.
-    private(set) var currentGeometrySnapshot: GeometrySnapshot?
 
     /// 15 Hz UI mirror of `currentComputedCrop` (see `publishDisplayMirrors`).
     @Published private(set) var displayedComputedCrop: CropEngine.CropRect?
@@ -692,6 +678,14 @@ final class ShotComposer: ObservableObject {
     private enum SteadyState { case following, holding }
     private var steadyState: SteadyState = .following
 
+    /// Smoothed subject speed (normalized frame units per second) that drives
+    /// the velocity-adaptive deadzone. Read-only Director evidence (S3 B-01).
+    var subjectSpeed: Double { Double(subjectVelocity) }
+
+    /// The Steady Following machine has concluded the subject settled and is
+    /// holding the camera. Read-only Director evidence (S3 B-01).
+    var isHoldingSteady: Bool { steadyState == .holding }
+
     /// Fresh-observation timing for the hold → follow and follow → hold
     /// confirmations. These stay in the detection frame's capture-time clock
     /// domain so their feel does not change with camera/detection cadence.
@@ -766,6 +760,10 @@ final class ShotComposer: ObservableObject {
 
     /// One captured reference view of the locked subject. The gallery
     /// holds 6-8 of these covering varied head pose / expression / lighting.
+    ///
+    /// `VNFeaturePrintObservation` is an immutable class and is not
+    /// `Sendable`. It is not mutated after capture, so the struct can cross
+    /// the re-acquisition task.
     struct FaceSignature: @unchecked Sendable {
         let featurePrint: VNFeaturePrintObservation
         /// Pose-invariant landmark geometry captured at the same moment.
@@ -781,6 +779,11 @@ final class ShotComposer: ObservableObject {
     /// re-acquisition takes the *best* (lowest-distance) entry per
     /// candidate, which lets the locked subject return in a pose that
     /// matches only one of the stored views.
+    ///
+    /// `VNFeaturePrintObservation` is an immutable class and is not
+    /// `Sendable`. It is not mutated after capture, so the struct can cross
+    /// the re-acquisition task. The gallery value is copied into that task;
+    /// its methods mutate the copy, not a shared instance.
     struct FaceSignatureGallery: @unchecked Sendable {
         private(set) var entries: [FaceSignature] = []
         private(set) var lastCaptureAt: TimeInterval = 0
@@ -916,10 +919,6 @@ final class ShotComposer: ObservableObject {
     /// How many consecutive frames the full decision (print + landmarks
     /// + margin) must hold before the lock binds.
     private static let reacquisitionConsecutiveFrames: Int = 3
-
-    /// How long a per-candidate score remains "fresh" for the cross-
-    /// candidate margin comparison. Older scores are evicted.
-    private static let scoreFreshness: TimeInterval = 0.3
 
     struct ReacquisitionScore: Sendable {
         let id: UUID
@@ -1080,8 +1079,6 @@ final class ShotComposer: ObservableObject {
         if case .hold = lockState { return true }
         return false
     }
-
-    private var lastTrackingPoint: CGPoint?
 
     // MARK: - Public Methods
 
@@ -1491,7 +1488,7 @@ final class ShotComposer: ObservableObject {
             let completedScores = scores
             guard let strong = self else { return }
             await MainActor.run {
-                strong.finishReacquisitionScoring(
+                _ = strong.finishReacquisitionScoring(
                     generation: generation,
                     visibilityRevision: visibilityRevision,
                     observationID: observationID,
@@ -1601,7 +1598,6 @@ final class ShotComposer: ObservableObject {
         currentComputedCrop = nil
         currentTrackedBounds = nil
         frameStateRevision &+= 1
-        lastTrackingPoint = nil
 
         subjectVelocity = 0.0
         lastComposeTime = 0
@@ -2112,7 +2108,6 @@ final class ShotComposer: ObservableObject {
         // subject doesn't fire objectWillChange 30-50×/s.
         if activeTargetID != selected.id { activeTargetID = selected.id }
         if !hasActiveTarget { hasActiveTarget = true }
-        lastTrackingPoint = trackingPoint(for: selected)
         return selected
     }
 
@@ -2124,30 +2119,6 @@ final class ShotComposer: ObservableObject {
             )
         }
         return CGPoint(x: person.boundingBox.midX, y: person.boundingBox.midY)
-    }
-
-    private func configuredStageRect() -> CGRect {
-        let horizontalMargin = min(max(config.stageHorizontalMargin, 0), 0.30)
-        let verticalMargin = min(max(config.stageVerticalMargin, 0), 0.30)
-
-        return CGRect(
-            x: horizontalMargin,
-            y: verticalMargin,
-            width: max(0.20, 1.0 - (horizontalMargin * 2.0)),
-            height: max(0.20, 1.0 - (verticalMargin * 2.0))
-        )
-    }
-
-    private func stagePriorityScore(for point: CGPoint) -> CGFloat {
-        let stageRect = configuredStageRect()
-        if stageRect.contains(point) {
-            return 1.0
-        }
-
-        let dx = max(stageRect.minX - point.x, point.x - stageRect.maxX, 0)
-        let dy = max(stageRect.minY - point.y, point.y - stageRect.maxY, 0)
-        let distance = hypot(dx, dy)
-        return max(0.0, 1.0 - (distance / 0.25))
     }
 
     private func normalizedRect(centeredAt center: CGPoint, size: CGSize) -> CGRect {
@@ -2177,7 +2148,6 @@ final class ShotComposer: ObservableObject {
         case .wide:
             return FramingTuning(
                 minimumCropHeight: 0.40,
-                horizontalPaddingMultiplier: 0.18,
                 trackedWidthMultiplier: 0.92,
                 trackedAspectFloor: 0.60,
                 poseHeadroomMultiplier: 0.10,
@@ -2189,7 +2159,6 @@ final class ShotComposer: ObservableObject {
         case .tight:
             return FramingTuning(
                 minimumCropHeight: 0.30,
-                horizontalPaddingMultiplier: 0.12,
                 trackedWidthMultiplier: 0.88,
                 trackedAspectFloor: 0.56,
                 poseHeadroomMultiplier: 0.08,
@@ -2207,7 +2176,6 @@ final class ShotComposer: ObservableObject {
             return FramingTuning(
                 minimumCropHeight: 0.70,
                 maximumCropHeight: 0.85,
-                horizontalPaddingMultiplier: 0.50,
                 trackedWidthMultiplier: 1.00,
                 trackedAspectFloor: 0.80,
                 poseHeadroomMultiplier: 0.15,
@@ -2220,7 +2188,6 @@ final class ShotComposer: ObservableObject {
             return FramingTuning(
                 minimumCropHeight: 0.55,
                 maximumCropHeight: 0.85,
-                horizontalPaddingMultiplier: 0.32,
                 trackedWidthMultiplier: 0.90,
                 trackedAspectFloor: 0.68,
                 poseHeadroomMultiplier: 0.10,
@@ -2233,7 +2200,6 @@ final class ShotComposer: ObservableObject {
             return FramingTuning(
                 minimumCropHeight: 0.35,
                 maximumCropHeight: 0.80,
-                horizontalPaddingMultiplier: 0.15,
                 trackedWidthMultiplier: 0.76,
                 trackedAspectFloor: 0.60,
                 poseHeadroomMultiplier: 0.08,
@@ -2246,7 +2212,6 @@ final class ShotComposer: ObservableObject {
             return FramingTuning(
                 minimumCropHeight: 0.65,
                 maximumCropHeight: 0.85,
-                horizontalPaddingMultiplier: 0.28,
                 trackedWidthMultiplier: 0.96,
                 trackedAspectFloor: 0.48,
                 poseHeadroomMultiplier: 0.16,
@@ -2259,7 +2224,6 @@ final class ShotComposer: ObservableObject {
             return FramingTuning(
                 minimumCropHeight: 0.45,
                 maximumCropHeight: 0.85,
-                horizontalPaddingMultiplier: 0.18,
                 trackedWidthMultiplier: 0.92,
                 trackedAspectFloor: 0.44,
                 poseHeadroomMultiplier: 0.14,
@@ -2272,7 +2236,6 @@ final class ShotComposer: ObservableObject {
             return FramingTuning(
                 minimumCropHeight: 0.30,
                 maximumCropHeight: 0.85,
-                horizontalPaddingMultiplier: 0.10,
                 trackedWidthMultiplier: 0.88,
                 trackedAspectFloor: 0.40,
                 poseHeadroomMultiplier: 0.12,

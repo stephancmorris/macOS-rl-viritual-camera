@@ -7,11 +7,10 @@
 //  controllers (CameraManager) that receive the shared output; they never
 //  create one. Only the Program channel's port reaches the output.
 //
-//  This first step keeps single-camera behaviour identical: channel A is
-//  created routed, exactly as the app ran before. A second channel can be
-//  added unrouted and isolated. ROUTER moves the routing decision (and Take)
-//  here; DEVICES adds exclusive device leases; CHANNEL-CMD binds commands to
-//  channel IDs.
+//  ProgramRouter owns which channel feeds program output, the output clock,
+//  and route generations. CaptureDeviceRegistry leases devices. Commands are
+//  bound to a channel id. Channel A starts routed. A second channel is added
+//  unrouted.
 //
 
 import Combine
@@ -61,8 +60,10 @@ final class ShowCoordinator: ObservableObject {
 
     /// - Parameter programOutput: injected in tests; the app passes nil and
     ///   gets the real virtual-camera + Program Display output.
-    init(programOutput: ProgramOutputManager? = nil, admissionRecords: AdmissionRecordStore? = nil) {
+    init(programOutput: ProgramOutputManager? = nil, admissionRecords: AdmissionRecordStore? = nil,
+         qualificationRecords: DirectorQualificationStore? = nil) {
         self.admissionRecords = admissionRecords ?? AdmissionRecordStore()
+        self.qualificationRecords = qualificationRecords ?? .applicationSupport()
         let rehearsal: [any ProgramOutputSink] = DeveloperFlags.allowRehearsalOutput ? [RehearsalOutputSink()] : []
         let output = programOutput
             ?? ProgramOutputManager(sinks: [VirtualCameraOutputSink(), DisplayOutputSink()] + rehearsal)
@@ -89,16 +90,21 @@ final class ShowCoordinator: ObservableObject {
         channel.workScheduler = workScheduler
         channels[id] = channel
         retarget()
+        channelsChangedObserver?(.added(id))
         return channel
     }
 
     /// Stop and drop a non-Program channel. The Program channel cannot be
     /// removed (the show would have no source); stop the show instead.
+    /// Channel A is never removed either: it is the show's home channel and
+    /// `channelA` relies on it, so after a Take to B, A stays as Preview
+    /// (CR-019).
     func removeChannel(_ id: ChannelID) {
-        guard id != programChannel, let channel = channels[id] else { return }
+        guard id != programChannel, id != .a, let channel = channels[id] else { return }
         channel.stopCapture()
         channels[id] = nil
         retarget()
+        channelsChangedObserver?(.removed(id))
     }
 
     /// Show-level Stop: retires every channel's generation and epoch.
@@ -107,6 +113,7 @@ final class ShowCoordinator: ObservableObject {
         editLive = false
         resetProgramToA()
         retarget()
+        channelsChangedObserver?(.showStopped)
     }
 
     /// A new show starts from A as Program with no other channel, whatever
@@ -117,6 +124,35 @@ final class ShowCoordinator: ObservableObject {
         resetProgramToA()
         for id in ChannelID.allCases where id != .a { removeChannel(id) }
         setEditLive(false)
+        channelsChangedObserver?(.newShowPrepared)
+    }
+
+    // MARK: Auto Director (S3 B-03)
+
+    /// Show-level changes the Director must hear about (plan §5.3).
+    enum ChannelChange: Equatable {
+        case added(ChannelID), removed(ChannelID), showStopped, newShowPrepared
+    }
+
+    var channelsChangedObserver: ((ChannelChange) -> Void)?
+
+    /// The Auto Director, owned by the show. Shadow only (no camera effects)
+    /// until B-05; levels come from this rig's qualification records.
+    private(set) lazy var director = DirectorController(
+        show: self, qualifiedLevels: { [weak self] in self?.qualifiedDirectorLevels ?? [] })
+
+    /// Start the Director's shadow when the flag allows it. Every launch is Manual.
+    func startDirectorShadow() {
+        guard DeveloperFlags.runDirectorShadow else { return }
+        director.attach()
+    }
+
+    /// Styles saved in Settings reach the running Director (CR-037). Only
+    /// while the shadow can run: where the flag is off nothing else creates
+    /// the Director, and a save must not.
+    func directorPreferencesChanged(_ preferences: DirectorPreferences) {
+        guard DeveloperFlags.runDirectorShadow else { return }
+        director.preferencesChanged(preferences)
     }
 
     private func resetProgramToA() {
@@ -154,6 +190,17 @@ final class ShowCoordinator: ObservableObject {
 
     func recordAdmission(_ result: PairAdmissionResult) {
         admissionRecords.record(result.status, for: admissionFingerprint())
+    }
+
+    // MARK: Director qualification (S3 B-06, C16)
+
+    /// Per-level sign-off records bound to the admission fingerprint.
+    let qualificationRecords: DirectorQualificationStore
+
+    /// Director levels this rig may select right now. Empty unless a sign-off
+    /// matches the current fingerprint; any configuration change empties it.
+    var qualifiedDirectorLevels: Set<DirectorAuthority.Level> {
+        qualificationRecords.qualifiedLevels(for: admissionFingerprint())
     }
 
     func pairAdmissionContext(preview: ChannelID) -> PairAdmissionContext {
@@ -208,8 +255,13 @@ final class ShowCoordinator: ObservableObject {
     /// cut. Commits only when the output accepts the Preview frame; then roles
     /// swap, Edit Live ends and controls return to the new Preview. Motion on
     /// both channels continues.
+    /// S3 B-02: every Take attempt, reported before any check so refused
+    /// attempts are seen too.
+    var takeAttemptObserver: ((TakeOrigin) -> Void)?
+
     @discardableResult
-    func take(_ request: TakeRequest? = nil) -> TakeResult {
+    func take(_ request: TakeRequest? = nil, origin: TakeOrigin = .operatorUI) -> TakeResult {
+        takeAttemptObserver?(origin)
         guard let request = request ?? makeTakeRequest(), let preview = previewChannel,
               let channel = channels[preview] else {
             return .rejected(.noPreview)

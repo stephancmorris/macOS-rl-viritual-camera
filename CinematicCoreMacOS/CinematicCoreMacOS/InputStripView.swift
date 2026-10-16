@@ -13,12 +13,15 @@ struct InputStripView: View {
     /// samples the channel's rendered output; without it tiles draw
     /// `InputTileModel.renderedImage` (gallery, tests).
     var tilePicture: ((ChannelID) -> AnyView)?
+    /// Channels whose current shot Alfie set. Those tiles show AUTO.
+    var autoBadgeChannels: Set<ChannelID> = []
 
     @State private var hint: String?
 
     init(snapshot: ConsoleSnapshot, actions: any ConsoleActions,
          renderedImages: [ChannelID: NSImage] = [:],
-         tilePicture: ((ChannelID) -> AnyView)? = nil) {
+         tilePicture: ((ChannelID) -> AnyView)? = nil,
+         autoBadgeChannels: Set<ChannelID> = []) {
         self.tiles = snapshot.slots.map { InputTileModel(slot: $0, renderedImage: renderedImages[$0.channel]) }
         self.onCue = { slot in
             guard let channel = ChannelID(rawValue: slot.rawValue) else { return }
@@ -27,6 +30,7 @@ struct InputStripView: View {
         self.note = snapshot.operatorNote
         self.programSlot = InputTileModel.Slot(rawValue: snapshot.programChannel.letter)
         self.tilePicture = tilePicture
+        self.autoBadgeChannels = autoBadgeChannels
     }
 
     init(tiles: [InputTileModel], onCue: @escaping (InputTileModel.Slot) -> Void) {
@@ -78,7 +82,8 @@ struct InputStripView: View {
                             model: model,
                             size: tileSize,
                             picture: model.isAssigned ? tilePicture?(model.channel) : nil,
-                            onCue: { hint = tap($0) })
+                            onCue: { hint = tap($0) },
+                            directorBadge: autoBadgeChannels.contains(model.channel) ? NextShotStatus.DirectorSection.autoBadge : nil)
                     }
                 }
             }

@@ -32,4 +32,18 @@ import Testing
         let pose = try #require(fields["keypoints"] as? [String: Any])
         #expect(Set(pose.keys) == Set(["headX", "headY", "waistX", "waistY", "poseConfidence"]))
     }
+
+    // CR-001: the release script is public. It must not name the notary Apple ID or a
+    // personal signing identity; both come from the keychain or ALFIE_DEV_ID.
+    @Test func releaseScriptCarriesNoPersonalIdentity() throws {
+        let script = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent().deletingLastPathComponent()
+            .appendingPathComponent("build_release.sh")
+        let text = try String(contentsOf: script, encoding: .utf8)
+        let email = try Regex(#"[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}"#)
+        #expect(text.firstMatch(of: email) == nil)
+        let identity = try Regex(#"Developer ID Application: [^"(]+\("#)
+        #expect(text.firstMatch(of: identity) == nil)
+        #expect(text.contains(#"DEV_ID="${ALFIE_DEV_ID:-Developer ID Application}""#))
+    }
 }

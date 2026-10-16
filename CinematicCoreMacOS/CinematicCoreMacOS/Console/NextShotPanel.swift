@@ -2,9 +2,9 @@
 //  NextShotPanel.swift
 //  CinematicCoreMacOS
 //
-//  Two-line panel directly under the Preview pane (600×70 at 1280 pt).
-//  Plain words only; freshness age, shot revision and reason codes belong in
-//  the inspector. Never renders `NextShotStatus.director` in R2.
+//  Panel directly under the Preview pane (600×70 at 1280 pt).
+//  Two lines for the next shot. When a director section is present, a third
+//  line adds the prepared shot and Alfie's plain status. The bar stays 70 pt.
 //
 
 import SwiftUI
@@ -21,8 +21,18 @@ struct NextShotPanel: View {
         }
     }
 
+    /// Prepared shot and plain status on one truncating line. Nil when Alfie is not reporting.
+    /// When the status already names the prepared input and shot (preparing
+    /// or ready), it is shown alone so the line doesn't repeat itself.
+    static func directorLine(_ section: NextShotStatus.DirectorSection) -> String {
+        switch section.activity {
+        case .active(.preparing), .active(.ready): section.statusLine
+        default: "\(section.preparedLine) · \(section.statusLine)"
+        }
+    }
+
     var body: some View {
-        VStack(alignment: .leading, spacing: 6) {
+        VStack(alignment: .leading, spacing: status.director == nil ? 6 : 4) {
             HStack(spacing: 10) {
                 Text(NextShotStatus.label)
                     .font(ConsoleStyle.label(11))
@@ -43,6 +53,13 @@ struct NextShotPanel: View {
                     .lineLimit(1)
                     .truncationMode(.tail)
             }
+            if let director = status.director {
+                Text(Self.directorLine(director))
+                    .font(.system(size: 12))
+                    .foregroundStyle(.white.opacity(0.85))
+                    .lineLimit(1)
+                    .truncationMode(.tail)
+            }
         }
         .padding(.leading, 14)
         .padding(.trailing, 12)
@@ -56,6 +73,24 @@ struct NextShotPanel: View {
                 .strokeBorder(ConsoleStyle.neutralBorder, lineWidth: 1)
         )
         .accessibilityElement(children: .ignore)
-        .accessibilityLabel(status.accessibilityLabel)
+        .accessibilityLabel(accessibilityLabel)
+    }
+
+    private var accessibilityLabel: String {
+        guard let director = status.director else { return status.accessibilityLabel }
+        return status.accessibilityLabel + ". " + Self.directorLine(director)
+    }
+}
+
+extension NextShotStatus {
+    /// Same next-shot lines, with the director section the console was given.
+    func withDirector(_ section: DirectorSection?) -> NextShotStatus {
+        NextShotStatus(
+            preview: preview,
+            shotLine: shotLine,
+            readiness: readiness,
+            statusText: statusText,
+            reasonText: reasonText,
+            director: section)
     }
 }

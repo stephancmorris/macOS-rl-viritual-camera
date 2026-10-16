@@ -13,92 +13,6 @@ import Foundation
 import OSLog
 import SwiftUI
 
-enum AlfieDiagnosticsLog {
-    private static let queue = DispatchQueue(label: "com.alfie.diagnostics-log")
-
-    static var fileURL: URL {
-        let logsDirectory = FileManager.default
-            .urls(for: .libraryDirectory, in: .userDomainMask)
-            .first?
-            .appendingPathComponent("Logs", isDirectory: true)
-            .appendingPathComponent("Alfie", isDirectory: true)
-            ?? URL(fileURLWithPath: NSHomeDirectory())
-            .appendingPathComponent("Library", isDirectory: true)
-            .appendingPathComponent("Logs", isDirectory: true)
-            .appendingPathComponent("Alfie", isDirectory: true)
-
-        return logsDirectory.appendingPathComponent("alfie-diagnostics.log")
-    }
-
-    static func append(_ category: String, _ message: String) {
-        let timestamp = ISO8601DateFormatter().string(from: Date())
-        let line = "[\(timestamp)] [\(category)] \(message)\n"
-
-        queue.async {
-            let url = fileURL
-            let directory = url.deletingLastPathComponent()
-            do {
-                try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
-
-                if FileManager.default.fileExists(atPath: url.path) {
-                    let handle = try FileHandle(forWritingTo: url)
-                    defer { try? handle.close() }
-                    try handle.seekToEnd()
-                    if let data = line.data(using: .utf8) {
-                        try handle.write(contentsOf: data)
-                    }
-                } else {
-                    try line.write(to: url, atomically: true, encoding: .utf8)
-                }
-            } catch {
-                Logger(subsystem: "com.alfie", category: "DiagnosticsFile")
-                    .error("Failed to append diagnostics log: \(error.localizedDescription, privacy: .public)")
-            }
-        }
-    }
-}
-
-enum OutputCheckLevel {
-    case ok
-    case info
-    case warning
-    case error
-
-    var title: String {
-        switch self {
-        case .ok:
-            return "OK"
-        case .info:
-            return "Info"
-        case .warning:
-            return "Warning"
-        case .error:
-            return "Error"
-        }
-    }
-
-    var color: Color {
-        switch self {
-        case .ok:
-            return .green
-        case .info:
-            return .secondary
-        case .warning:
-            return .orange
-        case .error:
-            return .red
-        }
-    }
-}
-
-struct OutputBringUpCheck: Identifiable {
-    let id: String
-    let title: String
-    let status: String
-    let detail: String
-    let level: OutputCheckLevel
-}
-
 @MainActor
 protocol SystemExtensionStatusProviding: ObservableObject {
     var badgeTitle: String { get }
@@ -211,6 +125,42 @@ final class ProgramOutputManager: ObservableObject {
         let duration: TimeInterval
     }
 
+    /// A time window of samples kept in arrival order. Appends and front
+    /// evictions mutate in place, so a sample no longer copies its stage's
+    /// window or filters the whole array (CR-013). Assumes arrival order is
+    /// time order, which holds for both host-clock latency samples and the
+    /// input timestamps (a backwards input timestamp clears the window first).
+    nonisolated struct SlidingWindow<Element> {
+        private var storage: [Element] = []
+        private var head = 0
+
+        var count: Int { storage.count - head }
+        var isEmpty: Bool { head == storage.count }
+        var first: Element? { isEmpty ? nil : storage[head] }
+        var last: Element? { isEmpty ? nil : storage[storage.count - 1] }
+        var elements: ArraySlice<Element> { storage[head...] }
+
+        mutating func append(_ element: Element) { storage.append(element) }
+
+        mutating func removeAll() {
+            storage.removeAll(keepingCapacity: true)
+            head = 0
+        }
+
+        /// Drop leading elements while `isExpired` holds. Storage is compacted
+        /// only once the dead prefix is over half of it, so this is amortised
+        /// O(1) per element.
+        mutating func dropExpired(while isExpired: (Element) -> Bool) {
+            while head < storage.count, isExpired(storage[head]) { head += 1 }
+            if head == storage.count {
+                removeAll()
+            } else if head > 32, head * 2 > storage.count {
+                storage.removeFirst(head)
+                head = 0
+            }
+        }
+    }
+
     enum Route: String, CaseIterable, Identifiable {
         case virtualCamera
         case display
@@ -320,8 +270,8 @@ final class ProgramOutputManager: ObservableObject {
     private let sinks: [any ProgramOutputSink]
     private var isCaptureRunning = false
     private var dropTimestamps: [Double] = []
-    private var latencySamples: [LatencyStage: [TimedDuration]] = [:]
-    private var inputFrameTimestamps: [Double] = []
+    private var latencySamples: [LatencyStage: SlidingWindow<TimedDuration>] = [:]
+    private var inputFrameTimestamps = SlidingWindow<Double>()
     private static let inputRateWindow: Double = 2.0
 
     // Per-frame counters land here (plain storage), NOT in the @Published
@@ -663,7 +613,7 @@ final class ProgramOutputManager: ObservableObject {
         dropTimestamps = []
         latencySamples = [:]
         stageLatencies = []
-        inputFrameTimestamps = []
+        inputFrameTimestamps.removeAll()
         measuredInputFPS = 0
         gateDropBaseline = nil
         detectionStartNoted = false
@@ -854,7 +804,7 @@ final class ProgramOutputManager: ObservableObject {
         }
         inputFrameTimestamps.append(timestamp)
         let windowStart = timestamp - Self.inputRateWindow
-        inputFrameTimestamps.removeAll { $0 < windowStart }
+        inputFrameTimestamps.dropExpired { $0 < windowStart }
     }
 
     func recordLatency(
@@ -874,11 +824,11 @@ final class ProgramOutputManager: ObservableObject {
             rawFrameMax = max(rawFrameMax, duration)
             rawFrameCount += 1
         }
-        var samples = latencySamples[stage, default: []]
-        samples.append(TimedDuration(timestamp: timestamp, duration: duration))
+        // Modified in place through the dictionary's default subscript: no
+        // copy of the stage's window per sample.
         let windowStart = timestamp - 5
-        samples.removeAll { $0.timestamp < windowStart }
-        latencySamples[stage] = samples
+        latencySamples[stage, default: SlidingWindow()].append(TimedDuration(timestamp: timestamp, duration: duration))
+        latencySamples[stage, default: SlidingWindow()].dropExpired { $0.timestamp < windowStart }
     }
 
     /// Copies the per-frame raw counters into the @Published snapshots at most
@@ -1040,7 +990,7 @@ final class ProgramOutputManager: ObservableObject {
     private func refreshLatencySnapshot() {
         stageLatencies = LatencyStage.allCases.compactMap { stage in
             guard let samples = latencySamples[stage], !samples.isEmpty else { return nil }
-            let total = samples.reduce(0) { $0 + $1.duration }
+            let total = samples.elements.reduce(0) { $0 + $1.duration }
             return StageLatency(stage: stage, averageDuration: total / Double(samples.count))
         }
     }
@@ -1188,289 +1138,3 @@ struct ProgramDisplayOption: Identifiable {
         return options
     }
 }
-
-struct ProgramOutputSettingsView<SystemExtensionManager: SystemExtensionStatusProviding>: View {
-    @ObservedObject var programOutput: ProgramOutputManager
-    @ObservedObject var systemExtensionManager: SystemExtensionManager
-
-    /// Persisted show standard, as a raw string so it survives relaunch and is
-    /// read back by CameraManager at capture start.
-    @AppStorage(ShowStandard.userDefaultsKey) private var showStandardRaw = ShowStandard.p50.rawValue
-
-    /// Persisted Program Display target, as a `CGDirectDisplayID` stored as an
-    /// Int (0 = "use default"). Read back live by `DisplayOutputSink`. `Int`
-    /// because @AppStorage has no UInt32 binding; the sink casts to
-    /// `CGDirectDisplayID`.
-    @AppStorage(ProgramDisplaySelection.userDefaultsKey) private var programDisplayID = 0
-
-    /// Snapshot of currently attached displays, refreshed whenever the display
-    /// arrangement changes so the picker stays in sync with hot-plug events.
-    @State private var availableDisplays: [ProgramDisplayOption] = ProgramDisplayOption.current()
-
-    var body: some View {
-        Form {
-            Section("Output Route") {
-                Picker("Preferred Route", selection: $programOutput.preferredRoute) {
-                    ForEach(programOutput.configuredRoutes) { route in
-                        Label(route.title, systemImage: route.systemImage)
-                            .tag(route)
-                    }
-                }
-
-                Picker("Show Standard", selection: $showStandardRaw) {
-                    ForEach(ShowStandard.allCases) { standard in
-                        Text(standard.title).tag(standard.rawValue)
-                    }
-                }
-
-                Text("Must match the ATEM switcher's video standard. Applies the next time capture starts.")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-
-                LabeledContent("Active Route", value: programOutput.activeRouteTitle)
-
-                Text(programOutput.routingSummary)
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-            }
-
-            if programOutput.configuredRoutes.contains(.display) {
-                Section("Direct output (HDMI / USB-C)") {
-                    Picker("Output port", selection: $programDisplayID) {
-                        ForEach(availableDisplays) { option in
-                            Text(option.label).tag(option.id)
-                        }
-                    }
-
-                    Text("Pick the port your HDMI-to-SDI converter or ATEM is plugged into. A picked port is reserved while this output is selected: it shows black until the show starts, then Program. At Start, Alfie switches it to the show standard (e.g. 1080p50) and macOS restores its own setting when you switch output or quit. Turn on Focus / Do Not Disturb so notifications can't reach the feed.")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                        .fixedSize(horizontal: false, vertical: true)
-                }
-                .onReceive(
-                    NotificationCenter.default.publisher(
-                        for: NSApplication.didChangeScreenParametersNotification
-                    )
-                ) { _ in
-                    availableDisplays = ProgramDisplayOption.current()
-                }
-            }
-
-            Section("Diagnostics") {
-                LabeledContent("Session Log") {
-                    Button("Open in Finder") {
-                        DiagnosticsLog.openInFinder()
-                    }
-                    .buttonStyle(.borderless)
-                }
-
-                LabeledContent(
-                    "Recording To",
-                    value: programOutput.diagnosticsFileName ?? "Not Capturing"
-                )
-
-                LabeledContent(
-                    "Thermal State",
-                    value: DiagnosticsLog.thermalStateName(ProcessInfo.processInfo.thermalState)
-                        .capitalized
-                )
-
-                Text("A CSV row is written every ~5 s while capture is running: memory, frame timings, dropped frames, and the system thermal state. Open the folder after a session and chart the columns against elapsed_s to see where and why throughput fell off.")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                    .fixedSize(horizontal: false, vertical: true)
-            }
-
-            Section("Program Feed") {
-                LabeledContent("Frames Sent", value: "\(programOutput.framesSent)")
-                LabeledContent("Dropped Frames", value: "\(programOutput.droppedFrames)")
-                LabeledContent(
-                    "Drop Rate",
-                    value: String(format: "%.0f/min", programOutput.dropRatePerMinute)
-                )
-
-                if let size = programOutput.lastFrameSize {
-                    LabeledContent(
-                        "Last Frame",
-                        value: "\(Int(size.width))×\(Int(size.height))"
-                    )
-                } else {
-                    LabeledContent("Last Frame", value: "None Yet")
-                }
-
-                if let timestamp = programOutput.lastFrameTimestamp {
-                    LabeledContent(
-                        "Last Timestamp",
-                        value: String(format: "%.3fs", timestamp)
-                    )
-                }
-
-                if let lastDropTimestamp = programOutput.lastDropTimestamp {
-                    LabeledContent(
-                        "Last Drop",
-                        value: String(format: "%.3fs", lastDropTimestamp)
-                    )
-                }
-
-                if let lastDropReason = programOutput.lastDropReason {
-                    Text(lastDropReason)
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                        .fixedSize(horizontal: false, vertical: true)
-                }
-            }
-
-            if !programOutput.stageLatencies.isEmpty {
-                Section("Latency (Last 5 Seconds)") {
-                    ForEach(programOutput.stageLatencies, id: \.id) { latency in
-                        LabeledContent(
-                            latency.stage.title,
-                            value: String(format: "%.1f ms", latency.averageDuration * 1000)
-                        )
-                    }
-                }
-            }
-
-            Section("Bring-Up Checklist") {
-                bringUpCheckRow(
-                    title: "Virtual Camera Extension",
-                    status: systemExtensionManager.badgeTitle,
-                    detail: systemExtensionManager.summaryText,
-                    level: systemExtensionManager.outputCheckLevel
-                )
-
-                if let actionTitle = systemExtensionManager.primaryActionTitle {
-                    Button {
-                        Task { await systemExtensionManager.triggerPrimaryAction() }
-                    } label: {
-                        Label(actionTitle, systemImage: systemExtensionManager.primaryActionSystemImage)
-                    }
-                }
-
-                ForEach(programOutput.bringUpChecks) { check in
-                    bringUpCheckRow(
-                        title: check.title,
-                        status: check.status,
-                        detail: check.detail,
-                        level: check.level
-                    )
-                }
-            }
-
-            Section("Sink Health") {
-                ForEach(programOutput.sinkStatuses, id: \.id) { status in
-                    VStack(alignment: .leading, spacing: 4) {
-                        HStack {
-                            Label(status.route.title, systemImage: status.route.systemImage)
-                            Spacer()
-                            Text(status.level.title)
-                                .foregroundStyle(status.level.color)
-                        }
-
-                        Text(status.summary)
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-
-                        Text(status.detail)
-                            .font(.caption2)
-                            .foregroundStyle(.tertiary)
-                    }
-                    .padding(.vertical, 4)
-                }
-            }
-
-            if programOutput.preferredSinkCanReconnect {
-                Section("Recovery") {
-                    Button {
-                        programOutput.reconnectPreferredRoute()
-                    } label: {
-                        Label("Reconnect Output", systemImage: "arrow.clockwise.circle")
-                    }
-
-                    if let reconnectStatus = programOutput.preferredSinkReconnectStatus {
-                        Text(reconnectStatus)
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                    } else {
-                        Text("Force the preferred output route to tear down the current XPC connection and reconnect immediately.")
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                    }
-                }
-            }
-        }
-        .formStyle(.grouped)
-        .frame(width: 420, height: 420)
-    }
-
-    @ViewBuilder
-    private func bringUpCheckRow(
-        title: String,
-        status: String,
-        detail: String,
-        level: OutputCheckLevel
-    ) -> some View {
-        VStack(alignment: .leading, spacing: 4) {
-            HStack {
-                Text(title)
-                Spacer()
-                Text(status)
-                    .foregroundStyle(level.color)
-            }
-
-            Text(detail)
-                .font(.caption)
-                .foregroundStyle(.secondary)
-                .fixedSize(horizontal: false, vertical: true)
-        }
-        .padding(.vertical, 4)
-    }
-}
-
-#if DEBUG
-#Preview {
-    ProgramOutputSettingsView(
-        programOutput: ProgramOutputManager(sinks: [PreviewOutputSink()]),
-        systemExtensionManager: PreviewSystemExtensionStatusManager()
-    )
-}
-
-@MainActor
-private final class PreviewOutputSink: ProgramOutputSink {
-    let route: ProgramOutputManager.Route = .virtualCamera
-    var isAvailable: Bool { true }
-    var summary: String { "Preview route is available." }
-    var detail: String { "Used only for the SwiftUI preview." }
-    var lastErrorDescription: String? { nil }
-    var canReconnect: Bool { false }
-    var reconnectStatus: String? { nil }
-    var bringUpChecks: [OutputBringUpCheck] {
-        [
-            OutputBringUpCheck(
-                id: "preview.virtual.link",
-                title: "Virtual Camera · XPC Link",
-                status: "Preview",
-                detail: "Preview output sink is active only inside SwiftUI previews.",
-                level: .info
-            )
-        ]
-    }
-    var onStateChange: (() -> Void)?
-    func connect() {}
-    func disconnect() {}
-    func reconnect() {}
-    func updateCaptureStatus(isRunning: Bool) {}
-    func sendFrame(pixelBuffer: CVPixelBuffer, timestamp: Double) -> Bool { true }
-}
-
-@MainActor
-private final class PreviewSystemExtensionStatusManager: ObservableObject, SystemExtensionStatusProviding {
-    let badgeTitle = "Extension Ready"
-    let summaryText = "Preview system extension manager is active only inside SwiftUI previews."
-    let primaryActionTitle: String? = nil
-    let primaryActionSystemImage = "checkmark.seal"
-    let outputCheckLevel: OutputCheckLevel = .ok
-
-    func triggerPrimaryAction() async {}
-}
-#endif

@@ -3,7 +3,6 @@
 //  CinematicCoreMacOS
 //
 //  Created by Stephan Morris on 2/25/2026.
-//  Ticket: APP-02 - CoreML RL Agent Integration
 //
 
 import Combine
@@ -44,9 +43,10 @@ final class CinematicAgent: ObservableObject {
     private let maxZoom:      Float = 4.0
     private let aspectRatio:  Float = 16.0 / 9.0
 
-    /// Runtime quality clamp derived from the source resolution. The smallest
-    /// crop the agent is allowed to take is one resolution tier below the
-    /// source (e.g. 4K source → 1080p min crop = 2× max zoom). Updated by
+    /// Runtime crop ceiling derived from the source resolution via
+    /// `CropEngine.QualityFloor`: crop height stays at or above `source / 4`
+    /// and never under 240 px, so a 4K source allows about 4×. `2.0` is only
+    /// the value before the first format update. Updated by
     /// `updateSourceResolution(_:)` whenever capture format changes.
     private var qualityMaxZoom: Float = 2.0
 
@@ -141,7 +141,7 @@ final class CinematicAgent: ObservableObject {
 
     /// Update the resolution-derived quality clamp. Call whenever the
     /// capture format changes (e.g. on camera switch or `activeFormat` change).
-    /// Smallest allowed crop is one resolution tier below the source.
+    /// The smallest allowed crop follows `CropEngine.QualityFloor`.
     func updateSourceResolution(width: Int, height: Int) {
         let newCap = Self.qualityMaxZoom(forSourceHeight: height)
         guard newCap != qualityMaxZoom else { return }
@@ -150,10 +150,8 @@ final class CinematicAgent: ObservableObject {
     }
 
     /// Map source pixel height to the maximum zoom that keeps the crop at or
-    /// above the next resolution tier down (e.g. 4K → min crop 1080p → 2×).
-    /// Delegates to `CropEngine.QualityFloor`, the single source of truth for
-    /// the resolution-tier table — zoom is the reciprocal of the min crop
-    /// height fraction.
+    /// above `CropEngine.QualityFloor`: `source / 4`, never under 240 px
+    /// (4K → about 4×). Zoom is the reciprocal of the min crop height fraction.
     static func qualityMaxZoom(forSourceHeight height: Int) -> Float {
         let fraction = CropEngine.QualityFloor.forSource(height: height).minCropHeightFraction
         guard fraction > 0 else { return 1.0 }
@@ -243,6 +241,16 @@ final class CinematicAgent: ObservableObject {
 
     /// Build the 18-dim float observation vector.
     /// Indices match `bc_dataset.py:build_observation()` exactly.
+    /// Per-second speaker velocity from one frame's centre change, clamped to
+    /// [-1, 1] per axis as in `cinematic_env.py` (CR-038).
+    nonisolated static func speakerVelocity(from previous: CGPoint, to current: CGPoint,
+                                            frameRate: Double) -> (x: Float, y: Float) {
+        let rate = Float(frameRate)
+        let x = max(-1.0, min(1.0, Float(current.x - previous.x) * rate))
+        let y = max(-1.0, min(1.0, Float(current.y - previous.y) * rate))
+        return (x, y)
+    }
+
     private func buildObservation(
         person: PersonDetector.DetectedPerson?
     ) -> [Float] {
@@ -283,14 +291,15 @@ final class CinematicAgent: ObservableObject {
         if cropW > 1.0 { cropW = 1.0 }
         let zoomNorm = min(cropZoom / maxZoom, 1.0)
 
-        // Speaker velocity (frames * 30fps ≈ per-second velocity, clamped to [-1, 1])
+        // Speaker velocity: per-frame delta × frame rate ≈ per-second velocity,
+        // clamped to [-1, 1]. The training env multiplies by the session's
+        // frame rate, so the live vector uses the show rate, not a fixed 30.
         var velX: Float = 0
         var velY: Float = 0
         if let prev = previousSpeakerCenter, let p = person {
-            let cx = Float(p.boundingBox.midX)
-            let cy = Float(p.boundingBox.midY)
-            velX = max(-1.0, min(1.0, (cx - Float(prev.x)) * 30.0))
-            velY = max(-1.0, min(1.0, (cy - Float(prev.y)) * 30.0))
+            (velX, velY) = Self.speakerVelocity(
+                from: prev, to: CGPoint(x: p.boundingBox.midX, y: p.boundingBox.midY),
+                frameRate: ShowStandard.activeOrCurrent.frameRate)
         }
         if let p = person {
             previousSpeakerCenter = CGPoint(x: p.boundingBox.midX, y: p.boundingBox.midY)

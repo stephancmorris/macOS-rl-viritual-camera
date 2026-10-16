@@ -1,60 +1,39 @@
-# Decisions for Stephan
+# Preparation and the two readiness bars
 
-| ID / question | Options | Recommendation / why | Blocks | Reversible? |
-|---|---|---|---|---|
-| P1 Director-ready means? | R2 technical eligibility only; identity + settled shot; allow moving shots | Identity + settled shot first; technical freshness is not editorial readiness | AD-PREPARE/TAKE | Yes, requalify |
-| P2 Ambiguous identity? | Guess strongest detection; abstain; operator confirmation | Abstain and request nomination; operator may still use manual R2 Take | AD-SUBJECT/PREPARE | Yes |
-| P3 Proposal lifetime? | Unlimited; fixed expiry; version-bound plus expiry | Version-bound plus proposed 5 s intent lease; re-evaluate, never silently extend a Take | AD-PREPARE | Yes |
+Status: reconciled 2026-10-10 for D-01. [Recorded decisions](../handoff/stage3-4/DECISIONS.md) take precedence over older proposed text. Implementation references describe the open A-07 stack at `ecbf8814b7c77c64edfd2cc4a92ff6c80d892e42`, not merged or qualified behavior. Unrecorded choices and recommendations remain **AWAITING OWNER**. See the [product contract](product-contract.md) and [event contract](event-authority-contract.md).
 
-Status: proposed, 2026-09-30. Code baseline `33a3faf`; evidence from `origin/r2/sol:reports/readiness-evaluation.md` and `CinematicCoreMacOS/CinematicCoreMacOSTests/ReadinessEvaluationTests.swift`. The report contains **no real dataset results**. Synthetic decoder/CSV success establishes plumbing only. All new numerical values below are proposed starting values, not observed performance.
+## Recorded contract
 
-## What already exists
+P1 separates **prepare-ready** (confirmed lock, settled) from stricter **cut-ready** (also face visible, not mid-stride, framing landed). P2 requires a wider shot that holds everyone when identity is ambiguous, rather than guessing a close-up. Neither bar may disable an otherwise legal **operator** Take. A3 adds deterministic permission and R2 route/render checks to automatic cuts; readiness alone is never permission.
 
-`ProgramTake.swift` / `TakeRules.inputs` checks source present/admitted, candidate channel, render age, processing-start age, sourceGeneration, shotRevision, legal geometry and non-repeat. Current provisional constants are 2 render periods, 4 source periods and 0.5 s between Takes; these are existing code values, not new evidence. `RenderedChannelFrame.processingStartedAt` in `ChannelFrame.swift` is a host-clock **processing proxy**, not a sensor exposure timestamp. `RenderedChannelFrame.matches` does not compare controlEpoch. `TakeAvailability.swift` permits R2 manual Take of a valid moving shot. Preserve that behavior.
+A proposal names an input and the app preset for its single shot (UC-2, N3). Preparation changes current Preview only. Assist never changes Program or cuts. An operator nomination wins; E1 also permits visible-rule subject selection without a nomination, with the pick shown and one-tap override. That autonomous selection is not supplied merely by an evidence sample.
 
-`ShowCoordinator.take` validates the current latest frame and synchronously invokes `ProgramRouter.commitTake`; `TakeRequest` carries roles/route generation, not all director revisions. Director must add its permit outside this request and atomically validate it at admission. Do not build a parallel render/output path.
+## Actual A-07 values and units
 
-## Proposed conjunction
+`DirectorReadiness.Inputs` contains `take: TakeAvailability`, categorical `identity: IdentityEvidence`, `framingSettledFor` in seconds, `motion` in normalized frame units per second, and `cropConverged`. `Bar` is `prepare` or `cut`.
 
-`directorReady = R2Eligible AND currentPermit AND editorialEvidence AND permittedMotion AND stableWindow`.
-
-| Gate / proposed parameter | Starting rule / rationale | Measurement and refusal |
+| Injected parameter | Unit / constraint | Use |
 |---|---|---|
-| identityEvidence | Operator-nominated same physical person; tracking state, ready gallery, no identity veto or pending reacquisition | Expose categorical evidence, not invented probability. Review wrong-person events against labels; uncertain → abstain |
-| observationMaxAgeS | 0.15 s and current source/lock generation | Match initial R2 perception budget; test stale observation ages separately from fresh renders; measure at decision host time |
-| settledWindowS | 0.75 s continuously eligible | Prevent cut during preparation transient; plot false-ready vs preparation delay on held-out clips |
-| stableFreshObservations | At least 3 distinct fresh observations spanning the window | Avoid repeated sample counting; insufficient cadence is not readiness |
-| centerSpeedMaxPerS | 0.02 source-width/height normalized units/s, Euclidean center speed | Finite differences of actual rendered crops with monotonic timestamps; rejects visibly moving pan until qualified |
-| logScaleSpeedMaxPerS | 0.02/s absolute d(log crop height)/dt | Scale-independent settle criterion; label noticeable zoom on replay |
-| plannedMoveActive | False: no in-flight rung move or Auto Pan | Tiny instantaneous speed at easing endpoints must not look settled |
-| source age | Keep R2 render/source-period gates; do not relax for director | Clock-injection boundary tests and rig capture-to-processing measurements |
-| proposalIntentTTLSeconds | 5 s since proposal creation | Bounds abandoned intent. Refresh creates new proposal/evidence, never extends an armed notice automatically |
-| future countdownSeconds | 3 s only after separate approval | Continuous readiness throughout notice; new exact render at dispatch must match intent/revisions; expiry/staleness cancels notice |
+| `minimumSettledTime` | Finite nonnegative seconds | Prepare bar |
+| `maximumMotion` | Finite nonnegative normalized frame units/s | Prepare motion limit unless `cutOnMotionAllowed` permits it |
+| `minimumCutSettledTime` | Seconds, at least `minimumSettledTime` | Stricter cut bar |
+| `maximumCutMotion` | Same speed unit, no greater than `maximumMotion` | Cut motion limit regardless of the prepare flag |
+| `cutOnMotionAllowed` | Boolean | Despite the name, it does not bypass the cut bar's motion or landed-crop checks |
 
-For a safe full-view candidate with no person-specific intent, nomination/face evidence is not required; explicit camera-role verification and fresh lawful rendering are required. A Wide preset tracking a person is not equivalent to this safe full view.
+Both bars require `.confirmed` and legal R2 Take availability. Cut additionally requires `cropConverged`. The readiness reasons are `compositionUnavailable`, `evidenceUnavailable`, `takeUnavailable`, `invalidParameters`, `invalidEvidence`, `identityUncertain`, `framingUnsettled`, `moving`, and `cropMoving`.
 
-## Proposed lifecycle and invalidation
+There is **no `faceVisible` field** in `ChannelEvidenceSample`. At A-07, `.confirmed` is used as the face-visibility proxy; it means a fresh tracked lock with a ready gallery, not an independent current face observation. The gap against P1 is an [owner question](event-authority-contract.md#owner-questions), not an approved relaxation of P1 or evidence of cut qualification.
 
-`proposed → preparing → settling → ready → consumed`, with any pre-consumed state able to become `invalid(reason)`. Suggest displays proposed intent without executing it. Auto Prepare applies one bounded intent to Preview, records the acknowledged resulting epoch/shotRevision, then observes it. An operator Take consumes/invalidates the proposal whether the click commits or rejects, because authority pauses.
+## Proposal, dispatch and composition
 
-| Change | Result |
-|---|---|
-| Any manual intent, Pause/Pin/Off, Edit Live, Stop | Invalidate authority token, pending effects and countdown before action |
-| Input stop/rebind/reconnect, channel removed, source missing | Invalidate sourceGeneration and nomination for that source; no substitution |
-| External shot revision / control epoch change | Invalidate; only the identified preparation acknowledgement may rebind its own expected post-command revisions |
-| Take/route change | Invalidate roles/routeGeneration; never reinterpret former Preview as current Preview |
-| Subject/lock generation, cue, preference policy version or role assignment change | Invalidate even if R2 frame remains technically fresh |
-| Observation ages out, ambiguity, movement or health failure | Revoke ready immediately; clear settling window and countdown; same intent can settle anew only inside current lease |
-| Intent expiry, nonfinite/negative age or clock discontinuity | Invalidate; fail closed, record reason |
+`DirectorProposal` binds target/shot to authority epoch, source/control/shot revisions, route generation, policy and nomination revisions, and host-clock creation time. `DirectorProposalValidator` rechecks those values at the effect boundary. The request lease and the resulting composition are different: expiry refuses late dispatch; a successfully prepared composition can remain while readiness is refreshed. Do not turn every refresh into a new preset or use a deadline to force a cut.
 
-Ordinary tracking interpolation need not increment shotRevision; this is why live motion/evidence must be checked independently. Readiness never arms a delayed manual Take. Countdown is a director notice, not a reserved stale frame.
+A request/receipt must refer to the same intent, target and revisions. Acknowledgement checks current roles, authority and expected post-effect revisions; duplicate, replaced or late results cannot create a current composition. Evidence gaps inhibit effects immediately; `wideWaiting` is declared identity loss (N5), not a temporary gap. Source restart, takeover and nomination changes retire work. N1 starts fresh on a new Assist Preview after an operator Take.
 
-## Evaluation using the existing harness
+Use a common monotonic host clock for ages, with finite nonnegative readings. Processing/observation timestamps are not camera exposure times and cannot prove physical latency. Parameter validity and stale rejection need explicit tests, including future/out-of-order observations. The A-07 adapter's debounce path has a review finding about delaying stale-evidence inhibition; its current behavior is not the desired freshness guarantee.
 
-1. Freeze consented train/held-out clips and annotations before tuning. Existing harness uses nearest target point in Vision bottom-left coordinates; require physical-person interval labels and explicit absence/ambiguity labels for director study.
-2. Run existing `ReadinessEvaluationTests` with `ALFIE_READINESS_CLIPS` and `ALFIE_READINESS_OUT`; record decoding, selected/face/print/pose frames, source-pixel height distribution and processing freshness. Unannotated tallest-person selection cannot validate identity.
-3. Proposed second replay layer drives actual acquisition/locked ROI/recovery and composer/render trajectories with recorded observation timestamps and injected delays. Existing full-frame `.reacquiring` harness does **not** exercise that pipeline. UUID continuity is only a proxy, never wrong-person truth.
-4. Independent reviewers label each candidate as intended person, acceptable composition, settled/moving and eligible/uncertain. Count false-ready candidates / all declared-ready candidates; missed-ready time / labelled acceptable time; median/p95 preparation latency for successful attempts, with failures separately counted.
-5. Freeze thresholds using training only; evaluate held-out small-subject, crossing and loss strata separately. Then test two live cameras and actual downstream cadence; offline processing age cannot establish live source freshness.
+## Choices and study plan — AWAITING OWNER
 
-Acceptance proposal: zero identity-veto bypasses and stale-revision accepts in deterministic tests; zero wrong-person director-ready proposals in held-out evaluation, with sample size and abstention published. Numeric quality/coverage budgets require the qualification protocol and Stephan approval before runs. Risk: conservative settling may starve useful shots; report coverage rather than easing thresholds after looking at held-out errors.
+P3 options are revision binding alone or revision binding plus a bounded request lease. Recommend the latter to reject delayed work, trading fewer stale effects for possible missed preparations. N4 options are repeated Preview changes or at most one per tenure with readiness refresh; recommend the latter for a truthful stable Preview, trading flexibility for predictability. Both remain open; no duration or change budget is approved here.
+
+Collect metadata on settlement, observation gaps, rejected requests, useful preparations and operator cuts; compare parameter candidates before freezing a named revision. Label synthetic, recorded and live evidence separately. Recorded media collection requires E3 first. No synthetic or replay pass qualifies a level; live use requires that level's sign-off.

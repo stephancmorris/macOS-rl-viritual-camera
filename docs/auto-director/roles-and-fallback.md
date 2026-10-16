@@ -1,40 +1,26 @@
-# Decisions for Stephan
+# Input roles and safe-wide fallback
 
-| ID / question | Options | Recommendation / why | Blocks | Reversible? |
-|---|---|---|---|---|
-| R1 Reserve safe camera? | Fixed safe-wide + speaker camera; both interchangeable; optional fallback | Fixed safe-wide role for first qualification; provides a verifiable full-stage candidate | AD-ROLES, setup | Yes |
-| R2 Automatic fault fallback? | Ask only; widen live automatically; qualified safe Take | Ask only in first scope and initially in Auto Direct; loss revokes authority | AD-ROLES/TAKE | Yes, requires separate fault qualification |
+Status: reconciled 2026-10-10 for D-01. [Recorded decisions](../handoff/stage3-4/DECISIONS.md) take precedence over older proposed text. Implementation references describe the open A-07 stack at `ecbf8814b7c77c64edfd2cc4a92ff6c80d892e42`, not merged or qualified behavior. Unrecorded choices and recommendations remain **AWAITING OWNER**. See the [product contract](product-contract.md) and [event contract](event-authority-contract.md).
 
-Status: proposed, 2026-09-30. Roles describe physical camera capability, independent of Program/Preview roles, which swap at Take.
+## Recorded boundaries
 
-| Proposed camera role | Eligibility / exclusions |
-|---|---|
-| Safe wide | Operator verifies complete intended stage coverage and lawful fresh rendered full view; no director crop tightening or physical movement. “Wide preset” is not proof of full view |
-| Speaker | Operator nominates subject in this camera; available approved close/full-body presets within existing quality limits |
-| Unassigned / unavailable | No director proposals; may be used manually under R2 rules |
+UC-2 gives each physical camera one input with one shot. Program and Preview are current routing roles, not permanent camera identities or multiple virtual shots from one camera. Alfie sends an input through the existing `ShowCoordinator.take` / `ProgramRouter` path; it does not publish raw source pixels, create another output or silently change output destinations.
 
-With two cameras, keeping A safe-wide means no second close-up angle while B is Program. This is an explicit coverage tradeoff, not a hidden third-input requirement. Roles do not transfer automatically to a replacement source. Rebind invalidates verification and requires operator reassignment.
+S1 includes a qualified Backup level with safe-wide fallback. A3 permits Director cuts only in qualified Auto/Backup with a one-shot permit checked in the same turn as the existing Take checks. Assist never cuts. P2 prefers a wider shot holding everyone under ambiguity; a Wide preset alone proves neither coverage nor freshness. N5 subject loss is separate from loss of a camera source.
 
-## Existing code and deterministic response
+## Open role and fault design — AWAITING OWNER
 
-`ProgramRouter.swift` / `ProgramRouter` owns source-loss behavior: existing constants detect loss after 0.5 s and hold rendered output for 2 s before standby. `ShotComposer.swift` / `LockState` has separate subject-loss HOLD (existing 10 s) then wideWaiting. These are distinct conditions, not interchangeable director timers. `ShowCoordinator.swift` / `take` remains the only proposed director routing entry; `TakeRules` rejects stale/repeated candidates. `ChannelRevisions` retires old source work.
-
-Priority order: Stop → source/output/admission fault → manual/pin/pause → identity failure → ordinary proposal. All simultaneous events resolve by the highest row; no fault is interpreted as permission to cut.
-
-| State / event | Off, Suggest, Auto Prepare | Proposed initial Auto Direct | Existing Program behavior |
+| Question | Options | Recommendation and tradeoff | Required evidence |
 |---|---|---|---|
-| Healthy nominated speaker, Preview available | Suggest or prepare if authorized | Prepare/Take only under ordinary qualified policy | Unchanged until Take commit |
-| Preview subject lost/ambiguous | Cancel ready proposal; pause, ask to verify/nominate | Same | No source switch |
-| Program subject lost, camera still healthy | Pause director; offer manual safe-wide candidate | Same; automatic safe Take deferred | Existing channel recovery may HOLD/widen under its previous tracking grant; director does not shorten it |
-| Preview camera lost | Cancel work, pause, ask reconnect | Same | Current Program continues |
-| Program camera lost; healthy safe wide elsewhere | Cancel work, pause; show “Program missing · Take A if suitable” | Same until separate fallback policy approved | Router hold/standby; manual R2 Take available if legal |
-| Both sources lost / safe wide stale | Pause; no eligible alternate | Same | Hold/standby; no raw source fallback |
-| Output destination missing | Pause; identify endpoint | Same | No source swap or destination substitution |
-| Pair workload unsupported | Pause optional director; request explicit operator single-input action | Same | No silent rate/format reduction |
-| Pin + subject/source loss | Clear pin into fault pause; show exact fault | Same | Pin never suppresses health reporting |
-| Source returns / evidence recovers | Stay paused, new generations/evidence required | Same | Existing same-assigned-Program recovery may resume fresh render; not a Take |
-| Stop show | Off; retire all grants | Same | Existing stop lifecycle |
+| R1 role assignment | Reserved verified safe wide; interchangeable inputs; optional fallback | Keep a verified safe-wide input as proposed, trading one flexible shot camera for known coverage | Rig-specific framing, health and fresh-render checks; operator can identify the wide |
+| R2 Program source loss | Pause/ask; widen same live input; take verified safe wide | The product contract proposes one Backup fallback inside the router hold window, then pause. It preserves continuity but adds a fault-time cut boundary | Fault drills proving current eligibility, permit, destination, bounded timing and no repeat fallback |
 
-Future alternative, **not recommended for initial wiring**: a separately approved `safeTakeOnProgramLoss` could issue a new permit for a verified current safe-wide Preview. It cannot revive a pre-fault permit, ignore operator revocation, bypass R2 readiness or treat a stale camera as safe. This would require revising the authority fault transition and qualifying it explicitly; no foundation default should enable it.
+**R2 is not recorded.** The open decision-register recommendation mentions Auto/Backup fallback, while the product contract narrows it to Backup and pauses Assist/Auto. Recommend the narrower Backup-only trial, but the owner must choose. Do not infer approval from S1's broad backup-producer scope or silently resolve this discrepancy in code.
 
-Acceptance: deterministic event permutations for every row, lost-subject vs lost-camera distinction, role rebinding, pin/fault conflict, manual Wide and rejected fallback. Inspect external output to prove no silent source switch in manual operation. Risks: safe-wide camera can be misframed; verify at setup and after any physical adjustment, even when image freshness is good.
+R2's existing hold/standby route remains authoritative until an approved and separately qualified fallback is implemented. A-07 has no authorized automatic Take. Never reuse an old preparation or permit merely because Program failed; current Preview must be the intended verified wide and pass all current cut and route checks. If no safe candidate exists, retain router hold/standby and show the fault. A destination fault is not permission to swap cameras or outputs.
+
+A manual camera action/Manual toggle wins over fallback; revoke and stop immediately. An operator Take follows N1, not a generic all-Takes-pause rule. Reconnect creates a new source generation and cannot revive a prior grant. Hand to Alfie rechecks current health, admission and qualification. Pin semantics and fault interactions remain A2 open.
+
+## Acceptance evidence
+
+Keep synthetic fault injection, consented recorded playback and live rig drills separate. Cover missing Preview, missing Program, both unavailable, destination loss, expired render, reconnection, operator takeover, duplicate callback, permit refusal and hold-window expiry. Observe the downstream rendered Program as well as logical state. A simulator pass does not qualify fallback, Auto or Backup. Freeze numeric parameters and the per-level protocol only through owner review; this reconciliation supplies no new timing default.

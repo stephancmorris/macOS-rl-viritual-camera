@@ -13,6 +13,8 @@ import IOSurface
 import OSLog
 import os
 
+/// `CVPixelBuffer` is not `Sendable`. The frame path hands this box across a
+/// task and does not touch the buffer again until that task finishes.
 private final class SendablePixelBufferBox: @unchecked Sendable {
     nonisolated(unsafe) let pixelBuffer: CVPixelBuffer
 
@@ -27,6 +29,59 @@ private final class SendablePixelBufferBox: @unchecked Sendable {
 private final class CaptureSessionBox: @unchecked Sendable {
     nonisolated(unsafe) let value: AVCaptureSession
     nonisolated init(_ value: AVCaptureSession) { self.value = value }
+}
+
+/// Coalesces AVCapture `didDrop` callbacks. A drop used to start one
+/// main-actor Task each; under overload that is frame-rate hops onto the actor
+/// that is already behind. Drops are counted here on the capture queue, and
+/// only the first drop of a burst schedules a hop, which records them all.
+nonisolated final class CaptureDropCoalescer: @unchecked Sendable {
+    private let lock = NSLock()
+    private var pending: [Double] = []
+    private var overflow = 0
+    private var flushScheduled = false
+    /// Timestamps kept per flush; beyond this, drops are still counted and
+    /// recorded with the newest timestamp.
+    static let maxPendingTimestamps = 256
+
+    struct Batch: Equatable {
+        var timestamps: [Double] = []
+        /// Drops past the timestamp cap; each is recorded at the newest time.
+        var overflow = 0
+
+        var all: [Double] {
+            guard overflow > 0, let last = timestamps.last else { return timestamps }
+            return timestamps + Array(repeating: last, count: overflow)
+        }
+    }
+
+    init() {}
+
+    /// Record one drop. True when the caller must schedule a flush.
+    func note(timestamp: Double) -> Bool {
+        lock.lock()
+        defer { lock.unlock() }
+        if pending.count < Self.maxPendingTimestamps {
+            pending.append(timestamp)
+        } else {
+            pending[pending.count - 1] = timestamp
+            overflow += 1
+        }
+        guard !flushScheduled else { return false }
+        flushScheduled = true
+        return true
+    }
+
+    /// Take every drop noted since the last flush.
+    func drain() -> Batch {
+        lock.lock()
+        defer { lock.unlock() }
+        let batch = Batch(timestamps: pending, overflow: overflow)
+        pending.removeAll(keepingCapacity: true)
+        overflow = 0
+        flushScheduled = false
+        return batch
+    }
 }
 
 nonisolated final class CaptureFrameProcessingGate: @unchecked Sendable {
@@ -152,7 +207,6 @@ enum CameraError: LocalizedError {
 }
 
 /// Manages the AVCaptureSession pipeline for 4K video capture
-/// Ticket: APP-01 - AVCaptureSession Pipeline
 @MainActor
 final class CameraManager: NSObject, ObservableObject {
     private nonisolated static let logger = Logger(subsystem: "com.alfie", category: "Camera")
@@ -213,16 +267,12 @@ final class CameraManager: NSObject, ObservableObject {
     /// Operator-facing summary of the current playback harness state.
     @Published private(set) var validationClipStatus: String = "Select a validation clip to route file playback through Alfie's camera pipeline."
     
-    /// Person detector (Task 2.1)
     let personDetector = PersonDetector()
     
-    /// Crop engine (Task 2.2 - GFX-01)
     let cropEngine: CropEngine?
 
-    /// Shot composer (Task 2.3 - LOGIC-01)
     let shotComposer = ShotComposer()
 
-    /// RL-trained CoreML agent (Task APP-02)
     let cinematicAgent = CinematicAgent()
 
     /// When true, the cinematic agent drives the crop instead of ShotComposer.
@@ -238,7 +288,6 @@ final class CameraManager: NSObject, ObservableObject {
         }
     }
 
-    /// Training data recorder (Task 3.1 - RL-01)
     let trainingDataRecorder = TrainingDataRecorder()
 
     /// Routes the processed program feed to the currently active output sink.
@@ -336,7 +385,7 @@ final class CameraManager: NSObject, ObservableObject {
 
 
     /// Operation modes for crop control
-    enum OperationMode {
+    nonisolated enum OperationMode: Sendable {
         case wide
         case autoTracking
         case manualCrop
@@ -373,7 +422,7 @@ final class CameraManager: NSObject, ObservableObject {
     //
     // Detection is off by default. The operator taps "Detect" to enter the
     // tap-a-subject state; tapping a point seeds a one-shot ROI scan that finds
-    // and acquires that single person. No full-frame multi-person scan ever runs.
+    // and acquires that single person.
 
     /// True after the operator taps Detect and before a subject is selected.
     /// Drives the `.awaitingTap` detection mode and the preview tap affordance.
@@ -425,10 +474,8 @@ final class CameraManager: NSObject, ObservableObject {
     /// queue detections faster than they complete and spawn unbounded work.
     private var detectionInFlight = false
 
-    /// Bumped whenever a detection completes. Comparing against
-    /// `consumedDetectionRevision` tells a frame whether its detections are new
-    /// or a repeat of the previous frame's — which matters because several
-    /// framing rules count *consecutive frames* and a repeat is not evidence.
+    /// Bumped when a capture source starts, stops, or rebinds. In-flight frames
+    /// from an older value are retired.
     private var captureGeneration: UInt64 = 0
 
     /// Frame counter driving `DeveloperFlags.detectionFrameInterval`.
@@ -616,6 +663,7 @@ final class CameraManager: NSObject, ObservableObject {
     private var cancellables = Set<AnyCancellable>()
     private var clipPlaybackTask: Task<Void, Never>?
     private nonisolated let frameProcessingGate = CaptureFrameProcessingGate()
+    private nonisolated let dropCoalescer = CaptureDropCoalescer()
 
     /// Last source pixel aspect (width/height) forwarded to the shot composer.
     /// Used to skip the per-frame update when aspect is unchanged.
@@ -674,7 +722,6 @@ final class CameraManager: NSObject, ObservableObject {
         self.outputPort = outputPort
         self.commands = CommandDispatcher(channelID: channelID)
         self.sessionQueue = DispatchQueue(label: "com.alfie.capture-session.\(channelID.letter)", qos: .userInitiated)
-        // Initialize crop engine (Task 2.2 - GFX-01)
         self.cropEngine = CropEngine()
         
         super.init()
@@ -717,11 +764,6 @@ final class CameraManager: NSObject, ObservableObject {
         let devices = allDevices.filter { device in
             !device.localizedName.lowercased().contains("Test")
         }
-//        
-//        print("   Found \(devices.count) camera(s) (excluding MacBook Pro for testing)")
-//        if devices.count != allDevices.count {
-//            print("   ⚠️ Filtered out: \(allDevices.count - devices.count) camera(s)")
-//        }
         
         if devices.isEmpty {
             availableCameras = []
@@ -824,6 +866,8 @@ final class CameraManager: NSObject, ObservableObject {
         }
     }
     private func choosePreset(_ preset: OperatorCommand.Preset) {
+        applyingInternalShotChange = true
+        defer { applyingInternalShotChange = false }
         switch preset {
         case .stage(let shot): shotComposer.config.shotPreset = shot
         case .webcam(let shot): shotComposer.config.webcamPreset = shot
@@ -892,14 +936,35 @@ final class CameraManager: NSObject, ObservableObject {
         }
     }
 
-    func makeCommand(_ action: OperatorCommand.Action) -> OperatorCommand {
+    func makeCommand(_ action: OperatorCommand.Action,
+                     origin: OperatorCommand.Origin = .operatorUI) -> OperatorCommand {
         let target: OperatorCommand.Target
         switch action { case .startSession, .stopSession: target = .session; default: target = .channel(channelID) }
-        return .init(target: target, epoch: commands.epoch, expiry: CACurrentMediaTime() + 2, action: action)
+        return .init(target: target, origin: origin, epoch: commands.epoch,
+                     expiry: CACurrentMediaTime() + 2, action: action)
     }
+
+    /// Something other than the Director tried to change this camera.
+    enum ManualCameraAction {
+        /// Reported before admission, so refused commands are included.
+        case command(OperatorCommand)
+        /// The shot settings changed outside any command (Settings, format).
+        case settingsChanged
+    }
+
+    /// S3 B-02: the one place every manual change to this camera is seen —
+    /// the ContentView, pill and console paths all reach `dispatch`. The show
+    /// installs it; Director-origin commands are not reported.
+    var manualActionObserver: ((ManualCameraAction) -> Void)?
+
+    /// True while the camera itself writes the shot settings (applying an
+    /// admitted preset or finishing a zoom move), so those writes are not
+    /// mistaken for a manual Settings change.
+    private var applyingInternalShotChange = false
 
     @discardableResult
     func dispatch(_ command: OperatorCommand) -> CommandResult {
+        if command.origin != .director { manualActionObserver?(.command(command)) }
         if let reason = commands.rejection(for: command, now: CACurrentMediaTime()) { return .rejected(reason) }
         switch command.action {
         case .startSession, .stopSession: break
@@ -980,8 +1045,17 @@ final class CameraManager: NSObject, ObservableObject {
     func setRunningForTesting(_ running: Bool) { isRunning = running }
     /// Test seam: a rendered frame as if processFrame had produced it.
     func setLatestRenderedFrameForTesting(_ frame: RenderedChannelFrame?) { latestRenderedFrame = frame }
+    /// Test seam: a detection observation as if the frame path consumed it.
+    func recordObservationForTesting(capturedAt: TimeInterval, personCount: Int) {
+        lastObservationCapturedAt = capturedAt
+        lastObservationPersonCount = personCount
+    }
     /// Test seam: mark the source missing as a hot unplug would.
     func setSourceMissingForTesting(_ missing: Bool) { sourceMissing = missing }
+    /// Test seam: feed one captured buffer through the frame path.
+    func processFrameForTesting(_ pixelBuffer: CVPixelBuffer, timestampSeconds: Double) async {
+        await processFrame(pixelBuffer: pixelBuffer, timestampSeconds: timestampSeconds)
+    }
     /// Test seam: the identity a configured source would have recorded.
     func setSourceIdentityForTesting(_ source: DiagnosticsSessionIdentity.Source) { recordSourceIdentity(source) }
     #endif
@@ -1117,6 +1191,18 @@ final class CameraManager: NSObject, ObservableObject {
         return lastGoodProgramBuffer
     }
 
+    /// Run `render` holding the shared render slot. Without a scheduler the
+    /// render runs directly. A scheduler that cancels or supersedes this turn
+    /// returns no permit: the frame is skipped (`CancellationError`), not
+    /// rendered outside the slot (CR-031).
+    static func renderInTurn(scheduler: FrameWorkScheduler?, channel: ChannelID,
+                             render: () async throws -> CVPixelBuffer) async throws -> CVPixelBuffer {
+        guard let scheduler else { return try await render() }
+        guard let permit = await scheduler.acquire(.render, for: channel) else { throw CancellationError() }
+        defer { scheduler.release(permit) }
+        return try await render()
+    }
+
     func renderProgramFrame(crop: CropEngine.CropRect, timestamp: Double,
                             render: () async throws -> CVPixelBuffer) async -> CVPixelBuffer? {
         let generation = captureGeneration
@@ -1129,6 +1215,10 @@ final class CameraManager: NSObject, ObservableObject {
               epoch == commands.epoch, running == isRunning else { return nil }
         switch result {
         case .success(let buffer): return selectProgramBuffer(rendered: buffer, crop: crop)
+        case .failure(let error) where error is CancellationError:
+            // A skipped turn is not a render failure: discard the frame and
+            // leave the hold state as it was.
+            return nil
         case .failure(let error):
             cancelOperatorMotion()
             outputPort.recordDroppedFrame(timestamp: timestamp, reason: "Crop processing failed: \(error.localizedDescription)", stage: .renderFailed)
@@ -1395,6 +1485,34 @@ final class CameraManager: NSObject, ObservableObject {
 
     var canDirectlyReacquire: Bool { recoveryState.allowsDirectSelection }
 
+    // MARK: Director evidence (read-only, S3 B-01)
+
+    /// Capture time of the newest detection observation the frame path
+    /// consumed (fresh or repeat). Plain storage, never published.
+    private(set) var lastObservationCapturedAt: TimeInterval?
+    /// People in the newest *fresh* observation. While locked this counts the
+    /// subject ROI only, so 2+ means someone else is crossing the subject.
+    private(set) var lastObservationPersonCount = 0
+
+    /// Seconds since the newest observation was captured, on the host clock.
+    func observationAge(now: TimeInterval = CACurrentMediaTime()) -> TimeInterval? {
+        lastObservationCapturedAt.map { now - $0 }
+    }
+
+    /// An operator gesture that has started but not finished on this channel:
+    /// Detect armed, a tap waiting for its ROI scan, or a zoom move in flight.
+    /// A Director command now would supersede it, so the Director must wait.
+    var operatorGestureInProgress: Bool {
+        detectionDiscoveryActive || tapPending || shotMove != nil
+    }
+
+    /// The crop has reached its target: no interpolation and no zoom move.
+    var cropConverged: Bool {
+        guard let cropEngine else { return false }
+        return !cropEngine.isInterpolating && cropEngine.zoomDirection == nil
+    }
+
+
     /// Operator tapped a point on the preview to pick a subject. Stored for a
     /// one-shot ROI scan on the next frame; the scan finds the single person
     /// at that point and starts acquisition. Accepted while discovery is
@@ -1624,6 +1742,14 @@ final class CameraManager: NSObject, ObservableObject {
             .sink { [weak self] _ in self?.objectWillChange.send() }.store(in: &cancellables)
 
         shotComposer.$config
+            .dropFirst()
+            .sink { [weak self] _ in
+                guard let self, !self.applyingInternalShotChange else { return }
+                self.manualActionObserver?(.settingsChanged)
+            }
+            .store(in: &cancellables)
+
+        shotComposer.$config
             .map(\.frameProfile)
             .removeDuplicates()
             .sink { [weak self] profile in
@@ -1652,13 +1778,7 @@ final class CameraManager: NSObject, ObservableObject {
     private func applyFrameProfile(_ profile: ShotComposer.Config.FrameProfile) {
         guard let cropEngine else { return }
 
-        let desiredSize: CGSize
-        switch profile {
-        case .livestream:
-            desiredSize = CGSize(width: 1920, height: 1080)
-        case .portrait:
-            desiredSize = profile.defaultOutputSize
-        }
+        let desiredSize = profile.defaultOutputSize
         if cropEngine.config.outputSize != desiredSize {
             cropEngine.config.outputSize = desiredSize
         }
@@ -1725,10 +1845,11 @@ final class CameraManager: NSObject, ObservableObject {
 
     private func processFrame(pixelBuffer: CVPixelBuffer, timestampSeconds: Double) async {
         let sessionGeneration = captureGeneration
-        guard isRunning else { return }
-        // NOTE: a `CIImage(cvPixelBuffer:)` used to be built here and never
-        // used — one wasted image object per frame on the exact path the memory
-        // investigation is looking at. Removed so it cannot muddy attribution.
+        // A hot unplug retires the generation but keeps `isRunning` so the
+        // output holds and then sends standby. A buffer the stopping session
+        // still delivers would start under the new generation, so refuse it
+        // here: it must not be rendered, sent, or replace the cleared hold.
+        guard isRunning, !sourceMissing else { return }
         let bufferWidth = CGFloat(CVPixelBufferGetWidth(pixelBuffer))
         let bufferHeight = CGFloat(CVPixelBufferGetHeight(pixelBuffer))
 
@@ -1921,8 +2042,10 @@ final class CameraManager: NSObject, ObservableObject {
             }
         }
         Self.signposter.endInterval("detection", detectionInterval)
-        if let observation = observation.frame {
-            outputPort.recordObservationAge(CACurrentMediaTime() - observation.capturedAt)
+        if let frame = observation.frame {
+            outputPort.recordObservationAge(CACurrentMediaTime() - frame.capturedAt)
+            lastObservationCapturedAt = frame.capturedAt
+            if detectionIsFresh { lastObservationPersonCount = frame.persons.count }
         }
 
         let composeInterval = Self.signposter.beginInterval("compose")
@@ -1993,11 +2116,11 @@ final class CameraManager: NSObject, ObservableObject {
                     let smoothing = CACurrentMediaTime() < fastFramingUntil
                         ? Self.fastFramingSmoothing
                         : shotComposer.config.smoothingFactor
-                    cropEngine.config.transitionSmoothing = smoothing
+                    cropEngine.applyFrameSmoothing(smoothing, operatorSetting: shotComposer.config.smoothingFactor)
                     cropEngine.setTargetCrop(widestSafeCrop())
                 case .autoTracking:
                     if useMLAgent {
-                        cropEngine.config.transitionSmoothing = 0.05
+                        cropEngine.applyFrameSmoothing(0.05, operatorSetting: shotComposer.config.smoothingFactor)
                         let newCrop = cinematicAgent.predict(
                             person: primaryPerson,
                             currentCrop: cropEngine.currentCrop
@@ -2007,7 +2130,7 @@ final class CameraManager: NSObject, ObservableObject {
                         let smoothing = CACurrentMediaTime() < fastFramingUntil
                             ? Self.fastFramingSmoothing
                             : shotComposer.config.smoothingFactor
-                        cropEngine.config.transitionSmoothing = smoothing
+                        cropEngine.applyFrameSmoothing(smoothing, operatorSetting: shotComposer.config.smoothingFactor)
                         if let primaryPerson {
                             frameLog("🔍 DEBUG: Composing shot for person at \(primaryPerson.boundingBox)")
                             if let idealCrop = shotComposer.compose(
@@ -2024,7 +2147,7 @@ final class CameraManager: NSObject, ObservableObject {
                         }
                     }
                 case .manualCrop:
-                    cropEngine.config.transitionSmoothing = shotComposer.config.smoothingFactor
+                    cropEngine.applyFrameSmoothing(shotComposer.config.smoothingFactor, operatorSetting: shotComposer.config.smoothingFactor)
                     let idealCrop = manualCropRect(center: manualCropPoint)
                     cropEngine.setTargetCrop(idealCrop)
                 case .autoPan:
@@ -2047,9 +2170,10 @@ final class CameraManager: NSObject, ObservableObject {
             outputPixelBuffer = await renderProgramFrame(crop: snapshot.crop, timestamp: timestampSeconds) {
                 // The render slot is shared across channels; wait for this
                 // channel's fair turn (immediate with one camera).
-                let permit = await scheduler?.acquire(.render, for: channel)
-                defer { if let permit { scheduler?.release(permit) } }
-                return try await cropEngine.renderCrop(pixelBuffer, crop: snapshot.crop, outputSize: snapshot.outputSize)
+                try await Self.renderInTurn(scheduler: scheduler, channel: channel) {
+                    try await cropEngine.renderCrop(pixelBuffer, crop: snapshot.crop,
+                                                    outputSize: snapshot.outputSize, highQuality: snapshot.highQuality)
+                }
             }
             mainSegmentStart = CACurrentMediaTime()
             cropDuration = CACurrentMediaTime() - cropStart
@@ -2940,12 +3064,15 @@ extension CameraManager: AVCaptureVideoDataOutputSampleBufferDelegate {
         // Performance monitoring: frame drops indicate system overload
         latencyLog("avcapture-drop (system overload upstream of processing gate)")
         let timestampSeconds = CMSampleBufferGetPresentationTimeStamp(sampleBuffer).seconds
+        guard dropCoalescer.note(timestamp: timestampSeconds) else { return }
         Task(priority: .userInitiated) { @MainActor in
-            self.outputPort.recordDroppedFrame(
-                timestamp: timestampSeconds,
-                reason: "AVCapture dropped a frame before processing.",
-                stage: .captureUpstream
-            )
+            for timestamp in self.dropCoalescer.drain().all {
+                self.outputPort.recordDroppedFrame(
+                    timestamp: timestamp,
+                    reason: "AVCapture dropped a frame before processing.",
+                    stage: .captureUpstream
+                )
+            }
         }
     }
 }

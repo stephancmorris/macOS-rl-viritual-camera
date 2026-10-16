@@ -1,56 +1,46 @@
-# Decisions for Stephan
+# Event and authority contract
 
-**Proposed approval package, 30 September 2026. Not an approval record.** Based on `origin/s34/astra` at `b4b447f`, `docs/auto-director/decision-review.md`. All 37 register decisions remain **OPEN**; this branch does not edit the register. The following choices can be approved together or individually by ID.
+Status: reconciled 2026-10-10 for D-01. [Recorded decisions](../handoff/stage3-4/DECISIONS.md) take precedence over older proposed text. Implementation references describe the open A-07 stack at `ecbf8814b7c77c64edfd2cc4a92ff6c80d892e42`, not merged or qualified behavior. Unrecorded choices and recommendations remain **AWAITING OWNER**. See the [product contract](product-contract.md) and [event contract](event-authority-contract.md).
 
-| IDs / question | Options | Recommendation and why | Blocks | Reversible? |
-|---|---|---|---|---|
-| S1/S2/A3: first authority? | Sermon Suggest; sermon Auto Prepare; Auto Direct | Sermon Auto Prepare, operator-nominated person per camera; every Take manual. Hardware and microphone remain separate later gates. | Initial integration scope | Yes, requalify changes |
-| A1/F2/F3: what revokes? | Global pause; channel pause; temporary suppression | Global latched pause on camera/editorial intervention, **including refused Take attempts**; exclude read-only navigation/cosmetics. Revoke before dispatch. | Authority/event adapter | Yes, requalify |
-| E1/P2/R2: evidence loss? | Always pause; graduated evidence states; automatic fallback | Temporary evidence gap withdraws readiness; declared identity loss or source/output fault latches Pause. Never nominate another person or Take automatically. | Loss classifier; lifecycle adapter | Yes; loss thresholds remain study inputs |
-| P1/P3/T1/T2: lifetimes? | One expiring proposal; separate composition/readiness/permit | Separate preparation permission, persistent composition, live readiness and short-lived execution permits. Preparation may move Preview immediately; settlement gates readiness. | Proposal/readiness/policy API | Yes |
-| A2/A4/U1/U2: first UI? | All controls; Pause/Resume now | Next-shot panel shows level, state, proposed Preview and reason, Pause/Resume. Defer Pin/countdown; explain unavailable Auto Direct in setup. | State projection/UI | Yes |
+## Decision and implementation boundary
 
-Proposed approval wording: “Approve the recommendations above for the first sermon Auto Prepare rehearsal, with all Takes manual and Auto Direct unavailable.” Recording that choice still requires Stephan's explicit response; this document grants no authority or release qualification.
+This document reconciles the recorded live-event backup-producer contract with the open A-07 stack; it does not approve remaining product choices or certify implementation. The owner alone records decisions. The register's Recorded section overrides its older open-row wording and stale proposed headers elsewhere.
 
-## Proposed event contract
+Recorded: UC-1 (present operator), E2 (no audio), UC-2 (one shot/input), S1 (qualified live-event steps), A1 (takeover/handback), A3 (qualified permit-bound cuts), E1 (visible subject selection/override), P1/P2 (two bars/wider ambiguity), N1/N3/N5 (Take semantics/presets/declared loss), U2 (four visible levels), AI-1/AI-2/AI-4 (bounded local ranking/no show network/metadata training), and C3 (bounded metadata retention/export). Other register choices remain **AWAITING OWNER**.
 
-A runtime grant records level, authority epoch and active/paused/inhibited state. Off grants nothing; Suggest can propose only; Auto Prepare can also prepare **current Preview**; Auto Direct requests are explicitly refused while unqualified. Persist preferences, never active grants. A pause retires queued proposals, preparations and future Take permits. It does not retroactively undo a committed Take or freeze existing R2 tracking.
+## Events and required effect boundaries
 
-| Event / owner | Immediate effect before other work | Recovery / cancellation rule |
+| Event | Contract consequence | A-07 status / remaining work |
 |---|---|---|
-| Operator enables an available level or explicitly Resumes | Revalidate nominations, channel roles, source health and current revisions; issue a **new** grant only if admissible | Never reuse pre-pause tokens; inhibit with a reason if prerequisites fail |
-| Manual camera action, nomination, cue advance, behavior-affecting policy/role edit, **Take attempt** / operator | Increment authority epoch and cancel pending director work globally **before** manual admission, even if the manual action fails | Pause remains until explicit Resume; Apply and Resume may be one clearly labelled, deliberate action |
-| Enter Edit Live / operator | Same revocation and latched Pause before retargeting | Leaving Edit Live removes inhibition, does not Resume |
-| Read-only inspector/navigation or cosmetic label edit / operator | No authority change | Never classify merely focusing Preview as camera intervention |
-| Temporary stale/missing/ambiguous evidence / evidence adapter | Immediately withdraw director-ready status; issue no new prepare action from insufficient evidence; retain nominated identity | May become ready again under the same still-valid grant; no silent new-person assignment or mandatory retap for every missed frame |
-| Declared subject/identity loss / evidence adapter | Revoke epoch, pause, cancel pending work, explain reason | Existing R2 same-person recovery follows its own grant; recovery does not clear director Pause. Retap only if original identity cannot be safely retained |
-| Source rebind/loss, output fault, show admission loss / lifecycle adapter | Revoke and pause; retire affected source/route context using existing lifecycle mechanisms | Restore health first, then explicit Resume; no fallback Take |
-| Successful manual Take / coordinator | Prior Take-attempt revocation already happened; observe resulting Program/Preview role and route changes | Never let old Preview work edit the new Program; a refused Take also leaves director paused |
-| Stop show / operator or lifecycle termination | Off; revoke all director work and runtime grants before teardown | Restart does not restore active authority from saved settings |
-| Future Pin/unpin / operator, if separately approved | Pin holds editorial intent, not pixels; health faults remain visible | Unpin leaves Pause; no auto-resume. Deferred for initial release |
+| Launch / show stop | Manual; no carried grant, cut or pending preparation | Authority and console value defaults support this; live integration is separate |
+| Manual camera action, Manual toggle, Edit Live | Immediate global takeover; stop preparation/cutting and retire pending work | Pure authority handles events; every live attempt, including refused commands, must reach it |
+| Hand to Alfie | Recheck current prerequisites and that level's qualification; fresh work only | Authority API exists; not an unconditional resume token |
+| Assist operator Take | Fresh epoch/work for new Preview, no pause (N1) | Implemented in pure authority; no inherited old request |
+| Auto/Backup operator Take | Nudge, minimum configured hold before continuation (N1) | Still pauses at A-07; later integration needed |
+| Evidence gap / operator gesture | Inhibit immediate effects; no guessed readiness | Adapter exists; stale-sample debounce review finding must be resolved |
+| `wideWaiting` / changed nomination | Declared loss or new subject invalidates affected work; loss pauses (N5) | Adapter emits typed loss/nomination events; wiring must consume them |
+| Role, route, source/control/shot revision change | Reject stale intent/receipt; never retarget it to new Program/Preview | Proposal/preparation validation exists; effect boundary must repeat checks |
+| Output/admission fault | Pause, retire grants; no silent alternate output | Must preserve existing R2 routing contract |
+| Program source loss | Existing R2 hold/standby; only separately approved/qualified fallback may cut | R2 choice unresolved; A-07 cannot authorize Take |
+| Refused/cancelled automatic cut | No delayed cut; require fresh decision and permit | Atomic permit/Take integration is later work |
 
-Declared-loss thresholds require labelled evidence and a separate frozen study configuration; this contract deliberately supplies no new timeout. A temporary gap cannot authorize a new command, but does not itself terminate existing R2 tracking. If tracking cannot retain identity safely, classify declared loss rather than silently replacing the subject.
+The recorded A3 boundary is a one-shot permit checked in the same turn as R2's existing `ShowCoordinator.take` checks. Assist never cuts. At A-07 `mayTake` and `autoTakeQualified` remain false for every level. A judgement, displayed countdown or ready composition cannot substitute for that permit. Preview preparation cannot mutate Program; N2's possible on-air moves are a separate open effect boundary.
 
-## Existing mechanisms and final-effect requirements
+## Owner questions
 
-| Existing code at Sol `605df3f` | Required proposed integration |
-|---|---|
-| `ShowCoordinator.swift` / `controlTargetRevision`, `makeCommand`, `dispatch` | Target revision changes on retargeting, **not every manual action**. Add a separate authority event at manual admission; bind immutable channel/role/source context, never late-bind to current selection. |
-| `OperatorCommand.swift` / `CommandDispatcher` channel epochs | Cancel pending director command effects on revocation; check action-specific permission (`prepare` versus `propose`) at final effect, not just initial enqueue. |
-| `ChannelFrame.swift` / `ChannelRevisions` | Bind source generation, command epoch and shot revision. Ordinary rendering/tracking interpolation does not increment shot revision. A preparation acknowledgement binds the **resulting** shot revision, avoiding immediate self-invalidation. |
-| `ProgramRouter.swift` / `routeGeneration`; `ProgramTake.swift` / `TakeRequest`; `ShowCoordinator.take` | R2 Take is synchronous admission/commit, not a queued future cut. Any future director permit must be rechecked immediately before Take in the same serialized coordinator turn, without an intervening await; R2 frame/output checks still apply. No such automatic path in first release. |
-| `Console/NextShotStatus.swift` / `DirectorSection` | Future seam needs distinct Auto Prepare/Auto Direct modes and explicit active/paused/inhibited status. R2's existing Take readiness remains authoritative for manual Take; director readiness must not disable otherwise legal manual operation. |
+Both questions below are **AWAITING OWNER**. They are not changed or decided by this documentation PR.
 
-Prepared composition may persist while useful. Live identity, evidence age and settlement are recomputed. Dispatch permits have bounded expiry and context; expiry discards the permit, never renews it invisibly or repeatedly reapplies the preset. Dwell/cut-reminder timing must not delay preparing Preview. A countdown would describe an already revocable proposed cut, never grant one.
+| Question | Options | Recommendation / tradeoff | Source evidence |
+|---|---|---|---|
+| Suggest operator Take extends N1 | Preserve pause in internal Suggest; explicitly extend the fresh-epoch/no-pause Assist rule to Suggest | Confirm the extension explicitly if shadow continuity is desired; improves uninterrupted metadata comparisons but goes beyond N1's named Assist case | A-07 `DirectorAuthority` handles `.suggest` and `.assist` together; recorded N1 names Assist and Auto/Backup |
+| Is confirmed evidence sufficient for P1 “face visible”? | Independently expose a current face observation; explicitly accept the proxy for a bounded study | Recommend direct current evidence before claiming the cut bar satisfies P1; extra plumbing and study cost buys a testable distinction | A-07 `ChannelEvidenceSample` has no `faceVisible`; `DirectorReadiness` uses `.confirmed`, whose gallery/lock/freshness test does not independently observe a face now |
 
-## Inconsistencies for Sol's next authority/lifecycle round
+R2 also needs owner resolution: the open register recommendation says Auto/Backup fallback, while the product contract proposes Backup-only. [Roles and fallback](roles-and-fallback.md) records options and the narrower recommendation without choosing for the owner. A2/A4/P3/N2/N4, style values, run-sheet details and qualification protocol/signatories remain open.
 
-Baseline inspected is `origin/s34/sol` **605df3f**, not a claim about Sol's concurrent repair branch:
+## Evidence and acceptance
 
-- `DirectorAuthority.apply` silently substitutes Auto Prepare for unavailable Auto Direct; manual/Take/source-loss events cancel an epoch without latching Pause. Edit Live exit and unpin can restore eligibility. The recommendation requires explicit refusal and deliberate Resume.
-- `DirectorAuthority.admits(forTake: false)` tests proposal permission, which is insufficient to admit preparation in Suggest. Require an action-specific permission check at final effect.
-- `DirectorShotPolicy.choose` minimum-duration filtering conflates preparation with cut timing. `DirectorProposal` expiry must distinguish a dispatch permit from retained composition and refreshed readiness.
-- The old authority memo's first-release Pin and fixed countdown, short “proposal expiry,” and the original roles memo's broad loss wording are superseded **as recommendations** by decision-review, not by recorded approvals. The original register/memos still need reconciliation after Stephan chooses.
-- Add explicit temporary-evidence, declared-identity-loss, output/admission-fault and Stop lifecycle events; do not force them through generic source loss. Threshold selection remains open.
+Test the final effect, not just proposed state: no mutation after takeover, no stale target after Take, no duplicated commit after a late receipt, and no cut after cancellation/refusal. Inject clock, input order, parameters and judge outcomes; check stale/future/out-of-order evidence, loss, recovery and source generations. Keep replay counters tied to real requests/receipts and preserve original judgement freshness when replaying recorded outcomes. Existing review findings are not waivers of these invariants.
 
-Acceptance for the next round: delayed preparation after manual action is rejected; Take then role-swap cannot retarget old work; evidence recovery cannot clear a latched pause; Suggest cannot prepare; refused Auto Direct never changes level; ordinary renders do not invalidate composition; no director command predating intervention takes effect afterward. Replay must test delayed effects and report unavailable latency as N/A, not synthetic zero. Stage 2 real-camera/output qualification and a measured director-workload gate remain prerequisites to app integration/rehearsal.
+Synthetic tests prove the exercised software properties. Recorded evidence preserves its original provenance, age and consent limits. Live trials establish rig/operator behavior. Report classes separately and freeze parameters before scored evaluation; none alone substitutes for explicit per-level owner sign-off. Qualification budgets and signatory details remain Q1–Q3 open; this reconciliation sets no numeric defaults.
+
+C3/AI-4: bounded metadata, 30-day expiry, explicit export, metadata-only training. E2: no audio. AI-2: no network during a show. No frames, crops, embeddings, video or transcripts in Director logs; separate media collection requires E3 first. No inferred names, cross-camera identity or children as inferred targets.

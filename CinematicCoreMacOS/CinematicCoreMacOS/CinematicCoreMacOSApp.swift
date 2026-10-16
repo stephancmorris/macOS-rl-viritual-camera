@@ -18,6 +18,7 @@ struct CinematicCoreMacOSApp: App {
 
     init() {
         let show = ShowCoordinator()
+        show.startDirectorShadow()
         _show = StateObject(wrappedValue: show)
         _cameraManager = StateObject(wrappedValue: show.channelA)
         #if DEBUG
@@ -59,7 +60,8 @@ struct CinematicCoreMacOSApp: App {
             SettingsWindow(
                 cameraManager: cameraManager,
                 systemExtensionManager: systemExtensionManager,
-                controller: settingsWindowController
+                controller: settingsWindowController,
+                onDirectorPreferencesChanged: { [show] in show.directorPreferencesChanged($0) }
             )
         }
 
