@@ -83,14 +83,15 @@ nonisolated struct DirectorReplay {
     static func run(_ fixture: Fixture, parameters: DirectorShotPolicy.Parameters,
                     maximumProposalAge: TimeInterval, maximumEvidenceAge: TimeInterval,
                     readinessParameters: DirectorReadiness.Parameters,
-                    sinkFactory: (Bool) -> any DirectorEffectSink) -> Report {
+                    sinkFactory: (Bool) -> any DirectorEffectSink,
+                    judge: any DirectorJudge = RuleJudge()) -> Report {
         // Invalid clocks are counted and skipped rather than crashing a replay.
         var authority = DirectorAuthority(reviewPolicy: .conservative)
         _ = authority.apply(.enable(.assist), prerequisites: .init(nominationsCurrent: true, previewAvailable: true, sourcesHealthy: true, outputHealthy: true, admissionCurrent: true, qualifiedLevels: [.assist]))
         var channels: [ChannelID: Channel] = [.a: Channel(), .b: Channel()]
         var program: ChannelID = .a
         var route: UInt64 = 0
-        var policyRevision: UInt64 = 0, nominationRevision: UInt64 = 0
+        var policyRevision: UInt64 = 0, nominationRevision: UInt64 = 0, evidenceRevision: UInt64 = 0
         var preparation = DirectorPreparation()
         var activeRequest: DirectorPreparation.Request?
         var acknowledgements: [(id: String, due: TimeInterval, receipt: DirectorPreparation.Receipt)] = []
@@ -309,6 +310,8 @@ nonisolated struct DirectorReplay {
             case .policyChange: policyRevision += 1; authority.apply(.policyChanged)
             case .nominationChange: nominationRevision += 1; authority.apply(.nominationChanged)
             case .subject(let id, let present, let identity, let intended, let ready, let movement):
+                guard evidenceRevision < UInt64.max else { clockAnomalies += 1; authority.apply(.pause); break }
+                evidenceRevision += 1
                 channels[id, default: Channel()].lastEvidenceAt = now
                 channels[id, default: Channel()].present = present
                 channels[id, default: Channel()].identity = identity
@@ -343,8 +346,13 @@ nonisolated struct DirectorReplay {
                 let timeline = DirectorShotPolicy.Timeline(programShot: program == .a ? shotA : shotB,
                     programStartedAt: programStartedAt, lastWideAt: lastWideAt,
                     history: history, candidates: [candidate], now: now)
-                if case .chosen(let choice, let reason) = DirectorShotPolicy.choosePreparation(timeline,
-                    preview: preview, parameters: parameters) {
+                let judgement = judge.judge(.init(timeline: timeline, preview: preview, parameters: parameters,
+                    evidenceRevision: evidenceRevision, now: now))
+                if judgement.computedAt.isFinite, judgement.computedAt >= 0,
+                   case .accepted(let accepted) = DirectorJudgeGate.accept(judgement,
+                    allowed: DirectorShotPolicy.rank(timeline, preview: preview, parameters: parameters),
+                    evidenceRevision: evidenceRevision, now: now, maximumAge: maximumProposalAge) {
+                    let choice = accepted.candidate, reason = accepted.reason
                     if let proposal = DirectorProposal(target: preview, preview: preview, shot: choice.shot,
                         reason: reason, authorityEpoch: authority.epoch,
                         revisions: channel.revisions, routeGeneration: route, createdAt: now, policyRevision: policyRevision, nominationRevision: nominationRevision) {
