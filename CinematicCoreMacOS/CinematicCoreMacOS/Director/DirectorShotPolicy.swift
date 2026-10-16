@@ -56,7 +56,7 @@ nonisolated struct DirectorShotPolicy {
         let now: TimeInterval
     }
     enum Abstention: Equatable, Sendable {
-        case invalidInput, noEligibleCandidate, repetition, movement, noPreview
+        case invalidInput, minimumDuration, noEligibleCandidate, repetition, movement, noPreview
     }
     enum Decision: Equatable, Sendable {
         case chosen(Candidate, String), abstain(Abstention)
