@@ -49,7 +49,7 @@ def main() -> int:
         models_dir.mkdir(exist_ok=True)
         bc_path = models_dir / "bc_test"
 
-        stats = train_bc(
+        train_bc(
             data_dirs=[data_dir],
             output_path=bc_path,
             epochs=3,

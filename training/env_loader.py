@@ -2,8 +2,8 @@
 JSONL session loading for the Gymnasium environment.
 
 Scans directories for session_*/frames.jsonl files produced by:
-  - Task 3.1 (Swift TrainingDataRecorder)
-  - Task 3.1b (YouTube extract_frames.py pipeline)
+  - the Swift TrainingDataRecorder
+  - extract_frames.py (YouTube/reference clips)
 
 Both produce the same JSONL schema, so they load identically.
 """
@@ -70,7 +70,7 @@ def scan_sessions(
                         source = "youtube"
                     elif label_source in ("auto", "manual"):
                         source = "live"
-                except (json.JSONDecodeError, KeyError):
+                except json.JSONDecodeError:
                     pass
 
             sessions.append(SessionData(

@@ -30,7 +30,7 @@ struct LiveTilePicture: View {
     let id: ChannelID
     let show: ShowCoordinator
 
-    static let refreshInterval: TimeInterval = 1.0 / 15.0
+    static let refreshInterval: TimeInterval = LiveConsoleModel.refreshInterval
     /// Fixed schedule origin so a parent re-render never restarts the timeline.
     private static let scheduleOrigin = Date(timeIntervalSinceReferenceDate: 0)
 

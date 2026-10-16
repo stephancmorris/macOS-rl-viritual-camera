@@ -310,7 +310,8 @@ final class MultiInputCheck: ObservableObject {
         }
         let frames = Int(previewCount &- lastPreviewCount)
         lastPreviewCount = previewCount
-        guard now - window.windowSeconds >= startedAt + warmUpSeconds - 0.25 else { return }
+        guard window.beganAfterWarmUp(closedAt: now, measurementStartedAt: startedAt,
+                                     warmUp: warmUpSeconds) else { return }
         program.append(CapabilitySample(window: window, thermal: thermal))
         preview.append(PreviewAdmissionSample(windowSeconds: window.windowSeconds, renderedFrames: frames))
         if program.count >= sampleWindows {
