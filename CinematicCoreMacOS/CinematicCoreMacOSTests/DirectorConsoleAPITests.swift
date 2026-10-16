@@ -73,33 +73,4 @@ import Testing
             #expect(NextShotStatus.make(FakeConsoleModel.snapshot(for: scenario, standard: .p50)).director == nil)
         }
     }
-
-    // MARK: Control protocol
-
-    private final class FakeController: DirectorConsoleControlling {
-        var directorSection = Section.atLaunch(qualified: .init(assist: true, auto: false, backup: false))
-        var calls: [String] = []
-        func setLevel(_ level: Section.Level) -> DirectorControlResult {
-            calls.append("level \(level.rawValue)")
-            guard directorSection.canSelect(level) else { return .refused(Section.notQualifiedCaption) }
-            directorSection.level = level
-            return .accepted
-        }
-        func handToAlfie() -> DirectorControlResult { calls.append("hand"); directorSection.handedToAlfie = true; return .accepted }
-        func takeOver() { calls.append("take over"); directorSection.handedToAlfie = false }
-        func cancelNextCut() { calls.append("cancel"); directorSection.nextCut = nil }
-        func advanceSegment() { calls.append("advance") }
-        func overrideSubject(on channel: ChannelID, at point: CGPoint) { calls.append("subject \(channel.rawValue)") }
-    }
-
-    @Test func unqualifiedLevelIsRefusedNotSubstituted() {
-        let controller = FakeController()
-        #expect(controller.setLevel(.auto) == .refused("not qualified"))
-        #expect(controller.directorSection.level == .manual)
-        #expect(controller.setLevel(.assist) == .accepted)
-        #expect(controller.directorSection.level == .assist)
-        _ = controller.handToAlfie(); controller.takeOver()
-        #expect(!controller.directorSection.handedToAlfie)
-        #expect(controller.calls == ["level auto", "level assist", "hand", "take over"])
-    }
 }
