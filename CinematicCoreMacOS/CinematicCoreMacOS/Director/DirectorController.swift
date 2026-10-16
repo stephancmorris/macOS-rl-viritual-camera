@@ -54,7 +54,7 @@ final class DirectorController: ObservableObject, DirectorConsoleControlling {
     /// Published only when it changes: at most once per tick or hook.
     @Published private(set) var directorSection: Section
 
-    private(set) var authority = DirectorAuthority(reviewPolicy: .conservative)
+    private(set) var authority = DirectorAuthority()
     /// Nil until the owner records adapter parameters (T1–T3, sitting 2).
     /// Without them identity is never confirmed, so nothing can be prepared.
     private(set) var adapter: DirectorEvidenceAdapter?
