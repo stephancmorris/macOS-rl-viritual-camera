@@ -6,7 +6,7 @@
 //  multi-camera: Preview, Take, a second input) exists only in Stage format.
 //  Webcam format keeps the traditional single-camera view — wide source plus
 //  crop and the existing pill — exactly as today. ContentView resolves this
-//  once integration lands; see docs/ALFIE_MULTICAMERA_SPEC.md "Format scope".
+//  from the capture profile; see docs/ALFIE_MULTICAMERA_SPEC.md "Format scope".
 //
 
 import Foundation

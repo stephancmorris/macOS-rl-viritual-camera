@@ -187,7 +187,6 @@ final class FakeConsoleModel: ObservableObject, ConsoleActions {
 }
 
 extension FakeConsoleModel {
-    /// C-01 fixtures. Local mirror of A-04's DirectorSection until that type merges.
     nonisolated static let directorStates: [DirectorGalleryCase] = DirectorGalleryCatalog.cases
 
     var directorStates: [DirectorGalleryCase] { Self.directorStates }

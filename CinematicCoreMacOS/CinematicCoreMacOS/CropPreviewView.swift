@@ -3,7 +3,6 @@
 //  CinematicCoreMacOS
 //
 //  Created by Stephan Morris on 2/5/2026.
-//  Ticket: GFX-01 - Metal Crop Engine (Preview UI)
 //
 
 import SwiftUI

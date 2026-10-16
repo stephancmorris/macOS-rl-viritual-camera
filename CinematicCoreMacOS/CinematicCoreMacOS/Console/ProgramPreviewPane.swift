@@ -8,7 +8,7 @@
 //
 //  The picture is a slot: Preview shows the Preview channel's latest RENDERED
 //  buffer and Program shows the router-committed buffer (incl. hold/standby).
-//  Until ROUTER lands, callers pass `PanePlaceholderPicture`.
+//  The live console passes rendered buffers. The gallery uses `PanePlaceholderPicture`.
 //
 
 import CoreGraphics
@@ -238,7 +238,7 @@ extension ProgramPreviewPane where Picture == PanePlaceholderPicture {
     }
 }
 
-/// Stand-in picture until ROUTER supplies rendered buffers. Shot view is a
+/// Gallery stand-in when the caller does not pass a picture. Shot view is a
 /// neutral frame; Source view is a wide frame with the legal crop dashed.
 struct PanePlaceholderPicture: View {
     let model: PaneModel

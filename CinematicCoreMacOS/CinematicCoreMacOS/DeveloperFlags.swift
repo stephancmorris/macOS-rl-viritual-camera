@@ -37,8 +37,7 @@ enum DeveloperFlags {
 
     /// Emits one structured `[LATENCY]` line per processed frame summarising
     /// total, detection, crop, and compose timings plus accumulated gate-drop
-    /// counts. Use this when diagnosing choppy output — see the
-    /// "as-a-senior-software-stateful-penguin" plan for expected baselines.
+    /// counts.
     ///
     /// MUST stay `false` in operator builds. This emits an `os_log` `.notice`
     /// with a `.public` string on **every processed frame** — 50 persisted log
@@ -74,12 +73,9 @@ enum DeveloperFlags {
     /// 20-minute intervals; each restored 50 fps instantly. Left to itself that
     /// is a choppy patch of unpredictable length arriving mid-show.
     ///
-    /// **Now 0 (off), deliberately.** This was a stop-gap that swept up the mess
-    /// periodically. The real cause turned out to be autorelease pools that were
-    /// never draining per work item — fixed at source in `PersonDetector`,
-    /// `CameraManager` and `FaceSignatureExtractor`. Leaving both in place would
-    /// mask whether that fix actually worked, so the flush stays off while the
-    /// before/after soak is run. Set to 30 only to A/B it back.
+    /// Off, so a periodic cache flush cannot mask the per-work-item autorelease
+    /// drain in `PersonDetector`, `CameraManager`, and `FaceSignatureExtractor`.
+    /// Set to 30 only to A/B the flush back on.
     nonisolated static let imageCacheFlushInterval: TimeInterval = 0
 
     /// Exposes the Multiview component gallery window (scenario picker plus

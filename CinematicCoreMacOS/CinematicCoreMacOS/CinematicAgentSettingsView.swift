@@ -3,7 +3,6 @@
 //  CinematicCoreMacOS
 //
 //  Created by Stephan Morris on 2/25/2026.
-//  Ticket: APP-02 - CoreML Agent Settings
 //
 
 import SwiftUI
