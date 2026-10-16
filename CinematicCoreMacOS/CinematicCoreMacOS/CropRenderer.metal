@@ -3,7 +3,6 @@
 //  CinematicCoreMacOS
 //
 //  Created by Stephan Morris on 2/5/2026.
-//  Ticket: GFX-01 - Metal Crop Engine
 //
 //  Intentionally empty. CropEngine crops and scales with Core Image (see
 //  CropEngine.processCrop); the cropAndScale, cropAndScaleSmooth and

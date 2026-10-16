@@ -210,7 +210,7 @@ final class DisplayOutputSink: ProgramOutputSink {
             // manager marks the route missing; it does not re-route mid-show.
             program.teardown()
             recentSentBuffers.removeAll()
-            Self.logger.notice("Program display disappeared; closing window and re-routing.")
+            Self.logger.notice("Program display disappeared; closing window.")
         } else {
             // Reconfiguration: the target might have moved/resized, or come
             // back. Re-present on the current screen frame if we should be up.
