@@ -28,6 +28,11 @@ import OSLog
 /// compared with `VNFeaturePrintObservation.computeDistance(_:to:)`; lower
 /// distance = better match. Empirical threshold tuning is left to the
 /// caller (see plan: re-acquisition threshold tuned from console logs).
+///
+/// `@unchecked Sendable` because the extractor is handed to a detached task.
+/// Its only state is immutable: a `CIContext`, which is safe to share, and
+/// the serial `processingQueue` that every Vision request runs on. It reads
+/// the caller's pixel buffer and does not mutate it.
 final class FaceSignatureExtractor: @unchecked Sendable {
     private nonisolated static let logger = Logger(subsystem: "com.alfie", category: "Vision")
 
