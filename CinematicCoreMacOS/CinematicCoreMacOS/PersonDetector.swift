@@ -13,7 +13,6 @@ import QuartzCore
 import OSLog
 
 /// Detects and tracks people in video frames using Apple Vision framework
-/// Ticket: VIS-01 - Person Detection
 @MainActor
 final class PersonDetector: ObservableObject {
     private nonisolated static let logger = Logger(subsystem: "com.alfie", category: "Vision")
@@ -52,7 +51,7 @@ final class PersonDetector: ObservableObject {
 
     // MARK: - Models
 
-    /// Body pose keypoints for rule-of-thirds composition (Task 2.3 - LOGIC-01)
+    /// Body pose keypoints for rule-of-thirds composition.
     struct PoseKeypoints: Sendable {
         /// Head position in normalized Vision coordinates (0-1, bottom-left origin)
         let head: CGPoint
@@ -80,16 +79,6 @@ final class PersonDetector: ObservableObject {
         /// when landmarks couldn't be extracted (face turned, partly
         /// occluded, or the face wasn't matched to this body).
         let faceLandmarkRatios: LandmarkRatios?
-
-        /// Convert normalized rect to pixel coordinates
-        func pixelBoundingBox(imageSize: CGSize) -> CGRect {
-            CGRect(
-                x: boundingBox.origin.x * imageSize.width,
-                y: (1 - boundingBox.origin.y - boundingBox.height) * imageSize.height, // Vision uses bottom-left origin
-                width: boundingBox.width * imageSize.width,
-                height: boundingBox.height * imageSize.height
-            )
-        }
     }
     
     struct DetectionStats: Sendable {
@@ -106,9 +95,8 @@ final class PersonDetector: ObservableObject {
     // MARK: - Detection gating
 
     /// How detection should run this frame. The pipeline is passive by
-    /// default — full-frame multi-person scanning never happens. Vision runs
-    /// only when a subject is being selected, acquired, or tracked, and then
-    /// only over a region of interest around that one person.
+    /// default. `.acquiring` and `.lockedROI` scan a region of interest around
+    /// one person; `.reacquiring` runs the face request on the full frame.
     enum DetectionMode: Sendable, Equatable {
         /// No subject and the operator hasn't tapped Detect — skip Vision entirely.
         case off
@@ -189,11 +177,12 @@ final class PersonDetector: ObservableObject {
     //
     // All of this state is touched ONLY from `processingQueue` (a serial
     // queue), hence the `nonisolated(unsafe)` — the class is MainActor by
-    // default and the detection closure is nonisolated.
+    // default and the detection closure is nonisolated. CIContext is Sendable,
+    // so the constant does not need unsafe.
 
     /// Metal-backed context for the downscale render. Working color space nil:
     /// detection doesn't care about color accuracy, skip the conversion.
-    nonisolated(unsafe) private static let downscaleContext = CIContext(options: [
+    nonisolated private static let downscaleContext = CIContext(options: [
         .useSoftwareRenderer: false,
         .workingColorSpace: NSNull(),
         // This context renders a fresh 1080p proxy on every detection and never
@@ -465,6 +454,8 @@ final class PersonDetector: ObservableObject {
 
     // MARK: - Private Methods
 
+    /// `CVPixelBuffer` is not `Sendable`. Detection reads the buffer on
+    /// `processingQueue` and does not write it.
     private struct SendablePixelBuffer: @unchecked Sendable {
         let value: CVPixelBuffer
     }
