@@ -14,8 +14,8 @@
 //    diagnostics. Its rendered frames stay on the channel
 //    (`CameraManager.latestRenderedFrame`) for Preview and a later Take.
 //
-//  ROUTER replaces the "routed channel = the output" shortcut with a
-//  ProgramRouter that owns route generations and the output clock.
+//  ProgramRouter owns route generations and the output clock. The routed
+//  channel's port is that router, not the output itself.
 //
 
 import CoreVideo
@@ -74,11 +74,9 @@ extension ChannelOutputPort {
 extension ProgramOutputManager: ChannelOutputPort {}
 
 /// Port for a channel that is not routed downstream. It owns nothing and
-/// cannot affect the show output; it only counts what it was offered so tests
-/// and diagnostics can see the channel is alive.
+/// cannot affect the show output.
 final class UnroutedChannelOutput: ChannelOutputPort {
     let channelID: ChannelID
-    private(set) var framesOffered = 0
 
     init(channelID: ChannelID) {
         self.channelID = channelID
@@ -91,7 +89,7 @@ final class UnroutedChannelOutput: ChannelOutputPort {
     func start() {}
     func stop() {}
     func updateCaptureStatus(isRunning: Bool) {}
-    func sendFrame(_ pixelBuffer: CVPixelBuffer, timestamp: Double, isRepeat: Bool) { framesOffered += 1 }
+    func sendFrame(_ pixelBuffer: CVPixelBuffer, timestamp: Double, isRepeat: Bool) {}
 
     func beginDiagnosticsSessionIfNeeded(note: String) {}
     func noteDetectionStartIfNeeded() {}

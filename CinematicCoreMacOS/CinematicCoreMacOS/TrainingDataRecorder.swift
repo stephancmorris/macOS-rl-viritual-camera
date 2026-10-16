@@ -3,7 +3,6 @@
 //  CinematicCoreMacOS
 //
 //  Created by Stephan Morris on 2/10/2026.
-//  Ticket: RL-01 - Real-World Data Recording
 //
 
 import Foundation
@@ -34,7 +33,7 @@ private actor TrainingDataSessionWriter {
 }
 
 /// Records per-frame training data to JSON Lines files for RL agent training.
-/// Data format is designed for direct consumption by Gymnasium environment (Task 3.2).
+/// The JSONL schema is what `training/env_loader.py` reads.
 @MainActor
 final class TrainingDataRecorder: ObservableObject {
     private nonisolated static let logger = Logger(subsystem: "com.alfie", category: "TrainingData")
@@ -167,7 +166,6 @@ final class TrainingDataRecorder: ObservableObject {
     private var pendingWriteTasks: [UUID: Task<Int64, Error>] = [:]
     private var frameIndex: Int = 0
     private var sessionStartTime: Date?
-    private var sessionId: String?
     private var buffer: [Data] = []
     private var pendingMetadata: SessionMetadata?
 
@@ -259,7 +257,6 @@ final class TrainingDataRecorder: ObservableObject {
         // Store state
         sessionWriter = TrainingDataSessionWriter(fileHandle: handle)
         sessionDirectory = sessionDir
-        sessionId = id
         sessionStartTime = Date()
         frameIndex = 0
         buffer = []
@@ -338,7 +335,6 @@ final class TrainingDataRecorder: ObservableObject {
 
         sessionWriter = nil
         sessionDirectory = nil
-        sessionId = nil
         sessionStartTime = nil
         pendingMetadata = nil
 

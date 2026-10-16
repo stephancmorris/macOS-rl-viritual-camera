@@ -110,36 +110,6 @@ final class SystemExtensionActivationManager: NSObject, ObservableObject {
         }
     }
 
-    var badgeSystemImage: String {
-        switch status {
-        case .unknown, .notInstalled:
-            return "shippingbox"
-        case .activationRequested:
-            return "arrow.down.circle"
-        case .awaitingUserApproval:
-            return "exclamationmark.triangle"
-        case .installed:
-            return "checkmark.seal"
-        case .failed:
-            return "xmark.octagon"
-        }
-    }
-
-    var badgeTint: Color {
-        switch status {
-        case .unknown, .notInstalled:
-            return .orange
-        case .activationRequested:
-            return .blue
-        case .awaitingUserApproval:
-            return .yellow
-        case .installed:
-            return .green
-        case .failed:
-            return .red
-        }
-    }
-
     var summaryText: String {
         switch status {
         case .unknown, .notInstalled:
@@ -871,15 +841,6 @@ extension SystemExtensionActivationManager: @preconcurrency OSSystemExtensionReq
                     recoveryAction: .retryInstall
                 )
             )
-        }
-    }
-
-    private static func userFacingErrorMessage(for error: Error) -> String {
-        switch failureDisposition(for: error) {
-        case .awaitingApproval:
-            return "Approve Alfie in System Settings under Login Items & Extensions, then try again."
-        case .failed(let details):
-            return details.summary
         }
     }
 }

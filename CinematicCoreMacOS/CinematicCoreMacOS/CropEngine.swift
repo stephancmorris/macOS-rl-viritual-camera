@@ -3,7 +3,6 @@
 //  CinematicCoreMacOS
 //
 //  Created by Stephan Morris on 2/5/2026.
-//  Ticket: GFX-01 - Metal Crop Engine
 //
 
 import Metal
@@ -27,8 +26,8 @@ final class CropEngine: ObservableObject {
         /// Output resolution (default: 1920x1080 for ATEM)
         var outputSize: CGSize = CGSize(width: 1920, height: 1080)
 
-        /// Smoothing factor for crop transitions (0 = instant, 1 = very smooth)
-        /// 10% per frame as specified by LOGIC-01
+        /// Spring stiffness for crop motion. 0.10 is the default (k = 60).
+        /// Higher is stiffer and snaps faster. The UI range is about 0.05–0.30.
         var transitionSmoothing: Float = 0.10
 
         /// Lanczos resampling on strong downscales (see `processCrop`). Off,
@@ -246,7 +245,6 @@ final class CropEngine: ObservableObject {
         var lastRenderTime: TimeInterval = 0
         var averageRenderTime: TimeInterval = 0
         var totalFramesRendered: Int = 0
-        var gpuUtilization: Float = 0
     }
 
     /// Per-frame stats accumulate here (plain storage); the @Published `stats`
@@ -345,31 +343,6 @@ final class CropEngine: ObservableObject {
             )
         }
 
-        /// Create crop to frame a bounding box (with padding)
-        static func framing(
-            boundingBox: CGRect,
-            padding: CGFloat = 0.1
-        ) -> CropRect {
-            // Add padding
-            let paddedBox = boundingBox.insetBy(
-                dx: -boundingBox.width * padding,
-                dy: -boundingBox.height * padding
-            )
-            
-            // Clamp to 0-1 range
-            let clampedOrigin = CGPoint(
-                x: max(0, min(1 - paddedBox.width, paddedBox.origin.x)),
-                y: max(0, min(1 - paddedBox.height, paddedBox.origin.y))
-            )
-            
-            let clampedSize = CGSize(
-                width: min(1, paddedBox.width),
-                height: min(1, paddedBox.height)
-            )
-            
-            return CropRect(origin: clampedOrigin, size: clampedSize)
-        }
-        
         /// Clamp crop to valid 0-1 range
         func clamped() -> CropRect {
             let clampedWidth = max(0.001, min(1, size.width))
@@ -416,21 +389,6 @@ final class CropEngine: ObservableObject {
             return CropRect(
                 origin: CGPoint(x: originX, y: originY),
                 size: CGSize(width: w, height: h)
-            )
-        }
-
-        /// Interpolate between two crop rectangles
-        func lerp(to target: CropRect, factor: Float) -> CropRect {
-            let f = CGFloat(factor)
-            return CropRect(
-                origin: CGPoint(
-                    x: origin.x + (target.origin.x - origin.x) * f,
-                    y: origin.y + (target.origin.y - origin.y) * f
-                ),
-                size: CGSize(
-                    width: size.width + (target.size.width - size.width) * f,
-                    height: size.height + (target.size.height - size.height) * f
-                )
             )
         }
     }
