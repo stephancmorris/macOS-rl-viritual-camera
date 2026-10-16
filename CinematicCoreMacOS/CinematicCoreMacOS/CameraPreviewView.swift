@@ -6,7 +6,6 @@
 //
 
 import SwiftUI
-import CoreImage
 import AppKit
 import CoreVideo
 import CoreGraphics
@@ -167,26 +166,6 @@ struct CameraPreviewView: View {
     }
 }
 
-extension Image {
-    /// Single shared CIContext for the CIImage display path. Hoisted to a
-    /// `static let` so it is created once, not per SwiftUI render — the old
-    /// per-call `CIContext()` was a major cost on the frame thread. Retained
-    /// only for lower-priority callers that still render a CIImage; the two
-    /// main panes now use the zero-copy `PixelBufferPreviewView` instead.
-    private static let sharedDisplayContext = CIContext(options: [.useSoftwareRenderer: false])
-
-    /// Helper initializer for CIImage
-    init(decorative ciImage: CIImage, scale: CGFloat, orientation: Image.Orientation = .up) {
-        // Convert CIImage to CGImage for SwiftUI display
-        if let cgImage = Image.sharedDisplayContext.createCGImage(ciImage, from: ciImage.extent) {
-            self.init(decorative: cgImage, scale: scale, orientation: orientation)
-        } else {
-            // Fallback to a system image if conversion fails
-            self.init(systemName: "exclamationmark.triangle")
-        }
-    }
-}
-
 #Preview {
     CameraPreviewView(
         pixelBuffer: nil,
@@ -198,7 +177,7 @@ extension Image {
     )
     .frame(width: 800, height: 600)
 }
-// MARK: - Crop Indicator View (Task 2.2)
+// MARK: - Crop Indicator View
 
 /// Draws the active program-crop rectangle as a white hairline overlay,
 /// with a top-left chip "PROGRAM CROP · {FRAMING} · {n}%".
