@@ -6,6 +6,7 @@
 //
 
 import Foundation
+import Security
 
 /// XPC Protocol for communication between host app and system extension
 /// Enables zero-copy IOSurface sharing for 4K video frames
@@ -55,4 +56,19 @@ enum CinematicCoreXPC {
     /// XPC connection configuration
     static let initialConnectionRetryDelay: TimeInterval = 1.0
     static let maxConnectionRetryDelay: TimeInterval = 30.0
+}
+
+enum XPCSigningIdentity {
+    /// Team identifier of this process, or nil when it is unsigned or ad-hoc
+    /// signed. Each side of the XPC link reads its own signature.
+    nonisolated static func ownTeamIdentifier() -> String? {
+        var code: SecCode?
+        guard SecCodeCopySelf([], &code) == errSecSuccess, let code else { return nil }
+        var staticCode: SecStaticCode?
+        guard SecCodeCopyStaticCode(code, [], &staticCode) == errSecSuccess, let staticCode else { return nil }
+        var info: CFDictionary?
+        guard SecCodeCopySigningInformation(staticCode, SecCSFlags(rawValue: kSecCSSigningInformation), &info) == errSecSuccess,
+              let dictionary = info as? [String: Any] else { return nil }
+        return dictionary[kSecCodeInfoTeamIdentifier as String] as? String
+    }
 }

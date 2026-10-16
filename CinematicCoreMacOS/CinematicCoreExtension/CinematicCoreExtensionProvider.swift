@@ -57,23 +57,12 @@ private enum ExtensionSecurityPolicy {
 	/// XPCConnectionManager.swift. Nil when this process has no team
 	/// signature, in which case every caller is refused.
 	static func hostRequirement() -> String? {
-		guard let teamID = ownTeamIdentifier(),
+		guard let teamID = XPCSigningIdentity.ownTeamIdentifier(),
 			  teamID.count == 10,
 			  teamID.unicodeScalars.allSatisfy({ ("A"..."Z").contains($0) || ("0"..."9").contains($0) }) else {
 			return nil
 		}
 		return "anchor apple generic and identifier \"\(expectedHostBundleIdentifier)\" and certificate leaf[subject.OU] = \"\(teamID)\""
-	}
-
-	static func ownTeamIdentifier() -> String? {
-		var code: SecCode?
-		guard SecCodeCopySelf([], &code) == errSecSuccess, let code else { return nil }
-		var staticCode: SecStaticCode?
-		guard SecCodeCopyStaticCode(code, [], &staticCode) == errSecSuccess, let staticCode else { return nil }
-		var info: CFDictionary?
-		guard SecCodeCopySigningInformation(staticCode, SecCSFlags(rawValue: kSecCSSigningInformation), &info) == errSecSuccess,
-			  let dictionary = info as? [String: Any] else { return nil }
-		return dictionary[kSecCodeInfoTeamIdentifier as String] as? String
 	}
 
 	static func signingIdentifier(for connection: NSXPCConnection) -> String? {
@@ -297,12 +286,6 @@ class CinematicCoreExtensionDeviceSource: NSObject, CMIOExtensionDeviceSource {
 	}
 	
 	// MARK: - Frame Reception from XPC
-	
-	/// Exact CMTime duration for one frame at the current playout rate.
-	/// Timescale 60000 represents 50, 59.94 (1001/60000) and 60 exactly.
-	private func playoutFrameDuration() -> CMTime {
-		CMTime(seconds: 1.0 / _playoutFrameRate, preferredTimescale: 60000)
-	}
 	
 	/// Host → extension: adopt the show standard as the playout (drain) rate
 	/// and re-time the running timer live. This is what keeps the drain clock
