@@ -130,7 +130,7 @@ import Testing
             .init(nominationsCurrent: true, previewAvailable: true, sourcesHealthy: true, outputHealthy: true,
                   admissionCurrent: true, qualifiedLevels: store.qualifiedLevels(for: fingerprint))
         }
-        var authority = DirectorAuthority(reviewPolicy: .conservative)
+        var authority = DirectorAuthority()
         #expect(authority.apply(.enable(.auto), prerequisites: prerequisites(rig)).refusal == .notQualified)
         #expect(authority.level == .off)
         #expect(authority.apply(.enable(.assist), prerequisites: prerequisites(Self.fingerprint(mode: "wide")))
