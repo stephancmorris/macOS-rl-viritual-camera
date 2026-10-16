@@ -3,7 +3,6 @@
 //  CinematicCoreMacOS
 //
 //  Created by Stephan Morris on 2/25/2026.
-//  Ticket: APP-02 - CoreML RL Agent Integration
 //
 
 import Combine
@@ -44,9 +43,10 @@ final class CinematicAgent: ObservableObject {
     private let maxZoom:      Float = 4.0
     private let aspectRatio:  Float = 16.0 / 9.0
 
-    /// Runtime quality clamp derived from the source resolution. The smallest
-    /// crop the agent is allowed to take is one resolution tier below the
-    /// source (e.g. 4K source → 1080p min crop = 2× max zoom). Updated by
+    /// Runtime crop ceiling derived from the source resolution via
+    /// `CropEngine.QualityFloor`: crop height stays at or above `source / 4`
+    /// and never under 240 px, so a 4K source allows about 4×. `2.0` is only
+    /// the value before the first format update. Updated by
     /// `updateSourceResolution(_:)` whenever capture format changes.
     private var qualityMaxZoom: Float = 2.0
 
@@ -141,7 +141,7 @@ final class CinematicAgent: ObservableObject {
 
     /// Update the resolution-derived quality clamp. Call whenever the
     /// capture format changes (e.g. on camera switch or `activeFormat` change).
-    /// Smallest allowed crop is one resolution tier below the source.
+    /// The smallest allowed crop follows `CropEngine.QualityFloor`.
     func updateSourceResolution(width: Int, height: Int) {
         let newCap = Self.qualityMaxZoom(forSourceHeight: height)
         guard newCap != qualityMaxZoom else { return }
@@ -150,10 +150,8 @@ final class CinematicAgent: ObservableObject {
     }
 
     /// Map source pixel height to the maximum zoom that keeps the crop at or
-    /// above the next resolution tier down (e.g. 4K → min crop 1080p → 2×).
-    /// Delegates to `CropEngine.QualityFloor`, the single source of truth for
-    /// the resolution-tier table — zoom is the reciprocal of the min crop
-    /// height fraction.
+    /// above `CropEngine.QualityFloor`: `source / 4`, never under 240 px
+    /// (4K → about 4×). Zoom is the reciprocal of the min crop height fraction.
     static func qualityMaxZoom(forSourceHeight height: Int) -> Float {
         let fraction = CropEngine.QualityFloor.forSource(height: height).minCropHeightFraction
         guard fraction > 0 else { return 1.0 }

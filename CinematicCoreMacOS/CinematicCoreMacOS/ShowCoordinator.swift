@@ -7,11 +7,10 @@
 //  controllers (CameraManager) that receive the shared output; they never
 //  create one. Only the Program channel's port reaches the output.
 //
-//  This first step keeps single-camera behaviour identical: channel A is
-//  created routed, exactly as the app ran before. A second channel can be
-//  added unrouted and isolated. ROUTER moves the routing decision (and Take)
-//  here; DEVICES adds exclusive device leases; CHANNEL-CMD binds commands to
-//  channel IDs.
+//  ProgramRouter owns which channel feeds program output, the output clock,
+//  and route generations. CaptureDeviceRegistry leases devices. Commands are
+//  bound to a channel id. Channel A starts routed. A second channel is added
+//  unrouted.
 //
 
 import Combine
