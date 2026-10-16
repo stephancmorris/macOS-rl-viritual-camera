@@ -33,7 +33,6 @@ class SessionWriter:
 
         self.frames_path = self.session_dir / "frames.jsonl"
         self._file = open(self.frames_path, "w", encoding="utf-8")
-        self._frame_count = 0
 
         self._metadata = SessionMetadata(
             session_id=self.session_id,
@@ -62,7 +61,6 @@ class SessionWriter:
         """Write a single frame observation as one line of JSONL."""
         line = json.dumps(observation.to_dict(), separators=(",", ":"))
         self._file.write(line + "\n")
-        self._frame_count += 1
 
     def finalize(self, total_frames: int, duration: float) -> None:
         """Write metadata.json and close the frames file."""

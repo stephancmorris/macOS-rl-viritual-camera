@@ -213,7 +213,6 @@ struct ShowSetupModel: Equatable {
         isChecking = true
     }
 
-    mutating func endCheck() { isChecking = false }
 
     // MARK: Slots
 
