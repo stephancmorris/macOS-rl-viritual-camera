@@ -8,7 +8,6 @@
 //  and sends ConsoleActions; the input row and pill are slots filled by the
 //  INPUT-STRIP and PILL-TARGET cards.
 //
-//  Not wired into ContentView yet: live pane pictures need ROUTER.
 //
 
 import SwiftUI

@@ -3,7 +3,6 @@
 //  CinematicCoreMacOS
 //
 //  Created by Stephan Morris on 2/10/2026.
-//  Ticket: RL-01 - Training Data Recorder Settings
 //
 
 import SwiftUI

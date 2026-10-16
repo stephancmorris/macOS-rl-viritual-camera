@@ -2,7 +2,7 @@
 //  StartGateTests.swift
 //  CinematicCoreMacOSTests
 //
-//  CR-036: when the virtual camera cannot be installed, Start goes ahead only
+//  when the virtual camera cannot be installed, Start goes ahead only
 //  if Program has somewhere else to go.
 //
 
