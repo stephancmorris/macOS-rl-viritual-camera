@@ -4,6 +4,8 @@ Status: **D-04 proposal, AWAITING OWNER (Q1–Q3), 2026-10-10. No run or level i
 
 Sources inspected: main `42191c71ec303e3f7d388c7cdafb5d5ef93d89db`, [recorded decisions](../../docs/handoff/stage3-4/DECISIONS.md), [D-04/B-06 and integration tickets](../../docs/handoff/stage3-4/STAGE3-TICKETS.md), [design/evaluation plan](../../docs/handoff/stage3-4/STAGE3-DESIGN-PLAN.md), [product walkthroughs](../../docs/auto-director/product-contract.md), and the actual admission types/producers cited in the [proposed B-06 record format](../../docs/auto-director/qualification-record-format.md). Recorded decisions override stale proposed headers. The A-08 review at `ba0601e` supplies synthetic sink-audit evidence only; no live trial or R2 MULTI-QA result was produced by this task.
 
+Current implementation review: [18 October evidence and remaining gates](d01-d04-review-2026-10-18.md). The basic B-06 store is now present on main, but does not implement the full proposed record/verifier contract. No stored key/time or passing test supplies the missing protocol decisions, measured exposure or signatories.
+
 ## Choices for owner sitting 3 — AWAITING OWNER
 
 | ID | Options | Recommendation and tradeoff | Evidence needed before approval |

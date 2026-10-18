@@ -63,6 +63,8 @@ Added 10 Oct 2026 for D-01. This section describes actual types on the open A-07
 
 Alfie is a live-event backup producer with static cameras and a present operator. Each input has one shot; preparation targets Preview, and any future qualified automatic cut uses the existing `ShowCoordinator.take` / `ProgramRouter` path. No parallel output, audio input or show-time network is added by the Director API.
 
+For the later main/PR boundary and outstanding integration work, see the [18 October documentation review](../reports/auto-director/d01-d04-review-2026-10-18.md). The table below retains its explicitly pinned A-07 snapshot.
+
 Files below are under `CinematicCoreMacOS/CinematicCoreMacOS/Director/` on that stack:
 
 | API / file | Concrete contract at A-07 |

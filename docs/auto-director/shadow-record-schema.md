@@ -2,6 +2,8 @@
 
 Status: **D-02 implementation specification for A-09; AWAITING OWNER review.** This document specifies a passive, Codable metadata record, not authority to run a show, collect media, or change an open product decision. It changes no Swift behaviour.
 
+Current implementation review: [18 October status](../../reports/auto-director/d01-d04-review-2026-10-18.md). Main `434e26a` contains the A-09 schema. B-04/PR #65 is a separate, unmerged storage candidate; its JSONL export API does not yet supply the companion manifest and visible session/time selection required by §8. Those requirements remain pending; a storage test pass does not satisfy them.
+
 ## Sources and decision boundary
 
 Contract sources were checked at `origin/main` **59f3acc9930676db71d3f3de926f52a7babf39eb** (10 Oct 2026): [tickets D-02/A-09/B-04/C-05 and shared rules](../handoff/stage3-4/STAGE3-TICKETS.md), [design plan](../handoff/stage3-4/STAGE3-DESIGN-PLAN.md), [use case](../handoff/stage3-4/STAGE3-USE-CASE.md), [AI options](../handoff/stage3-4/STAGE3-AI-OPTIONS.md), [product contract](product-contract.md), and [DECISIONS](../handoff/stage3-4/DECISIONS.md). Recorded decisions prevail over older “recommended” wording in those documents.
@@ -65,7 +67,7 @@ Producer ordering is `sequence`; asynchronous file writes must preserve it. Use 
 | `segmentType` | `presenter`, `panel`, `performance`, `videoBreak`, `liveEvent`, matching `SegmentType`; no run sheet → `liveEvent` |
 | `segmentToken?` | Fresh session-local UUID for segment correlation, no segment title or position text |
 
-The authority snapshot describes the state **before** an operator event is applied. Its later result is a separate correlated operator-action record (§7). At the inspected A-07 head, `mayTake` is always false and Auto/Backup operator Takes still pause pending A-11; record the actual state, never manufacture the proposed future nudge behaviour. Qualified cut capability must come from its separately reviewed implementation and per-level sign-off.
+An operator-action **attempt** snapshots authority before the event is applied. Its later result is a separate correlated record with the current post-event context (§7). Decision and abstention records snapshot their own observation time. At the inspected A-07 head, `mayTake` is always false and Auto/Backup operator Takes still pause pending A-11; record the actual state, never manufacture the proposed future nudge behaviour. Qualified cut capability must come from its separately reviewed implementation and per-level sign-off.
 
 `Shot` is `{ "format": "stage", "preset": "waistUp" }` or its allowed alternatives. Exact pairs are `stage` + `wide|fullBody|waistUp`, `webcam` + `wide|tight`. Map directly to `DirectorShot(preset: OperatorCommand.Preset)`; reject cross-format pairs. This is a preset, not a virtual input. Do not introduce `mode`, `zoomRung`, `medium`, `closeUp`, or `custom`.
 

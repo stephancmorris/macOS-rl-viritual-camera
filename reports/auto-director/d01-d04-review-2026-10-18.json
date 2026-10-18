@@ -1,0 +1,833 @@
+{
+  "source_base": "434e26aba298e4fb1fc7f32e028bad2f03fffae8",
+  "file_count": 17,
+  "link_count": 101,
+  "errors": [],
+  "files": [
+    {
+      "path": "docs/auto-director/authority-and-override.md",
+      "sha256": "cc844b48495f5694bb477a5244dc72d5dda1b5798b36d03930ded60d6293e79e"
+    },
+    {
+      "path": "docs/auto-director/prepare-and-readiness.md",
+      "sha256": "ff947fc1d6ad9d27a458b31064a228b141a9ba8686dc72a55698df29fb78f346"
+    },
+    {
+      "path": "docs/auto-director/subject-evidence.md",
+      "sha256": "488386a19f440d44159d8b73b67dfbcc2125627f34b4bbec6d3323e094f746e1"
+    },
+    {
+      "path": "docs/auto-director/roles-and-fallback.md",
+      "sha256": "cb92d13d1c558619c03c1abe27073e57b4b1634181ab838a0ab98548b4a71267"
+    },
+    {
+      "path": "docs/auto-director/shot-style.md",
+      "sha256": "e559d9ba11f75e94671d6454d01c7a581c3eb9f9456ec358ca09c2b75baa9ef3"
+    },
+    {
+      "path": "docs/auto-director/preferences.md",
+      "sha256": "0779d8b8619baf1732c831d75828012c5fd75abab3d189bd3fd460047d65df46"
+    },
+    {
+      "path": "docs/auto-director/ui-notes.md",
+      "sha256": "cfddd003902fa98cd523448580aab4417fed0d89bdb17f817dd7edcd5feb6ce0"
+    },
+    {
+      "path": "docs/auto-director/event-authority-contract.md",
+      "sha256": "3fa2a2dcdc1e27891da262d50a8d60dcd70657ad5e14363d46bf3088f480035d"
+    },
+    {
+      "path": "docs/auto-director/product-contract.md",
+      "sha256": "18a78afa5f336dba1f81a52962c4a606066c167f64ff1c31315ada4076d27b72"
+    },
+    {
+      "path": "docs/auto-director/shadow-record-schema.md",
+      "sha256": "555e5b65a51d38a37d35d29626b6482f6388d688ead9ec16414d6ef8d3d71dd7"
+    },
+    {
+      "path": "docs/auto-director/qualification-record-format.md",
+      "sha256": "684f9a74281db013ad26fe1669e076f44cfa09b39b87c6c6076b7f5610035225"
+    },
+    {
+      "path": "docs/ALFIE_ENGINEERING_SPEC.md",
+      "sha256": "2adc73a2ba31b7b5c604dcd4dc0248b0858bd1b118b6c8e6f2d1ed3af0129d84"
+    },
+    {
+      "path": "docs/ALFIE_MULTICAMERA_SPEC.md",
+      "sha256": "34d782490c4f5f3d5858ab7d2df2281f6734811ecda8a81174e157a75a02634d"
+    },
+    {
+      "path": "reports/auto-director/workload-plan.md",
+      "sha256": "79c95885c01ea553e2603fb5cd5ee9d77e6101a5256c1f21a9b4ed675ce6e039"
+    },
+    {
+      "path": "reports/auto-director/discovery-rig-budget.md",
+      "sha256": "71d6fc79338b2eef4a19217ed9c9c315e13eda7a319b4a3400a60584a61917b9"
+    },
+    {
+      "path": "reports/auto-director/qualification-protocol.md",
+      "sha256": "654594fd35e7001ea4f2337bdeb1f376d0a31e51f1cf48d833e289ee2b1c6772"
+    },
+    {
+      "path": "reports/auto-director/d01-d04-review-2026-10-18.md",
+      "sha256": "3d60a99584ece9adafbc6a260573af8d0e8d6b83377c68db5a1fa3cd2d37baec"
+    }
+  ],
+  "links": [
+    {
+      "source": "docs/auto-director/authority-and-override.md",
+      "target": "../handoff/stage3-4/DECISIONS.md",
+      "valid": true
+    },
+    {
+      "source": "docs/auto-director/authority-and-override.md",
+      "target": "product-contract.md",
+      "valid": true
+    },
+    {
+      "source": "docs/auto-director/authority-and-override.md",
+      "target": "event-authority-contract.md",
+      "valid": true
+    },
+    {
+      "source": "docs/auto-director/authority-and-override.md",
+      "target": "event-authority-contract.md#owner-questions",
+      "valid": true
+    },
+    {
+      "source": "docs/auto-director/prepare-and-readiness.md",
+      "target": "../handoff/stage3-4/DECISIONS.md",
+      "valid": true
+    },
+    {
+      "source": "docs/auto-director/prepare-and-readiness.md",
+      "target": "product-contract.md",
+      "valid": true
+    },
+    {
+      "source": "docs/auto-director/prepare-and-readiness.md",
+      "target": "event-authority-contract.md",
+      "valid": true
+    },
+    {
+      "source": "docs/auto-director/prepare-and-readiness.md",
+      "target": "event-authority-contract.md#owner-questions",
+      "valid": true
+    },
+    {
+      "source": "docs/auto-director/subject-evidence.md",
+      "target": "../handoff/stage3-4/DECISIONS.md",
+      "valid": true
+    },
+    {
+      "source": "docs/auto-director/subject-evidence.md",
+      "target": "product-contract.md",
+      "valid": true
+    },
+    {
+      "source": "docs/auto-director/subject-evidence.md",
+      "target": "event-authority-contract.md",
+      "valid": true
+    },
+    {
+      "source": "docs/auto-director/subject-evidence.md",
+      "target": "prepare-and-readiness.md",
+      "valid": true
+    },
+    {
+      "source": "docs/auto-director/roles-and-fallback.md",
+      "target": "../handoff/stage3-4/DECISIONS.md",
+      "valid": true
+    },
+    {
+      "source": "docs/auto-director/roles-and-fallback.md",
+      "target": "product-contract.md",
+      "valid": true
+    },
+    {
+      "source": "docs/auto-director/roles-and-fallback.md",
+      "target": "event-authority-contract.md",
+      "valid": true
+    },
+    {
+      "source": "docs/auto-director/shot-style.md",
+      "target": "../handoff/stage3-4/DECISIONS.md",
+      "valid": true
+    },
+    {
+      "source": "docs/auto-director/shot-style.md",
+      "target": "product-contract.md",
+      "valid": true
+    },
+    {
+      "source": "docs/auto-director/shot-style.md",
+      "target": "event-authority-contract.md",
+      "valid": true
+    },
+    {
+      "source": "docs/auto-director/preferences.md",
+      "target": "../handoff/stage3-4/DECISIONS.md",
+      "valid": true
+    },
+    {
+      "source": "docs/auto-director/preferences.md",
+      "target": "product-contract.md",
+      "valid": true
+    },
+    {
+      "source": "docs/auto-director/preferences.md",
+      "target": "event-authority-contract.md",
+      "valid": true
+    },
+    {
+      "source": "docs/auto-director/preferences.md",
+      "target": "shot-style.md",
+      "valid": true
+    },
+    {
+      "source": "docs/auto-director/ui-notes.md",
+      "target": "../handoff/stage3-4/DECISIONS.md",
+      "valid": true
+    },
+    {
+      "source": "docs/auto-director/ui-notes.md",
+      "target": "product-contract.md",
+      "valid": true
+    },
+    {
+      "source": "docs/auto-director/ui-notes.md",
+      "target": "event-authority-contract.md",
+      "valid": true
+    },
+    {
+      "source": "docs/auto-director/event-authority-contract.md",
+      "target": "../handoff/stage3-4/DECISIONS.md",
+      "valid": true
+    },
+    {
+      "source": "docs/auto-director/event-authority-contract.md",
+      "target": "product-contract.md",
+      "valid": true
+    },
+    {
+      "source": "docs/auto-director/event-authority-contract.md",
+      "target": "event-authority-contract.md",
+      "valid": true
+    },
+    {
+      "source": "docs/auto-director/event-authority-contract.md",
+      "target": "../../reports/auto-director/d01-d04-review-2026-10-18.md",
+      "valid": true
+    },
+    {
+      "source": "docs/auto-director/event-authority-contract.md",
+      "target": "roles-and-fallback.md",
+      "valid": true
+    },
+    {
+      "source": "docs/auto-director/product-contract.md",
+      "target": "../handoff/stage3-4/STAGE3-DESIGN-PLAN.md",
+      "valid": true
+    },
+    {
+      "source": "docs/auto-director/product-contract.md",
+      "target": "../handoff/stage3-4/STAGE3-USE-CASE.md",
+      "valid": true
+    },
+    {
+      "source": "docs/auto-director/product-contract.md",
+      "target": "authority-and-override.md",
+      "valid": true
+    },
+    {
+      "source": "docs/auto-director/product-contract.md",
+      "target": "event-authority-contract.md",
+      "valid": true
+    },
+    {
+      "source": "docs/auto-director/product-contract.md",
+      "target": "roles-and-fallback.md",
+      "valid": true
+    },
+    {
+      "source": "docs/auto-director/shadow-record-schema.md",
+      "target": "../../reports/auto-director/d01-d04-review-2026-10-18.md",
+      "valid": true
+    },
+    {
+      "source": "docs/auto-director/shadow-record-schema.md",
+      "target": "../handoff/stage3-4/STAGE3-TICKETS.md",
+      "valid": true
+    },
+    {
+      "source": "docs/auto-director/shadow-record-schema.md",
+      "target": "../handoff/stage3-4/STAGE3-DESIGN-PLAN.md",
+      "valid": true
+    },
+    {
+      "source": "docs/auto-director/shadow-record-schema.md",
+      "target": "../handoff/stage3-4/STAGE3-USE-CASE.md",
+      "valid": true
+    },
+    {
+      "source": "docs/auto-director/shadow-record-schema.md",
+      "target": "../handoff/stage3-4/STAGE3-AI-OPTIONS.md",
+      "valid": true
+    },
+    {
+      "source": "docs/auto-director/shadow-record-schema.md",
+      "target": "product-contract.md",
+      "valid": true
+    },
+    {
+      "source": "docs/auto-director/shadow-record-schema.md",
+      "target": "../handoff/stage3-4/DECISIONS.md",
+      "valid": true
+    },
+    {
+      "source": "docs/auto-director/qualification-record-format.md",
+      "target": "../../reports/auto-director/qualification-protocol.md",
+      "valid": true
+    },
+    {
+      "source": "docs/auto-director/qualification-record-format.md",
+      "target": "../handoff/stage3-4/DECISIONS.md",
+      "valid": true
+    },
+    {
+      "source": "docs/auto-director/qualification-record-format.md",
+      "target": "../handoff/stage3-4/STAGE3-TICKETS.md",
+      "valid": true
+    },
+    {
+      "source": "docs/auto-director/qualification-record-format.md",
+      "target": "../handoff/stage3-4/STAGE3-DESIGN-PLAN.md",
+      "valid": true
+    },
+    {
+      "source": "docs/auto-director/qualification-record-format.md",
+      "target": "../../CinematicCoreMacOS/CinematicCoreMacOS/MultiInputAdmission.swift",
+      "valid": true
+    },
+    {
+      "source": "docs/auto-director/qualification-record-format.md",
+      "target": "../../CinematicCoreMacOS/CinematicCoreMacOS/ShowCoordinator.swift",
+      "valid": true
+    },
+    {
+      "source": "docs/auto-director/qualification-record-format.md",
+      "target": "../../CinematicCoreMacOS/CinematicCoreMacOS/CameraManager.swift",
+      "valid": true
+    },
+    {
+      "source": "docs/auto-director/qualification-record-format.md",
+      "target": "../../CinematicCoreMacOS/CinematicCoreMacOS/ProgramOutputManager.swift",
+      "valid": true
+    },
+    {
+      "source": "docs/auto-director/qualification-record-format.md",
+      "target": "../../CinematicCoreMacOS/CinematicCoreMacOS/Director/DirectorQualificationStore.swift",
+      "valid": true
+    },
+    {
+      "source": "docs/auto-director/qualification-record-format.md",
+      "target": "../../reports/auto-director/d01-d04-review-2026-10-18.md",
+      "valid": true
+    },
+    {
+      "source": "docs/ALFIE_ENGINEERING_SPEC.md",
+      "target": "handoff/stage3-4/DECISIONS.md",
+      "valid": true
+    },
+    {
+      "source": "docs/ALFIE_ENGINEERING_SPEC.md",
+      "target": "auto-director/product-contract.md",
+      "valid": true
+    },
+    {
+      "source": "docs/ALFIE_ENGINEERING_SPEC.md",
+      "target": "auto-director/event-authority-contract.md",
+      "valid": true
+    },
+    {
+      "source": "docs/ALFIE_ENGINEERING_SPEC.md",
+      "target": "../reports/auto-director/d01-d04-review-2026-10-18.md",
+      "valid": true
+    },
+    {
+      "source": "docs/ALFIE_ENGINEERING_SPEC.md",
+      "target": "auto-director/shot-style.md",
+      "valid": true
+    },
+    {
+      "source": "docs/ALFIE_ENGINEERING_SPEC.md",
+      "target": "auto-director/event-authority-contract.md#owner-questions",
+      "valid": true
+    },
+    {
+      "source": "docs/ALFIE_ENGINEERING_SPEC.md",
+      "target": "ALFIE_MULTICAMERA_SPEC.md",
+      "valid": true
+    },
+    {
+      "source": "docs/ALFIE_ENGINEERING_SPEC.md",
+      "target": "ALFIE_MULTICAMERA_SPEC.md",
+      "valid": true
+    },
+    {
+      "source": "docs/ALFIE_MULTICAMERA_SPEC.md",
+      "target": "auto-director/product-contract.md",
+      "valid": true
+    },
+    {
+      "source": "docs/ALFIE_MULTICAMERA_SPEC.md",
+      "target": "handoff/stage3-4/DECISIONS.md",
+      "valid": true
+    },
+    {
+      "source": "docs/ALFIE_MULTICAMERA_SPEC.md",
+      "target": "ALFIE_ENGINEERING_SPEC.md#22-stage-3-director-api-open-stack-snapshot",
+      "valid": true
+    },
+    {
+      "source": "reports/auto-director/workload-plan.md",
+      "target": "discovery-rig-budget.md",
+      "valid": true
+    },
+    {
+      "source": "reports/auto-director/workload-plan.md",
+      "target": "../../docs/handoff/stage3-4/DECISIONS.md",
+      "valid": true
+    },
+    {
+      "source": "reports/auto-director/workload-plan.md",
+      "target": "../../docs/auto-director/product-contract.md",
+      "valid": true
+    },
+    {
+      "source": "reports/auto-director/workload-plan.md",
+      "target": "../../docs/handoff/stage3-4/STAGE3-TICKETS.md",
+      "valid": true
+    },
+    {
+      "source": "reports/auto-director/workload-plan.md",
+      "target": "d01-d04-review-2026-10-18.md",
+      "valid": true
+    },
+    {
+      "source": "reports/auto-director/workload-plan.md",
+      "target": "../../CinematicCoreMacOS/CinematicCoreMacOS/PersonDetector.swift",
+      "valid": true
+    },
+    {
+      "source": "reports/auto-director/workload-plan.md",
+      "target": "../../CinematicCoreMacOS/CinematicCoreMacOS/CameraManager.swift",
+      "valid": true
+    },
+    {
+      "source": "reports/auto-director/workload-plan.md",
+      "target": "../../CinematicCoreMacOS/CinematicCoreMacOS/FrameWorkScheduler.swift",
+      "valid": true
+    },
+    {
+      "source": "reports/auto-director/workload-plan.md",
+      "target": "../../CinematicCoreMacOS/CinematicCoreMacOS/DiagnosticsLog.swift",
+      "valid": true
+    },
+    {
+      "source": "reports/auto-director/workload-plan.md",
+      "target": "../../CinematicCoreMacOS/CinematicCoreMacOS/ProgramRouter.swift",
+      "valid": true
+    },
+    {
+      "source": "reports/auto-director/workload-plan.md",
+      "target": "../../CinematicCoreMacOS/CinematicCoreMacOS/CapabilityReport.swift",
+      "valid": true
+    },
+    {
+      "source": "reports/auto-director/workload-plan.md",
+      "target": "../../CinematicCoreMacOS/CinematicCoreMacOS/DegradePolicy.swift",
+      "valid": true
+    },
+    {
+      "source": "reports/auto-director/discovery-rig-budget.md",
+      "target": "workload-plan.md",
+      "valid": true
+    },
+    {
+      "source": "reports/auto-director/discovery-rig-budget.md",
+      "target": "d01-d04-review-2026-10-18.md",
+      "valid": true
+    },
+    {
+      "source": "reports/auto-director/discovery-rig-budget.md",
+      "target": "../../CinematicCoreMacOS/CinematicCoreMacOS/MultiInputAdmission.swift",
+      "valid": true
+    },
+    {
+      "source": "reports/auto-director/discovery-rig-budget.md",
+      "target": "../../CinematicCoreMacOS/CinematicCoreMacOS/ShowCoordinator.swift",
+      "valid": true
+    },
+    {
+      "source": "reports/auto-director/discovery-rig-budget.md",
+      "target": "../../CinematicCoreMacOS/CinematicCoreMacOS/ProgramOutputManager.swift",
+      "valid": true
+    },
+    {
+      "source": "reports/auto-director/qualification-protocol.md",
+      "target": "../../docs/handoff/stage3-4/DECISIONS.md",
+      "valid": true
+    },
+    {
+      "source": "reports/auto-director/qualification-protocol.md",
+      "target": "../../docs/handoff/stage3-4/STAGE3-TICKETS.md",
+      "valid": true
+    },
+    {
+      "source": "reports/auto-director/qualification-protocol.md",
+      "target": "../../docs/handoff/stage3-4/STAGE3-DESIGN-PLAN.md",
+      "valid": true
+    },
+    {
+      "source": "reports/auto-director/qualification-protocol.md",
+      "target": "../../docs/auto-director/product-contract.md",
+      "valid": true
+    },
+    {
+      "source": "reports/auto-director/qualification-protocol.md",
+      "target": "../../docs/auto-director/qualification-record-format.md",
+      "valid": true
+    },
+    {
+      "source": "reports/auto-director/qualification-protocol.md",
+      "target": "d01-d04-review-2026-10-18.md",
+      "valid": true
+    },
+    {
+      "source": "reports/auto-director/qualification-protocol.md",
+      "target": "workload-plan.md",
+      "valid": true
+    },
+    {
+      "source": "reports/auto-director/qualification-protocol.md",
+      "target": "../../docs/auto-director/qualification-record-format.md",
+      "valid": true
+    },
+    {
+      "source": "reports/auto-director/d01-d04-review-2026-10-18.md",
+      "target": "../../docs/auto-director/authority-and-override.md",
+      "valid": true
+    },
+    {
+      "source": "reports/auto-director/d01-d04-review-2026-10-18.md",
+      "target": "../../docs/auto-director/prepare-and-readiness.md",
+      "valid": true
+    },
+    {
+      "source": "reports/auto-director/d01-d04-review-2026-10-18.md",
+      "target": "../../docs/auto-director/subject-evidence.md",
+      "valid": true
+    },
+    {
+      "source": "reports/auto-director/d01-d04-review-2026-10-18.md",
+      "target": "../../docs/auto-director/roles-and-fallback.md",
+      "valid": true
+    },
+    {
+      "source": "reports/auto-director/d01-d04-review-2026-10-18.md",
+      "target": "../../docs/auto-director/shot-style.md",
+      "valid": true
+    },
+    {
+      "source": "reports/auto-director/d01-d04-review-2026-10-18.md",
+      "target": "../../docs/auto-director/preferences.md",
+      "valid": true
+    },
+    {
+      "source": "reports/auto-director/d01-d04-review-2026-10-18.md",
+      "target": "../../docs/auto-director/ui-notes.md",
+      "valid": true
+    },
+    {
+      "source": "reports/auto-director/d01-d04-review-2026-10-18.md",
+      "target": "../../docs/auto-director/event-authority-contract.md",
+      "valid": true
+    },
+    {
+      "source": "reports/auto-director/d01-d04-review-2026-10-18.md",
+      "target": "../../docs/auto-director/product-contract.md",
+      "valid": true
+    },
+    {
+      "source": "reports/auto-director/d01-d04-review-2026-10-18.md",
+      "target": "../../docs/handoff/stage3-4/DECISIONS.md",
+      "valid": true
+    },
+    {
+      "source": "reports/auto-director/d01-d04-review-2026-10-18.md",
+      "target": "../../docs/ALFIE_ENGINEERING_SPEC.md#22-stage-3-director-api-open-stack-snapshot",
+      "valid": true
+    },
+    {
+      "source": "reports/auto-director/d01-d04-review-2026-10-18.md",
+      "target": "../../docs/ALFIE_MULTICAMERA_SPEC.md",
+      "valid": true
+    },
+    {
+      "source": "reports/auto-director/d01-d04-review-2026-10-18.md",
+      "target": "d01-d04-review-2026-10-18.json",
+      "valid": true
+    }
+  ],
+  "validation_kind": "documentation/static source; prior software results explicitly reused",
+  "runtime_changes": false,
+  "schema_enum_audit": {
+    "IdentityEvidence": [
+      "confirmed",
+      "acquiring",
+      "holding",
+      "lost",
+      "ambiguous",
+      "unavailable"
+    ],
+    "StaleReason": [
+      "authorityRevoked",
+      "routeChanged",
+      "sourceRestarted",
+      "shotChangedByOperator",
+      "targetBecameProgram",
+      "sourceMissing",
+      "expired",
+      "requestReplaced",
+      "policyChanged",
+      "nominationChanged",
+      "evidenceUnavailable"
+    ],
+    "DirectorReadiness.Reason": [
+      "compositionUnavailable",
+      "evidenceUnavailable",
+      "takeUnavailable",
+      "invalidParameters",
+      "invalidEvidence",
+      "identityUncertain",
+      "framingUnsettled",
+      "moving",
+      "cropMoving"
+    ],
+    "DirectorShotPolicy.Abstention": [
+      "invalidInput",
+      "minimumDuration",
+      "noEligibleCandidate",
+      "repetition",
+      "movement",
+      "noPreview"
+    ],
+    "DirectorJudgement.Abstention": [
+      "policy",
+      "lowConfidence",
+      "notRecorded",
+      "nothingAllowed",
+      "invalidJudgement"
+    ]
+  },
+  "admission_fields": {
+    "outer": [
+      "policyVersion",
+      "machineModel",
+      "osVersion",
+      "showStandard",
+      "route",
+      "inputs"
+    ],
+    "input": [
+      "channel",
+      "deviceModelID",
+      "deliveredWidth",
+      "deliveredHeight",
+      "captureFPS",
+      "captureProfile",
+      "mode"
+    ]
+  },
+  "qualification_record_fields": [
+    "level",
+    "fingerprintKey",
+    "signedOffAt"
+  ],
+  "multiview_default": true,
+  "diagnostics_columns": [
+    "elapsed_s",
+    "clock",
+    "window_kind",
+    "thermal",
+    "low_power",
+    "cpu_cores",
+    "cpu_pct",
+    "threads",
+    "source_h",
+    "crop_h_frac",
+    "upscale",
+    "footprint_mb",
+    "hop_mean_ms",
+    "hop_max_ms",
+    "queue_mean_ms",
+    "queue_max_ms",
+    "vision_mean_ms",
+    "vision_max_ms",
+    "frame_wall_mean_ms",
+    "frame_wall_max_ms",
+    "detections",
+    "frames_window",
+    "frames_total",
+    "handoff_refused_window",
+    "handoff_refused_total",
+    "gate_drops_window",
+    "gate_drops_total",
+    "main_active_mean_ms",
+    "main_active_max_ms",
+    "observation_age_mean_ms",
+    "observation_age_max_ms",
+    "processed_input_fps",
+    "detector_fps",
+    "handoff_fps",
+    "window_s",
+    "delivered_window",
+    "admitted_window",
+    "capture_dropped_window",
+    "capture_dropped_total",
+    "render_failed_window",
+    "render_failed_total",
+    "routed_window",
+    "no_route_window",
+    "repeated_window",
+    "repeated_total",
+    "presented_fps",
+    "diag_emit_ms",
+    "note"
+  ],
+  "source_files": [
+    {
+      "path": "CinematicCoreMacOS/CinematicCoreMacOS/Director/DirectorProposal.swift",
+      "sha256": "622c3098166841fd273b8f50825f893267dd376953fc9c85dac975f5cafeee10"
+    },
+    {
+      "path": "CinematicCoreMacOS/CinematicCoreMacOS/Director/DirectorShotPolicy.swift",
+      "sha256": "cda97acc3ea10de101d91f217a796fcdc46b9b577555cc9bdb3ab47bf49f54b4"
+    },
+    {
+      "path": "CinematicCoreMacOS/CinematicCoreMacOS/Director/DirectorJudge.swift",
+      "sha256": "6a709962e8e53d47280c857a90e518e04c8c809c977c25396a360cafa88c162f"
+    },
+    {
+      "path": "CinematicCoreMacOS/CinematicCoreMacOS/Director/DirectorShadowRecord.swift",
+      "sha256": "98f5bef6638fc6d316d8cc61919afff066034711e8b58f012559072734471ad9"
+    },
+    {
+      "path": "CinematicCoreMacOS/CinematicCoreMacOS/Director/DirectorQualificationStore.swift",
+      "sha256": "5ecf848e01937744fda9c9cd66d66ba132b6f39e71b990ffb8d9f796fa5d31a0"
+    },
+    {
+      "path": "CinematicCoreMacOS/CinematicCoreMacOS/MultiInputAdmission.swift",
+      "sha256": "3486e2c4fc25c0990a6e8ab869c658194b8fd18bf4dece6f266b556a99e5a513"
+    },
+    {
+      "path": "CinematicCoreMacOS/CinematicCoreMacOS/DiagnosticsLog.swift",
+      "sha256": "a078fdcc5aa748b13dbfb394de07bac1e7abd4ab86660afce8f5c1a1b9ad7cc7"
+    },
+    {
+      "path": "CinematicCoreMacOS/CinematicCoreMacOS/ProgramOutputManager.swift",
+      "sha256": "cb4787ba60bf21eb7bc1e75fd54aaf982d160e80eaa8e5a49f38614494a83017"
+    },
+    {
+      "path": "CinematicCoreMacOS/CinematicCoreMacOS/ProgramRouter.swift",
+      "sha256": "35b9c3d3f4bcdbdcf4f3ccd8e46bd63cbc7035a29bdafbc8e8e117eb37b7008a"
+    },
+    {
+      "path": "CinematicCoreMacOS/CinematicCoreMacOS/FrameWorkScheduler.swift",
+      "sha256": "14b2df2755941067ed8d7906964fabe03158ecf7209fe665b44ce2d38a4b1d1d"
+    },
+    {
+      "path": "CinematicCoreMacOS/CinematicCoreMacOS/PersonDetector.swift",
+      "sha256": "9f90c34c60c613a557dbc61a21f579ecae8df41e53125bd6f195bf19cec80e5c"
+    },
+    {
+      "path": "CinematicCoreMacOS/CinematicCoreMacOS/DeveloperFlags.swift",
+      "sha256": "af85521509c8e0a56ba5910dd59d308b0f0a13261dd76a306b60de1fe3d843d8"
+    }
+  ],
+  "original_prs": [
+    {
+      "pr": 20,
+      "merge_commit": "68ede86e175ee63ca6ff0fe1bb2d06f9a43ab4b1",
+      "already_on_base": true
+    },
+    {
+      "pr": 15,
+      "merge_commit": "a826f4015af5bd056005c18356ba14fd5def810f",
+      "already_on_base": true
+    },
+    {
+      "pr": 27,
+      "merge_commit": "d800e3923c170b3276691ecb77e2ba1589bc4fcc",
+      "already_on_base": true
+    },
+    {
+      "pr": 24,
+      "merge_commit": "948db87a5243e7ff6e4541060e04aa8e881c97a3",
+      "already_on_base": true
+    }
+  ],
+  "reused_test_evidence": {
+    "new_run": false,
+    "base": "434e26aba298e4fb1fc7f32e028bad2f03fffae8",
+    "source_fingerprint": "bf17dec7f13d1ab3a66414c7cdf01969587ee7b575deba4c64156a3f49121e54",
+    "summary_sha256": "8d7e0667c1c05537b0090e0bef079af76417c43c0b5dd70e9fbf33d91790e997",
+    "passed_definitions": 664,
+    "passed_executions": 936,
+    "failed": 0,
+    "skipped": 3,
+    "relevant_suites": [
+      {
+        "suite": "DirectorQualificationStoreTests",
+        "result": "Passed",
+        "definitions": 12,
+        "results": {
+          "Passed": 12
+        }
+      },
+      {
+        "suite": "DirectorShadowRecordTests",
+        "result": "Passed",
+        "definitions": 15,
+        "results": {
+          "Passed": 15
+        }
+      }
+    ]
+  },
+  "read_only_inventory": {
+    "model": "Mac16,8",
+    "macos": "27.0.1",
+    "build": "26A434",
+    "camera_or_output_opened": false
+  },
+  "pending": {
+    "D-02_export_integration": [
+      "companion export manifest",
+      "visible session/time selection"
+    ],
+    "D-03": [
+      "selected rig and current R2 evidence",
+      "pilot-derived scan/burst budgets",
+      "frozen cost/exposure/utility limits"
+    ],
+    "D-04": [
+      "Q1-Q3 decisions",
+      "full assessment record/verifier/lifecycle integration",
+      "scored live/recorded evidence and real signatories"
+    ]
+  },
+  "decision_register_modified": false,
+  "diff_check_exit": 0
+}

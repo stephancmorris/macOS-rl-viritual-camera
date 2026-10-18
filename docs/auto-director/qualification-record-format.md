@@ -4,6 +4,12 @@ Status: **D-04 integration proposal, AWAITING OWNER (Q1–Q3), 2026-10-10.** Thi
 
 Evidence inspected at main `42191c71ec303e3f7d388c7cdafb5d5ef93d89db`: [MultiInputAdmission.swift](../../CinematicCoreMacOS/CinematicCoreMacOS/MultiInputAdmission.swift), [ShowCoordinator.swift](../../CinematicCoreMacOS/CinematicCoreMacOS/ShowCoordinator.swift), [CameraManager.swift](../../CinematicCoreMacOS/CinematicCoreMacOS/CameraManager.swift) and [ProgramOutputManager.swift](../../CinematicCoreMacOS/CinematicCoreMacOS/ProgramOutputManager.swift). The inspected main has no `QualificationLookup` or Director per-level record store. B-06 names that future seam; method signatures and fields below are integration requests. This memo does not edit or approve code.
 
+## Current implementation review — 18 October 2026
+
+Main `434e26a` now contains `DirectorQualificationLookup` and `DirectorQualificationStore` in [DirectorQualificationStore.swift](../../CinematicCoreMacOS/CinematicCoreMacOS/Director/DirectorQualificationStore.swift). Its version-1 `QualificationRecord` stores only `level`, `fingerprintKey` and `signedOffAt`; lookup matches the flattened key. This is B-06's initial persistence seam, not the full proposed envelope below.
+
+Structured setup/scope binding, evidence digests, verified signatories, explicit validity/retention checks and a persistent supersession/revocation history are still integration work. Existing store tests establish their exercised persistence/refusal behavior, not these missing guarantees. The historical source inspection above and proposed sections below are retained for traceability. See the [review and acceptance limits](../../reports/auto-director/d01-d04-review-2026-10-18.md). Q1–Q3 remain AWAITING OWNER.
+
 ## 1. Options and recommendation — AWAITING OWNER
 
 | Choice | Options | Recommendation / tradeoff | Evidence required |

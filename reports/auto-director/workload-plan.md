@@ -4,6 +4,8 @@
 
 [Recorded decisions](../../docs/handoff/stage3-4/DECISIONS.md) override stale proposed headers elsewhere. UC-1/UC-2 require an operator and one shot per input; E2 excludes audio; E1 preserves operator nomination and visible selection; A1/N1 preserve takeover and the recorded operator-Take distinction; P1/P2 preserve readiness and wider fallback. AI-2 prohibits show-time network; C3/AI-4 require bounded metadata, 30-day retention and explicit export. C1/C2 and E3 remain owner questions. The [product contract](../../docs/auto-director/product-contract.md) and [B-10/D-03 tickets](../../docs/handoff/stage3-4/STAGE3-TICKETS.md) define scope.
 
+Current review: [18 October acceptance and missing evidence](d01-d04-review-2026-10-18.md). The worksheet now records the OS inventory change. Its missing pilot, scan budgets and frozen limits remain blockers to workload approval; document review cannot supply measured values.
+
 ## Options and recommendation
 
 | Owner question | Options | Recommendation, tradeoff and evidence |
