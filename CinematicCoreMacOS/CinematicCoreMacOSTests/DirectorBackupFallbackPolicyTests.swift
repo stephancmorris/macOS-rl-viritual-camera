@@ -145,4 +145,17 @@ nonisolated struct DirectorBackupFallbackPolicyTests {
         let permit = try begin(&p, &a)
         #expect(p.consume(permit, snapshot: snapshot(a), now: 11, maximumFrameAge: 2) == nil)
     }
+    @Test func staleSourceLossIngressCannotRetireANewerFaultPermit() throws {
+        var a = authority(), p = BackupFallbackPolicy()
+        let staleSnapshot = snapshot(a)
+        _ = try begin(&p, &a)
+        a.apply(.healthRestored)
+        a.apply(.handToAlfie, prerequisites: prerequisites)
+        let replacement = try begin(&p, &a)
+        let current = a
+        #expect(p.sourceLoss(.a, authority: &a, snapshot: staleSnapshot, now: 10, maximumFrameAge: 0.5) == nil)
+        #expect(a == current && p.pending == replacement)
+        #expect(p.consume(replacement, snapshot: snapshot(a), now: 10, maximumFrameAge: 0.5) == replacement)
+    }
+
 }
