@@ -53,10 +53,13 @@ nonisolated struct BackupFallbackPolicy: Sendable {
     mutating func sourceLoss(_ channel: ChannelID, authority: inout DirectorAuthority,
                              snapshot s: Snapshot, now: TimeInterval,
                              maximumFrameAge: TimeInterval) -> Permit? {
+        // A delayed event from an older authority/source binding cannot
+        // revoke newer work. Validate before touching the pending exception.
+        guard authority == s.live.authority else { return nil }
         pending = nil
         let prior = authority
         authority.apply(.sourceLoss(channel))
-        guard prior == s.live.authority, channel == s.live.program,
+        guard channel == s.live.program,
               prior.level == .backup, prior.mayIssueTake(at: now),
               authority.epoch > prior.epoch, !authority.exhausted,
               eligible(s, now: now, maximumFrameAge: maximumFrameAge),
