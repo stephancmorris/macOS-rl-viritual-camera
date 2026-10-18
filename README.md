@@ -1,6 +1,6 @@
 # Alfie — operator-controlled live framing
 
-Alfie frames camera pictures into one Program feed. The operator chooses the subject and composition. Current Stage code provides Camera A/B Program/Preview, manual Take and deliberate Edit Live; Webcam uses the single-camera workflow.
+Alfie frames camera pictures into one Program feed. The operator chooses the subject and composition. Choose Single Cam for one stage camera and every Stage shot, Multi Cam for Camera A/B Program/Preview with manual Take and deliberate Edit Live, or Webcam for the close-range single-camera workflow.
 
 The Debug candidate also attaches Director status and controls. Preparation, automatic-cut, Backup, discovery and local-model study components require explicit settings and current prerequisites; ordinary app construction installs no execution-study settings, discovery budget or learned scorer. Every launch starts Manual. Release disables Director shadow, Assist and automatic effects. Active-speaker listening, microphone control and hardware motion remain deferred.
 

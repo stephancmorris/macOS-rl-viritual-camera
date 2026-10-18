@@ -8,19 +8,37 @@ Two independent camera inputs, **A** and **B**, run at once. One is **Program**,
 
 Preview taps, Detect, preset, Push/Pull, Manual, Pan, and Return to Wide affect Preview alone. They never cut Program. With two channels, Preview is always the other channel; the operator cannot select the live channel as Preview. The N-input rule is in *Input capacity* below. **Edit Live** is a separate, conspicuous operator action and state with a persistent `Editing live A/B` indication; commands created there explicitly target the live channel. Take exchanges the two roles atomically only from an already fresh, legal Preview render. Both channels retain their state through a Take; returning to a channel resumes its current mode and motion, not a reset or copied shot. A successful Take exits Edit Live and binds the controls to the new Preview. No second output, second CMIO device, direct SDI, speech, physical hardware, or T5a easing rewrite belongs to R2. The R2 technical release ships exactly two running inputs; a third and fourth input are gated follow-on work (see *Input capacity*), not an R2 exclusion.
 
-The show output format is frozen once per show: the existing `ShowStandard` 1920×1080 at 50, 60000/1001, or 60 fps (and existing portrait profile where supported). Multi-camera runs only in Stage format (see *Format scope*), so A and B both use the `CaptureProfilePolicy` Stage profile and each must supply the frozen show rate; no quiet 30 fps substitution, resolution change, or invented sharpness. Delivered source dimensions, rather than advertised active format, drive legal crop and detail messages.
+The show output format is frozen once per show: the existing `ShowStandard` 1920×1080 at 50, 60000/1001, or 60 fps (and existing portrait profile where supported). Multi-camera runs only in Multi Cam mode (see *Operator modes*), so A and B both use the `CaptureProfilePolicy` Stage profile and each must supply the frozen show rate; no quiet 30 fps substitution, resolution change, or invented sharpness. Delivered source dimensions, rather than advertised active format, drive legal crop and detail messages.
 
-## Format scope: Stage vs Webcam
+## Operator modes: Single Cam, Multi Cam, Webcam
 
-Alfie has two cinematic formats (`ShotComposer.Config.CinematicFormat`), and this whole design applies to **Stage only**.
+The operator picks one of three modes, always listed in this order (owner decision 18 Oct 2026, Trello MODES-SPEC). Multi Cam is the console this document describes and was called "Stage" before. This whole design applies to **Multi Cam only**.
 
-| | Stage | Webcam |
-| --- | --- | --- |
-| Main view | Multiview console (this document) | The traditional single-camera view: wide source + crop and the existing operator pill, unchanged |
-| Inputs | Up to four slots; R2 ships two | One camera; no Preview, Take, Edit Live or input row |
-| Capture profile | Prefers 3840×2160; every format must run at the show rate exactly, or the camera is refused | Prefers 1920×1080, then 720p-class; uses the show rate when any HD format has it, otherwise the webcam's fastest HD format at its own rate (reason `webcamBelowShowRate`, shown in the capture status line) |
+| | Single Cam | Multi Cam | Webcam |
+| --- | --- | --- | --- |
+| Main view | The traditional single-camera view: wide source + crop, identity/telemetry overlays and the operator pill | Multiview console (this document) | The traditional single-camera view, unchanged |
+| Stopped screen | Stopped screen with Start | Show setup | Stopped screen with Start |
+| Inputs | Camera A only; no Preview, Take, Edit Live, input row or pair check | Up to four slots; R2 ships two | Camera A only; no Preview, Take, Edit Live or input row |
+| Shots | Stage ladder: Wide, Full Body, Waist Up, plus Manual, Auto Pan, Push/Pull, Return to Wide and Stage headroom | The same Stage ladder on each channel, through the pill bound to the control target | Wide, Tight |
+| Cinematic format (`ShotComposer.Config.CinematicFormat`) | Stage | Stage | Webcam |
+| Capture profile (`CaptureProfilePolicy`) | Stage | Stage | Webcam |
+| Output | The show router, Program = A, one route | The show router, with Take | The show router, Program = A, one route |
 
-`ConsolePresentation.resolve(for:)` is the single mapping from format to view. Switching format swaps the whole console, so it is refused while a multi-camera show is running; the operator stops the show first. A single-camera session switches as it does today. A Webcam-mode camera running below the show rate is paced into the output at the show standard, so the virtual camera repeats frames and the existing frame-rate-match bring-up check shows a warning. That is accepted for video calls and never applies to Stage.
+Capture profiles: **Stage** prefers 3840×2160, and every format must run at the show rate exactly or the camera is refused (Debug builds may fall back as `stageBelowShowRate`). **Webcam** prefers 1920×1080, then 720p-class, and uses the show rate when any HD format has it, otherwise the webcam's fastest HD format at its own rate (reason `webcamBelowShowRate`, shown in the capture status line). A Webcam-mode camera running below the show rate is paced into the output at the show standard, so the virtual camera repeats frames and the existing frame-rate-match bring-up check shows a warning. That is accepted for video calls and never applies to Single Cam or Multi Cam.
+
+**One choice, everything derived.** `OperatorMode` (`Console/OperatorMode.swift`) is the operator's choice. The cinematic format, capture profile and `ConsolePresentation` are derived from it and are never chosen separately; Single Cam and Multi Cam differ only in presentation and in whether more than one input may exist. `OperatorModeStore` persists the mode (`operatorMode`) and is the only writer of the composer's format. `DeveloperFlags.useMultiviewConsole` is a kill switch: off removes Multi Cam from the choices and resolves a stored Multi Cam to Single Cam.
+
+**Defaults.** A fresh install starts in Single Cam. An install from before the three modes keeps its screen: a stored Stage format becomes Multi Cam, a stored Webcam format stays Webcam. The migration runs once and never overwrites a stored mode.
+
+**Switching.** Always allowed while stopped. While running:
+
+- Single Cam → Multi Cam swaps the console without restarting capture; A stays Program and Preview reads "No Preview camera".
+- Leaving Multi Cam (for Single Cam or Webcam) is allowed only when Program is A and no other channel exists or is starting; otherwise it is refused with a reason and nothing changes.
+- Switching into or out of Webcam keeps the earlier rule: the new capture profile applies at the next Start, and Manual / Auto Pan fall back when entering Webcam.
+
+The live-switch guard and the main-window mode picker are Trello MODE-SWITCH; until then the mode is chosen in Settings.
+
+**Open question (owner).** Whether the Auto Director gets a home in Single Cam. For now there is no Director UI there; the shadow keeps running as it does today.
 
 ## Historical implementation status (branch `r2/engine`, 28 Sep 2026; flag corrected 10 Oct)
 
