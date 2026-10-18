@@ -7,9 +7,9 @@
 //  tick, keeps `DirectorAuthority` and `DirectorEvidenceAdapter` current, and
 //  publishes the console's `DirectorSection`.
 //
-//  Shadow only: this controller has **no camera effects**. It never
-//  dispatches a command and never calls Take. Off-air preparation arrives in
-//  B-05 (behind its own Debug flag), cuts in B-08.
+//  The default tick observes only. B-05 exposes an explicit Debug-only
+//  Preview preparation boundary with supplied settings and qualification.
+//  Cut scheduling remains B-08; the B-07 Take boundary always needs a permit.
 //
 
 import Combine
@@ -60,6 +60,7 @@ final class DirectorController: ObservableObject, DirectorConsoleControlling {
     private(set) var adapter: DirectorEvidenceAdapter?
     private(set) var preferences: DirectorPreferences?
     private var takePermits = TakePermitIssuer()
+    private(set) lazy var assistPreparation = DirectorAssistPreparation(show: show, controller: self)
     private let cutReadinessParameters: DirectorReadiness.Parameters?
     private(set) var policyRevision: UInt64 = 0
     private(set) var nominationRevision: UInt64 = 0
@@ -252,6 +253,22 @@ final class DirectorController: ObservableObject, DirectorConsoleControlling {
         }
     }
 
+    /// A-10's chosen shot reaches the real camera boundary in this same turn.
+    /// Missing study settings never call this path automatically from the tick.
+    func preparePreview(_ shot: DirectorShot, configuration: DirectorAssistPreparation.Configuration) -> DirectorPreparationEffect {
+        guard let request = assistPreparation.enqueue(shot, configuration: configuration) else {
+            return .rejected([.evidenceUnavailable])
+        }
+        let result = assistPreparation.commit(request)
+        refreshSection()
+        return result
+    }
+
+    func preparationFailed() {
+        log("preparation result or revisions did not match; taking over")
+        takeOver()
+    }
+
     // MARK: One-shot Take boundary (B-07)
 
     /// Called by B-08 only after a fresh cut decision. No production timing
@@ -373,6 +390,7 @@ final class DirectorController: ObservableObject, DirectorConsoleControlling {
 
     private func record(_ event: DirectorAuthority.Event, transition: DirectorAuthority.Transition, note: String?) {
         if transition.cancellations.contains(.take) { takePermits.retire() }
+        if transition.cancellations.contains(.prepare) { assistPreparation.retire() }
         if event == .policyChanged { policyRevision &+= 1 }
         if event == .nominationChanged { nominationRevision &+= 1 }
         appliedEvents.append(event)
@@ -432,6 +450,11 @@ final class DirectorController: ObservableObject, DirectorConsoleControlling {
         section.level = Self.consoleLevel(authority.level)
         section.handedToAlfie = !authority.paused
         section.activity = activity()
+        section.alfieSetShot = assistPreparation.alfieSetShots
+        section.prepared = assistPreparation.preparedShot
+        if let prepared = section.prepared, section.activity.kind == .active {
+            section.activity = .active(.preparing(input: prepared.input, shot: prepared.shot, settled: false))
+        }
         return section
     }
 
