@@ -848,6 +848,8 @@ final class CameraManager: NSObject, ObservableObject {
     private var selectedShot: OperatorCommand.Preset {
         shotComposer.config.cinematicFormat == .webcam ? .webcam(shotComposer.config.webcamPreset) : .stage(shotComposer.config.shotPreset)
     }
+    var directorShot: DirectorShot { .init(preset: selectedShot) }
+
     private var shotLadder: [OperatorCommand.Preset] {
         shotComposer.config.cinematicFormat == .webcam ? [.webcam(.wide), .webcam(.tight)] :
             [.stage(.wide), .stage(.fullBody), .stage(.waistUp)]
@@ -1009,7 +1011,13 @@ final class CameraManager: NSObject, ObservableObject {
         case .unlock: clearManualTargetLock()
         case .resumeTracking: resumeTracking()
         case .setMode(let mode): setOperationMode(mode)
-        case .selectPreset(let preset): selectPreset(preset)
+        case .selectPreset(let preset):
+            if command.origin == .director {
+                // accept() already revoked the previous epoch, and the common
+                // dispatch path ended motion above. Keep B-05's exact +1 receipt.
+                choosePreset(preset)
+                boostFramingTransition()
+            } else { selectPreset(preset) }
         case .beginZoom(let direction): beginZoom(direction)
         case .endZoom: break
         case .moveManualCenter(let point):
@@ -1043,6 +1051,8 @@ final class CameraManager: NSObject, ObservableObject {
     #if DEBUG
     /// Test seam: lets unit tests exercise command admission without a camera.
     func setRunningForTesting(_ running: Bool) { isRunning = running }
+    /// Synthetic pending UI gesture, independent of lock/gallery acquisition.
+    func setOperatorGestureForTesting(_ pending: Bool) { tapPending = pending }
     /// Test seam: a rendered frame as if processFrame had produced it.
     func setLatestRenderedFrameForTesting(_ frame: RenderedChannelFrame?) { latestRenderedFrame = frame }
     /// Test seam: a detection observation as if the frame path consumed it.
