@@ -93,4 +93,6 @@ nonisolated enum TakeRejection: Equatable, Sendable {
     case notEligible(TakeAvailability.Reason?)
     /// The output did not accept the frame (route missing / refused).
     case outputRefused
+    /// Missing, stale, consumed or otherwise unauthorized Director permit.
+    case directorNotAuthorized
 }

@@ -274,6 +274,7 @@ final class LiveConsoleModel: ObservableObject, ConsoleActions {
     static func describe(_ rejection: TakeRejection, show: ShowCoordinator) -> String {
         switch rejection {
         case .noPreview: return "No Preview camera"
+        case .directorNotAuthorized: return "Alfie Take refused: authorization is no longer current"
         case .superseded: return "Take ignored: roles changed since the click"
         case .tooSoon: return "Take ignored: too soon after the last Take"
         case .outputRefused:
