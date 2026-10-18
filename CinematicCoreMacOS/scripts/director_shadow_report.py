@@ -1,0 +1,393 @@
+#!/usr/bin/env python3
+"""C-05: local metadata-only schema-1 JSONL analysis. No authority or I/O to the app."""
+import argparse
+from collections import Counter, defaultdict, deque
+from datetime import datetime
+import json
+import math
+from pathlib import Path
+import re
+import statistics
+import sys
+import uuid
+
+SCHEMA = json.loads(Path(__file__).with_name('director_shadow_schema.json').read_text())
+REASONS = {
+    'proposalStale': 'authorityRevoked routeChanged sourceRestarted shotChangedByOperator targetBecameProgram sourceMissing expired requestReplaced policyChanged nominationChanged evidenceUnavailable',
+    'policy': 'invalidInput minimumDuration noEligibleCandidate repetition movement noPreview',
+    'judge': 'lowConfidence notRecorded nothingAllowed invalidJudgement',
+    'readiness': 'compositionUnavailable evidenceUnavailable takeUnavailable invalidParameters invalidEvidence identityUncertain framingUnsettled moving cropMoving',
+    'selection': 'advisoryWideReminder advisoryMaximumDwell subjectEvidence unclassified',
+    'observation': 'parametersUnavailable parametersInvalid judgementStale cutPolicyUnavailable unclassified',
+    'authorityRefusal': 'notQualified prerequisites paused exhausted',
+}
+PAYLOAD = {
+    'wouldPrepare': 'decisionID target shot reason proposalID requestID proposalCreatedAt judgementIndex',
+    'wouldCut': 'decisionID target shot reason judgementIndex',
+    'abstention': 'decisionID stage reasons target proposalID requestID judgementIndex',
+    'operatorAction': 'actionID action phase targetScope target shot outcome reasons programAfter previewAfter',
+}
+SESSION_ACTIONS = set('take startSession stopSession settingsChanged formatChanged editLive setLevel handToAlfie takeOver cancelNextCut advanceSegment'.split())
+CHANNEL_ACTIONS = set('detect cancelDetect selectSubject unlock resumeTracking setMode selectPreset beginZoom endZoom moveManualCenter returnToWide overrideSubject'.split())
+
+
+def require(condition):
+    if not condition:
+        raise ValueError('invalid metadata')
+
+
+def validate(value, typename='Record', path=''):
+    """Closed typed schema: unknown keys, duplicate JSON keys and free text refuse."""
+    if typename.endswith('?'):
+        return value is None or validate(value, typename[:-1], path)
+    if typename.startswith('['):
+        require(type(value) is list)
+        for i, item in enumerate(value):
+            validate(item, typename[1:-1], f'{path}[{i}]')
+    elif typename in SCHEMA['objects']:
+        shape = SCHEMA['objects'][typename]
+        require(type(value) is dict and set(value) <= set(shape))
+        for key, fieldtype in shape.items():
+            require(key in value or fieldtype.endswith('?'))
+            validate(value.get(key), fieldtype, f'{path}.{key}'.lstrip('.'))
+    elif typename in SCHEMA['enums']:
+        require(type(value) is str and value in SCHEMA['enums'][typename])
+    elif typename == 'Bool':
+        require(type(value) is bool)
+    elif typename == 'Int':
+        require(type(value) is int and 0 <= value <= 2**63 - 1)
+    elif typename == 'Double':
+        require(type(value) in (int, float) and math.isfinite(value) and value >= 0)
+    elif typename == 'Counter':
+        require(type(value) is str and re.fullmatch(r'0|[1-9][0-9]{0,19}', value) and int(value) <= 2**64 - 1)
+    elif typename == 'Token':
+        require(type(value) is str and str(uuid.UUID(value)).upper() == value)
+    elif typename == 'String':
+        require(type(value) is str)
+        if path == 'recordedAtUTC':
+            require(re.fullmatch(r'\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d\.\d{3}Z', value))
+            datetime.strptime(value, '%Y-%m-%dT%H:%M:%S.%fZ')
+        elif path.endswith('.modelVersion'):
+            require(re.fullmatch(r'[A-Za-z0-9][A-Za-z0-9._-]*', value))
+        elif path.startswith('invalidFields['):
+            require(re.fullmatch(r'[A-Za-z]+(?:\[\d+\])?(?:\.[A-Za-z]+(?:\[\d+\])?)+', value))
+        else:
+            require(re.fullmatch(r'input-[1-9][0-9]*', value))
+    else:
+        raise ValueError('unsupported type')
+    return True
+
+
+def semantic(record):
+    c, p, e = (record[k] for k in ('context', 'parameters', 'event'))
+    require(record['schemaVersion'] == 1)
+    inputs = c['inputs']
+    require(inputs and len(set(inputs)) == len(inputs) and c['program'] in inputs)
+    for key in ('preview', 'pinnedInput'):
+        require(c.get(key) is None or c[key] in inputs)
+    require(c.get('preview') != c['program'])
+    optional = {'context.programStartedAt', 'context.lastWideAt', 'parameters.judgeMaximumAge', 'parameters.minimumProbability'}
+    if e['kind'] == 'wouldPrepare':
+        optional.add('event.proposalCreatedAt')
+
+    def shot(s):
+        require(s['preset'] in ({'wide', 'fullBody', 'waistUp'} if s['format'] == 'stage' else {'wide', 'tight'}))
+
+    if c.get('programShot') is not None:
+        shot(c['programShot'])
+    require(p.get('preferencesVersion') in (None, 2))
+    require(p.get('minimumProbability') is None or p['minimumProbability'] <= 1)
+    if p['status'] == 'available':
+        require(p.get('parametersVersion') is not None and p.get('preferencesVersion') == 2 and p.get('resolvedStyle') is not None)
+    else:
+        require(p.get('resolvedStyle') is None)
+    if p.get('resolvedStyle'):
+        s = p['resolvedStyle']
+        require(s['minimumShotDuration'] <= s['preferredShotDuration'] <= s['softMaximumShotDuration'] and s['wideCadence'] > 0 and s['onAirMoveRate'] > 0)
+    if p.get('readiness'):
+        s = p['readiness']
+        require(s['minimumCutSettledTime'] >= s['minimumSettledTime'] and s['maximumCutMotion'] <= s['maximumMotion'])
+    require(len({v['channel'] for v in record['evidence']}) == len(record['evidence']))
+    diagnostic = p['status'] == 'invalid' and e['kind'] in ('abstention', 'operatorAction')
+    for i, v in enumerate(record['evidence']):
+        require(v['channel'] in inputs)
+        for key in ('sampledAt', 'observationAge', 'subjectSpeed', 'settledSince', 'framingSettledFor', 'observedPersonCount'):
+            optional.add(f'evidence[{i}].{key}')
+        for key in ('prepareReadiness', 'cutReadiness'):
+            if v.get(key) is not None:
+                require(v[key]['isReady'] == (not v[key]['reasons']))
+                require(p.get('readiness') is not None or (diagnostic and not v[key]['isReady'] and 'invalidParameters' in v[key]['reasons']))
+        if v['identitySource'] == 'adapter' or any(v.get(k) is not None for k in ('adapterEvidenceAvailable', 'settledSince', 'framingSettledFor')):
+            require(p.get('adapter') is not None or (diagnostic and v['identity'] == 'unavailable' and v.get('adapterEvidenceAvailable') is not True and v.get('settledSince') is None))
+        if v['identitySource'] == 'sampleClassifier' and v['identity'] != 'unavailable':
+            require(p.get('adapter') is not None)
+    for i, j in enumerate(record['judgements']):
+        optional.add(f'judgements[{i}].computedAt')
+        require(j['judgeKind'] != 'learned' or j.get('modelVersion') is not None)
+        if j['gateResult'] != 'notEvaluated':
+            require(p.get('judgeMaximumAge') is not None or (diagnostic and j['gateResult'] == 'stale' and 'parameters.judgeMaximumAge' in record['invalidFields']))
+        o = j['outcome']
+        if o['kind'] == 'ranked':
+            require(o.get('ranked') is not None and o.get('reason') is None)
+            for k, item in enumerate(o['ranked']):
+                v = item['candidate']; require(v['channel'] in inputs); shot(v['shot'])
+                for number in ('subjectConfidence',):
+                    require(v.get(number) is None or v[number] <= 1)
+                require(item.get('probability') is None or item['probability'] <= 1)
+                require(j['judgeKind'] != 'rules' or item.get('probability') is None)
+                for suffix in ('candidate.subjectConfidence', 'candidate.movement', 'probability'):
+                    optional.add(f'judgements[{i}].outcome.ranked[{k}].{suffix}')
+        else:
+            require(o.get('ranked') is None and o.get('reason') is not None)
+        require((j['gateResult'] == 'abstained') == (j.get('gateReason') is not None))
+        if j['gateResult'] == 'accepted':
+            require(j.get('acceptedRank') is not None and o.get('ranked') is not None and j['acceptedRank'] < len(o['ranked']))
+        else:
+            require(j.get('acceptedRank') is None)
+    def traverse(v):
+        if isinstance(v, dict):
+            if set(v) == {'domain', 'code'}:
+                require(v['code'] in REASONS[v['domain']].split())
+            for child in v.values():
+                traverse(child)
+        elif isinstance(v, list):
+            for child in v:
+                traverse(child)
+    traverse(record)
+    markers = record['invalidFields']
+    require(markers == sorted(set(markers)))
+    for marker in markers:
+        require(marker in optional)
+        obj = record
+        for name in re.findall(r'[A-Za-z]+|\d+', marker):
+            obj = obj[int(name)] if name.isdigit() else obj.get(name)
+            if obj is None:
+                break
+        require(obj is None)
+    present = set(e) - {'kind'}
+    require(present <= set(PAYLOAD[e['kind']].split()))
+    for key in ('target', 'programAfter', 'previewAfter'):
+        require(e.get(key) is None or e[key] in inputs)
+    if e.get('shot') is not None:
+        shot(e['shot'])
+    if e.get('judgementIndex') is not None:
+        require(e['judgementIndex'] < len(record['judgements']))
+    if e['kind'] in ('wouldPrepare', 'wouldCut'):
+        require(p['status'] == 'available' and all(e.get(k) is not None for k in ('decisionID', 'target', 'shot', 'reason')) and e['target'] == c.get('preview'))
+    elif e['kind'] == 'abstention':
+        require(e.get('decisionID') is not None and e.get('stage') is not None and bool(e.get('reasons')))
+    else:
+        require(all(e.get(k) is not None for k in ('actionID', 'action', 'phase', 'targetScope')))
+        require((e['targetScope'] == 'channel') == (e.get('target') is not None))
+        require((e['action'] == 'selectPreset') == (e.get('shot') is not None))
+        require((e['phase'] == 'result') == (e.get('outcome') is not None))
+        require(e['phase'] != 'attempt' or (e.get('programAfter') is None and e.get('previewAfter') is None))
+        require(e.get('programAfter') is None or e['programAfter'] != e.get('previewAfter'))
+        require(e['action'] != 'take' or e.get('outcome') != 'completed' or e.get('programAfter') is not None)
+        require(e['action'] not in SESSION_ACTIONS or e['targetScope'] == 'session')
+        require(e['action'] not in CHANNEL_ACTIONS or e['targetScope'] == 'channel')
+
+
+def unique_object(pairs):
+    result = {}
+    for k, v in pairs:
+        require(k not in result); result[k] = v
+    return result
+
+
+def load_records(stream, maximum_records=100000, maximum_line_bytes=1048576, maximum_input_bytes=67108864):
+    records, issues, ids, sequences = [], Counter(), set(), {}
+    total_bytes = 0
+    for n in range(maximum_records + 1):
+        raw = stream.readline(maximum_line_bytes + 1)
+        if not raw:
+            break
+        total_bytes += len(raw)
+        if n == maximum_records or len(raw) > maximum_line_bytes or total_bytes > maximum_input_bytes:
+            issues['input_limit'] += 1; break
+        try:
+            value = json.loads(raw, object_pairs_hook=unique_object, parse_constant=lambda _: require(False))
+            validate(value); semantic(value)
+            session, seq = value['sessionID'], int(value['sequence'])
+            require(value['recordID'] not in ids and seq > sequences.get(session, -1))
+            ids.add(value['recordID']); sequences[session] = seq; records.append(value)
+        except (ValueError, TypeError, KeyError, OverflowError, RecursionError, UnicodeError):
+            issues['rejected_records'] += 1
+    return records, issues
+
+
+def stratum(r):
+    c, p = r['context'], r['parameters']
+    return (r['sessionID'], r['evidenceClass'], c['segmentType'], c.get('segmentToken'), p.get('parametersVersion'), p.get('preferencesVersion'), c['policyRevision'], c['routeGeneration'])
+
+
+def analyze(records, window, issues=None):
+    require(math.isfinite(window) and window >= 0)
+    issues = Counter(issues or {})
+    pairs, sessions, groups, abstentions = defaultdict(list), defaultdict(list), defaultdict(list), Counter()
+    for r in records:
+        sessions[r['sessionID']].append(r); groups[stratum(r)].append(r)
+        e = r['event']
+        if e['kind'] == 'operatorAction':
+            pairs[(r['sessionID'], e['actionID'])].append(r)
+        if e['kind'] == 'abstention':
+            for reason in e['reasons']:
+                abstentions[(r['evidenceClass'], r['context']['segmentType'], reason['domain'], reason['code'])] += 1
+    blocked, actions = set(), []
+    for session, rows in sessions.items():
+        previous = None
+        if int(rows[0]['sequence']):
+            issues['leading_sequence_offset'] += int(rows[0]['sequence']); blocked.add(session)
+        for r in rows:
+            if int(r['droppedRecordsBefore']):
+                issues['reported_drops'] += int(r['droppedRecordsBefore']); blocked.add(session)
+            if previous:
+                gap = int(r['sequence']) - int(previous['sequence']) - 1
+                issues['sequence_gaps'] += gap
+                if gap or r['eventTime'] < previous['eventTime']:
+                    blocked.add(session)
+                    if r['eventTime'] < previous['eventTime']:
+                        issues['backward_clocks'] += 1
+            issues['invalid_measurements'] += len(r['invalidFields'])
+            previous = r
+    snapshots = {}
+    for r in records:
+        p = r['parameters']
+        if p['status'] != 'available':
+            continue
+        key = (r['sessionID'], r['evidenceClass'], r['context']['segmentType'], p['parametersVersion'])
+        prior = snapshots.setdefault(key, {})
+        for name, value in p.items():
+            if value is None:
+                continue
+            if name in prior and prior[name] != value:
+                issues['inconsistent_parameters'] += 1; blocked.add(r['sessionID'])
+            prior[name] = value
+    for (session, _), rows in pairs.items():
+        a = [r for r in rows if r['event']['phase'] == 'attempt']
+        b = [r for r in rows if r['event']['phase'] == 'result']
+        if len(a) != 1 or len(b) != 1:
+            issues['incomplete_or_duplicate_action_pairs'] += 1; blocked.add(session); continue
+        a, b = a[0], b[0]; ae, be = a['event'], b['event']
+        if (a['eventTime'] > b['eventTime'] or stratum(a) != stratum(b) or
+                any(ae.get(k) != be.get(k) for k in ('action', 'target', 'shot', 'targetScope'))):
+            issues['inconsistent_action_pairs'] += 1; blocked.add(session); continue
+        if be['outcome'] != 'completed':
+            issues['operator_' + be['outcome']] += 1; continue
+        if be['action'] == 'take':
+            if be.get('programAfter') != a['context'].get('preview') or b['context']['program'] != be['programAfter'] or b['context'].get('preview') != a['context']['program']:
+                issues['inconsistent_take_roles'] += 1; blocked.add(session); continue
+            actions.append((a, b, 'wouldCut', be['programAfter'], b['context'].get('programShot')))
+        elif be['action'] == 'selectPreset' and ae['target'] == a['context'].get('preview'):
+            actions.append((a, b, 'wouldPrepare', be['target'], be['shot']))
+    # Invalid/unattributable input invalidates scoring globally; identified losses invalidate their session.
+    if issues['rejected_records'] or issues['input_limit']:
+        blocked.update(sessions)
+    result, dwell = [], defaultdict(list)
+    for key, rows in sorted(groups.items(), key=lambda kv: repr(kv[0])):
+        for kind in ('wouldPrepare', 'wouldCut'):
+            predictions = [r for r in rows if r['event']['kind'] == kind]
+            stats = Counter(predictions=len(predictions))
+            comparable = [x for x in actions if stratum(x[0]) == key and x[2] == kind]
+            if not predictions and not comparable:
+                continue
+            stats['completed_actions'] = len(comparable)
+            used = set()
+            ordered = sorted(predictions, key=lambda r: (r['eventTime'], int(r['sequence'])))
+            cursor, pending = 0, deque()
+            if key[0] not in blocked:
+                for a, b, action_kind, target, shot in sorted(comparable, key=lambda x: (x[0]['eventTime'], int(x[0]['sequence']))):
+                    if shot is None or a['parameters']['status'] != 'available':
+                        stats['unscored_actions'] += 1; continue
+                    while cursor < len(ordered) and ordered[cursor]['eventTime'] <= a['eventTime']:
+                        pending.append(ordered[cursor]); cursor += 1
+                    while pending and pending[0]['eventTime'] < a['eventTime'] - window:
+                        pending.popleft()
+                    if not pending:
+                        stats['unmatched_actions'] += 1; continue
+                    p = pending.pop()
+                    used.add(p['recordID']); stats['compared'] += 1
+                    stats['exact'] += int(p['event']['target'] == target and p['event']['shot'] == shot)
+            else:
+                stats['unscored_actions'] = len(comparable)
+            stats['unmatched_predictions'] = len(predictions) - len(used)
+            result.append((key + (kind,), stats, key[0] in blocked))
+    # Only complete, continuous consecutive observed Takes support an interior dwell.
+    takes = defaultdict(list)
+    for a, b, kind, _, _ in actions:
+        if kind == 'wouldCut':
+            takes[a['sessionID']].append((a, b))
+    for session, values in takes.items():
+        if session in blocked:
+            continue
+        positions = {r['recordID']: i for i, r in enumerate(sessions[session])}
+        values.sort(key=lambda pair: (pair[1]['eventTime'], int(pair[1]['sequence'])))
+        for (a, b), (next_a, next_b) in zip(values, values[1:]):
+            start, end = positions[b['recordID']], positions[next_a['recordID']]
+            if start >= end:
+                continue
+            intervening = sessions[session][start + 1:end]
+            disruption = any(stratum(r) != stratum(b) or (r['event']['kind'] == 'operatorAction' and r['event']['action'] not in ('take',)) or r['context']['program'] != b['context']['program'] for r in intervening)
+            if stratum(b) == stratum(next_a) and b['context']['program'] == next_a['context']['program'] and not disruption:
+                dwell[stratum(b)].append(next_b['eventTime'] - b['eventTime'])
+    return {'groups': result, 'issues': issues, 'abstentions': abstentions, 'dwell': dwell, 'records': len(records)}
+
+
+def markdown(data, window):
+    lines = ['# Director shadow report', '', 'Metadata observations only; no qualification or tuning recommendation.', '',
+             f'Accepted records: {data["records"]}. Matching window: {window:g} seconds (supplied).', '',
+             'Matching: latest unused preceding prediction of the same kind, within the supplied window,',
+             'matched to a paired completed operator action at its attempt time. Target and preset must both agree.',
+             'Partitions: session, source class, segment/token, parameter/preference versions, policy and route revision.',
+             'Agreement = exact / compared; coverage = compared / predictions. Unmatched and unscored counts remain visible.',
+             'Malformed input suppresses all scoring; sequence loss, backward clocks or incomplete action pairs suppress their session.', '',
+             '| Session | Evidence | Segment | Decision | Parameter version | Predictions | Completed actions | Compared | Exact | Agreement | Unmatched predictions | Unmatched actions | Unscored actions | Status |',
+             '| --- | --- | --- | --- | --- | ---: | ---: | ---: | ---: | --- | ---: | ---: | ---: | --- |']
+    for key, s, blocked in data['groups']:
+        agreement = f'{s["exact"]}/{s["compared"]}' if s['compared'] else 'unavailable'
+        label = f'{key[2]}/{key[3] or "none"}; policy {key[6]}; route {key[7]}; prefs {key[5] or "unknown"}'
+        lines.append(f'| {key[0]} | {key[1]} | {label} | {key[8]} | {key[4] or "unknown"} | {s["predictions"]} | {s["completed_actions"]} | {s["compared"]} | {s["exact"]} | {agreement} | {s["unmatched_predictions"]} | {s["unmatched_actions"]} | {s["unscored_actions"]} | {"incomplete" if blocked else "observed"} |')
+    lines += ['', '## Abstentions', '', 'Reason totals count reasons, not independent opportunities.', '']
+    for key, count in sorted(data['abstentions'].items()):
+        lines.append(f'- {" / ".join(key)}: {count}')
+    if not data['abstentions']:
+        lines.append('No observed abstentions.')
+    lines += ['', '## Interior Program dwell', '', 'Seconds between consecutive completed Takes with continuous roles and no observed disruption.', 'First/last censored holds and missing intervals are excluded; this is not downstream presentation.', '']
+    for key, values in sorted(data['dwell'].items(), key=lambda kv: repr(kv[0])):
+        lines.append(f'- {key[0]} / {key[1]} / {key[2]} / parameters {key[4]}: n={len(values)}, min={min(values):g}, median={statistics.median(values):g}, max={max(values):g} s')
+    if not data['dwell']:
+        lines.append('Unavailable: no complete continuous interior dwell intervals.')
+    lines += ['', '## Completeness', '']
+    for key, value in sorted(data['issues'].items()):
+        if value:
+            lines.append(f'- {key}: {value}')
+    lines.append('Zero reported loss does not prove complete capture. No source frames or raw rejected content are included.')
+    return '\n'.join(lines) + '\n'
+
+
+def main(argv=None):
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument('input', type=Path)
+    parser.add_argument('--match-window-seconds', type=float, required=True)
+    parser.add_argument('--output', type=Path)
+    parser.add_argument('--max-records', type=int, default=100000, help='offline analysis resource bound')
+    args = parser.parse_args(argv)
+    if not math.isfinite(args.match_window_seconds) or args.match_window_seconds < 0 or args.max_records <= 0:
+        parser.error('window must be finite/nonnegative and record limit positive')
+    try:
+        with args.input.open('rb') as stream:
+            records, issues = load_records(stream, args.max_records)
+        text = markdown(analyze(records, args.match_window_seconds, issues), args.match_window_seconds)
+        if args.output:
+            with args.output.open('x', encoding='utf-8') as output:
+                output.write(text)
+        else:
+            sys.stdout.write(text)
+        return 2 if issues['rejected_records'] or issues['input_limit'] else 0
+    except OSError:
+        print('Input/output unavailable; no existing output is overwritten.', file=sys.stderr)
+        return 1
+
+
+if __name__ == '__main__':
+    sys.exit(main())

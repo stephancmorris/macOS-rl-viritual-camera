@@ -29,6 +29,11 @@ final class FakeDirectorConsole: ObservableObject, DirectorConsoleControlling {
             directorSection.activity = .paused(.manualMode)
         } else {
             directorSection.handedToAlfie = true
+            switch directorSection.activity {
+            case .paused(.manualMode), .paused(.operatorTookOver):
+                directorSection.activity = .active(.watching)
+            default: break // Preserve unrelated fault/inhibition evidence in the fixture.
+            }
         }
         return .accepted
     }

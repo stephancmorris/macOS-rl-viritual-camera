@@ -81,6 +81,14 @@ nonisolated struct DirectorEvidenceAdapter: Sendable {
             ? IdentityEvidence.classify(sample, maximumObservationAge: parameters.maximumObservationAge)
             : .unavailable
 
+        // Malformed counts are invalid evidence, not a brief lock wobble.
+        // Never retain a confirmed/settled state through their debounce window.
+        // Declared wideWaiting loss still follows its ordinary revocation path.
+        if sample.observedPersonCount < 0, raw != .lost {
+            state.identity = .unavailable
+            state.pendingIdentity = nil; state.pendingSince = nil; state.settledSince = nil
+        }
+
         // Nomination: a different subject, or a cleared one that wasn't a loss.
         let previousTarget = state.lockedTargetID
         let nominationChanged = previousTarget != nil && sample.lockedTargetID != previousTarget &&

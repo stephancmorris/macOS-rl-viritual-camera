@@ -125,6 +125,7 @@ nonisolated enum IdentityEvidence: Equatable, Hashable, Sendable {
     static func classify(_ sample: ChannelEvidenceSample,
                          maximumObservationAge: TimeInterval) -> IdentityEvidence {
         if sample.lockPhase == .wideWaiting { return .lost }
+        guard sample.observedPersonCount >= 0 else { return .unavailable }
         guard sample.lockPhase != .inactive, sample.lockedTargetID != nil,
               sample.trackingOwnsControl else { return .unavailable }
         switch sample.lockPhase {

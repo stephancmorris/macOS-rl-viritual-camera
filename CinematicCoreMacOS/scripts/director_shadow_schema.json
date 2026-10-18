@@ -1,0 +1,355 @@
+{
+  "version": 1,
+  "objects": {
+    "Context": {
+      "inputs": "[String]",
+      "program": "String",
+      "preview": "String?",
+      "programShot": "Shot?",
+      "programStartedAt": "Double?",
+      "lastWideAt": "Double?",
+      "level": "Level",
+      "paused": "Bool",
+      "editLive": "Bool",
+      "running": "Bool",
+      "healthy": "Bool",
+      "evidenceAvailable": "Bool",
+      "mayPropose": "Bool",
+      "mayPrepare": "Bool",
+      "mayTake": "Bool",
+      "pinnedInput": "String?",
+      "authorityEpoch": "Counter",
+      "routeGeneration": "Counter",
+      "policyRevision": "Counter",
+      "nominationRevision": "Counter",
+      "evidenceRevision": "Counter",
+      "segmentType": "SegmentType",
+      "segmentToken": "Token?"
+    },
+    "Shot": {
+      "format": "Format",
+      "preset": "Preset"
+    },
+    "ParameterContext": {
+      "status": "ParameterStatus",
+      "parametersVersion": "Counter?",
+      "preferencesVersion": "Int?",
+      "resolvedStyle": "Style?",
+      "readiness": "ReadinessParameters?",
+      "adapter": "AdapterParameters?",
+      "judgeMaximumAge": "Double?",
+      "minimumProbability": "Double?"
+    },
+    "Style": {
+      "minimumShotDuration": "Double",
+      "preferredShotDuration": "Double",
+      "softMaximumShotDuration": "Double",
+      "wideCadence": "Double",
+      "repetitionWindow": "Double",
+      "maximumMovement": "Double",
+      "settleTime": "Double",
+      "onAirMoveRate": "Double",
+      "cutOnMotionAllowed": "Bool"
+    },
+    "ReadinessParameters": {
+      "minimumSettledTime": "Double",
+      "minimumCutSettledTime": "Double",
+      "maximumMotion": "Double",
+      "maximumCutMotion": "Double",
+      "cutOnMotionAllowed": "Bool"
+    },
+    "AdapterParameters": {
+      "maximumObservationAge": "Double",
+      "debounce": "Double",
+      "stillSpeed": "Double"
+    },
+    "EvidenceSummary": {
+      "channel": "String",
+      "sampledAt": "Double?",
+      "lockPhase": "LockPhase",
+      "trackingOwnsControl": "Bool",
+      "galleryReady": "Bool",
+      "hasLockedTarget": "Bool",
+      "observationAge": "Double?",
+      "subjectSpeed": "Double?",
+      "holdingSteady": "Bool",
+      "cropConverged": "Bool",
+      "operatorGestureInProgress": "Bool",
+      "observedPersonCount": "Int?",
+      "identity": "Identity",
+      "identitySource": "IdentitySource",
+      "adapterEvidenceAvailable": "Bool?",
+      "settledSince": "Double?",
+      "framingSettledFor": "Double?",
+      "prepareReadiness": "ReadinessSummary?",
+      "cutReadiness": "ReadinessSummary?",
+      "revisions": "Revisions?"
+    },
+    "ReadinessSummary": {
+      "isReady": "Bool",
+      "reasons": "[ReadinessReason]"
+    },
+    "Revisions": {
+      "sourceGeneration": "Counter",
+      "controlEpoch": "Counter",
+      "shotRevision": "Counter"
+    },
+    "CandidateSummary": {
+      "channel": "String",
+      "shot": "Shot",
+      "isWide": "Bool",
+      "subjectConfidence": "Double?",
+      "movement": "Double?"
+    },
+    "RankedSummary": {
+      "candidate": "CandidateSummary",
+      "probability": "Double?",
+      "reason": "Reason"
+    },
+    "JudgementSummary": {
+      "judgeKind": "JudgeKind",
+      "modelVersion": "String?",
+      "evidenceRevision": "Counter",
+      "computedAt": "Double?",
+      "outcome": "Outcome",
+      "gateResult": "GateResult",
+      "gateReason": "Reason?",
+      "acceptedRank": "Int?"
+    },
+    "Outcome": {
+      "kind": "OutcomeKind",
+      "ranked": "[RankedSummary]?",
+      "reason": "Reason?"
+    },
+    "Reason": {
+      "domain": "ReasonDomain",
+      "code": "ReasonCode"
+    },
+    "Event": {
+      "kind": "EventKind",
+      "decisionID": "Token?",
+      "target": "String?",
+      "shot": "Shot?",
+      "reason": "Reason?",
+      "proposalID": "Token?",
+      "requestID": "Token?",
+      "proposalCreatedAt": "Double?",
+      "judgementIndex": "Int?",
+      "stage": "Stage?",
+      "reasons": "[Reason]?",
+      "actionID": "Token?",
+      "action": "OperatorAction?",
+      "phase": "ActionPhase?",
+      "targetScope": "TargetScope?",
+      "outcome": "ActionOutcome?",
+      "programAfter": "String?",
+      "previewAfter": "String?"
+    },
+    "Record": {
+      "schemaVersion": "Int",
+      "recordID": "Token",
+      "sessionID": "Token",
+      "sequence": "Counter",
+      "recordedAtUTC": "String",
+      "eventTime": "Double",
+      "evidenceClass": "EvidenceClass",
+      "executionMode": "ExecutionMode",
+      "context": "Context",
+      "parameters": "ParameterContext",
+      "evidence": "[EvidenceSummary]",
+      "judgements": "[JudgementSummary]",
+      "event": "Event",
+      "invalidFields": "[String]",
+      "droppedRecordsBefore": "Counter"
+    }
+  },
+  "enums": {
+    "EvidenceClass": [
+      "synthetic",
+      "recorded",
+      "live"
+    ],
+    "ExecutionMode": [
+      "shadow",
+      "observing"
+    ],
+    "Level": [
+      "off",
+      "suggest",
+      "assist",
+      "auto",
+      "backup"
+    ],
+    "Format": [
+      "stage",
+      "webcam"
+    ],
+    "Preset": [
+      "wide",
+      "fullBody",
+      "waistUp",
+      "tight"
+    ],
+    "ParameterStatus": [
+      "available",
+      "unavailable",
+      "invalid"
+    ],
+    "LockPhase": [
+      "inactive",
+      "acquiring",
+      "tracking",
+      "hold",
+      "wideWaiting"
+    ],
+    "Identity": [
+      "confirmed",
+      "acquiring",
+      "holding",
+      "lost",
+      "ambiguous",
+      "unavailable"
+    ],
+    "IdentitySource": [
+      "adapter",
+      "sampleClassifier"
+    ],
+    "JudgeKind": [
+      "rules",
+      "recorded",
+      "learned"
+    ],
+    "GateResult": [
+      "notEvaluated",
+      "accepted",
+      "abstained",
+      "stale"
+    ],
+    "OutcomeKind": [
+      "ranked",
+      "abstain"
+    ],
+    "EventKind": [
+      "wouldPrepare",
+      "wouldCut",
+      "abstention",
+      "operatorAction"
+    ],
+    "Stage": [
+      "prepare",
+      "cut",
+      "judge",
+      "validation"
+    ],
+    "ActionPhase": [
+      "attempt",
+      "result"
+    ],
+    "TargetScope": [
+      "session",
+      "channel"
+    ],
+    "ActionOutcome": [
+      "accepted",
+      "completed",
+      "refused",
+      "unobserved"
+    ],
+    "OperatorAction": [
+      "take",
+      "detect",
+      "cancelDetect",
+      "selectSubject",
+      "unlock",
+      "resumeTracking",
+      "setMode",
+      "selectPreset",
+      "beginZoom",
+      "endZoom",
+      "moveManualCenter",
+      "returnToWide",
+      "startSession",
+      "stopSession",
+      "settingsChanged",
+      "formatChanged",
+      "editLive",
+      "setLevel",
+      "handToAlfie",
+      "takeOver",
+      "cancelNextCut",
+      "advanceSegment",
+      "overrideSubject",
+      "otherManualAction"
+    ],
+    "ReadinessReason": [
+      "compositionUnavailable",
+      "evidenceUnavailable",
+      "takeUnavailable",
+      "invalidParameters",
+      "invalidEvidence",
+      "identityUncertain",
+      "framingUnsettled",
+      "moving",
+      "cropMoving"
+    ],
+    "ReasonDomain": [
+      "proposalStale",
+      "policy",
+      "judge",
+      "readiness",
+      "selection",
+      "observation",
+      "authorityRefusal"
+    ],
+    "ReasonCode": [
+      "authorityRevoked",
+      "routeChanged",
+      "sourceRestarted",
+      "shotChangedByOperator",
+      "targetBecameProgram",
+      "sourceMissing",
+      "expired",
+      "requestReplaced",
+      "policyChanged",
+      "nominationChanged",
+      "evidenceUnavailable",
+      "invalidInput",
+      "minimumDuration",
+      "noEligibleCandidate",
+      "repetition",
+      "movement",
+      "noPreview",
+      "lowConfidence",
+      "notRecorded",
+      "nothingAllowed",
+      "invalidJudgement",
+      "compositionUnavailable",
+      "takeUnavailable",
+      "invalidParameters",
+      "invalidEvidence",
+      "identityUncertain",
+      "framingUnsettled",
+      "moving",
+      "cropMoving",
+      "advisoryWideReminder",
+      "advisoryMaximumDwell",
+      "subjectEvidence",
+      "unclassified",
+      "parametersUnavailable",
+      "parametersInvalid",
+      "judgementStale",
+      "cutPolicyUnavailable",
+      "notQualified",
+      "prerequisites",
+      "paused",
+      "exhausted"
+    ],
+    "SegmentType": [
+      "presenter",
+      "panel",
+      "performance",
+      "videoBreak",
+      "liveEvent"
+    ]
+  }
+}

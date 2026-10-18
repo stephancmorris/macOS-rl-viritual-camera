@@ -1,0 +1,117 @@
+{
+  "base": "baf141804b53154edfe093057b3e691d0e4e6e0a",
+  "source_fingerprint": "d9d82bb431a43b4d0dea6b0786a17d047f5bac508214da8d056de476db38c4e8",
+  "evidence_class": "synthetic/software/UI",
+  "live_qualification": false,
+  "runs": {
+    "regressions_before_repairs": {
+      "passed_definitions": 0,
+      "passed_executions": 3,
+      "failed_definitions": 4,
+      "skipped": 0,
+      "summary_sha256": "9351aea1c29ae7b72eaceb2e9bf73e6eee2415b4b8e13a3b0d6e960af2543867"
+    },
+    "full_unit_after_repairs": {
+      "passed_definitions": 668,
+      "passed_executions": 944,
+      "failed_definitions": 0,
+      "skipped": 3,
+      "summary_sha256": "3a1f7702b99bdba716388f8fbe827408042b596c94bba047b52d8232f5405815"
+    },
+    "final_regressions_and_swift_fixture": {
+      "passed_definitions": 5,
+      "passed_executions": 9,
+      "failed_definitions": 0,
+      "skipped": 0,
+      "summary_sha256": "191fef7c3b522a7dc2b3ad7eac844aec919c8e3dd3d9e06ca344bd3d4630d863"
+    },
+    "full_unit_final": {
+      "passed_definitions": 670,
+      "passed_executions": 946,
+      "failed_definitions": 0,
+      "skipped": 3,
+      "summary_sha256": "acf5a0bba574e94050cfd888cae805d2b8108b3e2481abb7af8250c557e30b44"
+    },
+    "adapter_regression_before_fix": {
+      "passed_definitions": 5,
+      "passed_executions": 9,
+      "failed_definitions": 1,
+      "skipped": 0,
+      "summary_sha256": "103969fe7b4b9b0ce6435dee2aa85d0e34045bb99fe20a05e710c6c75aff9815"
+    }
+  },
+  "python_tests": {
+    "passed": 13,
+    "failed": 0,
+    "log_sha256": "9d98b97fde2b78f7de933f12da516d60411b73fc309545228b9fc5a5f7ee7791"
+  },
+  "tool_environment": "Fresh DerivedData attempts failed before tests on missing SDK/App Intents/Metal tooling. Reusing the earlier baseline compiler cache ran normal Debug tests successfully without source/project or Xcode installation changes. No clean-cache build claim.",
+  "gui": {
+    "qualified_assist_status": "Watching \u00b7 Alfie is not changing shots",
+    "stopped_target_rates": [
+      "50.00",
+      "59.94"
+    ],
+    "original_standard_restored": "1080p50",
+    "start_pressed": false,
+    "candidate_exited": true,
+    "source_fingerprint": "11d25a1a1d33900f6e984c1c3c784fe5f56377238946bbc94e70c5427d44c4f0",
+    "before_final_adapter_only_change": true
+  },
+  "screenshots": [
+    {
+      "file": "fix-stopped.jpg",
+      "sha256": "fdc0ac1efd25543a4751387e3b7d5d1c75f07fd664bc4bac1444b62240e74b95"
+    },
+    {
+      "file": "fix-stopped-fractional.jpg",
+      "sha256": "9db71a72bd9993a875f5908cf4bb39ab9738c1c8cfe729b1be9ac4696e5e500b"
+    },
+    {
+      "file": "fix-assist.jpg",
+      "sha256": "c82d5d10065329c1877f7d10dbc2fc9458429912c715f6cd6494d7e5fe132f42"
+    }
+  ],
+  "source_files": [
+    {
+      "path": "CinematicCoreMacOS/CinematicCoreMacOS/Director/DirectorEvidenceAdapter.swift",
+      "sha256": "4f6f6dabcd52adc0f12a83e6d53031f103847b085a95a3b34118fd8278c9220e"
+    },
+    {
+      "path": "CinematicCoreMacOS/CinematicCoreMacOS/Director/DirectorPreferences.swift",
+      "sha256": "f9969e80cea518a88e3c22aff48749c4b0e027c74664aafb927f8e12e8e6120c"
+    },
+    {
+      "path": "CinematicCoreMacOS/CinematicCoreMacOS/Director/DirectorProposal.swift",
+      "sha256": "443811f22b02d71ca3561c4fc9f4d048232b7f363b0cbd78309b5ca695d2daf9"
+    },
+    {
+      "path": "CinematicCoreMacOS/CinematicCoreMacOS/Director/UI/FakeDirectorConsole.swift",
+      "sha256": "7e7e9187f4926ab5e67f150be70d8d1e264aef67863e046c6e4a280653b85d15"
+    },
+    {
+      "path": "CinematicCoreMacOS/CinematicCoreMacOS/ShowSetupModel.swift",
+      "sha256": "d5aee0af3182dad763609f6306158a2651f02ea422a31a8ae9737f38a16aaf50"
+    },
+    {
+      "path": "CinematicCoreMacOS/CinematicCoreMacOSTests/DirectorReviewRegressionTests.swift",
+      "sha256": "8c36965f81d0f06026a9cb0dfc36a7c32c37dca083804673d303350123bd80c6"
+    },
+    {
+      "path": "CinematicCoreMacOS/scripts/director_shadow_report.py",
+      "sha256": "df926b399cf36e92548e89a23b5103d7cb7e257f5b7905937a5f1faa8e407225"
+    },
+    {
+      "path": "CinematicCoreMacOS/scripts/director_shadow_schema.json",
+      "sha256": "83ea29ba2d2d3444c4b1973d86169443eb62f5201a88e3eac8fcbb574a519a18"
+    },
+    {
+      "path": "CinematicCoreMacOS/scripts/test_director_shadow_report.py",
+      "sha256": "c6f271be774935519031cebbb3b403455bed9d6af93a53164ecec607e876b318"
+    },
+    {
+      "path": "CinematicCoreMacOS/scripts/fixtures/director-shadow-synthetic.jsonl",
+      "sha256": "fd165676ed4e01cfdc2d8e34f3252faf07fa7a36b54c60289707568519dc29ec"
+    }
+  ]
+}

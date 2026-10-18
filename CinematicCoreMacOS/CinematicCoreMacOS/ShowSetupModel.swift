@@ -253,7 +253,7 @@ struct ShowSetupModel: Equatable {
 
     /// What the channel renders for the output (not the camera's native format).
     var deliveryTitle: String {
-        String(format: "Delivering 1920×1080 at %.2f fps", standard.frameRate)
+        String(format: "Planned output: 1920×1080 at %.2f fps", standard.frameRate)
     }
 
     // MARK: Pair check
