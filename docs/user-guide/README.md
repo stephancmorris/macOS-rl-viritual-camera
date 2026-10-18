@@ -5,3 +5,5 @@ Open index.html locally; no build or remote assets are required. Print CSS suppo
 Behavior references: LiveShowSetup/ShowSetupView (A/B Start), Console/LiveConsole and ContentView (live Multiview), ShowCoordinator (control target and Take), OperatorPill/CameraManager (framing), ProgramOutputManager/DiagnosticsLog/InspectorDrawer (output and log folders), RecorderSettingsView/TrainingDataRecorder (optional data).
 
 Guide verification is source inspection and static HTML structure checks only. Browser rendering of the local file was blocked by browser URL policy; visual/print verification remains pending. Actual package installation, camera permission, 1280-point app walkthrough, screenshots and downstream-output verification are pending. No gallery screenshot is evidence of live behavior. See screenshot-checklist.md. No release or supported-rig claim is inferred from source or unit tests.
+
+18 October 2026: mode wording updated for the three operator modes (Single Cam, Multi Cam, Webcam; Trello MODES-SPEC) and the Settings Mode picker. Other guidance is unchanged and still traces to the source base above.
