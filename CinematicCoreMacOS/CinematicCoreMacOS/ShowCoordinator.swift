@@ -61,7 +61,8 @@ final class ShowCoordinator: ObservableObject {
     /// - Parameter programOutput: injected in tests; the app passes nil and
     ///   gets the real virtual-camera + Program Display output.
     init(programOutput: ProgramOutputManager? = nil, admissionRecords: AdmissionRecordStore? = nil,
-         qualificationRecords: DirectorQualificationStore? = nil) {
+         qualificationRecords: DirectorQualificationStore? = nil, directorShadowLog: DirectorShadowLog? = nil) {
+        self.initialDirectorShadowLog = directorShadowLog
         self.admissionRecords = admissionRecords ?? AdmissionRecordStore()
         self.qualificationRecords = qualificationRecords ?? .applicationSupport()
         let rehearsal: [any ProgramOutputSink] = DeveloperFlags.allowRehearsalOutput ? [RehearsalOutputSink()] : []
@@ -136,10 +137,11 @@ final class ShowCoordinator: ObservableObject {
 
     var channelsChangedObserver: ((ChannelChange) -> Void)?
 
-    /// The Auto Director, owned by the show. Shadow only (no camera effects)
-    /// until B-05; levels come from this rig's qualification records.
+    /// Optional, explicitly budgeted metadata storage; no implicit I/O defaults.
+    private let initialDirectorShadowLog: DirectorShadowLog?
+    /// The show owns authority and the configured Debug-only effect boundaries.
     private(set) lazy var director = DirectorController(
-        show: self, clock: { [weak self] in self?.clock() ?? CACurrentMediaTime() }, qualifiedLevels: { [weak self] in self?.qualifiedDirectorLevels ?? [] })
+        show: self, clock: { [weak self] in self?.clock() ?? CACurrentMediaTime() }, qualifiedLevels: { [weak self] in self?.qualifiedDirectorLevels ?? [] }, shadowLog: initialDirectorShadowLog)
 
     /// Start the Director's shadow when the flag allows it. Every launch is Manual.
     func startDirectorShadow() {
@@ -258,11 +260,18 @@ final class ShowCoordinator: ObservableObject {
     /// S3 B-02: every Take attempt, reported before any check so refused
     /// attempts are seen too.
     var takeAttemptObserver: ((TakeOrigin) -> Void)?
+    var takeResultObserver: ((TakeOrigin, TakeResult) -> Void)?
 
     @discardableResult
     func take(_ request: TakeRequest? = nil, origin: TakeOrigin = .operatorUI,
               permit: TakePermit? = nil) -> TakeResult {
         takeAttemptObserver?(origin)
+        let result = performTake(request, origin: origin, permit: permit)
+        takeResultObserver?(origin, result)
+        return result
+    }
+
+    private func performTake(_ request: TakeRequest?, origin: TakeOrigin, permit: TakePermit?) -> TakeResult {
         // B-07: consume before every technical check, including missing Preview
         // and stale requests. No await or retry between authorization and effect.
         if origin != .operatorUI {
