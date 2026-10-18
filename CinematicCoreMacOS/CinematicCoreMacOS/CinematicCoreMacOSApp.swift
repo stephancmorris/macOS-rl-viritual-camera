@@ -59,6 +59,7 @@ struct CinematicCoreMacOSApp: App {
         Settings {
             SettingsWindow(
                 cameraManager: cameraManager,
+                operatorModes: show.operatorModes,
                 systemExtensionManager: systemExtensionManager,
                 controller: settingsWindowController,
                 onDirectorPreferencesChanged: { [show] in show.directorPreferencesChanged($0) }

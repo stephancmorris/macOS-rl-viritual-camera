@@ -16,6 +16,16 @@ nonisolated enum CaptureProfilePolicy {
         case stage
         case webcam
 
+        init(_ format: ShotComposer.Config.CinematicFormat) {
+            self = format == .webcam ? .webcam : .stage
+        }
+
+        var title: String { self == .stage ? "Stage" : "Webcam" }
+
+        /// Stable lowercase name stored in admission fingerprints and
+        /// diagnostics manifests. Never change it: stored records match on it.
+        var identifier: String { self == .stage ? "stage" : "webcam" }
+
         var preferredSize: (width: Int, height: Int) {
             switch self {
             case .stage: return (3840, 2160)

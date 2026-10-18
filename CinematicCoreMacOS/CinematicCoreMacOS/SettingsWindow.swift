@@ -73,6 +73,8 @@ final class SettingsWindowController: ObservableObject {
 
 struct SettingsWindow: View {
     @ObservedObject var cameraManager: CameraManager
+    /// The show's operator mode (Composer tab › Mode).
+    let operatorModes: OperatorModeStore
     @ObservedObject var systemExtensionManager: SystemExtensionActivationManager
     @ObservedObject var controller: SettingsWindowController
     var onDirectorPreferencesChanged: (DirectorPreferences) -> Void = { _ in }
@@ -85,7 +87,7 @@ struct SettingsWindow: View {
             Divider()
 
             TabView(selection: $controller.selectedTab) {
-                ComposerTab(shotComposer: cameraManager.shotComposer)
+                ComposerTab(shotComposer: cameraManager.shotComposer, operatorModes: operatorModes)
                     .tabItem {
                         Label(SettingsTab.composer.title, systemImage: SettingsTab.composer.systemImage)
                     }
@@ -162,6 +164,7 @@ struct SettingsWindow: View {
 
 private struct ComposerTab: View {
     @ObservedObject var shotComposer: ShotComposer
+    @ObservedObject var operatorModes: OperatorModeStore
     @State private var showAdvanced = false
 
     var body: some View {
@@ -177,7 +180,7 @@ private struct ComposerTab: View {
             .padding(.bottom, 6)
 
             Form {
-                let view = ShotComposerSettingsView(shotComposer: shotComposer)
+                let view = ShotComposerSettingsView(shotComposer: shotComposer, operatorModes: operatorModes)
                 view.basicSection
                 if showAdvanced {
                     view.advancedSection
@@ -217,6 +220,7 @@ private struct SettingsUnavailableView: View {
 #Preview {
     SettingsWindow(
         cameraManager: CameraManager(),
+        operatorModes: OperatorModeStore(defaults: UserDefaults(suiteName: "com.alfie.preview") ?? .standard),
         systemExtensionManager: SystemExtensionActivationManager(),
         controller: SettingsWindowController()
     )
