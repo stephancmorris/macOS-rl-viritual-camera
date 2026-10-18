@@ -139,7 +139,7 @@ final class ShowCoordinator: ObservableObject {
     /// The Auto Director, owned by the show. Shadow only (no camera effects)
     /// until B-05; levels come from this rig's qualification records.
     private(set) lazy var director = DirectorController(
-        show: self, qualifiedLevels: { [weak self] in self?.qualifiedDirectorLevels ?? [] })
+        show: self, clock: { [weak self] in self?.clock() ?? CACurrentMediaTime() }, qualifiedLevels: { [weak self] in self?.qualifiedDirectorLevels ?? [] })
 
     /// Start the Director's shadow when the flag allows it. Every launch is Manual.
     func startDirectorShadow() {
@@ -260,8 +260,18 @@ final class ShowCoordinator: ObservableObject {
     var takeAttemptObserver: ((TakeOrigin) -> Void)?
 
     @discardableResult
-    func take(_ request: TakeRequest? = nil, origin: TakeOrigin = .operatorUI) -> TakeResult {
+    func take(_ request: TakeRequest? = nil, origin: TakeOrigin = .operatorUI,
+              permit: TakePermit? = nil) -> TakeResult {
         takeAttemptObserver?(origin)
+        // B-07: consume before every technical check, including missing Preview
+        // and stale requests. No await or retry between authorization and effect.
+        if origin != .operatorUI {
+            guard let permit, director.consumeTakePermit(permit, now: clock()) else {
+                return .rejected(.directorNotAuthorized)
+            }
+            // Fault fallback needs B-12's distinct, source-loss-scoped permit.
+            guard origin == .director else { return .rejected(.directorNotAuthorized) }
+        }
         guard let request = request ?? makeTakeRequest(), let preview = previewChannel,
               let channel = channels[preview] else {
             return .rejected(.noPreview)

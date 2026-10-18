@@ -137,4 +137,12 @@ enum DeveloperFlags {
     #else
     nonisolated static let runDirectorShadow = false
     #endif
+    /// B-07/B-08: automatic Take is a Debug-only capability. Qualification,
+    /// current readiness and a one-shot permit remain mandatory.
+    #if DEBUG
+    nonisolated static let allowDirectorAuto = true
+    #else
+    nonisolated static let allowDirectorAuto = false
+    #endif
+
 }

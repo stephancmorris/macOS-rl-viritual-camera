@@ -59,6 +59,14 @@ final class DirectorController: ObservableObject, DirectorConsoleControlling {
     /// Without them identity is never confirmed, so nothing can be prepared.
     private(set) var adapter: DirectorEvidenceAdapter?
     private(set) var preferences: DirectorPreferences?
+    private var takePermits = TakePermitIssuer()
+    private let cutReadinessParameters: DirectorReadiness.Parameters?
+    private(set) var policyRevision: UInt64 = 0
+    private(set) var nominationRevision: UInt64 = 0
+    #if DEBUG
+    /// Synthetic rig seam only; never installed by the app or compiled in Release.
+    var cutReadinessForTesting: DirectorReadiness?
+    #endif
     /// Every authority event applied, newest last (bounded). Diagnostics and tests.
     private(set) var appliedEvents: [DirectorAuthority.Event] = []
 
@@ -82,11 +90,13 @@ final class DirectorController: ObservableObject, DirectorConsoleControlling {
          clock: @escaping () -> TimeInterval = { CACurrentMediaTime() },
          qualifiedLevels: @escaping () -> Set<DirectorAuthority.Level> = { [] },
          adapterParameters: DirectorEvidenceAdapter.Parameters? = nil,
+         cutReadinessParameters: DirectorReadiness.Parameters? = nil,
          log: ((String) -> Void)? = nil) {
         self.show = show
         self.ticker = ticker
         self.clock = clock
         self.qualifiedLevels = qualifiedLevels
+        self.cutReadinessParameters = cutReadinessParameters
         self.adapter = adapterParameters.map(DirectorEvidenceAdapter.init(parameters:))
         self.log = log ?? { Self.logger.notice("[DIRECTOR] \($0, privacy: .public)") }
         // Every launch starts Manual (U2); nothing is restored.
@@ -162,7 +172,12 @@ final class DirectorController: ObservableObject, DirectorConsoleControlling {
     private func takeAttempted(origin: TakeOrigin) {
         // Director and fallback Takes consume a permit (B-07); none exist in shadow.
         guard origin == .operatorUI else { return }
-        forward(.operatorTake, pause: .operatorTookOver)
+        let style = preferences?.style(for: .liveEvent)
+        let timing = style.flatMap { value -> DirectorAuthority.TakeTiming? in
+            guard (try? value.validated()) != nil else { return nil }
+            return .init(now: clock(), minimumShotDuration: value.minimumShotDuration)
+        }
+        forward(.operatorTake, pause: .operatorTookOver, takeTiming: timing)
     }
 
     private func channelsChanged(_ change: ShowCoordinator.ChannelChange) {
@@ -237,6 +252,66 @@ final class DirectorController: ObservableObject, DirectorConsoleControlling {
         }
     }
 
+    // MARK: One-shot Take boundary (B-07)
+
+    /// Called by B-08 only after a fresh cut decision. No production timing
+    /// defaults: the caller supplies the permit lease from approved parameters.
+    func issueTakePermit(now: TimeInterval, validity: TimeInterval) -> TakePermit? {
+        guard DeveloperFlags.allowDirectorAuto else { return nil }
+        return takePermits.issue(live: takeState(now: now), now: now, validity: validity)
+    }
+
+    func consumeTakePermit(_ permit: TakePermit, now: TimeInterval) -> Bool {
+        // Even a disabled path consumes/discards its own matching attempt.
+        guard DeveloperFlags.allowDirectorAuto else { takePermits.discard(permit); return false }
+        if case .admitted = takePermits.consume(permit, live: takeState(now: now), now: now) { return true }
+        return false
+    }
+
+    /// Final cut readiness uses current motion/crop facts, not the previous
+    /// tick's cached values. Debounced identity and settled history still come
+    /// from the adapter, and stale adapter state cannot authorize a cut.
+    static func currentCutInputs(sample: ChannelEvidenceSample, adapter: DirectorEvidenceAdapter,
+                                 take: TakeAvailability, now: TimeInterval) -> DirectorReadiness.Inputs? {
+        guard adapter.parameters.isValid, now.isFinite, now >= 0, sample.sampledAt == now,
+              let state = adapter.state(for: sample.channel), let sampledAt = state.lastSampleAt,
+              sampledAt >= 0, now >= sampledAt,
+              now - sampledAt <= adapter.parameters.maximumObservationAge else { return nil }
+        let rawIdentity = IdentityEvidence.classify(sample, maximumObservationAge: adapter.parameters.maximumObservationAge)
+        let settled = sample.holdingSteady && sample.cropConverged && sample.subjectSpeed.isFinite &&
+            sample.subjectSpeed >= 0 && sample.subjectSpeed <= adapter.parameters.stillSpeed
+        return .init(take: take, identity: rawIdentity == state.identity ? rawIdentity : .unavailable,
+            framingSettledFor: settled ? adapter.settledFor(sample.channel, now: now) : 0,
+            motion: sample.subjectSpeed, cropConverged: sample.cropConverged)
+    }
+
+    private func takeState(now: TimeInterval) -> DirectorTakeState {
+        let preview = show?.previewChannel
+        let channel = preview.flatMap { show?.channel($0) }
+        var ready = DirectorReadiness(reasons: [.evidenceUnavailable])
+        var evidence = false
+        if let show, let preview, let channel, let adapter, let p = cutReadinessParameters, let inputs = show.takeInputs() {
+            let sample = Self.sample(channel.evidenceReadings(now: now))
+            let availability = TakeAvailability.evaluate(take: inputs, program: show.programChannel,
+                preview: preview, standard: ShowStandard.activeOrCurrent, editLive: show.editLive)
+            if let input = Self.currentCutInputs(sample: sample, adapter: adapter, take: availability, now: now) {
+                ready = DirectorReadiness.evaluate(input, parameters: p, bar: .cut)
+                evidence = IdentityEvidence.classify(sample, maximumObservationAge: adapter.parameters.maximumObservationAge) == .confirmed &&
+                    adapter.state(for: preview)?.evidenceAvailable == true
+            }
+        }
+        #if DEBUG
+        if let override = cutReadinessForTesting { ready = override; evidence = override.isReady }
+        #endif
+        if show?.editLive == true { ready = .init(reasons: [.takeUnavailable]) }
+        return .init(world: .init(authority: authority, program: show?.programChannel ?? .a, preview: preview,
+            revisions: channel?.revisions, routeGeneration: show?.router.routeGeneration ?? 0,
+            sourceMissing: channel?.sourceMissing ?? true, policyRevision: policyRevision,
+            nominationRevision: nominationRevision, evidenceAvailable: evidence),
+            prerequisites: prerequisites(), cutReadiness: ready,
+            operatorGestureInProgress: channel?.operatorGestureInProgress ?? true)
+    }
+
     // MARK: Console control (DirectorConsoleControlling)
 
     @discardableResult
@@ -280,14 +355,16 @@ final class DirectorController: ObservableObject, DirectorConsoleControlling {
     /// While Manual there is nothing to take over: operator activity is the
     /// show, not an intervention. Health and prerequisites are re-checked when
     /// a level is chosen, so these events only matter while directing.
-    private func forward(_ event: DirectorAuthority.Event, pause reason: Section.PauseReason?, note: String? = nil) {
+    private func forward(_ event: DirectorAuthority.Event, pause reason: Section.PauseReason?, note: String? = nil,
+                         takeTiming: DirectorAuthority.TakeTiming? = nil) {
         guard isDirecting else { return }
-        apply(event, pause: reason, note: note)
+        apply(event, pause: reason, note: note, takeTiming: takeTiming)
     }
 
-    private func apply(_ event: DirectorAuthority.Event, pause reason: Section.PauseReason?, note: String?) {
+    private func apply(_ event: DirectorAuthority.Event, pause reason: Section.PauseReason?, note: String?,
+                       takeTiming: DirectorAuthority.TakeTiming? = nil) {
         let wasPaused = authority.paused
-        let transition = authority.apply(event)
+        let transition = authority.apply(event, takeTiming: takeTiming)
         record(event, transition: transition, note: note)
         if authority.paused, !wasPaused, let reason { pauseReason = reason }
         if !authority.paused { pauseReason = nil }
@@ -295,6 +372,9 @@ final class DirectorController: ObservableObject, DirectorConsoleControlling {
     }
 
     private func record(_ event: DirectorAuthority.Event, transition: DirectorAuthority.Transition, note: String?) {
+        if transition.cancellations.contains(.take) { takePermits.retire() }
+        if event == .policyChanged { policyRevision &+= 1 }
+        if event == .nominationChanged { nominationRevision &+= 1 }
         appliedEvents.append(event)
         if appliedEvents.count > Self.eventHistoryLimit { appliedEvents.removeFirst(appliedEvents.count - Self.eventHistoryLimit) }
         if let refusal = transition.refusal { log("\(note ?? "event") refused: \(refusal)") }
