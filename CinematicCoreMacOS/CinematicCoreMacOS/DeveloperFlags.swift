@@ -145,4 +145,12 @@ enum DeveloperFlags {
     nonisolated static let allowDirectorAuto = false
     #endif
 
+    /// B-05: effect adapter only; current qualification/readiness and explicit
+    /// study settings are still mandatory. Never available in Release.
+    #if DEBUG
+    nonisolated static let allowDirectorAssist = true
+    #else
+    nonisolated static let allowDirectorAssist = false
+    #endif
+
 }
