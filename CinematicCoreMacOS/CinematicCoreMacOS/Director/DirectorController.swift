@@ -60,6 +60,9 @@ final class DirectorController: ObservableObject, DirectorConsoleControlling {
     private(set) var adapter: DirectorEvidenceAdapter?
     private(set) var preferences: DirectorPreferences?
     private var takePermits = TakePermitIssuer()
+    private(set) var shadowRecorder: DirectorShadowRecorder?
+    private var shadowTakeID: UUID?
+    private(set) var evidenceRevision: UInt64 = 0
     private(set) lazy var assistPreparation = DirectorAssistPreparation(show: show, controller: self)
     private let cutReadinessParameters: DirectorReadiness.Parameters?
     private(set) var policyRevision: UInt64 = 0
@@ -92,8 +95,10 @@ final class DirectorController: ObservableObject, DirectorConsoleControlling {
          qualifiedLevels: @escaping () -> Set<DirectorAuthority.Level> = { [] },
          adapterParameters: DirectorEvidenceAdapter.Parameters? = nil,
          cutReadinessParameters: DirectorReadiness.Parameters? = nil,
+         shadowLog: DirectorShadowLog? = nil,
          log: ((String) -> Void)? = nil) {
         self.show = show
+        self.shadowRecorder = shadowLog.map(DirectorShadowRecorder.init(log:))
         self.ticker = ticker
         self.clock = clock
         self.qualifiedLevels = qualifiedLevels
@@ -111,6 +116,7 @@ final class DirectorController: ObservableObject, DirectorConsoleControlling {
         guard let show else { return }
         detachHooks()
         show.takeAttemptObserver = { [weak self] origin in self?.takeAttempted(origin: origin) }
+        show.takeResultObserver = { [weak self] origin, result in self?.takeFinished(origin: origin, result: result) }
         show.channelsChangedObserver = { [weak self] change in self?.channelsChanged(change) }
         show.router.stateObserver = { [weak self] state in self?.routerStateChanged(state) }
         show.$editLive.removeDuplicates().dropFirst()
@@ -135,6 +141,7 @@ final class DirectorController: ObservableObject, DirectorConsoleControlling {
     private func detachHooks() {
         guard let show else { return }
         show.takeAttemptObserver = nil
+        show.takeResultObserver = nil
         show.channelsChangedObserver = nil
         show.router.stateObserver = nil
         showCancellables.removeAll()
@@ -144,6 +151,11 @@ final class DirectorController: ObservableObject, DirectorConsoleControlling {
     private func installChannelHooks(_ id: ChannelID) {
         guard let channel = show?.channel(id) else { return }
         channel.manualActionObserver = { [weak self] action in self?.manualAction(action, on: id) }
+        channel.manualResultObserver = { [weak self] command, result in
+            guard let self else { return }
+            guard command.origin == .operatorUI else { return }
+            self.emitShadow(DirectorShadowRecorder.command(command, outcome: result.wasAccepted ? .accepted : .refused), authority: self.authority)
+        }
         var bag: Set<AnyCancellable> = []
         channel.$sourceMissing.removeDuplicates().dropFirst()
             .sink { [weak self] missing in
@@ -156,6 +168,7 @@ final class DirectorController: ObservableObject, DirectorConsoleControlling {
 
     private func removeChannelHooks(_ id: ChannelID) {
         show?.channel(id)?.manualActionObserver = nil
+        show?.channel(id)?.manualResultObserver = nil
         channelCancellables[id] = nil
     }
 
@@ -164,8 +177,10 @@ final class DirectorController: ObservableObject, DirectorConsoleControlling {
     private func manualAction(_ action: CameraManager.ManualCameraAction, on channel: ChannelID) {
         switch action {
         case .command(let command):
+            if command.origin == .operatorUI { emitShadow(DirectorShadowRecorder.command(command), authority: authority) }
             forward(.manualCommand, pause: .operatorTookOver, note: "manual \(command.action.logName) on \(channel.cameraLabel)")
         case .settingsChanged:
+            emitShadow(DirectorShadowRecorder.action(.settingsChanged), authority: authority)
             forward(.manualCommand, pause: .operatorTookOver, note: "settings changed on \(channel.cameraLabel)")
         }
     }
@@ -173,6 +188,9 @@ final class DirectorController: ObservableObject, DirectorConsoleControlling {
     private func takeAttempted(origin: TakeOrigin) {
         // Director and fallback Takes consume a permit (B-07); none exist in shadow.
         guard origin == .operatorUI else { return }
+        let actionID = UUID()
+        shadowTakeID = actionID
+        emitShadow(DirectorShadowRecorder.action(.take, id: actionID), authority: authority)
         let style = preferences?.style(for: .liveEvent)
         let timing = style.flatMap { value -> DirectorAuthority.TakeTiming? in
             guard (try? value.validated()) != nil else { return nil }
@@ -219,7 +237,8 @@ final class DirectorController: ObservableObject, DirectorConsoleControlling {
     func tick() {
         guard let show else { return }
         let now = clock()
-        guard now.isFinite else { return }
+        guard now.isFinite, now >= 0 else { return }
+        evidenceRevision &+= 1
         let preview = show.previewChannel
         for id in ChannelID.allCases {
             guard let channel = show.channel(id) else { continue }
@@ -238,6 +257,7 @@ final class DirectorController: ObservableObject, DirectorConsoleControlling {
             apply(.healthRestored, pause: nil, note: "health restored")
         }
         refreshSection()
+        emitShadow(DirectorShadowRecorder.noCutPolicy, authority: authority)
     }
 
     private func evidenceEvent(_ event: DirectorEvidenceAdapter.Event, preview: ChannelID?) {
@@ -266,7 +286,34 @@ final class DirectorController: ObservableObject, DirectorConsoleControlling {
 
     func preparationFailed() {
         log("preparation result or revisions did not match; taking over")
-        takeOver()
+        guard isDirecting else { return }
+        apply(.pause, pause: .setupChanged, note: "preparation failed")
+    }
+
+    private func emitShadow(_ event: DirectorShadowRecord.Event, authority before: DirectorAuthority) {
+        guard let show else { return }
+        shadowRecorder?.emit(event, show: show, authority: before, policy: policyRevision,
+            nomination: nominationRevision, evidence: evidenceRevision, preferences: preferences)
+    }
+
+    private func takeFinished(origin: TakeOrigin, result: TakeResult) {
+        guard origin == .operatorUI, let id = shadowTakeID else { return }
+        shadowTakeID = nil
+        let outcome: DirectorShadowRecord.ActionOutcome
+        var program: String?, preview: String?
+        if case .committed(let channel) = result {
+            outcome = .completed
+            func alias(_ id: ChannelID) -> String { "input-\((ChannelID.allCases.firstIndex(of: id) ?? 0) + 1)" }
+            program = alias(channel); preview = show?.previewChannel.map(alias)
+        } else { outcome = .refused }
+        emitShadow(DirectorShadowRecorder.action(.take, id: id, outcome: outcome,
+            programAfter: program, previewAfter: preview), authority: authority)
+    }
+
+    /// Explicit local export; the caller supplies its user-chosen destination.
+    func exportShadowLog(to destination: URL) async throws {
+        guard let log = shadowRecorder?.log else { throw DirectorShadowLog.Failure.unavailable }
+        try await log.export(session: log.sessionID, to: destination)
     }
 
     // MARK: One-shot Take boundary (B-07)
@@ -334,8 +381,9 @@ final class DirectorController: ObservableObject, DirectorConsoleControlling {
     @discardableResult
     func setLevel(_ level: Section.Level) -> DirectorControlResult {
         let requested = Self.authorityLevel(level)
+        let before = authority
         let transition = authority.apply(.enable(requested), prerequisites: prerequisites())
-        record(.enable(requested), transition: transition, note: "set level \(level.title)")
+        record(.enable(requested), transition: transition, note: "set level \(level.title)", before: before)
         if transition.refusal == nil { pauseReason = nil }
         refreshSection()
         return result(transition.refusal)
@@ -343,8 +391,9 @@ final class DirectorController: ObservableObject, DirectorConsoleControlling {
 
     @discardableResult
     func handToAlfie() -> DirectorControlResult {
+        let before = authority
         let transition = authority.apply(.handToAlfie, prerequisites: prerequisites())
-        record(.handToAlfie, transition: transition, note: "hand to Alfie")
+        record(.handToAlfie, transition: transition, note: "hand to Alfie", before: before)
         if transition.refusal == nil { pauseReason = nil }
         refreshSection()
         return result(transition.refusal)
@@ -352,6 +401,7 @@ final class DirectorController: ObservableObject, DirectorConsoleControlling {
 
     func takeOver() {
         guard isDirecting else { return }
+        emitShadow(DirectorShadowRecorder.action(.takeOver, outcome: .accepted), authority: authority)
         apply(.pause, pause: .operatorTookOver, note: "operator took over")
     }
 
@@ -381,18 +431,30 @@ final class DirectorController: ObservableObject, DirectorConsoleControlling {
     private func apply(_ event: DirectorAuthority.Event, pause reason: Section.PauseReason?, note: String?,
                        takeTiming: DirectorAuthority.TakeTiming? = nil) {
         let wasPaused = authority.paused
+        let before = authority
         let transition = authority.apply(event, takeTiming: takeTiming)
-        record(event, transition: transition, note: note)
+        record(event, transition: transition, note: note, before: before)
         if authority.paused, !wasPaused, let reason { pauseReason = reason }
         if !authority.paused { pauseReason = nil }
         refreshSection()
     }
 
-    private func record(_ event: DirectorAuthority.Event, transition: DirectorAuthority.Transition, note: String?) {
+    private func record(_ event: DirectorAuthority.Event, transition: DirectorAuthority.Transition, note: String?, before: DirectorAuthority) {
         if transition.cancellations.contains(.take) { takePermits.retire() }
         if transition.cancellations.contains(.prepare) { assistPreparation.retire() }
         if event == .policyChanged { policyRevision &+= 1 }
         if event == .nominationChanged { nominationRevision &+= 1 }
+        switch event {
+        case .operatorTake: break // Attempt is logged even in Manual, before forward().
+        case .enable:
+            emitShadow(DirectorShadowRecorder.action(.setLevel, outcome: transition.refusal == nil ? .accepted : .refused), authority: before)
+        case .handToAlfie, .resume:
+            emitShadow(DirectorShadowRecorder.action(.handToAlfie, outcome: transition.refusal == nil ? .accepted : .refused), authority: before)
+        case .pause: break // Only the explicit operator control logs a takeover.
+        case .manualCommand: break // The addressed command hook records its actual typed action.
+        default: break
+        }
+        if event == .restart { shadowRecorder?.restart() }
         appliedEvents.append(event)
         if appliedEvents.count > Self.eventHistoryLimit { appliedEvents.removeFirst(appliedEvents.count - Self.eventHistoryLimit) }
         if let refusal = transition.refusal { log("\(note ?? "event") refused: \(refusal)") }

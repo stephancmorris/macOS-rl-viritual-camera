@@ -958,6 +958,7 @@ final class CameraManager: NSObject, ObservableObject {
     /// the ContentView, pill and console paths all reach `dispatch`. The show
     /// installs it; Director-origin commands are not reported.
     var manualActionObserver: ((ManualCameraAction) -> Void)?
+    var manualResultObserver: ((OperatorCommand, CommandResult) -> Void)?
 
     /// True while the camera itself writes the shot settings (applying an
     /// admitted preset or finishing a zoom move), so those writes are not
@@ -967,6 +968,12 @@ final class CameraManager: NSObject, ObservableObject {
     @discardableResult
     func dispatch(_ command: OperatorCommand) -> CommandResult {
         if command.origin != .director { manualActionObserver?(.command(command)) }
+        let result = dispatchAdmittedCommand(command)
+        if command.origin != .director { manualResultObserver?(command, result) }
+        return result
+    }
+
+    private func dispatchAdmittedCommand(_ command: OperatorCommand) -> CommandResult {
         if let reason = commands.rejection(for: command, now: CACurrentMediaTime()) { return .rejected(reason) }
         switch command.action {
         case .startSession, .stopSession: break
