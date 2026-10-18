@@ -59,7 +59,7 @@ def write_session(folder: Path, *, admitted=250, short_window_at=None, refused_a
             "build": {"appVersion": "1.0", "buildNumber": "4", "sourceFingerprint": "abc123",
                       "osVersion": "26.0", "machineModel": "Mac16,1"},
             "source": {"inputKind": "Live camera", "deviceName": "Elgato 4K X", "captureProfile": "stage",
-                       "requestedWidth": 3840, "requestedHeight": 2160, "configuredCaptureFPS": 50,
+                       "operatorMode": "single_cam", "requestedWidth": 3840, "requestedHeight": 2160, "configuredCaptureFPS": 50,
                        "captureSelectionReason": "preferred format", "belowShowRate": False,
                        "deliveredWidth": 3840, "deliveredHeight": 2160},
             "output": {"route": "Program Display", "showStandard": "1080p50", "showFPS": 50,
@@ -84,6 +84,7 @@ class ReportTests(unittest.TestCase):
         self.assertIn("Schema 2", text)
         self.assertIn("Expected rate: 50.00 fps (manifest configured capture rate)", text)
         self.assertIn("Elgato 4K X", text)
+        self.assertIn("profile stage · mode single_cam", text)
         self.assertIn("| Delivered to Alfie | 3000 | 50.0 |", text)
         self.assertIn("| Presented downstream | unknown | unknown |", text)
         self.assertIn("**Cadence:** 0 of 12 full windows", text)

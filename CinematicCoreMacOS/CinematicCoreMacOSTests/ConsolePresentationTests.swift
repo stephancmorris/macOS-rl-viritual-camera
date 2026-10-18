@@ -7,12 +7,13 @@ import Testing
 @testable import Alfie
 
 struct ConsolePresentationTests {
-    @Test func stageGetsMultiview() {
-        #expect(ConsolePresentation.resolve(for: .stage) == .multiview)
+    @Test func multiCamGetsMultiview() {
+        #expect(ConsolePresentation.resolve(for: .multiCam) == .multiview)
         #expect(ConsolePresentation.multiview.allowsMultipleInputs)
     }
 
-    @Test func webcamKeepsTheTraditionalSingleCameraView() {
+    @Test func singleCamAndWebcamKeepTheTraditionalSingleCameraView() {
+        #expect(ConsolePresentation.resolve(for: .singleCam) == .traditional)
         #expect(ConsolePresentation.resolve(for: .webcam) == .traditional)
         #expect(!ConsolePresentation.traditional.allowsMultipleInputs)
     }

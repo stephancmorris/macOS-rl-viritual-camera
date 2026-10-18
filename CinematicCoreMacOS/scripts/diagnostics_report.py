@@ -235,7 +235,8 @@ def build_report(session: Session, expected_override: float | None = None, caden
             f"source fingerprint `{build.get('sourceFingerprint', 'unrecorded')}`",
             f"- Host: {build.get('machineModel', '?')}, {build.get('osVersion', '?')}",
             f"- Source: {source.get('inputKind', '?')} · {source.get('deviceName') or '–'}"
-            f" · profile {source.get('captureProfile') or '–'}",
+            f" · profile {source.get('captureProfile') or '–'}"
+            f" · mode {source.get('operatorMode') or '–'}",
             f"- Requested {source.get('requestedWidth', '–')}×{source.get('requestedHeight', '–')} at "
             f"{fmt(source.get('configuredCaptureFPS'), 2)} fps; delivered "
             f"{source.get('deliveredWidth', '–')}×{source.get('deliveredHeight', '–')}"

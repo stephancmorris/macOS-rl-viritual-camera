@@ -12,20 +12,15 @@ import SwiftUI
 /// Settings window can host them under a Basic/Advanced toggle.
 struct ShotComposerSettingsView: View {
     @ObservedObject var shotComposer: ShotComposer
+    @ObservedObject var operatorModes: OperatorModeStore
 
-    @AppStorage("cinematicFormat") private var storedFormat: String =
-        ShotComposer.Config.CinematicFormat.stage.rawValue
-
-    /// Mirrors the persisted format and the live composer config. Writing here
-    /// updates both, which drives the operator pill and triggers the activeMode
-    /// reset binding in CameraManager.
-    private var formatBinding: Binding<ShotComposer.Config.CinematicFormat> {
+    /// Selecting a mode goes through the store, which persists it and sets
+    /// every channel's format; that drives the operator pill and the
+    /// activeMode reset binding in CameraManager.
+    private var modeBinding: Binding<OperatorMode> {
         Binding(
-            get: { ShotComposer.Config.CinematicFormat(rawValue: storedFormat) ?? .stage },
-            set: { newValue in
-                storedFormat = newValue.rawValue
-                shotComposer.config.cinematicFormat = newValue
-            }
+            get: { operatorModes.mode },
+            set: { operatorModes.select($0) }
         )
     }
 
@@ -50,15 +45,15 @@ struct ShotComposerSettingsView: View {
                 .foregroundStyle(.secondary)
         }
 
-        Section("Format") {
-            Picker("Format", selection: formatBinding) {
-                ForEach(ShotComposer.Config.CinematicFormat.allCases) { format in
-                    Text(format.title).tag(format)
+        Section("Mode") {
+            Picker("Mode", selection: modeBinding) {
+                ForEach(operatorModes.available) { mode in
+                    Text(mode.title).tag(mode)
                 }
             }
             .pickerStyle(.segmented)
 
-            Text(formatBinding.wrappedValue.detail)
+            Text(operatorModes.mode.detail)
                 .font(.caption)
                 .foregroundStyle(.secondary)
         }
@@ -286,8 +281,8 @@ struct ShotComposerSettingsView: View {
             )
 
             LabeledContent(
-                "Format",
-                value: shotComposer.config.cinematicFormat.title
+                "Mode",
+                value: operatorModes.mode.title
             )
 
             if shotComposer.config.cinematicFormat == .webcam {
@@ -461,5 +456,8 @@ struct LiquidAutoPanSpeedSwitch: View {
 }
 
 #Preview {
-    ShotComposerSettingsView(shotComposer: ShotComposer())
+    ShotComposerSettingsView(
+        shotComposer: ShotComposer(),
+        operatorModes: OperatorModeStore(defaults: UserDefaults(suiteName: "com.alfie.preview") ?? .standard)
+    )
 }

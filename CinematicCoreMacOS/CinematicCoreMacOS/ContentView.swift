@@ -13,8 +13,10 @@ struct ContentView: View {
     @ObservedObject var cameraManager: CameraManager
     @ObservedObject var systemExtensionManager: SystemExtensionActivationManager
     @ObservedObject var settingsWindowController: SettingsWindowController
-    /// The show; drives the Multiview console when it is enabled.
+    /// The show; drives the Multiview console in Multi Cam.
     let show: ShowCoordinator?
+    /// The operator mode, observed so a change swaps the console.
+    @ObservedObject private var operatorModes: OperatorModeStore
 
     @State private var showError = false
     @State private var inspectorOpen = false
@@ -35,15 +37,24 @@ struct ContentView: View {
         self.systemExtensionManager = systemExtensionManager
         self.settingsWindowController = settingsWindowController
         self.show = show
+        // Without a show (previews) there is no Multi Cam: a throwaway store
+        // that never touches the saved mode.
+        _operatorModes = ObservedObject(wrappedValue: show?.operatorModes
+            ?? OperatorModeStore(defaults: UserDefaults(suiteName: "com.alfie.preview") ?? .standard,
+                                 multiviewEnabled: false))
     }
 
-    /// Multiview console only in Stage format, behind the developer flag, and
-    /// only while capture runs (ConsolePresentation: Webcam keeps this view).
+    /// The show, when the operator mode presents the Multiview console.
+    /// The kill switch is applied by the store: with it off, Multi Cam is
+    /// never the mode.
+    private var multiviewModeShow: ShowCoordinator? {
+        operatorModes.mode.presentation == .multiview ? show : nil
+    }
+
+    /// Multiview console only in Multi Cam, and only while capture runs
+    /// (ConsolePresentation: Single Cam and Webcam keep this view).
     private var multiviewShow: ShowCoordinator? {
-        guard DeveloperFlags.useMultiviewConsole, cameraManager.isRunning, let show else { return nil }
-        let profile: CaptureProfilePolicy.Profile =
-            cameraManager.shotComposer.config.cinematicFormat == .webcam ? .webcam : .stage
-        return ConsolePresentation.resolve(for: profile) == .multiview ? show : nil
+        cameraManager.isRunning ? multiviewModeShow : nil
     }
 
     var body: some View {
@@ -75,13 +86,10 @@ struct ContentView: View {
                     onHoldPoint: holdPointHandler
                 )
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
-            } else if DeveloperFlags.useMultiviewConsole, let show,
-                      ConsolePresentation.resolve(
-                        for: cameraManager.shotComposer.config.cinematicFormat == .webcam ? .webcam : .stage
-                      ) == .multiview {
-                // Show setup (SHOW-SETUP) replaces the stopped screen where
-                // the Multiview console applies. Channel A starts through
-                // startCamera() so extension preflight is unchanged.
+            } else if let show = multiviewModeShow {
+                // Show setup (SHOW-SETUP) replaces the stopped screen in
+                // Multi Cam. Channel A starts through startCamera() so
+                // extension preflight is unchanged.
                 LiveShowSetup(show: show, startChannelA: { await startCamera() })
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
             } else {

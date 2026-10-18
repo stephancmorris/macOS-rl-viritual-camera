@@ -39,6 +39,10 @@ final class ShowCoordinator: ObservableObject {
 
     var channelA: CameraManager { channels[.a]! }
 
+    /// Single Cam, Multi Cam or Webcam (MODES-SPEC). Every channel's composer
+    /// format follows it, including channels added later.
+    let operatorModes: OperatorModeStore
+
     // MARK: Control target (CHANNEL-CMD)
 
     /// The channel every console control acts on: Preview by default, Program
@@ -60,9 +64,12 @@ final class ShowCoordinator: ObservableObject {
 
     /// - Parameter programOutput: injected in tests; the app passes nil and
     ///   gets the real virtual-camera + Program Display output.
+    /// - Parameter operatorModes: injected in tests; the app passes nil and
+    ///   gets the mode saved in standard user defaults.
     init(programOutput: ProgramOutputManager? = nil, admissionRecords: AdmissionRecordStore? = nil,
          qualificationRecords: DirectorQualificationStore? = nil, directorShadowLog: DirectorShadowLog? = nil,
-         directorRunSheet: RunSheet? = nil) {
+         directorRunSheet: RunSheet? = nil, operatorModes: OperatorModeStore? = nil) {
+        self.operatorModes = operatorModes ?? OperatorModeStore()
         self.initialDirectorShadowLog = directorShadowLog
         self.initialDirectorRunSheet = directorRunSheet
         self.admissionRecords = admissionRecords ?? AdmissionRecordStore()
@@ -77,7 +84,14 @@ final class ShowCoordinator: ObservableObject {
         let a = CameraManager(channelID: .a, programOutput: output, outputPort: router.port(for: .a))
         a.deviceRegistry = deviceRegistry
         a.workScheduler = workScheduler
+        self.operatorModes.apply(to: a)
         channels[.a] = a
+        self.operatorModes.modeChanged = { [weak self] _ in self?.applyOperatorMode() }
+    }
+
+    /// Bring every channel in line with the operator mode.
+    private func applyOperatorMode() {
+        for channel in channels.values { operatorModes.apply(to: channel) }
     }
 
     func channel(_ id: ChannelID) -> CameraManager? { channels[id] }
@@ -91,6 +105,7 @@ final class ShowCoordinator: ObservableObject {
         let channel = CameraManager(channelID: id, programOutput: programOutput, outputPort: router.port(for: id))
         channel.deviceRegistry = deviceRegistry
         channel.workScheduler = workScheduler
+        operatorModes.apply(to: channel)
         channels[id] = channel
         retarget()
         channelsChangedObserver?(.added(id))

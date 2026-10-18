@@ -167,7 +167,9 @@ final class ShotComposer: ObservableObject {
         /// Top-level use case. Stage targets distant speakers/performers
         /// (the original behaviour). Webcam targets a close-range subject on a
         /// video call and uses a simpler, tighter, head-anchored framing.
-        enum CinematicFormat: String, CaseIterable, Identifiable, Sendable {
+        /// Derived from the operator mode (Single Cam and Multi Cam are Stage)
+        /// and written only by `OperatorModeStore`.
+        nonisolated enum CinematicFormat: String, CaseIterable, Identifiable, Sendable {
             case stage
             case webcam
 
@@ -414,7 +416,8 @@ final class ShotComposer: ObservableObject {
         /// extends downward by a fraction of the subject's height.
         var shotFraming: ShotFraming = .waistUp
 
-        /// Top-level use case. Defaults to Stage (original behaviour).
+        /// Top-level use case. Defaults to Stage (original behaviour); in the
+        /// app `OperatorModeStore` sets it from the operator mode.
         var cinematicFormat: CinematicFormat = .stage
 
         /// Operator-facing crop choice while in Webcam format.

@@ -3,28 +3,29 @@
 //  CinematicCoreMacOS
 //
 //  Which main view the operator gets. The Multiview console (and everything
-//  multi-camera: Preview, Take, a second input) exists only in Stage format.
-//  Webcam format keeps the traditional single-camera view — wide source plus
-//  crop and the existing pill — exactly as today. ContentView resolves this
-//  from the capture profile; see docs/ALFIE_MULTICAMERA_SPEC.md "Format scope".
+//  multi-camera: Preview, Take, a second input) exists only in Multi Cam.
+//  Single Cam and Webcam keep the traditional single-camera view — wide
+//  source plus crop and the existing pill. ContentView resolves this from the
+//  operator mode; see docs/ALFIE_MULTICAMERA_SPEC.md "Operator modes".
 //
 
 import Foundation
 
 nonisolated enum ConsolePresentation: Equatable, Sendable {
-    /// Webcam format: the existing single-camera console.
+    /// Single Cam and Webcam: the single-camera console.
     case traditional
-    /// Stage format: the Multiview console (Preview / Program / Take).
+    /// Multi Cam: the Multiview console (Preview / Program / Take).
     case multiview
 
-    static func resolve(for profile: CaptureProfilePolicy.Profile) -> ConsolePresentation {
-        switch profile {
-        case .stage: return .multiview
-        case .webcam: return .traditional
+    /// The single mapping from operator mode to view.
+    static func resolve(for mode: OperatorMode) -> ConsolePresentation {
+        switch mode {
+        case .multiCam: return .multiview
+        case .singleCam, .webcam: return .traditional
         }
     }
 
-    /// Multi-camera (a Preview input, Take, cueing) is Stage-only.
+    /// Multi-camera (a Preview input, Take, cueing) is Multi Cam only.
     var allowsMultipleInputs: Bool { self == .multiview }
 
     /// Changing format swaps the whole console, so it is refused while a

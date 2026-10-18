@@ -3,8 +3,7 @@
 //  CinematicCoreMacOS
 //
 //  Connects the show-setup screen (SHOW-SETUP) to the engine. Shown on the
-//  stopped screen in Stage format when DeveloperFlags.useMultiviewConsole is
-//  on.
+//  stopped screen in Multi Cam (see OperatorMode).
 //
 //  - Launching never starts video: devices come from discovery only (no
 //    session opens) and nothing starts until an operator presses Start.
@@ -59,7 +58,7 @@ final class LiveShowSetupModel: ObservableObject {
             devices: channelA.availableCameras.map(Self.device),
             saved: saved,
             fallbackA: channelA.selectedCamera?.uniqueID,
-            captureProfile: channelA.shotComposer.config.cinematicFormat == .webcam ? "Webcam" : "Stage",
+            captureProfile: show.operatorModes.mode.captureProfile.title,
             machine: machine ?? .init(model: build.machineModel, osVersion: build.osVersion),
             records: show.admissionRecords.storedPairRecords())
         setup.isRunning = channelA.isRunning || channelA.isStartingSession
