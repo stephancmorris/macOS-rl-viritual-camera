@@ -28,6 +28,28 @@ nonisolated enum ConsolePresentation: Equatable, Sendable {
     /// Multi-camera (a Preview input, Take, cueing) is Multi Cam only.
     var allowsMultipleInputs: Bool { self == .multiview }
 
+    /// What fills ContentView's main layer.
+    enum Screen: Equatable, Sendable {
+        /// Multi Cam while capture runs.
+        case multiviewConsole
+        /// Multi Cam while stopped (SHOW-SETUP).
+        case showSetup
+        /// Single Cam or Webcam while capture runs: wide source + crop, the
+        /// overlays and the operator pill.
+        case singleCameraLive
+        /// Single Cam or Webcam while stopped.
+        case stopped
+    }
+
+    /// The single mapping from mode and capture state to the main screen.
+    /// Without a show (previews) there is no Multiview console.
+    static func screen(for mode: OperatorMode, isCaptureRunning: Bool, hasShow: Bool) -> Screen {
+        if resolve(for: mode) == .multiview, hasShow {
+            return isCaptureRunning ? .multiviewConsole : .showSetup
+        }
+        return isCaptureRunning ? .singleCameraLive : .stopped
+    }
+
     /// Changing format swaps the whole console, so it is refused while a
     /// multi-camera show runs; the operator stops the show first. A
     /// single-camera session can switch as it does today.

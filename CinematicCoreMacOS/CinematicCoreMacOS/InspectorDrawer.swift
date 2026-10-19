@@ -17,6 +17,8 @@ struct InspectorDrawer: View {
     @Binding var isOpen: Bool
     /// The show, when the app runs one. With a second input the drawer gains
     /// a Show section; nil (or a single input) leaves it exactly as before.
+    /// Single Cam and Webcam have no second input: entering them removes
+    /// it, and they offer no way to add one.
     var show: ShowCoordinator?
 
     @Environment(\.openSettings) private var openSettings

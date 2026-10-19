@@ -2,12 +2,15 @@
 //  StoppedScreen.swift
 //  CinematicCoreMacOS
 //
-//  Replaces the dual feed when the session is stopped.
+//  Replaces the dual feed when a single-camera session (Single Cam or
+//  Webcam) is stopped. Multi Cam shows Show setup instead.
 //
 
 import SwiftUI
 
 struct StoppedScreen: View {
+    /// Single Cam or Webcam, named above the title.
+    let mode: OperatorMode
     let lastSessionEndedAt: Date?
     var onStart: () -> Void
 
@@ -21,7 +24,7 @@ struct StoppedScreen: View {
     var body: some View {
         ZStack {
             VStack(spacing: 22) {
-                Text("SESSION STOPPED")
+                Text("\(mode.title.uppercased()) · SESSION STOPPED")
                     .font(.system(size: 10, weight: .semibold, design: .monospaced))
                     .tracking(2.0)
                     .foregroundStyle(.white.opacity(0.5))

@@ -146,6 +146,9 @@ struct OperatorModeStoreTests {
         #expect(b.shotComposer.config.cinematicFormat == .stage)
         #expect(b.operatorMode == .multiCam)
 
+        // A running B is kept (a stopped one is dropped on entering a
+        // single-input mode; see SingleCamTests) and still follows the mode.
+        b.setRunningForTesting(true)
         store.select(.singleCam)
         #expect(show.channelA.operatorMode == .singleCam)
         #expect(b.operatorMode == .singleCam)

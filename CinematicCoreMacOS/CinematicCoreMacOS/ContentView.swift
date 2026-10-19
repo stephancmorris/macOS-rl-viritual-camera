@@ -44,17 +44,13 @@ struct ContentView: View {
                                  multiviewEnabled: false))
     }
 
-    /// The show, when the operator mode presents the Multiview console.
-    /// The kill switch is applied by the store: with it off, Multi Cam is
-    /// never the mode.
-    private var multiviewModeShow: ShowCoordinator? {
-        operatorModes.mode.presentation == .multiview ? show : nil
-    }
-
-    /// Multiview console only in Multi Cam, and only while capture runs
-    /// (ConsolePresentation: Single Cam and Webcam keep this view).
-    private var multiviewShow: ShowCoordinator? {
-        cameraManager.isRunning ? multiviewModeShow : nil
+    /// Multiview console and Show setup only in Multi Cam; Single Cam and
+    /// Webcam get the single-camera view (ConsolePresentation.screen). The
+    /// kill switch is applied by the store: with it off, Multi Cam is never
+    /// the mode.
+    private var screen: ConsolePresentation.Screen {
+        ConsolePresentation.screen(for: operatorModes.mode, isCaptureRunning: cameraManager.isRunning,
+                                   hasShow: show != nil)
     }
 
     var body: some View {
@@ -63,10 +59,10 @@ struct ContentView: View {
             LiquidGlassBackdrop()
 
             // Layer 1: dual feed (or stopped screen) fills the window
-            if let show = multiviewShow {
+            if screen == .multiviewConsole, let show {
                 LiveMultiviewConsole(show: show)
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
-            } else if cameraManager.isRunning {
+            } else if screen == .singleCameraLive {
                 CropPreviewView(
                     originalFrame: cameraManager.currentFrameBuffer,
                     croppedFrame: cameraManager.croppedFrameBuffer,
@@ -86,7 +82,7 @@ struct ContentView: View {
                     onHoldPoint: holdPointHandler
                 )
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
-            } else if let show = multiviewModeShow {
+            } else if screen == .showSetup, let show {
                 // Show setup (SHOW-SETUP) replaces the stopped screen in
                 // Multi Cam. Channel A starts through startCamera() so
                 // extension preflight is unchanged.
@@ -94,15 +90,21 @@ struct ContentView: View {
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
             } else {
                 StoppedScreen(
+                    mode: operatorModes.mode,
                     lastSessionEndedAt: lastSessionEndedAt,
-                    onStart: { Task { await startCamera() } }
+                    onStart: {
+                        // A single-camera session is a new show on A alone:
+                        // A is Program and no other channel is kept.
+                        show?.prepareForNewShow()
+                        Task { await startCamera() }
+                    }
                 )
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
             }
 
-            // Layer 2: floating overlays — only while running (the Multiview
-            // console carries its own pill and status)
-            if cameraManager.isRunning, multiviewShow == nil {
+            // Layer 2: floating overlays — only in the single-camera view (the
+            // Multiview console carries its own pill and status)
+            if screen == .singleCameraLive {
                 IdentityStackOverlay(
                     cameraManager: cameraManager,
                     elapsedSeconds: elapsedSeconds
