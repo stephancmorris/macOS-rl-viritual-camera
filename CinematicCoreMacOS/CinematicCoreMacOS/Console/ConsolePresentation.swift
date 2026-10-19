@@ -49,11 +49,4 @@ nonisolated enum ConsolePresentation: Equatable, Sendable {
         }
         return isCaptureRunning ? .singleCameraLive : .stopped
     }
-
-    /// Changing format swaps the whole console, so it is refused while a
-    /// multi-camera show runs; the operator stops the show first. A
-    /// single-camera session can switch as it does today.
-    static func canSwitchFormat(isShowRunning: Bool, runningInputs: Int) -> Bool {
-        !(isShowRunning && runningInputs > 1)
-    }
 }

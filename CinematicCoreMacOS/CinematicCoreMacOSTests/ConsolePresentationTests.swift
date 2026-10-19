@@ -17,10 +17,4 @@ struct ConsolePresentationTests {
         #expect(ConsolePresentation.resolve(for: .webcam) == .traditional)
         #expect(!ConsolePresentation.traditional.allowsMultipleInputs)
     }
-
-    @Test func formatSwitchRefusedOnlyDuringAMultiCameraShow() {
-        #expect(ConsolePresentation.canSwitchFormat(isShowRunning: false, runningInputs: 2))
-        #expect(ConsolePresentation.canSwitchFormat(isShowRunning: true, runningInputs: 1))
-        #expect(!ConsolePresentation.canSwitchFormat(isShowRunning: true, runningInputs: 2))
-    }
 }

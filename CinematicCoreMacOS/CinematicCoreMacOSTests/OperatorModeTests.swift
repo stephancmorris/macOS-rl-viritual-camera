@@ -119,7 +119,7 @@ struct OperatorModeStoreTests {
         let defaults = defaults()
         let store = OperatorModeStore(defaults: defaults, multiviewEnabled: true)
         var changes: [OperatorMode] = []
-        store.modeChanged = { changes.append($0) }
+        store.modeChanged = { _, to in changes.append(to) }
 
         store.select(.webcam)
         #expect(store.mode == .webcam)

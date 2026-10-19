@@ -1042,6 +1042,8 @@ final class CameraManager: NSObject, ObservableObject {
     #if DEBUG
     /// Test seam: lets unit tests exercise command admission without a camera.
     func setRunningForTesting(_ running: Bool) { isRunning = running }
+    /// Test seam: a session that is still starting.
+    func setStartingForTesting(_ starting: Bool) { isStartingSession = starting }
     /// Test seam: a rendered frame as if processFrame had produced it.
     func setLatestRenderedFrameForTesting(_ frame: RenderedChannelFrame?) { latestRenderedFrame = frame }
     /// Test seam: a detection observation as if the frame path consumed it.

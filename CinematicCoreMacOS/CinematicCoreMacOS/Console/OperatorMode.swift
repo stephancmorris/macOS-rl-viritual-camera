@@ -72,6 +72,39 @@ nonisolated enum OperatorMode: String, CaseIterable, Identifiable, Sendable {
     }
 }
 
+/// Whether the operator may change mode now (MODE-SWITCH). Stopped, any
+/// change is allowed. While the show is live, leaving Multi Cam needs A to be
+/// Program with no other channel, so a console swap never hides a live input
+/// or changes what is routed. Every other live change is allowed: Single Cam
+/// to Multi Cam keeps capture running with A as Program, and a change into or
+/// out of Webcam applies its capture profile at the next Start.
+nonisolated enum OperatorModeSwitch {
+    struct ShowState: Equatable, Sendable {
+        /// Any channel is running or starting.
+        var isLive: Bool
+        var programChannel: ChannelID
+        /// Channels other than A that exist, running or not.
+        var otherChannels: [ChannelID]
+    }
+
+    enum Decision: Equatable, Sendable {
+        case allowed
+        case refused(String)
+    }
+
+    static func decide(from: OperatorMode, to: OperatorMode, state: ShowState) -> Decision {
+        guard from != to, state.isLive, from == .multiCam else { return .allowed }
+        if state.programChannel != .a {
+            return .refused("\(state.programChannel.cameraLabel) is Program. Stop the show to leave Multi Cam.")
+        }
+        if !state.otherChannels.isEmpty {
+            let cameras = state.otherChannels.map(\.cameraLabel).joined(separator: " and ")
+            return .refused("Remove \(cameras) or stop the show to leave Multi Cam.")
+        }
+        return .allowed
+    }
+}
+
 /// Persists the operator's mode and applies it to channels. The only writer of
 /// `ShotComposer.Config.cinematicFormat` in the app; the show applies the mode
 /// to every channel it owns, including channels added later.
@@ -86,8 +119,10 @@ final class OperatorModeStore: ObservableObject {
     @Published private(set) var mode: OperatorMode
     /// What the operator may pick, in display order.
     let available: [OperatorMode]
-    /// Called after every accepted change, with the new mode.
-    var modeChanged: ((OperatorMode) -> Void)?
+    /// Called after every accepted change, with the old and new mode.
+    var modeChanged: ((_ from: OperatorMode, _ to: OperatorMode) -> Void)?
+    /// Whether a change may happen now; set by the show. Nil allows it.
+    var switchDecision: ((_ from: OperatorMode, _ to: OperatorMode) -> OperatorModeSwitch.Decision)?
 
     private let defaults: UserDefaults
 
@@ -116,14 +151,25 @@ final class OperatorModeStore: ObservableObject {
         }
     }
 
-    /// Switch modes. Ignores a mode that is not available or already chosen.
-    /// Live-switch guards belong to the caller (MODE-SWITCH).
+    /// The operator asks for a mode. Returns why it was refused, or nil when
+    /// the mode is now `newMode`. A refusal changes nothing.
+    @discardableResult
+    func request(_ newMode: OperatorMode) -> String? {
+        guard available.contains(newMode) else { return "\(newMode.title) is not available in this build." }
+        if case .refused(let reason) = switchDecision?(mode, newMode) ?? .allowed { return reason }
+        select(newMode)
+        return nil
+    }
+
+    /// Switch modes without the live-switch check. Ignores a mode that is not
+    /// available or already chosen. Operator controls use `request`.
     func select(_ newMode: OperatorMode) {
         guard available.contains(newMode), newMode != mode else { return }
+        let oldMode = mode
         mode = newMode
         defaults.set(newMode.rawValue, forKey: Self.key)
         defaults.set(newMode.cinematicFormat.rawValue, forKey: Self.legacyFormatKey)
-        modeChanged?(newMode)
+        modeChanged?(oldMode, newMode)
     }
 
     /// Bring a channel's mode and composer format in line with the current mode.

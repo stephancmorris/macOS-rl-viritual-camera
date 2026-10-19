@@ -23,6 +23,9 @@ struct ShowSetupActions {
 struct ShowSetupView: View {
     let model: ShowSetupModel
     let actions: ShowSetupActions
+    /// The live app's mode, picked in the header (MODE-SWITCH). Nil in the
+    /// gallery, which has no mode to change.
+    var operatorModes: OperatorModeStore? = nil
 
     static let sidePadding: CGFloat = 64
     static let thumbnailHeight: CGFloat = 196
@@ -86,6 +89,9 @@ struct ShowSetupView: View {
                     .font(.system(size: 27, weight: .semibold))
             }
             Spacer()
+            if let operatorModes {
+                OperatorModePicker(store: operatorModes, style: .setupHeader)
+            }
             headerPicker("Show standard") {
                 Picker("Show standard", selection: Binding(
                     get: { model.standard },
