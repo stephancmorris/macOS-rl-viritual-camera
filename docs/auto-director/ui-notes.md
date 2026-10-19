@@ -31,3 +31,10 @@ A-07 has a review finding in countdown formatting for huge finite values overflo
 Do not replace these open choices with fixed geometry, a countdown default, a timed usability budget or a screenshot advertised as release evidence. Check launch, each unqualified level, paused/inhibited/abstaining states, subject override, takeover, cancellation, current/next segment and truthful Program/Preview. N2 on-air motion and R2 fallback need separate approved behavior and qualification before their UI can claim active operation.
 
 Mark synthetic gallery states, recorded evidence and live tests distinctly. No live level is qualified by screenshots or replay. UI/logging must preserve no audio, no show network, metadata-only 30-day retention and explicit export; no media collection without E3.
+
+
+## Isolated follow-up gallery checks — 19 October 2026
+
+In a Debug build, open Window → Multiview Gallery and find Director control · C-02. The Synthetic qualification picker offers Unqualified and Qualified Assist scenarios. Each starts in Manual; changing the scenario recreates the control and clears its refusal. Only this interactive control owns Command Shift H; the state cards below do not register shortcuts. In Manual, the shortcut refuses with “Choose Assist, Auto or Backup”. In Qualified Assist, select Assist, press Command Shift H to take over, then press it again to hand back. Auto and Backup remain unqualified. These are in-memory fake controllers, with no camera, saved qualification or live authority.
+
+The Director styles · C-04 section hosts the actual style editor against a unique temporary gallery file. Save the empty form to check the required Live event message; Load synthetic example supplies explicit fixture values for checking malformed fields, conflicting durations and correction/save/reload. Reload scratch styles reads only that scratch file. These fixture values are not product defaults and never reach the live preferences callback.
