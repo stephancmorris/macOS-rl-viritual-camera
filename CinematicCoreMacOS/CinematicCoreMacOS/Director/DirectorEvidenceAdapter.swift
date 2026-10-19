@@ -9,6 +9,8 @@ import Foundation
 /// revision on the frame path (plan F-D), so a short flicker must not also
 /// churn evidence: a changed identity is published only after it persists for
 /// `debounce`. A declared loss and a nomination change are never debounced.
+/// Missing, stale or malformed evidence inhibits immediately; debounce never
+/// extends observation freshness or preserves a settled subject through a gap.
 nonisolated struct DirectorEvidenceAdapter: Sendable {
     struct Parameters: Equatable, Sendable {
         let maximumObservationAge: TimeInterval
@@ -72,20 +74,34 @@ nonisolated struct DirectorEvidenceAdapter: Sendable {
     mutating func ingest(_ sample: ChannelEvidenceSample) -> [Event] {
         let now = sample.sampledAt
         var state = channels[sample.channel] ?? ChannelState()
-        // Out-of-order or invalid times are ignored rather than rewinding state.
-        guard now.isFinite, state.lastSampleAt.map({ now >= $0 }) ?? true else { return [] }
         let wasAvailable = channels[sample.channel]?.evidenceAvailable ?? false
+        // A bad current clock cannot support fresh evidence. Discard its payload
+        // and inhibit without moving the last accepted timestamp or nomination.
+        guard now.isFinite, now >= 0 else {
+            guard channels[sample.channel] != nil else { return [] }
+            if state.identity != .lost { state.identity = .unavailable }
+            state.pendingIdentity = nil; state.pendingSince = nil; state.settledSince = nil
+            channels[sample.channel] = state
+            return wasAvailable ? [.evidenceAvailable(sample.channel, false)] : []
+        }
+        // A finite, nonnegative older sample is historical: ignore it completely.
+        // It must neither rewind state nor revoke a newer accepted nomination.
+        guard state.lastSampleAt.map({ now >= $0 }) ?? true else { return [] }
         var events: [Event] = []
 
         let raw = parameters.isValid
             ? IdentityEvidence.classify(sample, maximumObservationAge: parameters.maximumObservationAge)
             : .unavailable
 
-        // Malformed counts are invalid evidence, not a brief lock wobble.
-        // Never retain a confirmed/settled state through their debounce window.
+        let observationIsFresh = sample.observationAge.map {
+            $0.isFinite && $0 >= 0 && $0 <= parameters.maximumObservationAge
+        } ?? false
+        // Unavailable evidence is a real gap, not a brief lock wobble. Also do
+        // not let hold/acquiring bypass freshness while retaining confirmation.
+        // Keep their truthful category; only a fresh wobble uses debounce.
         // Declared wideWaiting loss still follows its ordinary revocation path.
-        if sample.observedPersonCount < 0, raw != .lost {
-            state.identity = .unavailable
+        if raw != .lost, raw == .unavailable || !observationIsFresh {
+            state.identity = raw
             state.pendingIdentity = nil; state.pendingSince = nil; state.settledSince = nil
         }
 
