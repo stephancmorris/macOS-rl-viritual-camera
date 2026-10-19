@@ -42,6 +42,121 @@ struct DirectorStyleSettingsTests {
         #expect(editor.draft(for: .liveEvent).minimumShotDuration.isEmpty)
     }
 
+    @Test func aWhitespaceOnlyLiveEventStillNeedsTheRequiredProfile() {
+        let editor = makeEditor()
+        editor.selected = .panel
+        editor.drafts[.liveEvent] = DirectorStyleDraft(minimumShotDuration: " \n\t ")
+        editor.save()
+        #expect(editor.message == DirectorStyleEditor.liveEventRequiredMessage)
+        #expect(editor.selected == .liveEvent)
+        #expect(editor.hasError)
+        #expect(editor.store.load() == .empty)
+    }
+
+    @Test func missingAndUnparseableFieldsNameTheValueToFix() throws {
+        let fields: [(WritableKeyPath<DirectorStyleDraft, String>, String)] = [
+            (\.minimumShotDuration, "Minimum shot length"),
+            (\.preferredShotDuration, "Preferred shot length"),
+            (\.softMaximumShotDuration, "Soft maximum shot length"),
+            (\.wideCadence, "Wide cadence"),
+            (\.repetitionWindow, "Repetition window"),
+            (\.maximumMovement, "Maximum movement"),
+            (\.settleTime, "Settle time"),
+            (\.onAirMoveRate, "On-air move rate")
+        ]
+        for (field, title) in fields {
+            for text in ["", "not a number"] {
+                var draft = DirectorStyleDraft.from(fixtureStyle)
+                draft[keyPath: field] = text
+                let reason = text.isEmpty ? "is required" : "must be a finite number"
+                try expectRefused(draft, message: "Live event: \(title) \(reason).")
+            }
+        }
+        for text in ["nan", "inf", "-inf"] {
+            var draft = DirectorStyleDraft.from(fixtureStyle)
+            draft.maximumMovement = text
+            try expectRefused(draft, message: "Live event: Maximum movement must be a finite number.")
+        }
+    }
+
+    @Test func invalidBoundsNameTheFieldAndItsConstraint() throws {
+        let fields: [(WritableKeyPath<DirectorStyleDraft, String>, String, String, String)] = [
+            (\.minimumShotDuration, "-1", "Minimum shot length", "0 seconds or greater"),
+            (\.preferredShotDuration, "-1", "Preferred shot length", "0 seconds or greater"),
+            (\.softMaximumShotDuration, "-1", "Soft maximum shot length", "0 seconds or greater"),
+            (\.wideCadence, "0", "Wide cadence", "greater than 0 seconds"),
+            (\.repetitionWindow, "-1", "Repetition window", "0 seconds or greater"),
+            (\.maximumMovement, "-1", "Maximum movement", "0 or greater"),
+            (\.settleTime, "-1", "Settle time", "0 seconds or greater"),
+            (\.onAirMoveRate, "0", "On-air move rate", "greater than 0")
+        ]
+        for (field, text, title, constraint) in fields {
+            var draft = DirectorStyleDraft.from(fixtureStyle)
+            draft[keyPath: field] = text
+            try expectRefused(draft, message: "Live event: \(title) must be \(constraint).")
+        }
+    }
+
+    @Test func inconsistentLengthsAndAnUnchosenCutPolicyExplainTheFix() throws {
+        var draft = DirectorStyleDraft.from(fixtureStyle)
+        draft.minimumShotDuration = "21"
+        try expectRefused(draft, message: "Live event: Minimum shot length must be less than or equal to Preferred shot length.")
+        draft = DirectorStyleDraft.from(fixtureStyle)
+        draft.preferredShotDuration = "41"
+        try expectRefused(draft, message: "Live event: Preferred shot length must be less than or equal to Soft maximum shot length.")
+        draft = DirectorStyleDraft.from(fixtureStyle)
+        draft.cutOnMotionAllowed = nil
+        try expectRefused(draft, message: "Live event: Choose Yes or No for Cut while moving.")
+    }
+
+    @Test func anIncompleteOptionalProfileSelectsThatSegmentWithoutLosingDrafts() throws {
+        let draft = DirectorStyleDraft(minimumShotDuration: "8")
+        try expectRefused(draft, segment: .panel, message: "Panel: Preferred shot length is required.")
+    }
+
+    @Test func correctingARefusedDraftSavesTheEnteredBoundaryValues() throws {
+        let url = tempFile()
+        defer { try? FileManager.default.removeItem(at: url) }
+        var changed: DirectorPreferences?
+        let editor = DirectorStyleEditor(store: DirectorPreferencesStore(fileURL: url)) { changed = $0 }
+        var draft = DirectorStyleDraft(
+            minimumShotDuration: "0", preferredShotDuration: "0", softMaximumShotDuration: "0",
+            wideCadence: "0", repetitionWindow: "0", maximumMovement: "0", settleTime: "0",
+            onAirMoveRate: "0.000001", cutOnMotionAllowed: true)
+        editor.drafts[.liveEvent] = draft
+        editor.save()
+        #expect(editor.hasError)
+        #expect(changed == nil && editor.store.load() == .empty)
+        draft.wideCadence = "0.000001"
+        editor.drafts[.liveEvent] = draft
+        editor.drafts[.panel] = DirectorStyleDraft(minimumShotDuration: " \n")
+        editor.save()
+        #expect(editor.message == DirectorStyleEditor.savedMessage)
+        #expect(!editor.hasError)
+        let preferences = try #require(changed)
+        #expect(preferences.styles[.liveEvent] == (try draft.makeStyle()))
+        #expect(preferences.styles[.panel] == nil)
+        #expect(editor.draft(for: .liveEvent) == draft)
+        #expect(try DirectorPreferences.migrate(Data(contentsOf: url)) == preferences)
+    }
+
+    @Test func reloadingPreservesTinyAndLargeFiniteValuesWithoutRoundingOrTrapping() throws {
+        let url = tempFile()
+        defer { try? FileManager.default.removeItem(at: url) }
+        let style = DirectorStyle(
+            minimumShotDuration: 1.0000001, preferredShotDuration: 1e20, softMaximumShotDuration: 1e21,
+            wideCadence: 1e-9, repetitionWindow: 1e20, maximumMovement: Double.greatestFiniteMagnitude,
+            settleTime: 1e-9, onAirMoveRate: 1e-9, cutOnMotionAllowed: false)
+        let preferences = DirectorPreferences(styles: [.liveEvent: style])
+        let store = DirectorPreferencesStore(fileURL: url)
+        try store.save(preferences)
+        let editor = DirectorStyleEditor(store: store)
+        #expect(try editor.draft(for: .liveEvent).makeStyle() == style)
+        editor.save()
+        #expect(editor.message == DirectorStyleEditor.savedMessage)
+        #expect(store.load() == .loaded(preferences))
+    }
+
     @Test func aSavedStyleRoundTripsAndOmitsTheLevel() throws {
         let url = tempFile()
         var saved: DirectorPreferences?
@@ -107,6 +222,32 @@ struct DirectorStyleSettingsTests {
         try render(empty, name: "style-empty.png")
         try render(bad, name: "style-unreadable.png")
         try render(filled, name: "style-entered.png")
+    }
+
+    /// Exercise the actual save path against an existing valid file. Every
+    /// invalid edit must keep both the saved bytes and all entered drafts.
+    private func expectRefused(_ draft: DirectorStyleDraft, segment: SegmentType = .liveEvent,
+                               message: String) throws {
+        let url = tempFile()
+        defer { try? FileManager.default.removeItem(at: url) }
+        let store = DirectorPreferencesStore(fileURL: url)
+        let original = DirectorPreferences(styles: [.liveEvent: fixtureStyle])
+        try store.save(original)
+        let savedBytes = try Data(contentsOf: url)
+        var changes = 0
+        let editor = DirectorStyleEditor(store: store) { _ in changes += 1 }
+        editor.selected = .performance
+        editor.drafts[.presenter] = DirectorStyleDraft.from(fixtureStyle)
+        editor.drafts[segment] = draft
+        let enteredDrafts = editor.drafts
+        editor.save()
+        #expect(editor.message == message)
+        #expect(editor.hasError)
+        #expect(editor.selected == segment)
+        #expect(editor.drafts == enteredDrafts)
+        #expect(changes == 0)
+        #expect(try Data(contentsOf: url) == savedBytes)
+        #expect(store.load() == .loaded(original))
     }
 
     private func render<V: View>(_ view: V, name: String) throws {
