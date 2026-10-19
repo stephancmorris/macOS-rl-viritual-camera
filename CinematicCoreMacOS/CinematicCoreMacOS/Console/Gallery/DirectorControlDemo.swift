@@ -33,7 +33,7 @@ struct DirectorControlDemo: View {
 }
 
 struct DirectorControlCard: Identifiable {
-    var id: String
+    nonisolated var id: String
     var title: String
     var controller: FakeDirectorConsole
     /// A refusal the card shows as if the controller had just returned it.
@@ -41,6 +41,11 @@ struct DirectorControlCard: Identifiable {
 }
 
 enum DirectorControlGallery {
+    /// Stable ids for tests. The cards themselves are main-actor values.
+    nonisolated static let cardIDs = [
+        "launch-manual", "qualified-still-manual", "assist-handed", "refused", "takeover",
+    ]
+
     static let cards: [DirectorControlCard] = [
         DirectorControlCard(
             id: "launch-manual",
