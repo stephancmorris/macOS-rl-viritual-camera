@@ -36,7 +36,7 @@ Capture profiles: **Stage** prefers 3840×2160, and every format must run at the
 - Leaving Multi Cam (for Single Cam or Webcam) is allowed only when Program is A and no other channel exists or is starting; otherwise it is refused with a reason and nothing changes.
 - Switching into or out of Webcam keeps the earlier rule: the new capture profile applies at the next Start, and Manual / Auto Pan fall back when entering Webcam.
 
-The live-switch guard and the main-window mode picker are Trello MODE-SWITCH; until then the mode is chosen in Settings.
+One mode picker (`OperatorModePicker`), always Single Cam | Multi Cam | Webcam, sits on the single-camera stopped screen above Start, in the Show setup header, and in Settings › Composer. Every change goes through `OperatorModeStore.request`, which applies the rule above (`OperatorModeSwitch.decide`, with "live" meaning any channel running or starting). A refused change leaves the mode, Program, channels and capture untouched and shows its reason beside the picker: "Remove Cam B or stop the show to leave Multi Cam." or "Cam B is Program. Stop the show to leave Multi Cam." A change while live is written to the diagnostics notes. Leaving Multi Cam also leaves Edit Live.
 
 **Open question (owner).** Whether the Auto Director gets a home in Single Cam. For now there is no Director UI there; the shadow keeps running as it does today.
 

@@ -90,7 +90,7 @@ struct ContentView: View {
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
             } else {
                 StoppedScreen(
-                    mode: operatorModes.mode,
+                    operatorModes: operatorModes,
                     lastSessionEndedAt: lastSessionEndedAt,
                     onStart: {
                         // A single-camera session is a new show on A alone:

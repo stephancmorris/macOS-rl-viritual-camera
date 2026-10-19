@@ -86,16 +86,41 @@ final class ShowCoordinator: ObservableObject {
         a.workScheduler = workScheduler
         self.operatorModes.apply(to: a)
         channels[.a] = a
-        self.operatorModes.modeChanged = { [weak self] _ in self?.applyOperatorMode() }
+        self.operatorModes.switchDecision = { [weak self] from, to in
+            guard let self else { return .allowed }
+            return OperatorModeSwitch.decide(from: from, to: to, state: self.modeSwitchState)
+        }
+        self.operatorModes.modeChanged = { [weak self] from, to in self?.operatorModeChanged(from: from, to: to) }
     }
 
-    /// Bring every channel in line with the operator mode. Entering a
-    /// single-input mode (Single Cam, Webcam) while everything is stopped
-    /// also prepares a new show, so no other channel is kept from Multi Cam
-    /// and A is Program.
+    /// Any channel is running or starting.
+    var isAnyChannelLive: Bool {
+        channels.values.contains { $0.isRunning || $0.isStartingSession }
+    }
+
+    /// What the live-switch rule needs to know about the show.
+    var modeSwitchState: OperatorModeSwitch.ShowState {
+        .init(isLive: isAnyChannelLive, programChannel: programChannel,
+              otherChannels: ChannelID.allCases.filter { $0 != .a && channels[$0] != nil })
+    }
+
+    private func operatorModeChanged(from: OperatorMode, to: OperatorMode) {
+        if isAnyChannelLive {
+            programOutput.noteDiagnostics("mode \(from.diagnosticsName) -> \(to.diagnosticsName) while live")
+        }
+        applyOperatorMode()
+    }
+
+    /// Bring every channel in line with the operator mode. A single-input
+    /// mode (Single Cam, Webcam) leaves Edit Live, and while everything is
+    /// stopped also prepares a new show, so no other channel is kept from
+    /// Multi Cam and A is Program.
     private func applyOperatorMode() {
         for channel in channels.values { operatorModes.apply(to: channel) }
-        if !operatorModes.mode.allowsMultipleInputs { prepareForNewShow() }
+        if !operatorModes.mode.allowsMultipleInputs {
+            setEditLive(false)
+            prepareForNewShow()
+        }
     }
 
     func channel(_ id: ChannelID) -> CameraManager? { channels[id] }

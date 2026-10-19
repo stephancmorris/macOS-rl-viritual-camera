@@ -12,17 +12,10 @@ import SwiftUI
 /// Settings window can host them under a Basic/Advanced toggle.
 struct ShotComposerSettingsView: View {
     @ObservedObject var shotComposer: ShotComposer
+    /// The mode picker asks the store, which checks the live-switch rule,
+    /// persists the mode and sets every channel's format; that drives the
+    /// operator pill and the activeMode reset binding in CameraManager.
     @ObservedObject var operatorModes: OperatorModeStore
-
-    /// Selecting a mode goes through the store, which persists it and sets
-    /// every channel's format; that drives the operator pill and the
-    /// activeMode reset binding in CameraManager.
-    private var modeBinding: Binding<OperatorMode> {
-        Binding(
-            get: { operatorModes.mode },
-            set: { operatorModes.select($0) }
-        )
-    }
 
     var body: some View {
         Form {
@@ -46,16 +39,7 @@ struct ShotComposerSettingsView: View {
         }
 
         Section("Mode") {
-            Picker("Mode", selection: modeBinding) {
-                ForEach(operatorModes.available) { mode in
-                    Text(mode.title).tag(mode)
-                }
-            }
-            .pickerStyle(.segmented)
-
-            Text(operatorModes.mode.detail)
-                .font(.caption)
-                .foregroundStyle(.secondary)
+            OperatorModePicker(store: operatorModes, style: .form)
         }
 
         Section("Framing Style") {

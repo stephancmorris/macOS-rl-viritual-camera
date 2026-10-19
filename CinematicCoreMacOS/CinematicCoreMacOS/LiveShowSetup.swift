@@ -187,7 +187,7 @@ struct LiveShowSetup: View {
     }
 
     var body: some View {
-        ShowSetupView(model: model.setup, actions: model.actions)
+        ShowSetupView(model: model.setup, actions: model.actions, operatorModes: model.show.operatorModes)
             #if DEBUG
             .task { [model] in
                 await DebugLaunchHooks.autostartIfRequested(model) { model.show.channelA.availableCameras }

@@ -1313,6 +1313,8 @@ final class CameraManager: NSObject, ObservableObject {
     var directorPerceptionForTesting: DirectorPerceptionForTesting?
     /// Synthetic pending UI gesture, independent of lock/gallery acquisition.
     func setOperatorGestureForTesting(_ pending: Bool) { tapPending = pending }
+    /// Test seam: a session that is still starting.
+    func setStartingForTesting(_ starting: Bool) { isStartingSession = starting }
     /// Test seam: a rendered frame as if processFrame had produced it.
     func setLatestRenderedFrameForTesting(_ frame: RenderedChannelFrame?) { latestRenderedFrame = frame }
     /// Test seam: a detection observation as if the frame path consumed it.
