@@ -34,6 +34,7 @@ struct MultiviewGalleryView: View {
                     MultiviewGallerySection("Director next shot · C-03") { DirectorNextDemo() }
                     MultiviewGallerySection("Director styles · C-04") { DirectorStyleDemo() }
                     MultiviewGallerySection("Next cut · C-06") { DirectorNextCutDemo() }
+                    MultiviewGallerySection("Run sheet · C-07") { DirectorRunSheetDemo() }
                     MultiviewGallerySection("Input strip · INPUT-STRIP") { StripDemo() }
                     MultiviewGallerySection("Show setup · SHOW-SETUP") { SetupDemo() }
                     MultiviewGallerySection("Operator pill · PILL-TARGET") { PillDemo(model: model) }
