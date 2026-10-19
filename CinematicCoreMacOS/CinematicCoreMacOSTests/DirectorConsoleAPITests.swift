@@ -45,6 +45,27 @@ import Testing
         #expect(Section.PreparedShot(input: .b, shot: waistUp).line == "Cam B · Waist Up")
     }
 
+    @Test(arguments: [Double(Int.max), Double.greatestFiniteMagnitude, 1e100])
+    func hugeFiniteCountdownsNeverTrapOrOverflowTheirDisplay(value: Double) {
+        let line = Section.NextCut(input: .b, countdown: value, cancellable: true).line
+        #expect(line.hasPrefix("Next: Cam B · "))
+        #expect(line.hasSuffix(" s · Esc to cancel"))
+        #expect(!line.lowercased().contains("inf"))
+        #expect(!line.lowercased().contains("nan"))
+    }
+
+    @Test func missingOrInvalidCountdownNeverHidesCancellation() {
+        let unusable: [Double?] = [nil, -.infinity, .infinity, .nan, -1]
+        for value in unusable {
+            #expect(Section.NextCut(input: .b, countdown: value, cancellable: true).line
+                == "Next: Cam B · Esc to cancel")
+            #expect(Section.NextCut(input: .b, countdown: value, cancellable: false).line
+                == "Next: Cam B")
+        }
+        #expect(Section.NextCut.seconds(2.04) == "2 s")
+        #expect(Section.NextCut.seconds(2.25) == "2.3 s")
+    }
+
     @Test func launchStateIsManualWhateverIsQualified() {
         let everything = Section.Qualification(assist: true, auto: true, backup: true)
         let launch = Section.atLaunch(qualified: everything)

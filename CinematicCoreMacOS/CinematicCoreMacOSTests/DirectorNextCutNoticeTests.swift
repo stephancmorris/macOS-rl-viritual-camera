@@ -2,11 +2,12 @@
 //  DirectorNextCutNoticeTests.swift
 //  CinematicCoreMacOSTests
 //
-//  C-06: Auto shows the countdown and Esc. Backup shows the next cut with
-//  no duration. Esc calls cancelNextCut on the gallery controller.
+//  C-06 software UI evidence only. Controllers are synthetic, and no test
+//  opens capture, issues a permit or executes a real cut.
 //
 
 import AppKit
+import Combine
 import SwiftUI
 import Testing
 @testable import Alfie
@@ -14,67 +15,136 @@ import Testing
 @MainActor
 struct DirectorNextCutNoticeTests {
     @Test func autoNoticeUsesTheFixtureCountdown() {
-        let line = DirectorNextCutGallery.auto.nextCut?.line
         #expect(DirectorNextCutGallery.auto.nextCut?.countdown == DirectorNextCutGallery.noticeExample)
-        #expect(line == "Next: Cam B · 2 s · Esc to cancel")
+        #expect(DirectorNextCutGallery.auto.nextCut?.line == "Next: Cam B · 2 s · Esc to cancel")
     }
 
     @Test func backupNamesTheNextCutWithoutACountdown() {
-        let line = DirectorNextCutGallery.backup.nextCut?.line
         #expect(DirectorNextCutGallery.backup.nextCut?.countdown == nil)
-        #expect(line == "Next: Cam B")
-        #expect(line?.contains("Esc") == false)
+        #expect(DirectorNextCutGallery.backup.nextCut?.line == "Next: Cam B")
     }
 
-    @Test func escapeCallsCancelNextCut() throws {
-        let controller = FakeNextCutConsole(section: DirectorNextCutGallery.auto)
-        let catcher = DirectorEscapeKeyView()
-        catcher.onEscape = { controller.cancelNextCut() }
-        let event = try #require(NSEvent.keyEvent(
-            with: .keyDown,
-            location: .zero,
-            modifierFlags: [],
-            timestamp: ProcessInfo.processInfo.systemUptime,
-            windowNumber: 0,
-            context: nil,
-            characters: String(UnicodeScalar(0x1b)!),
-            charactersIgnoringModifiers: String(UnicodeScalar(0x1b)!),
-            isARepeat: false,
-            keyCode: 53))
-        #expect(catcher.performKeyEquivalent(with: event))
+    @MainActor private final class OtherController: ObservableObject, DirectorConsoleControlling {
+        @Published var directorSection = DirectorNextCutGallery.auto
+        var cancelledInputs: [ChannelID] = []
+        func cancelNextCut() {
+            if let notice = directorSection.nextCut, notice.cancellable {
+                cancelledInputs.append(notice.input)
+                directorSection.nextCut = nil
+            }
+        }
+        func setLevel(_ level: NextShotStatus.DirectorSection.Level) -> DirectorControlResult { .accepted }
+        func handToAlfie() -> DirectorControlResult { .accepted }
+        func takeOver() {}
+        func advanceSegment() {}
+        func overrideSubject(on channel: ChannelID, at point: CGPoint) {}
+    }
+
+    @Test func cancellationWorksWithAnotherControllerAndReadsTheCurrentNotice() {
+        let controller = OtherController()
+        let notice = DirectorNextCutNotice(controller: controller)
+        #expect(notice.cancelCurrentCut())
+        #expect(!notice.cancelCurrentCut())
+        #expect(controller.cancelledInputs == [.b])
+
+        controller.directorSection = DirectorNextCutGallery.backup
+        #expect(!notice.cancelCurrentCut())
+        // The same view action must cancel the current replacement, rather
+        // than an old captured input or countdown from its earlier rendering.
+        controller.directorSection.nextCut = .init(input: .a, countdown: 0.5, cancellable: true)
+        #expect(notice.cancelCurrentCut())
+        #expect(controller.cancelledInputs == [.b, .a])
+    }
+
+    @Test func theGalleryFakeRefusesNoncancellableAndDuplicateCancellation() {
+        let controller = FakeNextCutConsole(section: DirectorNextCutGallery.backup)
+        controller.cancelNextCut()
+        #expect(controller.cancelCount == 0)
+        #expect(controller.directorSection.nextCut != nil)
+        controller.show(DirectorNextCutGallery.auto)
+        controller.cancelNextCut()
+        controller.cancelNextCut()
         #expect(controller.cancelCount == 1)
         #expect(controller.directorSection.nextCut == nil)
-
-        let other = try #require(NSEvent.keyEvent(
-            with: .keyDown,
-            location: .zero,
-            modifierFlags: [],
-            timestamp: ProcessInfo.processInfo.systemUptime,
-            windowNumber: 0,
-            context: nil,
-            characters: "a",
-            charactersIgnoringModifiers: "a",
-            isARepeat: false,
-            keyCode: 0))
-        #expect(catcher.performKeyEquivalent(with: other) == false)
-        #expect(controller.cancelCount == 1)
     }
 
-    @Test func onlyACancellableNoticeInstallsEsc() {
-        let auto = NSHostingView(rootView: DirectorNextCutNotice(
-            controller: FakeNextCutConsole(section: DirectorNextCutGallery.auto)))
-        let backup = NSHostingView(rootView: DirectorNextCutNotice(
-            controller: FakeNextCutConsole(section: DirectorNextCutGallery.backup)))
-        let autoWindow = NSWindow(contentRect: CGRect(x: 0, y: 0, width: 600, height: 48), styleMask: [.borderless], backing: .buffered, defer: false)
-        let backupWindow = NSWindow(contentRect: autoWindow.frame, styleMask: [.borderless], backing: .buffered, defer: false)
-        auto.frame = autoWindow.frame
-        backup.frame = autoWindow.frame
-        autoWindow.contentView = auto
-        backupWindow.contentView = backup
-        auto.layoutSubtreeIfNeeded()
-        backup.layoutSubtreeIfNeeded()
-        #expect(findEscapeKeyView(auto) != nil)
-        #expect(findEscapeKeyView(backup) == nil)
+    private func event(keyCode: UInt16 = 53, modifiers: NSEvent.ModifierFlags = [],
+                       repeated: Bool = false, windowNumber: Int = 0) throws -> NSEvent {
+        let characters = keyCode == 53 ? String(UnicodeScalar(0x1b)!) : "a"
+        return try #require(NSEvent.keyEvent(
+            with: .keyDown, location: .zero, modifierFlags: modifiers,
+            timestamp: ProcessInfo.processInfo.systemUptime, windowNumber: windowNumber,
+            context: nil, characters: characters, charactersIgnoringModifiers: characters,
+            isARepeat: repeated, keyCode: keyCode))
+    }
+
+    private func host<V: View>(_ view: V) -> (NSHostingView<V>, NSWindow) {
+        let host = NSHostingView(rootView: view)
+        host.frame = CGRect(x: 0, y: 0, width: 680, height: 300)
+        let window = NSWindow(contentRect: host.frame, styleMask: [.borderless], backing: .buffered, defer: false)
+        window.contentView = host
+        host.layoutSubtreeIfNeeded()
+        return (host, window)
+    }
+
+    @Test func escapeRoutesThroughTheHostedWindowAndCancelsOnlyOnce() throws {
+        let controller = OtherController()
+        let (host, window) = host(DirectorNextCutNotice(controller: controller))
+        #expect(host.fittingSize.height > 0)
+        let escape = try event(windowNumber: window.windowNumber)
+        #expect(window.performKeyEquivalent(with: escape))
+        #expect(controller.cancelledInputs == [.b])
+        #expect(!window.performKeyEquivalent(with: escape))
+        #expect(controller.cancelledInputs == [.b])
+    }
+
+    @Test func aStaleCatcherChecksRemovalAndReplacementBeforeConsumingEsc() throws {
+        let controller = FakeNextCutConsole(section: DirectorNextCutGallery.auto)
+        let (host, window) = host(DirectorNextCutNotice(controller: controller))
+        let catcher = try #require(findEscapeKeyViews(host).first)
+        let escape = try event(windowNumber: window.windowNumber)
+        // Do not refresh the hosted view: this deliberately exercises its old
+        // native callback after the controller's published state has changed.
+        controller.removeNotice()
+        #expect(!catcher.performKeyEquivalent(with: escape))
+        controller.show(DirectorNextCutGallery.backup)
+        #expect(!catcher.performKeyEquivalent(with: escape))
+        #expect(controller.cancelCount == 0)
+        controller.show(DirectorNextCutGallery.auto)
+        #expect(catcher.performKeyEquivalent(with: escape))
+        #expect(controller.cancelCount == 1)
+        #expect(!catcher.performKeyEquivalent(with: escape))
+    }
+
+    @Test func onlyTheInteractiveCancellableNoticeInstallsEsc() {
+        var absent = DirectorNextCutGallery.auto
+        absent.nextCut = nil
+        let view = VStack {
+            DirectorNextCutNotice(controller: FakeNextCutConsole(section: DirectorNextCutGallery.auto))
+            DirectorNextCutNotice(controller: FakeNextCutConsole(section: DirectorNextCutGallery.auto), ownsShortcut: false)
+            DirectorNextCutNotice(controller: FakeNextCutConsole(section: DirectorNextCutGallery.backup))
+            DirectorNextCutNotice(controller: FakeNextCutConsole(section: absent))
+        }
+        let (host, window) = host(view)
+        #expect(findEscapeKeyViews(host).count == 1)
+        #expect(window.contentView === host)
+    }
+
+    @Test func escapeDoesNotSwallowModifiedRepeatedOrUnrelatedKeys() throws {
+        let catcher = DirectorEscapeKeyView()
+        var cancellations = 0
+        catcher.onEscape = { cancellations += 1; return true }
+        let modifiers: [NSEvent.ModifierFlags] = [.command, .option, .shift, .control]
+        for modifier in modifiers {
+            #expect(!catcher.performKeyEquivalent(with: try event(modifiers: modifier)))
+        }
+        #expect(!catcher.performKeyEquivalent(with: try event(keyCode: 0)))
+        #expect(!catcher.performKeyEquivalent(with: try event(repeated: true)))
+        #expect(cancellations == 0)
+        #expect(catcher.performKeyEquivalent(with: try event()))
+        #expect(cancellations == 1)
+        catcher.onEscape = nil
+        #expect(!catcher.performKeyEquivalent(with: try event()))
     }
 
     @Test(arguments: DirectorNextCutGallery.cards)
@@ -108,12 +178,10 @@ struct DirectorNextCutNoticeTests {
     }
 }
 
-private func findEscapeKeyView(_ view: NSView) -> DirectorEscapeKeyView? {
-    if let found = view as? DirectorEscapeKeyView { return found }
-    for subview in view.subviews {
-        if let found = findEscapeKeyView(subview) { return found }
-    }
-    return nil
+private func findEscapeKeyViews(_ view: NSView) -> [DirectorEscapeKeyView] {
+    var found = (view as? DirectorEscapeKeyView).map { [$0] } ?? []
+    for child in view.subviews { found += findEscapeKeyViews(child) }
+    return found
 }
 
 extension DirectorNextCutCard: CustomTestStringConvertible {

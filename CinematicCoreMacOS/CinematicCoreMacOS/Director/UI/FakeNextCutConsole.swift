@@ -2,8 +2,8 @@
 //  FakeNextCutConsole.swift
 //  CinematicCoreMacOS
 //
-//  Gallery stand-in so Esc can reach cancelNextCut before B-08 wires the
-//  live controller. It never touches a camera.
+//  Synthetic C-06 gallery controller. It never opens capture, issues permits
+//  or cuts. Replacing the supplied section is an explicit rehearsal action.
 //
 
 import Combine
@@ -19,7 +19,16 @@ final class FakeNextCutConsole: ObservableObject, DirectorConsoleControlling {
         directorSection = section
     }
 
+    func show(_ section: NextShotStatus.DirectorSection) {
+        directorSection = section
+    }
+
+    func removeNotice() {
+        directorSection.nextCut = nil
+    }
+
     func cancelNextCut() {
+        guard directorSection.nextCut?.cancellable == true else { return }
         cancelCount += 1
         directorSection.nextCut = nil
     }

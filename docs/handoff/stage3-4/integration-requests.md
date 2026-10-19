@@ -109,4 +109,4 @@ The gallery only shows `DirectorSection` reason text. These contract lines have 
 
 ## C-06 · Live Esc rehearsal (B-08)
 
-The gallery notice binds Esc to `cancelNextCut` on a fake controller. The live Debug rehearsal, where Esc cancels a real next cut, waits on B-08. Please confirm that path when the live controller exists. The notice length stays a parameter.
+The reusable notice now accepts any observable `DirectorConsoleControlling`; its Cancel button and plain Esc re-read the current cancellable notice. Removed and Backup notices do not consume Esc. The gallery uses one synthetic shortcut owner. B-08 still owns the real notice/deadline identity and atomic cancellation/Take boundary, and its live Debug rehearsal remains pending. The notice length stays a parameter.

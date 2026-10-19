@@ -52,13 +52,22 @@ struct DirectorNextCutDemo: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
-            Text("Esc cancels a cut that can be cancelled. The notice length is supplied with the cut.")
+            Text("Synthetic examples only: no capture, permits or cuts. The supplied 2 s notice is a fixture, not a product default.")
                 .font(.system(size: 12))
                 .foregroundStyle(.white.opacity(0.55))
-            Text("LIVE")
+            Text("INTERACTIVE EXAMPLE · ESC CANCELS")
                 .font(ConsoleStyle.label(11))
                 .foregroundStyle(.white.opacity(0.55))
+            HStack(spacing: 12) {
+                Button("Restore Auto notice") { live.show(DirectorNextCutGallery.auto) }
+                Button("Show Backup notice") { live.show(DirectorNextCutGallery.backup) }
+                Button("Remove notice") { live.removeNotice() }
+            }
             DirectorNextCutNotice(controller: live)
+            Text("Cancelled examples: \(live.cancelCount)")
+                .font(.system(size: 12))
+                .foregroundStyle(.white.opacity(0.7))
+                .accessibilityIdentifier("director.cancelCount")
             ForEach(DirectorNextCutGallery.cards) { card in
                 VStack(alignment: .leading, spacing: 8) {
                     Text(card.title.uppercased())
