@@ -77,11 +77,11 @@ nonisolated enum OperatorMode: String, CaseIterable, Identifiable, Sendable {
 /// to every channel it owns, including channels added later.
 @MainActor
 final class OperatorModeStore: ObservableObject {
-    static let key = "operatorMode"
+    nonisolated static let key = "operatorMode"
     /// The two-format key the Settings picker used before the three modes.
     /// Read once to migrate, and still written so an older build launched on
     /// the same Mac opens in the matching format.
-    static let legacyFormatKey = "cinematicFormat"
+    nonisolated static let legacyFormatKey = "cinematicFormat"
 
     @Published private(set) var mode: OperatorMode
     /// What the operator may pick, in display order.

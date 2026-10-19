@@ -89,9 +89,13 @@ final class ShowCoordinator: ObservableObject {
         self.operatorModes.modeChanged = { [weak self] _ in self?.applyOperatorMode() }
     }
 
-    /// Bring every channel in line with the operator mode.
+    /// Bring every channel in line with the operator mode. Entering a
+    /// single-input mode (Single Cam, Webcam) while everything is stopped
+    /// also prepares a new show, so no other channel is kept from Multi Cam
+    /// and A is Program.
     private func applyOperatorMode() {
         for channel in channels.values { operatorModes.apply(to: channel) }
+        if !operatorModes.mode.allowsMultipleInputs { prepareForNewShow() }
     }
 
     func channel(_ id: ChannelID) -> CameraManager? { channels[id] }
