@@ -115,6 +115,9 @@ final class PersonDetector: ObservableObject {
         /// Subject lost and we're wide; face request runs full-frame so a
         /// returning subject can be re-acquired anywhere in the frame.
         case reacquiring
+        /// Explicit Debug study only: rect + pose on an unlocked off-air input.
+        /// Its separate token is checked on the executor at actual Vision start.
+        case discovery
     }
 
     /// What to run this frame and where. `roi` is a normalized Vision rect
@@ -133,7 +136,7 @@ final class PersonDetector: ObservableObject {
         var runsVision: Bool {
             switch mode {
             case .off, .awaitingTap: return false
-            case .acquiring, .lockedROI, .reacquiring: return true
+            case .acquiring, .lockedROI, .reacquiring, .discovery: return true
             }
         }
     }
@@ -283,6 +286,11 @@ final class PersonDetector: ObservableObject {
     }
     private var lastLockPassLogKey: LockPassLogKey?
     private var processingGeneration: UInt64 = 0
+    #if DEBUG
+    /// Synthetic executor body for lifecycle tests; installed only by tests.
+    /// The real queued token/start gate still runs before this body.
+    var discoveryVisionForTesting: (@Sendable () -> Void)?
+    #endif
 
     /// Discard any result whose Vision work began before an operator/session change.
     func invalidatePendingWork(clearTracks: Bool = true) {
@@ -385,8 +393,16 @@ final class PersonDetector: ObservableObject {
     @discardableResult
     func processFrame(
         _ pixelBuffer: CVPixelBuffer,
-        plan: DetectionRequestPlan = DetectionRequestPlan(mode: .acquiring, roi: nil)
+        plan: DetectionRequestPlan = DetectionRequestPlan(mode: .acquiring, roi: nil),
+        discoveryToken: DirectorSubjectDiscovery.WorkToken? = nil
     ) async -> [DetectedPerson] {
+        if plan.mode == .discovery {
+            #if DEBUG
+            guard discoveryToken != nil else { return [] }
+            #else
+            return []
+            #endif
+        }
         // Off / awaitingTap: no Vision at all. Clear detections so the overlay
         // shows nothing and the crop holds wide — the passive default.
         if plan.mode == .off || plan.mode == .awaitingTap {
@@ -403,17 +419,25 @@ final class PersonDetector: ObservableObject {
         let configSnapshot = config
         let generation = processingGeneration
 
+        #if DEBUG
+        let syntheticDiscovery = plan.mode == .discovery ? discoveryVisionForTesting : nil
+        #else
+        let syntheticDiscovery: (@Sendable () -> Void)? = nil
+        #endif
         // Perform detection on background queue (rect + pose + face together).
         let (rectObservations, poseObservations, faceObservations, queueWait) = await performDetection(
             pixelBuffer: pixelBuffer,
             config: configSnapshot,
-            plan: plan
+            plan: plan,
+            discoveryToken: discoveryToken,
+            syntheticDiscovery: syntheticDiscovery
         )
 
         let detectionTime = CACurrentMediaTime() - startTime
         Self.signposter.endInterval("visionDetection", detectionInterval)
 
-        guard generation == processingGeneration else { return [] }
+        guard generation == processingGeneration,
+              discoveryToken.map(\.mayPublish) ?? true else { return [] }
 
         // Already isolated to MainActor: do not suspend after validating the generation.
         updateTracking(rectObservations: rectObservations,
@@ -463,7 +487,9 @@ final class PersonDetector: ObservableObject {
     private nonisolated func performDetection(
         pixelBuffer: CVPixelBuffer,
         config: Config,
-        plan: DetectionRequestPlan
+        plan: DetectionRequestPlan,
+        discoveryToken: DirectorSubjectDiscovery.WorkToken?,
+        syntheticDiscovery: (@Sendable () -> Void)?
     ) async -> ([VNHumanObservation], [VNHumanBodyPoseObservation], [VNFaceObservation], TimeInterval) {
         let sendablePixelBuffer = SendablePixelBuffer(value: pixelBuffer)
         let enqueueTime = CACurrentMediaTime()
@@ -488,7 +514,7 @@ final class PersonDetector: ObservableObject {
                     switch plan.mode {
                     case .acquiring, .lockedROI:
                         roi = (plan.roi ?? fullFrame).intersection(fullFrame)
-                    case .off, .awaitingTap, .reacquiring:
+                    case .off, .awaitingTap, .reacquiring, .discovery:
                         roi = fullFrame
                     }
                     let effectiveROI = roi.isEmpty ? fullFrame : roi
@@ -511,11 +537,12 @@ final class PersonDetector: ObservableObject {
                     // `if case` avoids needing Equatable on the main-actor-isolated
                     // enum from this nonisolated closure.
                     let isLockedROI: Bool = { if case .lockedROI = plan.mode { return true }; return false }()
+                    let isDiscovery: Bool = { if case .discovery = plan.mode { return true }; return false }()
                     var requests: [VNRequest] = [
                         self.cachedRectRequest,
                         self.cachedPoseRequest
                     ]
-                    if !isLockedROI {
+                    if !isLockedROI && !isDiscovery {
                         requests.append(self.cachedFaceRequest)
                     }
 
@@ -531,6 +558,20 @@ final class PersonDetector: ObservableObject {
                         options: [:]
                     )
 
+                    // This check is deliberately on processingQueue, after
+                    // permit/dispatch waits and downscale, immediately before
+                    // inference. A Take can retire a queued job without letting
+                    // it begin Vision under its new Program role.
+                    if let discoveryToken, !discoveryToken.begin(at: CACurrentMediaTime()) {
+                        continuation.resume(returning: ([], [], [], queueWait))
+                        return
+                    }
+                    if let syntheticDiscovery {
+                        syntheticDiscovery()
+                        discoveryToken?.finish(at: CACurrentMediaTime())
+                        continuation.resume(returning: ([], [], [], queueWait))
+                        return
+                    }
                     do {
                         try handler.perform(requests)
 
@@ -543,10 +584,12 @@ final class PersonDetector: ObservableObject {
                         // this frame — otherwise the cached request still holds the
                         // previous frame's faces, which would attach a stale face to
                         // the locked subject and trigger spurious gallery captures.
-                        let faceResults = isLockedROI ? [] : (self.cachedFaceRequest.results ?? [])
+                        let faceResults = isLockedROI || isDiscovery ? [] : (self.cachedFaceRequest.results ?? [])
 
+                        discoveryToken?.finish(at: CACurrentMediaTime())
                         continuation.resume(returning: (limited, poseResults, faceResults, queueWait))
                     } catch {
+                        discoveryToken?.finish(at: CACurrentMediaTime())
                         Self.logger.error("Person detection error: \(error.localizedDescription, privacy: .public)")
                         continuation.resume(returning: ([], [], [], queueWait))
                     }

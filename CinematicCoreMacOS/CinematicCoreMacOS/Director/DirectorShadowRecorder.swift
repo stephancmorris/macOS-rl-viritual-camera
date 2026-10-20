@@ -19,7 +19,8 @@ final class DirectorShadowRecorder {
     }
 
     func emit(_ event: R.Event, show: ShowCoordinator, authority a: DirectorAuthority,
-              policy: UInt64, nomination: UInt64, evidence: UInt64, preferences: DirectorPreferences?, segment: RunSheet.Segment? = nil) {
+              policy: UInt64, nomination: UInt64, evidence: UInt64, preferences: DirectorPreferences?, segment: RunSheet.Segment? = nil,
+              judgeObservation: DirectorJudgeShadow.Observation? = nil) {
         guard !exhausted else { log.noteDropped(); return }
         let number = sequence
         if sequence == .max { exhausted = true } else { sequence += 1 }
@@ -36,7 +37,9 @@ final class DirectorShadowRecorder {
         #endif
         let now = show.clock()
         guard provenance.count == channels.count, let kind = provenance.first,
-              provenance.allSatisfy({ $0 == kind }), now.isFinite, now >= 0 else {
+              provenance.allSatisfy({ $0 == kind }),
+              judgeObservation.map({ !$0.provenance.isEmpty && $0.provenance.allSatisfy { $0 == kind } }) ?? true,
+              now.isFinite, now >= 0 else {
             log.noteDropped(); return
         }
         func alias(_ id: ChannelID) -> String { "input-\((ChannelID.allCases.firstIndex(of: id) ?? 0) + 1)" }
@@ -49,20 +52,37 @@ final class DirectorShadowRecorder {
             segmentToken = .init(token)
         } else { segmentToken = nil }
         let context = R.Context(inputs: channels.map { alias($0.channelID) }, program: alias(show.programChannel),
-            preview: show.previewChannel.map(alias), programShot: nil, programStartedAt: nil, lastWideAt: nil,
+            preview: show.previewChannel.map(alias), programShot: judgeObservation.map { .init($0.context.timeline.programShot) },
+            programStartedAt: judgeObservation?.context.timeline.programStartedAt,
+            lastWideAt: judgeObservation?.context.timeline.lastWideAt,
             level: level, paused: a.paused, editLive: a.editLive, running: a.running, healthy: a.healthy,
             evidenceAvailable: a.evidenceAvailable, mayPropose: a.mayPropose, mayPrepare: a.mayPrepare, mayTake: a.mayTake,
             pinnedInput: a.pinnedShot.map(alias), authorityEpoch: .init(a.epoch), routeGeneration: .init(show.router.routeGeneration),
             policyRevision: .init(policy), nominationRevision: .init(nomination), evidenceRevision: .init(evidence),
             segmentType: segment?.type ?? .liveEvent, segmentToken: segmentToken)
         let validPreferences = preferences.flatMap { try? $0.validated() }
+        var measurements = R.Measurements()
+        var judgements: [R.JudgementSummary] = []
+        if let comparison = judgeObservation {
+            let aliases = Dictionary(uniqueKeysWithValues: channels.map { ($0.channelID, alias($0.channelID)) })
+            do {
+                judgements.append(try .init(comparison.evaluation.rules, kind: .rules, modelVersion: nil,
+                    aliases: aliases, path: "judgements[0]", gate: nil, measurements: &measurements))
+                let learned = comparison.evaluation.source == .learned
+                judgements.append(try .init(comparison.evaluation.judgement, kind: learned ? .learned : .rules,
+                    modelVersion: learned ? comparison.evaluation.modelVersion : nil,
+                    aliases: aliases, path: "judgements[1]", gate: nil, measurements: &measurements))
+            } catch { log.noteDropped(); return }
+        }
         let record = R(schemaVersion: R.currentSchemaVersion, recordID: .init(UUID()), sessionID: .init(log.sessionID),
             sequence: .init(number), recordedAtUTC: log.recordingUTC(), eventTime: now, evidenceClass: kind,
             executionMode: a.level == .off || a.level == .suggest ? .shadow : .observing, context: context,
-            parameters: .init(status: preferences != nil && validPreferences == nil ? .invalid : .unavailable,
-                parametersVersion: nil, preferencesVersion: validPreferences?.version, resolvedStyle: nil,
-                readiness: nil, adapter: nil, judgeMaximumAge: nil, minimumProbability: nil),
-            evidence: [], judgements: [], event: event, invalidFields: [], droppedRecordsBefore: .init(0))
+            parameters: .init(status: judgeObservation != nil ? .available : (preferences != nil && validPreferences == nil ? .invalid : .unavailable),
+                parametersVersion: judgeObservation.map { .init($0.parametersVersion) }, preferencesVersion: validPreferences?.version,
+                resolvedStyle: judgeObservation.map { .init($0.style) }, readiness: nil, adapter: nil,
+                judgeMaximumAge: judgeObservation?.maximumAge,
+                minimumProbability: judgeObservation.flatMap { (0...1).contains($0.minimumProbability) && $0.minimumProbability.isFinite ? $0.minimumProbability : nil }),
+            evidence: [], judgements: judgements, event: event, invalidFields: measurements.invalidFields, droppedRecordsBefore: .init(0))
         log.append(record, provenance: provenance)
     }
 
@@ -72,6 +92,12 @@ final class DirectorShadowRecorder {
             proposalID: nil, requestID: nil, proposalCreatedAt: nil, judgementIndex: nil, stage: nil, reasons: nil,
             actionID: .init(id), action: action, phase: outcome == nil ? .attempt : .result, targetScope: .session,
             outcome: outcome, programAfter: programAfter, previewAfter: previewAfter)
+    }
+    static var judgeComparison: R.Event {
+        .init(kind: .abstention, decisionID: .init(UUID()), target: nil, shot: nil, reason: nil,
+            proposalID: nil, requestID: nil, proposalCreatedAt: nil, judgementIndex: nil, stage: .judge,
+            reasons: [.init(domain: .observation, code: .unclassified)], actionID: nil, action: nil,
+            phase: nil, targetScope: nil, outcome: nil, programAfter: nil, previewAfter: nil)
     }
     static var noCutPolicy: R.Event {
         .init(kind: .abstention, decisionID: .init(UUID()), target: nil, shot: nil, reason: nil,

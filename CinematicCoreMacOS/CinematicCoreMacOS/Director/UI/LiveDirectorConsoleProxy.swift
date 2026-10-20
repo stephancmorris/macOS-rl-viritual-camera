@@ -50,4 +50,17 @@ final class LiveDirectorConsoleProxy: ObservableObject, DirectorConsoleControlli
         current?.overrideSubject(on: channel, at: point)
         sample(current?.directorSection)
     }
+
+    @discardableResult
+    func overrideSubject(_ request: DirectorSubjectOverrideRequest) -> DirectorControlResult {
+        guard let current else { return .refused("Subject selection is unavailable") }
+        // Reject a stale painted request before forwarding. The real controller
+        // still rechecks roles, route and camera generations at its effect boundary.
+        guard let pick = current.directorSection.subjectPicks[request.channel], request.matches(pick) else {
+            return .refused("The subject view changed. Choose again.")
+        }
+        let result = current.overrideSubject(request)
+        sample(current.directorSection)
+        return result
+    }
 }

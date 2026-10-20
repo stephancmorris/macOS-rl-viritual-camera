@@ -87,14 +87,16 @@ struct MultiviewConsoleView<Strip: View, Pill: View>: View {
                 model: model,
                 onPaneView: actions.setPaneView,
                 onReconnect: actions.reconnect,
-                onDoneEditing: { actions.setEditLive(false) }
+                onDoneEditing: { actions.setEditLive(false) },
+                subjectPick: model.channel.flatMap { director?.subjectPicks[$0] }
             ) { panePicture(model) }
         } else {
             ProgramPreviewPane(
                 model: model,
                 onPaneView: actions.setPaneView,
                 onReconnect: actions.reconnect,
-                onDoneEditing: { actions.setEditLive(false) })
+                onDoneEditing: { actions.setEditLive(false) },
+                subjectPick: model.channel.flatMap { director?.subjectPicks[$0] })
         }
     }
 

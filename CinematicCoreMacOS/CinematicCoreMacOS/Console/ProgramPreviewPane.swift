@@ -83,6 +83,7 @@ struct ProgramPreviewPane<Picture: View>: View {
     var onPaneView: (ConsoleSnapshot.PaneView) -> Void = { _ in }
     var onReconnect: (ChannelID) -> Void = { _ in }
     var onDoneEditing: () -> Void = {}
+    var subjectPick: DirectorSubjectPick? = nil
     @ViewBuilder let picture: () -> Picture
 
     static var ringWidth: CGFloat { 3 }
@@ -99,6 +100,19 @@ struct ProgramPreviewPane<Picture: View>: View {
                 .clipped()
 
             overlay
+
+            if model.paneView == .shot, !model.overlay.isBlocking, let subjectPick,
+               subjectPick.channel == model.channel {
+                VStack {
+                    Spacer(minLength: 0)
+                    HStack {
+                        DirectorSubjectPickCaption(pick: subjectPick)
+                        Spacer(minLength: 0)
+                    }
+                    .padding(10)
+                }
+                .allowsHitTesting(false)
+            }
 
             VStack(spacing: 0) {
                 if model.showsEditLiveBanner { editLiveBanner }
@@ -229,10 +243,11 @@ extension ProgramPreviewPane where Picture == PanePlaceholderPicture {
         model: PaneModel,
         onPaneView: @escaping (ConsoleSnapshot.PaneView) -> Void = { _ in },
         onReconnect: @escaping (ChannelID) -> Void = { _ in },
-        onDoneEditing: @escaping () -> Void = {}
+        onDoneEditing: @escaping () -> Void = {},
+        subjectPick: DirectorSubjectPick? = nil
     ) {
         self.init(model: model, onPaneView: onPaneView, onReconnect: onReconnect,
-                  onDoneEditing: onDoneEditing) {
+                  onDoneEditing: onDoneEditing, subjectPick: subjectPick) {
             PanePlaceholderPicture(model: model)
         }
     }
