@@ -174,6 +174,40 @@ extension NextShotStatus {
             }
         }
 
+        /// B-12 reports facts only. This alert never authorizes a fallback or
+        /// changes authority; a successful fallback remains paused.
+        enum BackupAlert: Equatable, Sendable {
+            case switchedTo(ChannelID)
+            case bothInputsStale
+            case pausedAfterFallback
+
+            var title: String {
+                switch self {
+                case .switchedTo(let channel): return "Program lost → switched to \(channel.cameraLabel)"
+                case .bothInputsStale: return "Both inputs stale"
+                case .pausedAfterFallback: return "Paused after fallback"
+                }
+            }
+
+            var detail: String {
+                switch self {
+                case .switchedTo, .pausedAfterFallback:
+                    return "Paused after fallback · Hand to Alfie when ready"
+                case .bothInputsStale:
+                    return "No safe input is ready. Check the cameras and output."
+                }
+            }
+
+            var accessibilityLabel: String {
+                switch self {
+                case .switchedTo(let channel):
+                    return "Program lost. Switched to \(channel.cameraLabel). \(detail)"
+                case .bothInputsStale, .pausedAfterFallback:
+                    return "\(title). \(detail)"
+                }
+            }
+        }
+
         /// Per-level qualification on this rig. Manual is always allowed.
         struct Qualification: Equatable, Sendable {
             var assist: Bool
@@ -211,6 +245,7 @@ extension NextShotStatus {
         /// False at every launch and after any takeover.
         var handedToAlfie: Bool
         var runSheet: RunSheetLine?
+        var backupAlert: BackupAlert? = nil
 
         /// Every launch: Manual, not handed to Alfie, nothing prepared or badged.
         static func atLaunch(qualified: Qualification) -> DirectorSection {

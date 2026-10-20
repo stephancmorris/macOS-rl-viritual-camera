@@ -23,6 +23,8 @@ struct MultiviewConsoleView<Strip: View, Pill: View>: View {
     var panePicture: ((PaneModel) -> AnyView)?
     /// Show-level controls at the right of the header (live console only).
     var headerTrailing: AnyView?
+    /// Optional live controls use the existing free row above the pill.
+    var directorControls: AnyView?
     /// Alfie's status. Nil until the live console is given a director controller.
     var director: NextShotStatus.DirectorSection?
 
@@ -67,6 +69,8 @@ struct MultiviewConsoleView<Strip: View, Pill: View>: View {
 
                 strip
                     .place(layout.stripLabel.union(layout.strip))
+
+                if let directorControls { directorControls.place(layout.directorBar) }
 
                 pill
                     .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottom)

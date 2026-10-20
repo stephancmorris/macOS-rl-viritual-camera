@@ -89,6 +89,7 @@ enum LiveConsoleSnapshot {
 
 final class LiveConsoleModel: ObservableObject, ConsoleActions {
     let show: ShowCoordinator
+    let directorControls: LiveDirectorConsoleProxy
 
     @Published private(set) var snapshot: ConsoleSnapshot
     /// The started Director's actual status, sampled with the console refresh.
@@ -116,14 +117,18 @@ final class LiveConsoleModel: ObservableObject, ConsoleActions {
     /// reads the show's noncreating accessor; it never accesses lazy director.
     init(show: ShowCoordinator, pairCheck: MultiInputCheck? = nil,
          directorStatusEnabled: Bool = DeveloperFlags.runDirectorShadow,
-         directorStatus: (() -> NextShotStatus.DirectorSection?)? = nil) {
+         directorStatus: (() -> NextShotStatus.DirectorSection?)? = nil,
+         directorControlProvider: (() -> (any DirectorConsoleControlling)?)? = nil) {
         self.show = show
+        self.directorControls = LiveDirectorConsoleProxy(enabled: directorStatusEnabled,
+            controller: directorControlProvider ?? { [weak show] in show?.directorControlForConsole })
         self.pairCheck = pairCheck ?? MultiInputCheck()
         self.directorStatusEnabled = directorStatusEnabled
         let reader = directorStatus ?? { [weak show] in show?.directorSectionForConsole }
         self.readDirectorSection = reader
         self.directorSection = directorStatusEnabled ? reader() : nil
         self.snapshot = LiveConsoleSnapshot.make(show: show, paneView: .shot, rates: [:], note: nil)
+        self.directorControls.sample(self.directorSection)
         pairCheckSubscription = self.pairCheck.$phase.sink { [weak self] phase in
             self?.pairCheckText = Self.describe(phase)
         }
@@ -160,6 +165,7 @@ final class LiveConsoleModel: ObservableObject, ConsoleActions {
         // not change. Coalesce equal values rather than observing frame writes.
         let nextDirector = directorStatusEnabled ? readDirectorSection() : nil
         if nextDirector != directorSection { directorSection = nextDirector }
+        directorControls.sample(nextDirector)
     }
 
     /// Badges reflect accepted current preparation; status and level alone
@@ -355,6 +361,9 @@ struct LiveMultiviewConsole: View {
         }
         view.panePicture = { [model] pane in AnyView(LivePanePicture.make(pane: pane, show: model.show)) }
         view.headerTrailing = AnyView(LiveConsoleHeader(model: model))
+        if model.directorSection != nil {
+            view.directorControls = AnyView(LiveDirectorControlBar(controller: model.directorControls))
+        }
         return view
     }
 

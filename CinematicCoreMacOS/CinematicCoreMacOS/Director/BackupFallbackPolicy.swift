@@ -1,8 +1,8 @@
 import Foundation
 
-/// A-17, isolated R1/R2 proposal. Only B-12 may integrate this exceptional
-/// source-loss permit with the existing synchronous technical Take checks.
-/// No production caller exists while fallback decisions remain open.
+/// A-17 / B-12: an exceptional, one-shot source-loss grant. A loss may be
+/// reserved before the router detects its hold, but a permit exists only
+/// inside the actual hold window. Qualification and live trials remain open.
 nonisolated struct BackupFallbackPolicy: Sendable {
     struct Snapshot: Sendable {
         let live: DirectorLiveState
@@ -42,9 +42,69 @@ nonisolated struct BackupFallbackPolicy: Sendable {
             self.maximumFrameAge = maximumFrameAge
         }
     }
+    /// Captures permission immediately before the ordinary fault transition.
+    /// It grants no effect and contains no invented router deadline.
+    struct Reservation: Equatable, Sendable {
+        let id: UUID
+        let authority: DirectorAuthority
+        let program: ChannelID
+        let preview: ChannelID
+        let previewRevisions: ChannelRevisions
+        let routeGeneration: UInt64
+        let policyRevision: UInt64
+        let nominationRevision: UInt64
+        let createdAt: TimeInterval
+        let maximumFrameAge: TimeInterval
+    }
     private(set) var pending: Permit?
+    private(set) var reservation: Reservation?
     private var lastClock: TimeInterval?
-    mutating func retire() { pending = nil }
+    mutating func retire() { pending = nil; reservation = nil }
+
+    /// B-12's split ingress: the controller first cancels/pauses using its
+    /// normal sourceLoss transition, then reserves the exact resulting state.
+    /// No stale pre-fault snapshot can grant after an intervening event.
+    mutating func reserveSourceLoss(_ channel: ChannelID, before: DirectorLiveState,
+                                   after: DirectorAuthority, now: TimeInterval,
+                                   maximumFrameAge: TimeInterval) -> Reservation? {
+        guard now.isFinite, now >= 0, lastClock.map({ now >= $0 }) ?? true,
+              maximumFrameAge.isFinite, maximumFrameAge >= 0,
+              channel == before.program, before.authority.level == .backup,
+              before.authority.mayIssueTake(at: now), let preview = before.preview,
+              preview != before.program, let revisions = before.revisions else { return nil }
+        var expected = before.authority
+        expected.apply(.sourceLoss(channel))
+        guard after == expected, !after.exhausted, after.epoch > before.authority.epoch else { return nil }
+        let next = Reservation(id: UUID(), authority: after, program: before.program,
+            preview: preview, previewRevisions: revisions, routeGeneration: before.routeGeneration,
+            policyRevision: before.policyRevision, nominationRevision: before.nominationRevision,
+            createdAt: now, maximumFrameAge: maximumFrameAge)
+        retire()
+        reservation = next
+        lastClock = now
+        return next
+    }
+
+    /// First actual hold callback only. A matching failed attempt is terminal;
+    /// later fresh frames or repeated fault callbacks never renew the chance.
+    mutating func issueReserved(_ candidate: Reservation, snapshot s: Snapshot,
+                               now: TimeInterval, maximumFrameAge: TimeInterval) -> Permit? {
+        guard reservation == candidate else { return nil }
+        reservation = nil
+        guard maximumFrameAge == candidate.maximumFrameAge, now >= candidate.createdAt,
+              eligible(s, now: now, maximumFrameAge: maximumFrameAge),
+              s.live.authority == candidate.authority,
+              s.live.program == candidate.program, s.live.preview == candidate.preview,
+              s.live.revisions == candidate.previewRevisions,
+              s.live.routeGeneration == candidate.routeGeneration,
+              s.live.policyRevision == candidate.policyRevision,
+              s.live.nominationRevision == candidate.nominationRevision else { return nil }
+        let permit = Permit(s, epoch: candidate.authority.epoch, preview: candidate.preview,
+                            revisions: candidate.previewRevisions, now: now, maximumFrameAge: maximumFrameAge)
+        pending = permit
+        lastClock = now
+        return permit
+    }
 
     /// Call once at source-loss ingress, before the ordinary authority handler.
     /// Every level receives exactly its existing sourceLoss transition. Backup
@@ -56,7 +116,7 @@ nonisolated struct BackupFallbackPolicy: Sendable {
         // A delayed event from an older authority/source binding cannot
         // revoke newer work. Validate before touching the pending exception.
         guard authority == s.live.authority else { return nil }
-        pending = nil
+        retire()
         let prior = authority
         authority.apply(.sourceLoss(channel))
         guard channel == s.live.program,

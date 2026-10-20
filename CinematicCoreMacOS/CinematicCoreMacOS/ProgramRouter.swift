@@ -40,6 +40,19 @@ final class ProgramRouter {
         case standby
     }
 
+    /// The actual detected hold, bound to the route that lost Program.
+    nonisolated struct HoldWindow: Equatable, Sendable {
+        let program: ChannelID
+        let routeGeneration: UInt64
+        let startedAt: TimeInterval
+        let deadline: TimeInterval
+    }
+    var holdWindow: HoldWindow? {
+        guard case .holding(let since) = state else { return nil }
+        return .init(program: programChannel, routeGeneration: routeGeneration,
+                     startedAt: since, deadline: since + Self.holdDuration)
+    }
+
     static let sourceLossAfter: TimeInterval = 0.5
     static let holdDuration: TimeInterval = 2.0
 
@@ -181,10 +194,18 @@ final class ProgramRouter {
     /// when the request was made under an older route generation, when the
     /// output is not running, or when the sink refuses — old roles are kept.
     func commitTake(_ frame: RenderedChannelFrame, to channel: ChannelID,
-                    expectedRouteGeneration: UInt64) -> Bool {
+                    expectedRouteGeneration: UInt64, fallbackWindow: HoldWindow? = nil) -> Bool {
         guard isOutputStarted, expectedRouteGeneration == routeGeneration,
               frame.channelID == channel, !isProgram(channel) else { return false }
-        guard output.sendFrameAccepted(frame.pixelBuffer, timestamp: nextOutputTimestamp(), isRepeat: false) else {
+        let timestamp = nextOutputTimestamp()
+        if let fallbackWindow {
+            // Recheck at the actual effect, after all technical Take checks.
+            // The strict bound also refuses when a watchdog has not yet run.
+            let now = clock()
+            guard holdWindow == fallbackWindow, now.isFinite,
+                  now >= fallbackWindow.startedAt, now < fallbackWindow.deadline else { return false }
+        }
+        guard output.sendFrameAccepted(frame.pixelBuffer, timestamp: timestamp, isRepeat: false) else {
             return false
         }
         programChannel = channel
@@ -207,10 +228,12 @@ final class ProgramRouter {
         let now = clock()
         switch state {
         case .routed where now - lastProgramFrameAt > Self.sourceLossAfter:
-            state = .holding(since: now)
             output.noteDiagnostics("program source lost: holding last good frame")
             startFaultTicker()
             prepareStandbyFrame()
+            // Notify last: the observer can synchronously commit a fallback,
+            // which stops these timers and changes the route back to routed.
+            state = .holding(since: now)
         case .holding(let since) where now - since >= Self.holdDuration:
             state = .standby
             output.noteDiagnostics("program source missing: standby")
