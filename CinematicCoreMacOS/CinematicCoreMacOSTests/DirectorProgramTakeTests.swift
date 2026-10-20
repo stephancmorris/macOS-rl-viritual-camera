@@ -26,7 +26,7 @@ import Testing
         .init(nominationsCurrent: true, previewAvailable: true, sourcesHealthy: true,
               outputHealthy: true, admissionCurrent: true, qualifiedLevels: [.auto, .backup])
     }
-    private func rig(style: Bool = false) -> Rig {
+    private func rig(style: Bool = false, tracking: Bool = false) -> Rig {
         let sink = Sink(), clock = Clock()
         let show = ShowCoordinator(programOutput: ProgramOutputManager(sinks: [sink]),
             admissionRecords: AdmissionRecordStore(defaults: UserDefaults(suiteName: "b07-\(UUID())")!),
@@ -34,6 +34,11 @@ import Testing
         show.clock = { clock.now }; show.router.clock = { clock.now }
         show.addChannel(.b)
         show.channelA.setRunningForTesting(true); show.channel(.b)!.setRunningForTesting(true)
+        if tracking {
+            let b = show.channel(.b)!
+            b.shotComposer.lockTarget(UUID())
+            b.setOperationMode(.autoTracking)
+        }
         show.channelA.outputPort.start(); show.channelA.outputPort.updateCaptureStatus(isRunning: true)
         show.director.prerequisitesOverride = { ready }
         show.director.cutReadinessForTesting = .init(reasons: [])
@@ -134,6 +139,83 @@ import Testing
         r.clock.now = 1005
         #expect(r.show.director.issueTakePermit(now: r.clock.now, validity: 1) != nil)
     }
+    @Test func segmentAdvanceRetiresAPendingPermitWithoutChangingAuthority() throws {
+        let r = rig(), controller = r.show.director
+        #expect(controller.setRunSheet(try RunSheet(segments: [.init(type: .presenter), .init(type: .panel)])))
+        try prepare(r)
+        let pending = try permit(r)
+        let authority = controller.authority, revision = controller.policyRevision
+        controller.advanceSegment()
+        #expect(controller.authority == authority)
+        #expect(controller.policyRevision == revision + 1)
+        #expect(r.show.take(origin: .director, permit: pending) == .rejected(.directorNotAuthorized))
+        #expect(r.show.programChannel == .a && r.sink.sent == 0)
+        #expect(controller.authority == authority)
+        // A fresh decision can issue a new permit under the new style; the
+        // segment transition retires old work rather than disabling Take.
+        let fresh = try permit(r)
+        #expect(r.show.take(origin: .director, permit: fresh) == .committed(newProgram: .b))
+        #expect(r.sink.sent == 1)
+    }
+
+    @Test func segmentAdvanceRetiresPendingPreparationWithoutChangingAuthority() throws {
+        let r = rig(tracking: true), controller = r.show.director
+        #expect(controller.setRunSheet(try RunSheet(segments: [.init(type: .presenter), .init(type: .panel)])))
+        let sink = controller.assistPreparation
+        sink.readinessForTesting = .init(reasons: [])
+        let configuration = DirectorAssistPreparation.Configuration(
+            readiness: .init(minimumSettledTime: 0, maximumMotion: 0.2, cutOnMotionAllowed: false,
+                             minimumCutSettledTime: 1, maximumCutMotion: 0.1),
+            maximumRequestAge: 1, onePreparationPerTenure: true)
+        let shot = DirectorShot(preset: .stage(.fullBody))
+        let pending = try #require(sink.enqueue(shot, configuration: configuration))
+        let authority = controller.authority, revision = controller.policyRevision
+        let beforeA = r.show.channelA.revisions, beforeB = r.show.channel(.b)!.revisions
+        controller.advanceSegment()
+        #expect(controller.authority == authority)
+        #expect(controller.policyRevision == revision + 1)
+        #expect(sink.commit(pending) == .rejected([.requestReplaced]))
+        #expect(r.show.channelA.revisions == beforeA && r.show.channel(.b)!.revisions == beforeB)
+        #expect(r.show.programChannel == .a && r.sink.sent == 0)
+        let fresh = try #require(sink.enqueue(shot, configuration: configuration))
+        guard case .committed = sink.commit(fresh) else {
+            Issue.record("New style must still allow a fresh authorized preparation"); return
+        }
+        #expect(r.show.channelA.revisions == beforeA)
+        #expect(r.show.channel(.b)!.revisions.shotRevision == beforeB.shotRevision + 1)
+        #expect(controller.authority == authority)
+    }
+
+    @Test func finalReadinessNeverBorrowsConfirmationOrSettlementFromAnotherSubject() throws {
+        let previous = UUID(), replacement = UUID()
+        func sample(subject: UUID, at time: Double) -> ChannelEvidenceSample {
+            .init(channel: .b, sampledAt: time, lockPhase: .tracking, trackingOwnsControl: true,
+                  galleryReady: true, lockedTargetID: subject, observationAge: 0, subjectSpeed: 0,
+                  holdingSteady: true, cropConverged: true, operatorGestureInProgress: false,
+                  observedPersonCount: 1)
+        }
+        var adapter = DirectorEvidenceAdapter(parameters: .init(maximumObservationAge: 2, debounce: 0, stillSpeed: 0.2))
+        adapter.ingest(sample(subject: previous, at: 10))
+        adapter.ingest(sample(subject: previous, at: 11))
+        let availability = TakeAvailability.evaluate(take: .init(sourcePresent: true, supportedAtStandard: true,
+            hasFreshRender: true, matchesSourceGeneration: true, matchesShotRevision: true,
+            legalGeometry: true, isHeldFrame: false, takePending: false), program: .a, preview: .b,
+            standard: .p50, editLive: false)
+        let current = sample(subject: replacement, at: 11.5)
+        #expect(adapter.state(for: .b)?.identity == .confirmed)
+        #expect(adapter.settledFor(.b, now: 11.5) == 1.5)
+        // This is the final-boundary read between nomination/handback and the
+        // next 4 Hz evidence ingest. Both Assist and Take use this helper.
+        #expect(DirectorController.currentCutInputs(sample: current, adapter: adapter,
+            take: availability, now: 11.5) == nil)
+        let events = adapter.ingest(current)
+        #expect(events.contains(.nominationChanged(.b)))
+        let fresh = try #require(DirectorController.currentCutInputs(sample: current, adapter: adapter,
+            take: availability, now: 11.5))
+        #expect(fresh.identity == .confirmed)
+        #expect(fresh.framingSettledFor == 0)
+    }
+
     @Test func finalCutInputsUseFreshMotionAndCropInsteadOfCachedTickValues() throws {
         let id = UUID()
         func sample(at: Double, speed: Double, converged: Bool) -> ChannelEvidenceSample {

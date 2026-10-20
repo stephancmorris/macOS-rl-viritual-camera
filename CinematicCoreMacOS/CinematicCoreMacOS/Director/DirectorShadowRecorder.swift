@@ -7,18 +7,19 @@ final class DirectorShadowRecorder {
     private(set) var log: DirectorShadowLog
     private var sequence: UInt64 = 0
     private var exhausted = false
+    private var segmentTokens: [UUID: UUID] = [:]
     #if DEBUG
     var provenanceForTesting: [R.EvidenceClass]?
     #endif
     init(log: DirectorShadowLog) { self.log = log }
 
     func restart() {
-        do { log = try log.renewed(); sequence = 0; exhausted = false }
+        do { log = try log.renewed(); sequence = 0; exhausted = false; segmentTokens.removeAll() }
         catch { log.noteDropped() }
     }
 
     func emit(_ event: R.Event, show: ShowCoordinator, authority a: DirectorAuthority,
-              policy: UInt64, nomination: UInt64, evidence: UInt64, preferences: DirectorPreferences?) {
+              policy: UInt64, nomination: UInt64, evidence: UInt64, preferences: DirectorPreferences?, segment: RunSheet.Segment? = nil) {
         guard !exhausted else { log.noteDropped(); return }
         let number = sequence
         if sequence == .max { exhausted = true } else { sequence += 1 }
@@ -41,13 +42,19 @@ final class DirectorShadowRecorder {
         func alias(_ id: ChannelID) -> String { "input-\((ChannelID.allCases.firstIndex(of: id) ?? 0) + 1)" }
         let level: R.Level
         switch a.level { case .off: level = .off; case .suggest: level = .suggest; case .assist: level = .assist; case .auto: level = .auto; case .backup: level = .backup }
+        let segmentToken: R.Token?
+        if let segment {
+            let token = segmentTokens[segment.id] ?? UUID()
+            segmentTokens[segment.id] = token
+            segmentToken = .init(token)
+        } else { segmentToken = nil }
         let context = R.Context(inputs: channels.map { alias($0.channelID) }, program: alias(show.programChannel),
             preview: show.previewChannel.map(alias), programShot: nil, programStartedAt: nil, lastWideAt: nil,
             level: level, paused: a.paused, editLive: a.editLive, running: a.running, healthy: a.healthy,
             evidenceAvailable: a.evidenceAvailable, mayPropose: a.mayPropose, mayPrepare: a.mayPrepare, mayTake: a.mayTake,
             pinnedInput: a.pinnedShot.map(alias), authorityEpoch: .init(a.epoch), routeGeneration: .init(show.router.routeGeneration),
             policyRevision: .init(policy), nominationRevision: .init(nomination), evidenceRevision: .init(evidence),
-            segmentType: .liveEvent, segmentToken: nil)
+            segmentType: segment?.type ?? .liveEvent, segmentToken: segmentToken)
         let validPreferences = preferences.flatMap { try? $0.validated() }
         let record = R(schemaVersion: R.currentSchemaVersion, recordID: .init(UUID()), sessionID: .init(log.sessionID),
             sequence: .init(number), recordedAtUTC: log.recordingUTC(), eventTime: now, evidenceClass: kind,

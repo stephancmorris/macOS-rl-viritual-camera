@@ -150,7 +150,7 @@
       "recordID": "Token",
       "sessionID": "Token",
       "sequence": "Counter",
-      "recordedAtUTC": "String",
+      "recordedAtUTC": "UTC",
       "eventTime": "Double",
       "evidenceClass": "EvidenceClass",
       "executionMode": "ExecutionMode",
@@ -161,6 +161,16 @@
       "event": "Event",
       "invalidFields": "[String]",
       "droppedRecordsBefore": "Counter"
+    },
+    "ExportManifest": {
+      "exportSchemaVersion": "Int",
+      "exportID": "Token",
+      "exportedAtUTC": "UTC",
+      "sessionIDs": "[Token]",
+      "recordCount": "Int",
+      "evidenceClasses": "[EvidenceClass]",
+      "recordSchemaVersions": "[Int]",
+      "retention": "ExportRetention"
     }
   },
   "enums": {
@@ -350,6 +360,9 @@
       "performance",
       "videoBreak",
       "liveEvent"
+    ],
+    "ExportRetention": [
+      "explicitExport"
     ]
   }
 }

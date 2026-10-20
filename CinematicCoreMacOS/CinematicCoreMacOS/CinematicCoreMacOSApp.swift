@@ -61,7 +61,8 @@ struct CinematicCoreMacOSApp: App {
                 cameraManager: cameraManager,
                 systemExtensionManager: systemExtensionManager,
                 controller: settingsWindowController,
-                onDirectorPreferencesChanged: { [show] in show.directorPreferencesChanged($0) }
+                onDirectorPreferencesChanged: { [show] in show.directorPreferencesChanged($0) },
+                shadowLogProvider: { [show] in show.shadowLogForExport }
             )
         }
 

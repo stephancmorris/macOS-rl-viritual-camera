@@ -59,6 +59,11 @@ final class DirectorController: ObservableObject, DirectorConsoleControlling {
     /// Without them identity is never confirmed, so nothing can be prepared.
     private(set) var adapter: DirectorEvidenceAdapter?
     private(set) var preferences: DirectorPreferences?
+    private(set) var runSheet: RunSheet?
+    private(set) var isAttached = false
+    /// Style changes retire stale work without changing authority or its epoch.
+    enum StyleEvent: Equatable { case policyChanged(segmentID: UUID?) }
+    private(set) var lastStyleEvent: StyleEvent?
     private var takePermits = TakePermitIssuer()
     private(set) var shadowRecorder: DirectorShadowRecorder?
     private var shadowTakeID: UUID?
@@ -96,9 +101,11 @@ final class DirectorController: ObservableObject, DirectorConsoleControlling {
          adapterParameters: DirectorEvidenceAdapter.Parameters? = nil,
          cutReadinessParameters: DirectorReadiness.Parameters? = nil,
          shadowLog: DirectorShadowLog? = nil,
+         runSheet: RunSheet? = nil,
          log: ((String) -> Void)? = nil) {
         self.show = show
-        self.shadowRecorder = shadowLog.map(DirectorShadowRecorder.init(log:))
+        self.runSheet = runSheet
+        if let shadowLog { self.shadowRecorder = DirectorShadowRecorder(log: shadowLog) }
         self.ticker = ticker
         self.clock = clock
         self.qualifiedLevels = qualifiedLevels
@@ -107,6 +114,7 @@ final class DirectorController: ObservableObject, DirectorConsoleControlling {
         self.log = log ?? { Self.logger.notice("[DIRECTOR] \($0, privacy: .public)") }
         // Every launch starts Manual (U2); nothing is restored.
         self.directorSection = .atLaunch(qualified: Self.qualification(qualifiedLevels()))
+        refreshSection()
     }
 
     // MARK: Lifecycle
@@ -129,11 +137,13 @@ final class DirectorController: ObservableObject, DirectorConsoleControlling {
             self.tick()
             return true
         }
-        log("attached · shadow only, no camera effects")
+        isAttached = true
+        log("attached · default tick observes only; effects require explicit gated requests")
         refreshSection()
     }
 
     func detach() {
+        isAttached = false
         ticker.stop()
         detachHooks()
     }
@@ -191,7 +201,7 @@ final class DirectorController: ObservableObject, DirectorConsoleControlling {
         let actionID = UUID()
         shadowTakeID = actionID
         emitShadow(DirectorShadowRecorder.action(.take, id: actionID), authority: authority)
-        let style = preferences?.style(for: .liveEvent)
+        let style = effectiveStyle
         let timing = style.flatMap { value -> DirectorAuthority.TakeTiming? in
             guard (try? value.validated()) != nil else { return nil }
             return .init(now: clock(), minimumShotDuration: value.minimumShotDuration)
@@ -293,7 +303,7 @@ final class DirectorController: ObservableObject, DirectorConsoleControlling {
     private func emitShadow(_ event: DirectorShadowRecord.Event, authority before: DirectorAuthority) {
         guard let show else { return }
         shadowRecorder?.emit(event, show: show, authority: before, policy: policyRevision,
-            nomination: nominationRevision, evidence: evidenceRevision, preferences: preferences)
+            nomination: nominationRevision, evidence: evidenceRevision, preferences: preferences, segment: runSheet?.current)
     }
 
     private func takeFinished(origin: TakeOrigin, result: TakeResult) {
@@ -339,8 +349,12 @@ final class DirectorController: ObservableObject, DirectorConsoleControlling {
                                  take: TakeAvailability, now: TimeInterval) -> DirectorReadiness.Inputs? {
         guard adapter.parameters.isValid, now.isFinite, now >= 0, sample.sampledAt == now,
               let state = adapter.state(for: sample.channel), let sampledAt = state.lastSampleAt,
+              state.lockedTargetID == sample.lockedTargetID,
               sampledAt >= 0, now >= sampledAt,
               now - sampledAt <= adapter.parameters.maximumObservationAge else { return nil }
+        // A new nomination must first pass through the adapter. The previous
+        // subject's confirmation and settled duration cannot authorize it in
+        // the interval before the next evidence tick.
         let rawIdentity = IdentityEvidence.classify(sample, maximumObservationAge: adapter.parameters.maximumObservationAge)
         let settled = sample.holdingSteady && sample.cropConverged && sample.subjectSpeed.isFinite &&
             sample.subjectSpeed >= 0 && sample.subjectSpeed <= adapter.parameters.stillSpeed
@@ -408,8 +422,43 @@ final class DirectorController: ObservableObject, DirectorConsoleControlling {
     /// Cuts arrive in B-08; there is never a next cut to cancel in shadow.
     func cancelNextCut() {}
 
-    /// Run-sheet segments arrive with A-13 / B-11.
-    func advanceSegment() {}
+    /// Explicitly supplied show context only; no authority or show identity is restored.
+    @discardableResult
+    func setRunSheet(_ sheet: RunSheet?) -> Bool {
+        guard sheet != runSheet else { return true }
+        guard policyRevision < UInt64.max else { return false }
+        runSheet = sheet
+        styleContextChanged()
+        return true
+    }
+
+    /// Operator advancement is style-scoped. It cannot grant or pause authority.
+    func advanceSegment() {
+        guard var next = runSheet, next.advance(), policyRevision < UInt64.max else { return }
+        runSheet = next
+        styleContextChanged()
+        emitShadow(DirectorShadowRecorder.action(.advanceSegment, outcome: .accepted), authority: authority)
+    }
+
+    var effectiveStyle: DirectorStyle? {
+        guard let preferences, (try? preferences.validated()) != nil else { return nil }
+        return preferences.style(for: runSheet?.current?.type ?? .liveEvent)
+    }
+
+    /// Pure preparation choice using the current segment at the time of the call.
+    /// The caller still needs the independent preparation and authority gates.
+    func choosePreparation(_ timeline: DirectorShotPolicy.Timeline, preview: ChannelID) -> DirectorShotPolicy.Decision {
+        guard let style = effectiveStyle else { return .abstain(.invalidInput) }
+        return DirectorShotPolicy.choosePreparation(timeline, preview: preview, parameters: .init(style))
+    }
+
+    private func styleContextChanged() {
+        policyRevision += 1
+        takePermits.retire()
+        assistPreparation.retire()
+        lastStyleEvent = .policyChanged(segmentID: runSheet?.currentSegmentID)
+        refreshSection()
+    }
 
     /// Subject override arrives with B-10 (E1).
     func overrideSubject(on channel: ChannelID, at point: CGPoint) {}
@@ -505,6 +554,10 @@ final class DirectorController: ObservableObject, DirectorConsoleControlling {
     private func makeSection() -> Section {
         let qualified = Self.qualification(qualifiedLevels())
         var section = Section.atLaunch(qualified: qualified)
+        if let runSheet, let current = runSheet.current {
+            section.runSheet = .init(current: RunSheetSegmentText.title(current),
+                next: runSheet.next.map(RunSheetSegmentText.title))
+        }
         guard isDirecting, authority.level != .suggest else {
             if !authority.running { section.activity = .paused(.showStopped) }
             return section

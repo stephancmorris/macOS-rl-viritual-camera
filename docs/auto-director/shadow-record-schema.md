@@ -2,7 +2,7 @@
 
 Status: **D-02 implementation specification for A-09; AWAITING OWNER review.** This document specifies a passive, Codable metadata record, not authority to run a show, collect media, or change an open product decision. It changes no Swift behaviour.
 
-Current implementation review: [18 October status](../../reports/auto-director/d01-d04-review-2026-10-18.md). Main `434e26a` contains the A-09 schema. B-04/PR #65 is a separate, unmerged storage candidate; its JSONL export API does not yet supply the companion manifest and visible session/time selection required by §8. Those requirements remain pending; a storage test pass does not satisfy them.
+Current implementation review: [18 October status](../../reports/auto-director/d01-d04-review-2026-10-18.md). The [20 October candidate group](../../reports/auto-director/next-group-2026-10-20/README.md) extends the unmerged B-04 storage candidate with the §8 manifest, validated session inventory, inclusive UTC selection and synthetic local export rehearsal. Default writer budgets remain absent; production external destination selection and signed sandbox export still require the owner-reserved entitlement change. A synthetic test pass does not satisfy live qualification or signed export acceptance.
 
 ## Sources and decision boundary
 

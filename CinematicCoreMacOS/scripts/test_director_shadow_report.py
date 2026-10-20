@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 """C-05 synthetic fixtures; no person/media or live qualifications."""
+import copy
 import io
 import json
 from pathlib import Path
@@ -210,6 +211,246 @@ class ShadowReportTests(unittest.TestCase):
             self.assertEqual(out.read_bytes(), before)
             invalid = [sys.executable, str(Path(report.__file__)), str(src), '--match-window-seconds', 'nan']
             self.assertEqual(subprocess.run(invalid, capture_output=True).returncode, 2)
+
+
+def manifest_for(rows, exported_at='2026-10-19T00:00:00.000Z'):
+    return {
+        'exportSchemaVersion': 1,
+        'exportID': '3C38781E-8078-4D22-912E-0FB9A9C50154',
+        'exportedAtUTC': exported_at,
+        'sessionIDs': sorted({row['sessionID'] for row in rows}),
+        'recordCount': len(rows),
+        'evidenceClasses': sorted({row['evidenceClass'] for row in rows}),
+        'recordSchemaVersions': sorted({row['schemaVersion'] for row in rows}),
+        'retention': 'explicitExport',
+    }
+
+
+def jsonl_bytes(rows):
+    return ('\n'.join(json.dumps(row) for row in rows) + ('\n' if rows else '')).encode()
+
+
+def write_bundle(directory, rows, manifest=None, raw_manifest=None):
+    directory.mkdir(exist_ok=True)
+    (directory / 'records.jsonl').write_bytes(jsonl_bytes(rows))
+    if raw_manifest is None:
+        raw_manifest = json.dumps(manifest if manifest is not None else manifest_for(rows)).encode()
+    (directory / 'manifest.json').write_bytes(raw_manifest)
+
+
+def run_bundle(rows, manifest=None, raw_manifest=None, **limits):
+    with tempfile.TemporaryDirectory() as temporary:
+        directory = Path(temporary)
+        write_bundle(directory, rows, manifest, raw_manifest)
+        records, issues, source = report.load_input(directory, **limits)
+        return report.analyze(records, 2, issues, source)
+
+
+class ExportBundleTests(unittest.TestCase):
+    def assert_blocked(self, data):
+        self.assertTrue(report.blocking_input(data['issues']))
+        self.assertIsNone(data['source']['manifest'])
+        self.assertEqual(sum(stats['compared'] for _, stats, _ in data['groups']), 0)
+        self.assertFalse(data['dwell'])
+        text = report.markdown(data, 2)
+        self.assertIn('export bundle not validated', text)
+        self.assertNotIn('PRIVATE', text)
+
+    def test_shared_swift_python_bundle_preserves_known_metrics(self):
+        directory = Path(__file__).parent / 'fixtures/director-shadow-synthetic-export'
+        records, issues, source = report.load_input(directory)
+        data = report.analyze(records, 2, issues, source)
+        self.assertFalse(report.blocking_input(issues))
+        self.assertEqual(source['manifest'], manifest_for(records))
+        stats = data['groups'][0][1]
+        self.assertEqual((stats['compared'], stats['exact']), (2, 2))
+        self.assertAlmostEqual(next(iter(data['dwell'].values()))[0], 10)
+        text = report.markdown(data, 2)
+        self.assertIn('explicit-export bundle', text)
+        self.assertIn('2026-10-19T00:00:00.000Z', text)
+        self.assertIn('Retention: explicitExport', text)
+        self.assertNotIn('unbundled', text)
+
+    def test_every_required_key_and_unknown_private_additions_are_rejected(self):
+        rows = fixture()
+        original = manifest_for(rows)
+        for field in original:
+            with self.subTest(missing=field):
+                changed = copy.deepcopy(original)
+                changed.pop(field)
+                self.assert_blocked(run_bundle(rows, changed))
+        for field, value in [('destination', '/PRIVATE_PATH'), ('name', 'PRIVATE_NAME'), ('frame', 'PRIVATE_FRAME')]:
+            with self.subTest(unknown=field):
+                changed = copy.deepcopy(original)
+                changed[field] = value
+                self.assert_blocked(run_bundle(rows, changed))
+
+    def test_manifest_rejects_noncanonical_types_tokens_dates_and_versions(self):
+        rows = fixture()
+        changes = [
+            ('exportSchemaVersion', True), ('exportSchemaVersion', 1.0), ('exportSchemaVersion', '1'),
+            ('exportSchemaVersion', 2), ('exportSchemaVersion', 0),
+            ('recordCount', True), ('recordCount', 7.0), ('recordCount', -1), ('recordCount', 2**63),
+            ('exportID', token('export').lower()), ('exportID', 'PRIVATE_NOT_A_TOKEN'),
+            ('exportedAtUTC', '2026-02-30T00:00:00.000Z'),
+            ('exportedAtUTC', '2026-10-19T00:00:00Z'),
+            ('exportedAtUTC', '2026-10-19T00:00:00.000+00:00'),
+            ('exportedAtUTC', None), ('exportedAtUTC', True),
+            ('sessionIDs', [token('session').lower()]), ('sessionIDs', None),
+            ('evidenceClasses', ['PRIVATE_CLASS']), ('evidenceClasses', 'synthetic'),
+            ('recordSchemaVersions', [True]), ('recordSchemaVersions', [2]),
+            ('retention', 'ordinaryLog'), ('retention', None),
+        ]
+        for field, value in changes:
+            with self.subTest(field=field, value=value):
+                changed = manifest_for(rows)
+                changed[field] = value
+                self.assert_blocked(run_bundle(rows, changed))
+        for raw in [b'null', b'[]', b'true', b'1', b'"PRIVATE_STRING"', b'{"recordCount":NaN}']:
+            with self.subTest(root=raw):
+                self.assert_blocked(run_bundle(rows, raw_manifest=raw))
+
+    def test_summaries_must_be_exact_sorted_unique_sets_of_the_actual_rows(self):
+        rows = fixture() + [record(0, 1, {
+            'kind': 'abstention', 'decisionID': token('recorded-abstention'), 'stage': 'cut',
+            'reasons': [{'domain': 'observation', 'code': 'cutPolicyUnavailable'}],
+        }, session='second-session', evidence='recorded')]
+        original = manifest_for(rows)
+        clean = run_bundle(rows, original)
+        self.assertFalse(report.blocking_input(clean['issues']))
+        self.assertEqual(clean['source']['manifest']['evidenceClasses'], ['recorded', 'synthetic'])
+        changes = [
+            ('recordCount', len(rows) - 1), ('recordCount', len(rows) + 1),
+            ('sessionIDs', list(reversed(original['sessionIDs']))),
+            ('sessionIDs', original['sessionIDs'] + [original['sessionIDs'][0]]),
+            ('sessionIDs', original['sessionIDs'][:1]),
+            ('sessionIDs', sorted(original['sessionIDs'] + [token('unobserved-session')])),
+            ('evidenceClasses', ['synthetic', 'recorded']),
+            ('evidenceClasses', ['recorded', 'synthetic', 'synthetic']),
+            ('evidenceClasses', ['synthetic']), ('evidenceClasses', ['live', 'recorded', 'synthetic']),
+            ('recordSchemaVersions', []), ('recordSchemaVersions', [1, 1]),
+        ]
+        for field, value in changes:
+            with self.subTest(field=field, value=value):
+                changed = copy.deepcopy(original)
+                changed[field] = value
+                self.assert_blocked(run_bundle(rows, changed))
+
+    def test_source_retention_uses_export_time_and_exact_thirty_day_boundary(self):
+        rows = fixture()
+        before_expiry = manifest_for(rows, '2026-11-16T23:59:59.999Z')
+        self.assertFalse(report.blocking_input(run_bundle(rows, before_expiry)['issues']))
+        for exported_at in ['2026-10-17T23:59:59.999Z', '2026-11-17T00:00:00.000Z', '2026-11-17T00:00:00.001Z']:
+            with self.subTest(exported_at=exported_at):
+                self.assert_blocked(run_bundle(rows, manifest_for(rows, exported_at)))
+
+    def test_old_explicit_export_is_not_expired_by_the_analysis_clock(self):
+        rows = fixture()
+        for row in rows:
+            row['recordedAtUTC'] = '2000-01-01T00:00:00.000Z'
+        data = run_bundle(rows, manifest_for(rows, '2000-01-02T00:00:00.000Z'))
+        self.assertFalse(report.blocking_input(data['issues']))
+        self.assertEqual(sum(stats['exact'] for _, stats, _ in data['groups']), 2)
+        self.assertTrue(data['dwell'])
+
+    def test_empty_export_has_empty_summaries_and_no_invented_observations(self):
+        data = run_bundle([])
+        self.assertFalse(report.blocking_input(data['issues']))
+        self.assertEqual(data['records'], 0)
+        self.assertEqual(data['source']['manifest']['sessionIDs'], [])
+        self.assertEqual(data['source']['manifest']['evidenceClasses'], [])
+        self.assertEqual(data['source']['manifest']['recordSchemaVersions'], [])
+        self.assertEqual(data['groups'], [])
+        self.assertIn('Unavailable', report.markdown(data, 2))
+
+    def test_valid_manifest_does_not_clear_partial_session_or_pair_losses(self):
+        for rows in [fixture()[3:], fixture()[:2]]:
+            with self.subTest(sequences=[row['sequence'] for row in rows]):
+                data = run_bundle(rows)
+                self.assertIsNotNone(data['source']['manifest'])
+                self.assertEqual(sum(stats['compared'] for _, stats, _ in data['groups']), 0)
+                self.assertTrue(all(blocked for _, _, blocked in data['groups']))
+                self.assertFalse(data['dwell'])
+
+    def test_invalid_record_cannot_be_laundered_by_a_matching_accepted_record_count(self):
+        rows = fixture()
+        manifest = manifest_for(rows[1:])
+        rows[0]['frame'] = 'PRIVATE_FRAME'
+        data = run_bundle(rows, manifest)
+        self.assertEqual(data['issues']['rejected_records'], 1)
+        self.assert_blocked(data)
+
+    def test_duplicate_json_keys_and_non_utf8_transport_are_rejected(self):
+        rows = fixture()
+        encoded = json.dumps(manifest_for(rows)).encode()
+        duplicate = encoded[:-1] + b',"exportSchemaVersion":1}'
+        for raw in [duplicate, json.dumps(manifest_for(rows)).encode('utf-16'), b'\xff']:
+            with self.subTest(encoding=raw[:16]):
+                self.assert_blocked(run_bundle(rows, raw_manifest=raw))
+        records, issues = report.load_records(io.BytesIO(json.dumps(rows[0]).encode('utf-16')))
+        self.assertEqual(records, [])
+        self.assertGreater(issues['rejected_records'], 0)
+
+    def test_manifest_and_jsonl_share_the_same_bounded_input_budget(self):
+        rows = fixture()
+        raw_manifest = json.dumps(manifest_for(rows)).encode()
+        exact_bytes = len(raw_manifest) + len(jsonl_bytes(rows))
+        exact = run_bundle(rows, raw_manifest=raw_manifest, maximum_input_bytes=exact_bytes)
+        self.assertFalse(report.blocking_input(exact['issues']))
+        for limits in [
+            {'maximum_input_bytes': exact_bytes - 1},
+            {'maximum_input_bytes': len(raw_manifest) - 1},
+            {'maximum_records': len(rows) - 1},
+            {'maximum_line_bytes': 4},
+        ]:
+            with self.subTest(limits=limits):
+                data = run_bundle(rows, raw_manifest=raw_manifest, **limits)
+                self.assertGreater(data['issues']['input_limit'], 0)
+                self.assert_blocked(data)
+
+    def test_cli_bundle_failures_are_fixed_diagnostics_and_never_overwrite_output(self):
+        command = [sys.executable, str(Path(report.__file__))]
+        with tempfile.TemporaryDirectory() as temporary:
+            directory = Path(temporary) / 'PRIVATE_DIRECTORY'
+            write_bundle(directory, fixture())
+            arguments = command + [str(directory), '--match-window-seconds', '2']
+            good = subprocess.run(arguments, capture_output=True, text=True)
+            self.assertEqual(good.returncode, 0)
+            self.assertIn('explicit-export bundle', good.stdout)
+            output = Path(temporary) / 'report.md'
+            self.assertEqual(subprocess.run(arguments + ['--output', str(output)], capture_output=True).returncode, 0)
+            before = output.read_bytes()
+            self.assertEqual(subprocess.run(arguments + ['--output', str(output)], capture_output=True).returncode, 1)
+            self.assertEqual(output.read_bytes(), before)
+            (directory / 'manifest.json').unlink()
+            invalid = subprocess.run(arguments, capture_output=True, text=True)
+            self.assertEqual(invalid.returncode, 2)
+            self.assertIn('export bundle not validated', invalid.stdout)
+            self.assertIn('invalid_export_manifest: 1', invalid.stdout)
+            self.assertNotIn('PRIVATE', invalid.stdout + invalid.stderr)
+            write_bundle(directory, fixture())
+            (directory / 'records.jsonl').unlink()
+            missing = subprocess.run(arguments, capture_output=True, text=True)
+            self.assertEqual(missing.returncode, 2)
+            self.assertIn('missing_bundle_records: 1', missing.stdout)
+            unavailable = subprocess.run(command + [str(directory / 'PRIVATE_MISSING.jsonl'), '--match-window-seconds', '2'],
+                                         capture_output=True, text=True)
+            self.assertEqual(unavailable.returncode, 1)
+            self.assertNotIn('PRIVATE', unavailable.stdout + unavailable.stderr)
+
+    def test_file_input_is_explicitly_unbundled_even_beside_a_manifest(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            directory = Path(temporary)
+            write_bundle(directory, fixture())
+            (directory / 'manifest.json').write_text('PRIVATE_INVALID_MANIFEST')
+            records, issues, source = report.load_input(directory / 'records.jsonl')
+            data = report.analyze(records, 2, issues, source)
+            self.assertEqual(sum(stats['exact'] for _, stats, _ in data['groups']), 2)
+            self.assertEqual(source, {'kind': 'unbundled'})
+            text = report.markdown(data, 2)
+            self.assertIn('unbundled JSONL', text)
+            self.assertIn('explicit-export retention is not established', text)
+            self.assertNotIn('PRIVATE', text)
 
 
 if __name__ == '__main__':

@@ -2,7 +2,7 @@ import Foundation
 
 /// A-13's optional, operator-advanced run sheet. This value selects styles
 /// only; it cannot issue commands or change Director authority. F3 remains
-/// open, so this model is not wired into the live controller or preferences.
+/// open for live acceptance; the controller accepts only explicit sheet injection.
 nonisolated struct RunSheet: Codable, Equatable, Sendable {
     static let currentVersion = 1
 
