@@ -1,0 +1,52 @@
+{
+  "date": "2026-10-22",
+  "basePR": 73,
+  "branch": "codex/director-decision-evidence",
+  "sourceFingerprint": "c4f2f2d717d2d958df0a92e890bd9a0d7ecabce930bda4c2f24f3603c0798340",
+  "evidenceClass": "synthetic",
+  "swift": {
+    "passedDefinitions": 1012,
+    "passedExpanded": 1550,
+    "failed": 0,
+    "skipped": 3,
+    "coreMLCpuInterop": "configured-passed"
+  },
+  "python": {
+    "scripts": 78,
+    "training": 14,
+    "failed": 0,
+    "actualDecisionBundleChecks": true
+  },
+  "release": {
+    "result": "passed",
+    "codeSigningAllowed": false
+  },
+  "skips": [
+    "RealCameraTests.twoWebcamsRenderPicturesAndBJoinsWithoutCrashing",
+    "ReadinessEvaluationTests.replayConsentedFolderWhenConfigured",
+    "InstrumentationInvestigationTests.compareAcceleratedWallClockAndSourceClockWindows"
+  ],
+  "capture": {
+    "records": 10,
+    "wouldPrepare": 1,
+    "wouldCut": 1,
+    "manualTakes": 1,
+    "comparedCuts": 1,
+    "exactCuts": 1,
+    "unmatchedPreparations": 1,
+    "unscoredTakes": 0,
+    "automaticDeadlineFired": false,
+    "independentOpportunities": null,
+    "perLevelBinding": "missing",
+    "perLevelEvaluation": "incomplete"
+  },
+  "qualification": false,
+  "signedInstall": false,
+  "realCameraOrReceiver": false,
+  "localArtifacts": "/private/tmp/alfie-decision-evidence-20261022",
+  "remainingCaptureGaps": [
+    "legacyComparisonRequiresSeparateRenewedSession",
+    "segmentStyleChangeRequiresNewSuppliedVersion",
+    "stopTerminalSourceProvenanceUnavailable"
+  ]
+}

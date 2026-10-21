@@ -249,10 +249,7 @@ struct InspectorDrawer: View {
             get: { cameraManager.selectedCamera },
             set: { newValue in
                 guard let newValue else { return }
-                cameraManager.selectedCamera = newValue
-                if cameraManager.isRunning {
-                    Task { try? await cameraManager.restartWithCamera(newValue) }
-                }
+                Task { try? await cameraManager.restartWithCamera(newValue) }
             }
         )
     }

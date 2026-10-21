@@ -2,6 +2,7 @@
 """Synthetic evaluation metadata and report regressions; no app or real evidence."""
 import copy
 import json
+import os
 from pathlib import Path
 import subprocess
 import sys
@@ -80,6 +81,25 @@ def with_speed(rows, speed):
 
 
 class EvaluationTests(unittest.TestCase):
+    def test_actual_decision_rehearsal_preserves_missing_per_level_binding(self):
+        requested = os.environ.get('ALFIE_DIRECTOR_DECISION_EXPORT')
+        if not requested:
+            return
+        data = report.summarize_shadow(Path(requested), 2, [])
+        self.assertTrue(data['exportValidated'])
+        self.assertEqual(data['records'], 10)
+        self.assertEqual({g['reason'] for g in data['gaps']},
+                         {'missingShadowBinding', 'mixedLevelModeOrModel'})
+        self.assertTrue(data['rows'])
+        self.assertTrue(all(r['status'] == 'incomplete' and r['counts']['compared'] is None
+                            and r['counts']['exact'] is None for r in data['rows']))
+        self.assertEqual(sum(r['counts']['completed_actions'] for r in data['rows']), 1)
+        # C-05 may compare the tightly scoped manual Take. D-06 does not pool
+        # this off/assist/auto integration rehearsal into a per-level trial.
+        self.assertEqual(data['sessions'][0]['judgeModels'], [])
+        self.assertEqual(sum(p['subjectSpeed']['reportedSamples']
+                             for p in data['parameterEvidence']), 2)
+
     def test_wrong_proposal_is_visible_and_never_becomes_wrong_committed_rate(self):
         run = run_fixture(); run['metrics']['wrongSubjectProposals'] = 1
         result = report.evaluate(envelope(run))

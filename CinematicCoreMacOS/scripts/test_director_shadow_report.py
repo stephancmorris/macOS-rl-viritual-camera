@@ -161,6 +161,26 @@ class ShadowReportTests(unittest.TestCase):
         self.assertEqual(sum(s['compared'] for _, s, _ in data['groups']), 0)
         self.assertEqual(sum(s['unscored_actions'] for _, s, _ in data['groups']), 1)
 
+    def test_actual_swift_decision_bundle_when_explicitly_supplied(self):
+        requested = os.environ.get('ALFIE_DIRECTOR_DECISION_EXPORT')
+        if not requested:
+            return
+        records, issues, source = report.load_input(Path(requested))
+        data = report.analyze(records, 2, issues, source)
+        self.assertFalse(report.blocking_input(data['issues']), data['issues'])
+        self.assertIsNotNone(source['manifest'])
+        self.assertEqual({r['evidenceClass'] for r in records}, {'synthetic'})
+        self.assertEqual(sum(r['event']['kind'] == 'wouldPrepare' for r in records), 1)
+        self.assertGreaterEqual(sum(r['event']['kind'] == 'wouldCut' for r in records), 1)
+        self.assertEqual(data['issues']['incomplete_or_duplicate_action_pairs'], 0)
+        self.assertEqual(data['issues']['inconsistent_action_pairs'], 0)
+        totals = sum((stats for _, stats, _ in data['groups']), report.Counter())
+        self.assertEqual((totals['completed_actions'], totals['compared'], totals['exact']), (1, 1, 1))
+        self.assertEqual(totals['unscored_actions'], 0)
+        # Preparation intent is recorded before dispatch, not credited as an
+        # operator completion or independent quality/safety opportunity.
+        self.assertGreaterEqual(totals['unmatched_predictions'], 1)
+
     def test_known_agreement_and_interior_dwell(self):
         data = run(fixture()); s = sum((stats for _, stats, _ in data['groups']), report.Counter())
         self.assertEqual((s['predictions'], s['completed_actions'], s['compared'], s['exact']), (2, 2, 2, 2))

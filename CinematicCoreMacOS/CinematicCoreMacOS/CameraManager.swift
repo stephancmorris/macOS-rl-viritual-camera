@@ -981,6 +981,43 @@ final class CameraManager: NSObject, ObservableObject {
     @Published private(set) var isProgramHolding = false
     @Published private(set) var zoomMoveDirection: OperatorCommand.ZoomDirection?
     private var sessionStartTask: Task<Void, Never>?
+    /// One operator intent owns startup, including the camera-switch wait.
+    /// Stop or a replacement retires it before any suspended work can resume.
+    private var sessionStartRequest: UUID?
+    #if DEBUG
+    var sessionRestartWaitForTesting: (() async throws -> Void)?
+    var sessionCaptureStartForTesting: (() async throws -> Void)?
+    var sessionConfigureForTesting: (() async throws -> Void)?
+    var sessionStartRunningForTesting: (() async -> Void)?
+    var sessionStopRunningForTesting: (() -> Void)?
+    var sessionStartTaskForTesting: Task<Void, Never>? { sessionStartTask }
+    #endif
+
+    private func beginSessionStart() -> UUID {
+        sessionStartTask?.cancel()
+        sessionStartTask = nil
+        let request = UUID()
+        sessionStartRequest = request
+        isStartingSession = true
+        return request
+    }
+
+    private func checkSessionStart(_ request: UUID) throws {
+        try Task.checkCancellation()
+        guard sessionStartRequest == request else { throw CancellationError() }
+    }
+
+    private func finishSessionStart(_ request: UUID) {
+        guard sessionStartRequest == request else { return }
+        sessionStartRequest = nil
+        sessionStartTask = nil
+        isStartingSession = false
+    }
+
+    private func stopFailedSessionStart(_ request: UUID) {
+        guard sessionStartRequest == request else { return }
+        stopCapture()
+    }
     private var lastGoodProgramBuffer: CVPixelBuffer?
     private var lastGoodProgramCrop: CropEngine.CropRect?
     private var lastTrackingCrop: CropEngine.CropRect?
@@ -1275,13 +1312,18 @@ final class CameraManager: NSObject, ObservableObject {
         case .returnToWide: returnToWide()
         case .startSession:
             guard !isRunning, !isStartingSession else { return .completed }
-            isStartingSession = true
+            let request = beginSessionStart()
             sessionStartTask = Task { [weak self] in
                 guard let self else { return }
-                defer { self.isStartingSession = false }
-                do { try await self.startCapture() }
-                catch is CancellationError { }
-                catch { self.error = error as? CameraError; self.controlStatus = error.localizedDescription }
+                defer { self.finishSessionStart(request) }
+                do { try await self.startCapture(request: request) }
+                catch is CancellationError { self.stopFailedSessionStart(request) }
+                catch {
+                    guard self.sessionStartRequest == request else { return }
+                    self.stopFailedSessionStart(request)
+                    self.error = error as? CameraError
+                    self.controlStatus = error.localizedDescription
+                }
             }
         case .stopSession: stopCapture()
         }
@@ -1324,6 +1366,8 @@ final class CameraManager: NSObject, ObservableObject {
     }
     /// Test seam: mark the source missing as a hot unplug would.
     func setSourceMissingForTesting(_ missing: Bool) { sourceMissing = missing }
+
+    func setDeviceLeaseForTesting(_ lease: CaptureDeviceRegistry.Lease?) { deviceLease = lease }
     /// Test seam: feed one captured buffer through the frame path.
     func processFrameForTesting(_ pixelBuffer: CVPixelBuffer, timestampSeconds: Double) async {
         await processFrame(pixelBuffer: pixelBuffer, timestampSeconds: timestampSeconds)
@@ -1503,6 +1547,15 @@ final class CameraManager: NSObject, ObservableObject {
 
     func startCapture() async throws {
         try Task.checkCancellation()
+        if isStartingSession { stopCapture() }
+        let request = beginSessionStart()
+        defer { finishSessionStart(request) }
+        do { try await startCapture(request: request) }
+        catch { stopFailedSessionStart(request); throw error }
+    }
+
+    private func startCapture(request: UUID) async throws {
+        try checkSessionStart(request)
         cancelOperatorMotion()
         commands.setTrackingOwnership(false)
         lastGoodProgramBuffer = nil
@@ -1520,25 +1573,28 @@ final class CameraManager: NSObject, ObservableObject {
         sourcePixelHeight = 0
         captureProfileStatus = "Configuring capture…"
 
+        #if DEBUG
+        if let sessionCaptureStartForTesting {
+            try await sessionCaptureStartForTesting()
+            try checkSessionStart(request)
+            return
+        }
+        #endif
+
         if preferredInputSource == .validationClip {
-            do {
-                try await startValidationClipPlayback()
-            } catch {
-                outputPort.stop()
-                throw error
-            }
+            try await startValidationClipPlayback()
+            try checkSessionStart(request)
             return
         }
         
         // Check authorization
         let generation = captureGeneration
         let authorized = await checkAuthorization()
-        try Task.checkCancellation()
+        try checkSessionStart(request)
         guard generation == captureGeneration else { throw CancellationError() }
         guard authorized else {
             Self.logger.error("Camera authorization denied")
             error = .authorizationDenied
-            outputPort.stop()
             throw CameraError.authorizationDenied
         }
         Self.logger.notice("Camera authorized")
@@ -1551,32 +1607,18 @@ final class CameraManager: NSObject, ObservableObject {
         
         // Configure session
         Self.logger.notice("Configuring capture session")
-        do {
-            try await configureSession()
-        } catch {
-            releaseDevice()
-            outputPort.stop()
-            throw error
-        }
-        try Task.checkCancellation()
+        try await configureSession()
+        try checkSessionStart(request)
         guard generation == captureGeneration else { throw CancellationError() }
         Self.logger.notice("Capture session configured")
         
         // Start running on this channel's session executor: startRunning()
         // blocks, and must never block the MainActor or the other channel.
-        let session = CaptureSessionBox(captureSession)
-        await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in
-            sessionQueue.async { @Sendable in
-                session.value.startRunning()
-                continuation.resume()
-            }
-        }
+        await startSessionAsync()
         // A Stop during startup retired this generation: the late start must
         // not revive it.
-        guard generation == captureGeneration else {
-            sessionQueue.async { @Sendable in session.value.stopRunning() }
-            throw CancellationError()
-        }
+        try checkSessionStart(request)
+        guard generation == captureGeneration else { throw CancellationError() }
         do {
             // macOS has no .inputPriority preset, and the session's default
             // .high preset re-configures the device's activeFormat (4K →
@@ -1602,6 +1644,7 @@ final class CameraManager: NSObject, ObservableObject {
     
     /// Stop the capture session
     func stopCapture() {
+        sessionStartRequest = nil
         sessionStartTask?.cancel()
         sessionStartTask = nil
         isStartingSession = false
@@ -1965,25 +2008,33 @@ final class CameraManager: NSObject, ObservableObject {
     
     /// Restart capture with a different camera
     func restartWithCamera(_ cameraDevice: CameraDevice) async throws {
+        try Task.checkCancellation()
         Self.logger.notice("Switching to camera: \(cameraDevice.name, privacy: .public)")
-        
-        // Stop current session
-        let wasRunning = isRunning && activeInputSource == .liveCamera
-        if wasRunning {
-            Self.logger.debug("Stopping current session before camera switch")
-            stopCapture()
-            // Give the session time to fully stop
-            try await Task.sleep(for: .milliseconds(500))
+        let needsRestart = (isRunning && activeInputSource == .liveCamera)
+            || (isStartingSession && preferredInputSource == .liveCamera)
+        guard needsRestart else {
+            selectedCamera = cameraDevice
+            return
         }
-        
-        // Update selected camera
-        selectedCamera = cameraDevice
-        Self.logger.notice("Selected camera updated")
-        
-        // Start new session if it was running before
-        if wasRunning {
-            Self.logger.debug("Restarting capture after camera switch")
-            try await startCapture()
+
+        stopCapture()
+        let request = beginSessionStart()
+        defer { finishSessionStart(request) }
+        do {
+            // Preserve the existing settling interval, owned by this request.
+            #if DEBUG
+            if let sessionRestartWaitForTesting { try await sessionRestartWaitForTesting() }
+            else { try await Task.sleep(for: .milliseconds(500)) }
+            #else
+            try await Task.sleep(for: .milliseconds(500))
+            #endif
+            try checkSessionStart(request)
+            selectedCamera = cameraDevice
+            Self.logger.notice("Selected camera updated")
+            try await startCapture(request: request)
+        } catch {
+            stopFailedSessionStart(request)
+            throw error
         }
     }
 
@@ -2682,6 +2733,9 @@ final class CameraManager: NSObject, ObservableObject {
     }
     
     private func configureSession() async throws {
+        #if DEBUG
+        if let sessionConfigureForTesting { try await sessionConfigureForTesting(); return }
+        #endif
         captureSession.beginConfiguration()
         defer { captureSession.commitConfiguration() }
         
@@ -2789,9 +2843,25 @@ final class CameraManager: NSObject, ObservableObject {
 
     /// Stop the session on this channel's executor without blocking.
     private func stopSessionAsync() {
+        #if DEBUG
+        if let sessionStopRunningForTesting { sessionStopRunningForTesting(); return }
+        #endif
         let session = CaptureSessionBox(captureSession)
         sessionQueue.async { @Sendable in
             if session.value.isRunning { session.value.stopRunning() }
+        }
+    }
+
+    private func startSessionAsync() async {
+        #if DEBUG
+        if let sessionStartRunningForTesting { await sessionStartRunningForTesting(); return }
+        #endif
+        let session = CaptureSessionBox(captureSession)
+        await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in
+            sessionQueue.async { @Sendable in
+                session.value.startRunning()
+                continuation.resume()
+            }
         }
     }
 
@@ -2841,17 +2911,10 @@ final class CameraManager: NSObject, ObservableObject {
         frameProcessingGate.reset()
         try await configureSession()
         guard generation == captureGeneration else { throw CancellationError() }
-        let session = CaptureSessionBox(captureSession)
-        await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in
-            sessionQueue.async { @Sendable in
-                session.value.startRunning()
-                continuation.resume()
-            }
-        }
-        guard generation == captureGeneration else {
-            sessionQueue.async { @Sendable in session.value.stopRunning() }
-            throw CancellationError()
-        }
+        await startSessionAsync()
+        // Stop/replacement already queued the retiring generation's stop.
+        // Another stop here could run after the replacement's start.
+        guard generation == captureGeneration else { throw CancellationError() }
         reassertConfiguredFormatIfNeeded()
         if captureSession.isRunning {
             sourceMissing = false

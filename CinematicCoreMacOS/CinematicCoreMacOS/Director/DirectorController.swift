@@ -347,10 +347,29 @@ final class DirectorController: ObservableObject, DirectorConsoleControlling {
     }
 
     private func emitShadow(_ event: DirectorShadowRecord.Event, authority before: DirectorAuthority,
-                            judgeObservation: DirectorJudgeShadow.Observation? = nil) {
+                            judgeObservation: DirectorJudgeShadow.Observation? = nil,
+                            evaluation: DirectorShadowRecorder.Evaluation? = nil) {
         guard let show else { return }
         shadowRecorder?.emit(event, show: show, authority: before, policy: policyRevision,
-            nomination: nominationRevision, evidence: evidenceRevision, preferences: preferences, segment: runSheet?.current, judgeObservation: judgeObservation)
+            nomination: nominationRevision, evidence: evidenceRevision, preferences: preferences, segment: runSheet?.current,
+            judgeObservation: judgeObservation, eventTime: clock(),
+            studyParameters: judgeObservation == nil && evaluation == nil ? cutExecution.captureParameters : nil,
+            evaluation: evaluation)
+    }
+
+    func captureParameters(_ binding: DirectorShadowRecorder.CaptureBinding,
+                           readiness: DirectorReadiness.Parameters, judgeMaximumAge: Double? = nil,
+                           minimumProbability: Double? = nil) -> DirectorShadowRecorder.Parameters? {
+        guard let style = effectiveStyle, let adapter, let preferences,
+              (try? preferences.validated()) != nil, readiness.isValid, adapter.parameters.isValid else { return nil }
+        return .init(binding: binding, style: style, readiness: readiness, adapter: adapter.parameters,
+                     judgeMaximumAge: judgeMaximumAge, minimumProbability: minimumProbability)
+    }
+
+    var captureCutReadinessParameters: DirectorReadiness.Parameters? { cutReadinessParameters }
+
+    func captureDecision(_ event: DirectorShadowRecord.Event, evaluation: DirectorShadowRecorder.Evaluation) {
+        emitShadow(event, authority: authority, evaluation: evaluation)
     }
 
     private func takeFinished(origin: TakeOrigin, result: TakeResult) {
@@ -410,31 +429,47 @@ final class DirectorController: ObservableObject, DirectorConsoleControlling {
             motion: sample.subjectSpeed, cropConverged: sample.cropConverged)
     }
 
-    func currentTakeState(now: TimeInterval) -> DirectorTakeState {
+    struct TakeSnapshot {
+        let live: DirectorTakeState
+        let sample: ChannelEvidenceSample?
+        let readinessInputs: DirectorReadiness.Inputs?
+        let measuredReadiness: DirectorReadiness?
+    }
+
+    func currentTakeState(now: TimeInterval) -> DirectorTakeState { currentTakeSnapshot(now: now).live }
+
+    func currentTakeSnapshot(now: TimeInterval) -> TakeSnapshot {
         let preview = show?.previewChannel
         let channel = preview.flatMap { show?.channel($0) }
         var ready = DirectorReadiness(reasons: [.evidenceUnavailable])
         var evidence = false
+        var observedSample: ChannelEvidenceSample?
+        var evaluatedInputs: DirectorReadiness.Inputs?
+        var measuredReadiness: DirectorReadiness?
         if let show, let preview, let channel, let adapter, let p = cutReadinessParameters, let inputs = show.takeInputs() {
             let sample = Self.sample(channel.evidenceReadings(now: now))
+            observedSample = sample
             let availability = TakeAvailability.evaluate(take: inputs, program: show.programChannel,
                 preview: preview, standard: ShowStandard.activeOrCurrent, editLive: show.editLive)
             if let input = Self.currentCutInputs(sample: sample, adapter: adapter, take: availability, now: now) {
                 ready = DirectorReadiness.evaluate(input, parameters: p, bar: .cut)
+                evaluatedInputs = input; measuredReadiness = ready
                 evidence = IdentityEvidence.classify(sample, maximumObservationAge: adapter.parameters.maximumObservationAge) == .confirmed &&
                     adapter.state(for: preview)?.evidenceAvailable == true
             }
         }
         #if DEBUG
-        if let override = cutReadinessForTesting { ready = override; evidence = override.isReady }
+        if let override = cutReadinessForTesting { ready = override; evidence = override.isReady; measuredReadiness = nil }
         #endif
         if show?.editLive == true { ready = .init(reasons: [.takeUnavailable]) }
-        return .init(world: .init(authority: authority, program: show?.programChannel ?? .a, preview: preview,
+        let live = DirectorTakeState(world: .init(authority: authority, program: show?.programChannel ?? .a, preview: preview,
             revisions: channel?.revisions, routeGeneration: show?.router.routeGeneration ?? 0,
             sourceMissing: channel?.sourceMissing ?? true, policyRevision: policyRevision,
             nominationRevision: nominationRevision, evidenceAvailable: evidence),
             prerequisites: prerequisites(), cutReadiness: ready,
             operatorGestureInProgress: channel?.operatorGestureInProgress ?? true)
+        return .init(live: live, sample: observedSample, readinessInputs: evaluatedInputs,
+                     measuredReadiness: measuredReadiness)
     }
 
     // MARK: Console control (DirectorConsoleControlling)

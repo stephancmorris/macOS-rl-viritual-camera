@@ -73,7 +73,11 @@ import Testing
         frame(recorder, 2) // Accepted batch queued behind the paused first write.
         recorder.config.bufferSize = 100
         frame(recorder, 3) // Accepted in-memory observation must also be preserved.
-        let queuedFrame = Task { @MainActor in frame(recorder, 4) }
+        let queuedFrame = Task { @MainActor in
+            let admitted = recorder.isRecording && recorder.hasUserConsentedToTrainingData
+            frame(recorder, 4)
+            return admitted
+        }
         let stop = Task { await recorder.stopRecording() }
         if stopFirst {
             for _ in 0..<1_000 {
@@ -83,13 +87,14 @@ import Testing
             try #require(recorder.isStopping) // Prove Stop entered before revoke.
             // queuedFrame was posted earlier, so it can be admitted before Stop.
         }
-        let acceptedAtBoundary = recorder.stats.framesRecorded
+        let persistedAtBoundary = recorder.stats.framesRecorded
+        #expect(persistedAtBoundary == 0) // The first write is still gated.
         recorder.setTrainingDataConsent(false)
         #expect(!recorder.isRecording && recorder.isStopping)
         let lateFrame = Task { @MainActor in frame(recorder, 5) }
-        await queuedFrame.value
+        let acceptedAtBoundary = 3 + (await queuedFrame.value ? 1 : 0)
         await lateFrame.value
-        #expect(recorder.stats.framesRecorded == acceptedAtBoundary)
+        #expect(recorder.stats.framesRecorded == persistedAtBoundary)
         start(recorder)
         #expect(!recorder.isRecording)
         recorder.setTrainingDataConsent(true)
@@ -104,6 +109,7 @@ import Testing
         #expect(stored.count == 1)
         let rows = try observations(try #require(stored.first))
         #expect(rows.count == acceptedAtBoundary)
+        #expect(recorder.stats.framesRecorded == acceptedAtBoundary)
         #expect(rows.compactMap { $0["t"] as? Double } == Array(1...acceptedAtBoundary).map(Double.init))
         #expect(await writer.closeCount == 1)
         #expect(recorder.stats.droppedFrames == 0)
