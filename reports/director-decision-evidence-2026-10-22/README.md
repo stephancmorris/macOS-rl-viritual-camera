@@ -19,7 +19,7 @@ The lifecycle checks suspend synthetic executor operations at actual start/recon
 
 ## Validation
 
-The full macOS suite passed **1,012 test definitions / 1,550 expanded executions**, zero failures and three existing opt-in fixture/hardware skips. The actual CoreML CPU interoperability fixture was configured and passed. All **92 Python tests** passed (78 script, 14 training), including both checks using the final Swift-produced decision bundle. Release app/extension build status is recorded in [validation.json](validation.json). Signing is disabled for these local checks.
+The full macOS suite passed **1,012 test definitions / 1,550 expanded executions**, zero failures and three existing opt-in fixture/hardware skips. The actual CoreML CPU interoperability fixture was configured and passed. All **108 Python tests** passed (78 script, 14 Director training, 12 loader validation, 4 checkpoint trust), including both checks using the final Swift-produced decision bundle. Release app/extension build status is recorded in [validation.json](validation.json). Signing is disabled for these local checks.
 
 The [actual synthetic export](evidence/decision-export/manifest.json) contains ten schema-2 rows: two cut-policy-unavailable abstentions, two level-control pairs, one preparation intent, one cut-policy decision and one manual Take pair. The [C-05 report](evidence/shadow-report.md) has one compared/exact cut, one unmatched preparation intent, no unscored Take and no complete interior dwell interval. This one authored agreement is an integration check, not a useful-opportunity denominator or quality rate.
 
@@ -28,6 +28,12 @@ The [D-06 report](evidence/evaluation.md) includes a fresh actual five-fixture r
 Independent read-only reviews checked lifecycle ownership/queue ordering, decision capture ordering/version/provenance and recorder drain/rollback behavior. They caught and led to fixes for the Inspector bypass and stale reconnect cleanup. The first clock test expected a cut when both shots were wide; its corrected assertion selects the actual evaluated abstention and verifies the evaluation clock. Final focused lifecycle/capture run:18 definitions/22 executions, zero failures. Review also identified the remaining segment/Stop/legacy-comparison capture limits above. The [next group](next-group.md) records these with bounded scopes, including two harder handoffs.
 
 No project settings, entitlements, Info.plist or extension-shared Director references changed. No physical source or receiving output was used; this batch adds no manual GUI acceptance claim.
+
+## Additional framing-loader integrity follow-up
+
+The remaining allowance supported a verified consumer-side fix under PRIVACY: the loader previously admitted non-object rows, invalid FPS and NaN crop labels that could crash training or create NaN cloning actions. It now validates the shapes and finite numeric fields used by consumers, positive finite numeric FPS, provided session identity and completed row-count consistency. Totals bind to physical persisted rows, not maximum source index. Malformed JSON is refused with session/line/field context instead of disappearing. Validation also runs for sessions below `min_frames`, so malformed short sessions now raise rather than being ignored.
+
+Twelve new temporary-corpus tests pass, as do four existing checkpoint-trust tests; the existing 100-row NumPy-generated fixture loads with consistent metadata. Independent review found no blocker in this bounded change. Optional legacy metadata/fields, fractional FPS and arbitrary subsampling/index strides remain compatible. Environment/BC timing calculations are unchanged: the audit reproduced compressed-time velocity across missing observations, and that timing contract remains a separate follow-up. Geometry ranges and float32 arithmetic safety are not established by finite-value validation. Gymnasium/Torch were unavailable, so no full pipeline run or model-quality claim is made. App build inputs are unchanged after the validated Swift/Release run; [validation.json](validation.json) separately hashes the loader.
 
 ## Remaining acceptance
 

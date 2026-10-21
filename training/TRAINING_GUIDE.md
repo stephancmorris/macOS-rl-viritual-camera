@@ -59,6 +59,12 @@ output/
     metadata.json     # Session info (fps, resolution, duration)
 ```
 
+### Loader validation
+
+`scan_sessions` validates observations and metadata before returning a session. Invalid FPS, non-object rows, nonfinite numeric labels and inconsistent provided session IDs or completed row counts raise `ValueError`; repair or explicitly replace the source corpus rather than treating rejected input as training evidence. A completed `total_frames` counts persisted rows, not the highest source frame index. Missing optional legacy metadata retains the existing fallback behavior.
+
+Frame-index strides from subsampling and dropped frames remain accepted. The current environment and behavioral-cloning consumers still assume adjacent rows at fixed FPS for velocity/action calculations. This loader validation does not correct irregular elapsed-time motion; a timing-contract follow-up remains open. No full training run or model-quality result follows from passing loader checks.
+
 ### Recommended Videos
 
 For best results, collect **5-10 diverse clips** with:

@@ -15,7 +15,10 @@
     "scripts": 78,
     "training": 14,
     "failed": 0,
-    "actualDecisionBundleChecks": true
+    "actualDecisionBundleChecks": true,
+    "loaderValidation": 12,
+    "checkpointTrust": 4,
+    "totalPassed": 108
   },
   "release": {
     "result": "passed",
@@ -48,5 +51,16 @@
     "legacyComparisonRequiresSeparateRenewedSession",
     "segmentStyleChangeRequiresNewSuppliedVersion",
     "stopTerminalSourceProvenanceUnavailable"
-  ]
+  ],
+  "sourceFingerprintScope": "App build inputs per source_fingerprint.py; Python loader hash below",
+  "loaderSha256": "0a3fd67c60d9ab936030ee32deb0b1b86933b187c12baee632d5a580bc48b7d4",
+  "loaderValidation": {
+    "result": "passed",
+    "review": "independent-no-blocker",
+    "malformedShortSessions": "raise-before-minimum-length-filter",
+    "temporalAdjacency": "not-validated",
+    "geometryRanges": "not-validated",
+    "float32ArithmeticSafety": "not-validated",
+    "fullGymTorchSmoke": "not-run-dependencies-unavailable"
+  }
 }
