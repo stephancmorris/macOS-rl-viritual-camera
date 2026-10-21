@@ -174,8 +174,8 @@ struct ShowSetupTests {
             #expect(setup.failingRows == [row])
             #expect(setup.rowState(row) == .failed("why it failed"))
             #expect(setup.rowState(.distinctDevices) == .passed)
-            #expect(setup.pairCheckTitle == "Camera B unsupported at 1080p50 with Camera A")
-            #expect(setup.pairCheckDetail.hasPrefix("Failed: \(row.title)."))
+            #expect(setup.pairCheckTitle == "Previous A + B check failed at 1080p50")
+            #expect(setup.pairCheckDetail.hasPrefix("The previous check reported: \(row.title)."))
         }
         let render = paired([ShowSetupModel.galleryRecord(.unsupported([reason(.render)]))])
         #expect(render.suggestion.contains("Wide or Pan"))
@@ -195,12 +195,34 @@ struct ShowSetupTests {
 
     @Test func passAndCertifiedCopy() {
         let certified = paired([ShowSetupModel.galleryRecord(.certified)])
-        #expect(certified.pairCheckTitle == "A + B hold 1080p50 on this Mac · certified")
+        #expect(certified.pairCheckTitle == "Previous A + B certification at 1080p50")
         let trial = model(saved: [.a: wide.uniqueID, .b: side.uniqueID])
         var measured = trial
         measured.records = [ShowSetupModel.galleryRecord(.provisional)]
-        #expect(measured.pairCheckTitle == "A + B hold 1080p50 on this Mac · trial")
-        #expect(measured.pairCheckDetail.hasSuffix(", not certified. Certification needs the 60-minute two-input soak on this exact setup."))
+        #expect(measured.pairCheckTitle == "Previous A + B trial at 1080p50")
+        #expect(measured.pairCheckDetail.contains("Current delivered formats, capture profiles and camera modes have not been checked."))
+    }
+
+    @Test(arguments: [AdmissionStatus.provisional, .certified])
+    func historicalPassNeverMarksUnmeasuredCurrentRowsAsPassed(status: AdmissionStatus) {
+        let setup = paired([ShowSetupModel.galleryRecord(status)])
+        #expect(setup.rowState(.distinctDevices) == .passed)
+        for row in [ShowSetupModel.PairCheckRow.showRate, .renderHeadroom, .memoryAndHeat] {
+            #expect(setup.rowState(row) == .notMeasured)
+            #expect(setup.accessibilityLabel(for: row).contains("Not measured yet"))
+        }
+        #expect(setup.canStartPair) // Existing guarded trial policy is unchanged.
+        #expect(setup.pairCheckDetail.contains("camera models"))
+        #expect(!setup.pairCheckDetail.contains("this exact setup"))
+    }
+
+    @Test func historicalFailureDoesNotInventPassesForUnreportedMeasurements() {
+        let setup = paired([ShowSetupModel.galleryRecord(.unsupported([reason(.render)]))])
+        #expect(setup.rowState(.renderHeadroom) == .failed("measured failure"))
+        #expect(setup.rowState(.showRate) == .notMeasured)
+        #expect(setup.rowState(.memoryAndHeat) == .notMeasured)
+        #expect(setup.accessibilityLabel(for: .renderHeadroom).contains("previous check failed"))
+        #expect(setup.canStartAOnly && !setup.canStartPair)
     }
 
     @Test func notRunCopyIsHonestAboutWhenAlfieMeasures() {
@@ -253,8 +275,8 @@ struct ShowSetupTests {
         checking.beginCheck()
         #expect(checking.accessibilityLabel(for: .renderHeadroom) == "Render headroom: checking")
         let unsupported = paired([ShowSetupModel.galleryRecord(.unsupported([reason(.heat, "Thermal state reached serious.")]))])
-        #expect(unsupported.accessibilityLabel(for: .memoryAndHeat) == "Memory and heat: failed. Thermal state reached serious.")
-        #expect(unsupported.accessibilityLabel(for: .renderHeadroom) == "Render headroom: passed")
+        #expect(unsupported.accessibilityLabel(for: .memoryAndHeat) == "Memory and heat: previous check failed. Thermal state reached serious.")
+        #expect(unsupported.accessibilityLabel(for: .renderHeadroom) == "Render headroom: Not measured yet")
         let empty = model()
         #expect(empty.accessibilityLabel(for: .distinctDevices) == "Two distinct devices: Choose A and B")
         for row in ShowSetupModel.PairCheckRow.allCases {

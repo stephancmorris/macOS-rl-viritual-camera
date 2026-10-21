@@ -77,6 +77,27 @@ class ExportTests(unittest.TestCase):
         self.assertEqual({p.name: p.read_bytes() for p in self.inputs.iterdir()}, before)
         self.assertEqual(self.out.stat().st_mode & 0o777, 0o600)
 
+    def test_uuid_session_tokens_are_kept_whole_and_never_pair_same_second_runs(self):
+        first = STAMP + "_00000000-0000-0000-0000-000000000001"
+        second = STAMP + "_00000000-0000-0000-0000-000000000002"
+        soak = self.inputs / f"alfie_soak_{first}.csv"
+        matching = self.inputs / f"alfie_memory_{first}.csv"
+        other = self.inputs / f"alfie_memory_{second}.csv"
+        self.write(soak, [self.throughput()])
+        self.write(matching, [dict(elapsed_s="5", heap_blocks="100")])
+        self.write(other, [dict(elapsed_s="5", heap_blocks="999")])
+        for mismatched in (other, self.memory):
+            if mismatched == self.memory:
+                self.write(self.memory, [dict(elapsed_s="5", heap_blocks="888")])
+            with self.subTest(memory=mismatched.name):
+                with self.assertRaises(export.ExportError):
+                    export.export_metrics(soak, self.out, mismatched)
+                self.assertFalse(self.out.exists())
+        result = export.export_metrics(soak, self.out, matching)
+        self.assertEqual(result["memory"][0]["heap_blocks"], 100)
+        self.assertNotIn(first, self.out.read_text())
+        self.assertNotIn(second, self.out.read_text())
+
     def test_legacy_losses_keep_their_mixed_stage_label_and_have_no_wall_clock(self):
         self.write(self.soak, [dict(elapsed_s="5", clock=SENTINEL, frames_window="245",
                                     out_drops_window="5", out_drops_total="5", frame_mean_ms="1.5",

@@ -1,0 +1,24 @@
+Window: "Alfie", App: Alfie.
+0 standard window Alfie, ID: SwiftUI.WindowGroup<Alfie.ContentView>-1-AppWindow-1, Secondary Actions: Raise
+	1 container
+		2 button ⌥
+		3 text SINGLE CAM · SESSION STOPPED Alfie is standing by. Virtual camera released.
+		4 Description: Mode, Help: One stage camera: wide source, crop and every Stage shot.
+			5 radio button Description: Single Cam, Value: 1
+			6 radio button Description: Multi Cam, Value: 0
+			7 radio button Description: Webcam, Value: 0
+		8 text One stage camera: wide source, crop and every Stage shot.
+		9 button Start session
+	10 close button
+	11 full screen button Help: this button also has an action to zoom the window, Secondary Actions: zoom the window
+	12 minimize button
+13 menu bar
+	14 Alfie
+	15 File
+	16 Edit
+	17 View
+	18 Session
+	19 Window
+	20 Help
+
+The focused UI element is 0 standard window Alfie, ID: SwiftUI.WindowGroup<Alfie.ContentView>-1-AppWindow-1, Secondary Actions: Raise

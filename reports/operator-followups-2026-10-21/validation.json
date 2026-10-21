@@ -1,0 +1,84 @@
+{
+  "date": "2026-10-21",
+  "sourceFingerprint": "72aac3d1de96c855d23a0f049c36fad3bd48dc4edf05545ebdc4448044a48cda",
+  "basePR": 72,
+  "baseCommit": "3c8a7d452c3804c1169b5d96abcbf6aa34152d36",
+  "integratedModePR": 66,
+  "modeSourceCommits": [
+    "21025af",
+    "83137a3",
+    "7d78324",
+    "05ecb92",
+    "4a627fe"
+  ],
+  "swift": {
+    "testDefinitionsPassed": 988,
+    "expandedExecutionsPassed": 1521,
+    "failures": 0,
+    "skipped": 3,
+    "resultBundle": "/private/tmp/alfie-operator-followups-20261021/full-unit-final.xcresult",
+    "skips": [
+      "consented-folder replay",
+      "two real webcams",
+      "explicit cadence investigation"
+    ],
+    "coreMLInteropConfigured": true,
+    "controlExportConfigured": true
+  },
+  "python": {
+    "scripts": 76,
+    "training": 14,
+    "total": 90,
+    "failures": 0,
+    "actualControlBundleSelectionPassed": 54
+  },
+  "release": {
+    "result": "passed",
+    "signingAllowed": false,
+    "signedInstallTested": false
+  },
+  "manual": {
+    "kind": "actual stopped Release UI; no capture started",
+    "modesChecked": [
+      "Single Cam",
+      "Multi Cam",
+      "Webcam"
+    ],
+    "initialAndRestoredMode": "Single Cam",
+    "accessibilityTreeInspected": true,
+    "spokenVoiceOverTested": false,
+    "images": [
+      {
+        "file": "multi-cam.jpg",
+        "widthPixels": 2560,
+        "heightPixels": 1664,
+        "sha256": "5f2608e60ce52e935abf2f5b58d195ffcea4f11d12ec09f927f18edcb978086c"
+      },
+      {
+        "file": "single-cam.jpg",
+        "widthPixels": 2560,
+        "heightPixels": 1664,
+        "sha256": "3775ae2f1f3d40f5c9e153567d94d24a624c786bac3276f884ab14673e9f0a4d"
+      },
+      {
+        "file": "webcam.jpg",
+        "widthPixels": 2560,
+        "heightPixels": 1664,
+        "sha256": "363a301b2f69c0cedf27b705e8d686ba024535934a63c8e6954cf74b1e6e42c3"
+      }
+    ],
+    "pointSizeIndependentlyMeasured": false,
+    "liveRefusalMatrixTested": false
+  },
+  "admissionPolicyVersion": 2,
+  "numericThresholdsChanged": false,
+  "qualifiedLevels": [],
+  "remainingGates": [
+    "named physical rig and both downstream routes",
+    "signed install/upgrade and legacy migration walkthrough",
+    "spoken VoiceOver and live single-camera pill",
+    "owner F3/G08/qualification decisions",
+    "actual wouldPrepare/wouldCut and evaluated-parameter producer logging",
+    "representative consented real data and independent labels"
+  ]
+}

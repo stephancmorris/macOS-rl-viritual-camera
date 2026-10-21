@@ -298,10 +298,10 @@ struct ShowSetupModel: Equatable {
         switch pairCheck {
         case .notRun: return .notMeasured
         case .checking: return .checking
-        case .pass: return .passed
+        case .pass: return .notMeasured
         case .unsupported(let reasons):
             let failing = reasons.filter { PairCheckRow.row(for: $0.bottleneck) == row }
-            return failing.isEmpty ? .passed : .failed(failing.first?.message)
+            return failing.isEmpty ? .notMeasured : .failed(failing.first?.message)
         }
     }
 
@@ -317,8 +317,8 @@ struct ShowSetupModel: Equatable {
         case .notRun: return "A + B at \(standard.title): unknown on this Mac"
         case .checking: return "Checking A + B at \(standard.title) on this Mac"
         case .pass(let certified, _):
-            return "A + B hold \(standard.title) on this Mac · \(certified ? "certified" : "trial")"
-        case .unsupported: return "Camera B unsupported at \(standard.title) with Camera A"
+            return "Previous A + B \(certified ? "certification" : "trial") at \(standard.title)"
+        case .unsupported: return "Previous A + B check failed at \(standard.title)"
         }
     }
 
@@ -328,15 +328,13 @@ struct ShowSetupModel: Equatable {
             return "Alfie measures A + B together right after Start and shows the result in the console header. It will not lower the output rate to make them fit."
         case .checking:
             return "Measuring both cameras together on this Mac. It will not lower the output rate to make them fit."
-        case .pass(true, _):
-            return "Certified by the 60-minute two-input soak on this exact setup."
-        case .pass(false, let measuredAt):
-            // The card's copy says "Measured now"; a stored record says when.
-            let when = measuredAt.map { "Measured \(Self.dateFormatter.string(from: $0))" } ?? "Measured now"
-            return "\(when), not certified. Certification needs the 60-minute two-input soak on this exact setup."
+        case .pass(let certified, let measuredAt):
+            let when = measuredAt.map { "Recorded \(Self.dateFormatter.string(from: $0)). " } ?? ""
+            let kind = certified ? "certification" : "trial"
+            return "\(when)A previous \(kind) matches this Mac, show standard, output route and camera models. Current delivered formats, capture profiles and camera modes have not been checked. Alfie measures the current pair after Start."
         case .unsupported:
             let failed = failingRows.map(\.title).joined(separator: ", ")
-            return "Failed: \(failed). \(suggestion)"
+            return "The previous check reported: \(failed). Current settings may differ. \(suggestion)"
         }
     }
 
@@ -361,7 +359,7 @@ struct ShowSetupModel: Equatable {
         case .checking: return "Checking…"
         case .passed:
             return row == .distinctDevices ? "Different cameras" : "Passed"
-        case .failed(let message): return message ?? "Failed"
+        case .failed(let message): return "Previous check: " + (message ?? "Failed")
         }
     }
 
@@ -371,7 +369,7 @@ struct ShowSetupModel: Equatable {
         case .notMeasured: return "\(row.title): \(rowStatusText(row))"
         case .checking: return "\(row.title): checking"
         case .passed: return "\(row.title): passed"
-        case .failed(let message): return "\(row.title): failed. \(message ?? "")".trimmingCharacters(in: .whitespaces)
+        case .failed(let message): return "\(row.title): previous check failed. \(message ?? "")".trimmingCharacters(in: .whitespaces)
         }
     }
 

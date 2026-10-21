@@ -1,0 +1,40 @@
+Window: "Alfie", App: Alfie.
+0 standard window Alfie, ID: SwiftUI.WindowGroup<Alfie.ContentView>-1-AppWindow-1, Secondary Actions: Raise
+	1 container
+		2 text SESSION STOPPED Mode Show standard Program output
+		3 button ⌥
+		4 text Show setup
+		5 Description: Mode, Help: Preview and Program with Take, for more than one stage camera.
+			6 radio button Description: Single Cam, Value: 0
+			7 radio button Description: Multi Cam, Value: 1
+			8 radio button Description: Webcam, Value: 0
+		9 pop up button Description: Show standard, Value: 1080p50
+		10 pop up button Description: Program output, Value: Direct output (HDMI / USB-C)
+		11 collection Secondary Actions: AXScrollToTop, AXScrollToBottom
+			12 text CAM A Program at Start
+			13 menu button Camera A device, Value: MacBook Pro Camera
+			14 text Camera A, MacBook Pro Camera. Capture profile Stage. Planned output: 1920×1080 at 50.00 fps CAM B Preview at Start
+			15 menu button Camera B device, Value: Choose a device
+			16 text Choose a device CAM C, not assigned CAM D, not assigned
+		17 container Pair check
+			18 text PAIR CHECK, A + B at 1080p50: unknown on this Mac Alfie measures A + B together right after Start and shows the result in the console header. It will not lower the output rate to make them fit.
+			19 unknown Two distinct devices: Choose A and B
+			20 unknown Both at the show rate: Not measured yet
+			21 unknown Render headroom: Not measured yet
+			22 unknown Memory and heat: Not measured yet
+		23 button Start with Camera A only
+		24 button (disabled) Start show · A Program, B Preview
+		25 text Nothing goes to the ATEM until you press Start. Alfie never restores a Program/Preview state from the last show.
+	26 close button
+	27 full screen button Help: this button also has an action to zoom the window, Secondary Actions: zoom the window
+	28 minimize button
+29 menu bar
+	30 Alfie
+	31 File
+	32 Edit
+	33 View
+	34 Session
+	35 Window
+	36 Help
+
+The focused UI element is 0 standard window Alfie, ID: SwiftUI.WindowGroup<Alfie.ContentView>-1-AppWindow-1, Secondary Actions: Raise

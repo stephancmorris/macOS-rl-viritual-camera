@@ -77,6 +77,49 @@ import Testing
             #expect(sink.commit(captured) == .rejected([.requestReplaced]))
         }
     }
+    @Test func detachmentRetiresCapturedPreparationAndReattachmentRequiresFreshHandback() throws {
+        let r = rig(), controller = r.show.director, sink = controller.assistPreparation
+        let captured = try request(r), channel = try #require(r.show.channel(.b)), before = channel.revisions
+        let epoch = controller.authority.epoch
+        controller.detach()
+        #expect(!controller.isAttached && controller.authority.paused && controller.authority.epoch > epoch)
+        #expect(sink.preparation.request == nil && sink.preparation.composition == nil)
+        #expect(sink.commit(captured) == .rejected([.requestReplaced]))
+        #expect(sink.enqueue(.init(preset: .stage(.fullBody)), configuration: configuration()) == nil)
+        #expect(channel.revisions == before)
+
+        controller.attach()
+        #expect(controller.authority.paused)
+        #expect(sink.commit(captured) == .rejected([.requestReplaced]))
+        #expect(controller.handToAlfie() == .accepted)
+        let fresh = try request(r)
+        #expect(sink.commit(captured) == .rejected([.requestReplaced]))
+        guard case .committed = sink.commit(fresh) else { Issue.record("Fresh attached request did not commit"); return }
+        #expect(channel.revisions.controlEpoch == before.controlEpoch + 1)
+    }
+    @Test func detachedPreparationRefusesEvenWhenAuthorityWasExplicitlyRestored() throws {
+        let r = rig(), controller = r.show.director, sink = controller.assistPreparation
+        let channel = try #require(r.show.channel(.b)), before = channel.revisions
+        controller.detach()
+        // A retained caller can still invoke the control API directly. Restoring
+        // its value-state grant cannot replace the missing manual/fault hooks.
+        #expect(controller.handToAlfie() == .accepted)
+        #expect(controller.authority.mayPrepare)
+        #expect(sink.enqueue(.init(preset: .stage(.fullBody)), configuration: configuration()) == nil)
+        controller.attach()
+        #expect(controller.authority.paused && channel.revisions == before)
+    }
+    @Test func reinstallingHooksRetiresCapturedPreparationWithoutRenewingItsToken() throws {
+        let r = rig(), controller = r.show.director, sink = controller.assistPreparation
+        let captured = try request(r), channel = try #require(r.show.channel(.b)), before = channel.revisions
+        let epoch = controller.authority.epoch
+        controller.attach()
+        #expect(controller.isAttached && controller.authority.epoch == epoch && !controller.authority.paused)
+        #expect(sink.commit(captured) == .rejected([.requestReplaced]))
+        #expect(channel.revisions == before)
+        let fresh = try request(r)
+        guard case .committed = sink.commit(fresh) else { Issue.record("Fresh request after hooks reinstalled did not commit"); return }
+    }
     @Test func neverPreparesWithoutFreshEvidenceTrackingOrQualification() {
         let r = rig(), sink = r.show.director.assistPreparation, shot = DirectorShot(preset: .stage(.fullBody))
         sink.readinessForTesting = nil

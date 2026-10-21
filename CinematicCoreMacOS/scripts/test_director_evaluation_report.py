@@ -183,10 +183,13 @@ class EvaluationTests(unittest.TestCase):
             row['sessionID'] = token('another-session')
             row['recordID'] = token('another-record-' + row['recordID'])
         data = analyze_shadow(first + second, [binding(first, 'config-A', 'learned', 'model-A'), binding(second, 'config-B', 'learned', 'model-B')])
-        self.assertEqual(len(data['rows']), 2)
+        self.assertEqual(len(data['rows']), 4)
         self.assertEqual({row['binding']['modelVersion'] for row in data['rows']}, {'model-A', 'model-B'})
         self.assertEqual({row['binding']['configurationID'] for row in data['rows']}, {'config-A', 'config-B'})
-        self.assertTrue(all(row['counts']['compared'] == 2 for row in data['rows']))
+        self.assertTrue(all(row['counts']['compared'] == 1 for row in data['rows']))
+        for configuration in ('config-A', 'config-B'):
+            self.assertEqual(sum(row['counts']['compared'] for row in data['rows']
+                if row['binding']['configurationID'] == configuration), 2)
 
     def test_mixed_level_mode_or_model_never_silently_matches(self):
         for field, value in [('level', 'assist'), ('executionMode', 'observing'), ('modelVersion', 'model-B')]:

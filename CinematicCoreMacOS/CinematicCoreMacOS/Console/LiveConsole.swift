@@ -279,8 +279,8 @@ final class LiveConsoleModel: ObservableObject, ConsoleActions {
 
     func measurePair() {
         guard let preview = show.previewChannel else { return }
-        pairCheck.start(show: show, preview: preview) { [weak self] result in
-            self?.show.recordAdmission(result)
+        pairCheck.start(show: show, preview: preview) { [weak self] result, binding in
+            self?.show.recordAdmission(result, for: binding)
             self?.refresh()
         }
     }

@@ -258,8 +258,28 @@ final class ShowCoordinator: ObservableObject {
         AdmissionDecision.decide(admissionStatus)
     }
 
-    func recordAdmission(_ result: PairAdmissionResult) {
-        admissionRecords.record(result.status, for: admissionFingerprint())
+    func admissionCheckBinding(preview: ChannelID) -> PairAdmissionBinding? {
+        guard previewChannel == preview, let program = channels[programChannel],
+              let previewSource = channels[preview],
+              program.isRunning, !program.sourceMissing,
+              previewSource.isRunning, !previewSource.sourceMissing else { return nil }
+        return PairAdmissionBinding(
+            fingerprint: admissionFingerprint(), program: programChannel, preview: preview,
+            routeGeneration: router.routeGeneration,
+            operatorMode: operatorModes.mode, context: pairAdmissionContext(preview: preview),
+            sources: channels.mapValues {
+                .init(instance: ObjectIdentifier($0), generation: $0.revisions.sourceGeneration,
+                      deviceID: $0.selectedCamera?.uniqueID)
+            })
+    }
+
+    /// A delayed result cannot be attached to whichever setup happens to be
+    /// current at completion. Short checks remain provisional software evidence.
+    @discardableResult
+    func recordAdmission(_ result: PairAdmissionResult, for binding: PairAdmissionBinding) -> Bool {
+        guard admissionCheckBinding(preview: binding.preview) == binding else { return false }
+        admissionRecords.record(result.status, for: binding.fingerprint)
+        return true
     }
 
     // MARK: Director qualification (S3 B-06, C16)
