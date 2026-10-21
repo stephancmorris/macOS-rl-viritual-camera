@@ -65,10 +65,36 @@
         "widthPixels": 2560,
         "heightPixels": 1664,
         "sha256": "363a301b2f69c0cedf27b705e8d686ba024535934a63c8e6954cf74b1e6e42c3"
+      },
+      {
+        "file": "settings-single-cam.jpg",
+        "widthPixels": 1800,
+        "heightPixels": 1456,
+        "sha256": "b5ffa6fa84a48b2628cd6ee595990a009322ebf1dbbfd321e692349c76d2735a"
+      },
+      {
+        "file": "synthetic-historical-certification.jpg",
+        "widthPixels": 2720,
+        "heightPixels": 1800,
+        "sha256": "2c3bfaa5a82c36c3f7cf2b8ee26ab4811beb6ec27a7793ad066441cba2b55cf0"
       }
     ],
     "pointSizeIndependentlyMeasured": false,
-    "liveRefusalMatrixTested": false
+    "liveRefusalMatrixTested": false,
+    "settingsModeMatchesMain": true,
+    "modeChangeInSettingsUpdatesMain": true,
+    "persistedModeAfterFreshLaunch": "Webcam",
+    "freshReleaseProcessVerified": {
+      "before": 48518,
+      "after": 49269
+    },
+    "syntheticHistoryGallery": {
+      "kind": "actual Debug gallery UI with synthetic model",
+      "previousCertificationDisplayed": true,
+      "distinctDevicesPassed": true,
+      "currentRateRenderMemoryRemainUnmeasured": true,
+      "realCertificationCreated": false
+    }
   },
   "admissionPolicyVersion": 2,
   "numericThresholdsChanged": false,

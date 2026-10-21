@@ -1,0 +1,101 @@
+Window: "Multiview Gallery", App: Alfie.
+0 standard window Multiview Gallery, ID: multiview-gallery, Secondary Actions: Raise
+	1 container
+		2 pop up button Scenario, Value: Ready
+		3 pop up button Show standard, Value: 1080p50
+		4 text No actions yet
+		5 scroll area Secondary Actions: Scroll Up, Scroll Down (showing 83-183 of 183 items)
+			6 button Load synthetic run sheet
+			7 text The example replaces this show's unsaved draft. Save explicitly to keep it in this gallery session. The Advance shortcut is suspended while a name field is focused. Current: Live event · No run sheet Next: No segments
+			8 button (disabled) Description: Advance run sheet, Help: Moves to the next segment. Never advances automatically or wraps.
+			9 text Add a segment to use a run sheet. No run sheet. Alfie uses the Live event style. No segments. Live event is the fallback style. Add segment
+			10 pop up button Type, Value: Presenter
+			11 text field (settable) Description: New segment name (optional), Placeholder: Name (optional)
+			12 pop up button Position, Value: None
+			13 button Add run sheet segment
+			14 button Save run sheet
+			15 button Reload run sheet
+			16 text Saved for this show only. Segments guide style and never grant authority. SUBJECT PICK · C-08 Synthetic source only. Click either person to nominate; no camera, readiness decision or qualification is involved.
+			17 pop up button Subject example, Value: Alfie's pick · acquiring
+			18 container
+				19 button Click a person to choose your subject
+				20 button Click a person to choose your subject
+				21 text Alfie's pick · acquiring, Central presenter, Click a person to choose your subject
+			22 text Synthetic nomination changes: 0 Alfie's pick · select to acquire
+			23 container
+				24 text Alfie's pick · select to acquire, Central presenter
+			25 text Alfie's pick · acquiring
+			26 container
+				27 text Alfie's pick · acquiring, Central presenter
+			28 text Your subject · tracking
+			29 container
+				30 text Your subject · tracking
+			31 text Ambiguous · no pick
+			32 container
+				33 text More than one possible subject
+			34 text Recovering · last position
+			35 container
+				36 text Recovering subject · last position
+			37 text Subject lost
+			38 text Subject lost
+			39 text No current view
+			40 text No current subject view
+			41 text RUN-SHEET STYLE CONTEXT · B-11 Synthetic style-context rehearsal. Manual authority; no cameras or qualification. The fixture parameters apply only to this example. Current: Presenter · Opening Next: Panel · Discussion
+			42 button
+			43 button
+			44 text Authority: Manual · Epoch: 0 · Policy revision: 0
+			45 button
+			46 text No synthetic decision evaluated. SHADOW METADATA EXPORT · B-04 Synthetic export rehearsal. The visible destination is a new folder inside this app's temporary container.
+			47 button
+			48 button
+			49 text No sessions created. Shadow metadata export Local metadata only. Select sessions and an inclusive UTC time range, then export explicitly. Shadow logging is not configured.
+			50 text BACKUP ALERTS · C-09 Synthetic outcome illustrations. These cards do not lose an input, switch Program, or grant Backup qualification.
+			51 text INPUT STRIP · INPUT-STRIP
+			52 pop up button Input scenario, Value: Ready
+			53 text INPUTS · 2 OF 4 Locked · Band side
+			54 text Tap a tile to cue Preview SHOW SETUP · SHOW-SETUP
+			55 Pair-check scenario
+				56 radio button Description: Not run, Value: 0
+				57 radio button Description: Checking, Value: 0
+				58 radio button Description: Pass · trial, Value: 0
+				59 radio button Description: Certified, Value: 1
+				60 radio button Description: Unsupported, Value: 0
+				61 radio button Description: Saved B missing, Value: 0
+			62 text SESSION STOPPED Show standard Program output Show setup
+			63 pop up button 1080p50
+			64 pop up button Direct output (HDMI / USB-C)
+			65 collection Secondary Actions: AXScrollToTop, AXScrollToBottom
+				66 text CAM A Program at Start
+				67 menu button Camera A device, Value: Stage wide · FX3
+				68 text Camera A, Stage wide · FX3. Capture profile Stage. Planned output: 1920×1080 at 50.00 fps CAM B Preview at Start
+				69 menu button Camera B device, Value: Band side · UltraStudio
+				70 text Camera B, Band side · UltraStudio. Capture profile Stage. Planned output: 1920×1080 at 50.00 fps CAM C, not assigned CAM D, not assigned
+			71 container
+				72 button Secondary Actions: Check pair
+				73 text Recorded 22 Sep 2026 at 12:13 am. A previous certification matches this Mac, show standard, output route and camera models. Current delivered formats, capture profiles and camera modes have not been checked. Alfie measures the current pair after Start.
+			74 button
+			75 button
+			76 text Nothing goes to the ATEM until you press Start. Alfie never restores a Program/Preview state from the last show. OPERATOR PILL · PILL-TARGET CAM B · PREVIEW
+			77 button
+			78 button
+			79 button
+			80 scroll bar (settable, float) 0.9963901576543391
+				81 value indicator (settable, float) 0.9963901576543391
+				82 increment arrow button
+				83 decrement arrow button
+				84 increment page button
+				85 decrement page button
+	86 close button
+	87 zoom button
+	88 minimize button
+	89 text Multiview Gallery
+90 menu bar
+	91 Alfie
+	92 File
+	93 Edit
+	94 View
+	95 Session
+	96 Window
+	97 Help
+
+The focused UI element is 0 standard window Multiview Gallery, ID: multiview-gallery, Secondary Actions: Raise
