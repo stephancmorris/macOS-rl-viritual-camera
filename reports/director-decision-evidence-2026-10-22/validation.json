@@ -18,7 +18,8 @@
     "actualDecisionBundleChecks": true,
     "loaderValidation": 12,
     "checkpointTrust": 4,
-    "totalPassed": 108
+    "totalPassed": 113,
+    "writerSessions": 5
   },
   "release": {
     "result": "passed",
@@ -62,5 +63,13 @@
     "geometryRanges": "not-validated",
     "float32ArithmeticSafety": "not-validated",
     "fullGymTorchSmoke": "not-run-dependencies-unavailable"
+  },
+  "writerSha256": "7284a3669c1bf8261be84d4541c417cf5e50fa610282efd610989fb196d0750a",
+  "writerSessionValidation": {
+    "result": "passed",
+    "review": "independent-no-blocker",
+    "sameSecondSequentialAndConcurrent": "preserved",
+    "directoryFrameMetadataCollisions": "exclusive-refusal",
+    "incompleteArtifactsOnFailure": "possible-no-durability-claim"
   }
 }
