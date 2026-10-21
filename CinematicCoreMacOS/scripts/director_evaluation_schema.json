@@ -1,0 +1,19 @@
+{
+  "evaluationSchemaVersion": 1,
+  "producer": "DirectorReplay",
+  "requiredTopLevelKeys": ["evaluationSchemaVersion", "producer", "runs", "shadowBindings"],
+  "requiredRunKeys": ["scenarioID", "sessionID", "evidenceClass", "level", "executionMode", "route", "configurationID", "parameterVersion", "judgeKind", "modelVersion", "durationSeconds", "parameters", "opportunities", "metrics"],
+  "requiredBindingKeys": ["sessionID", "evidenceClass", "level", "executionMode", "route", "configurationID", "parameterVersion", "judgeKind", "modelVersion"],
+  "countMetrics": ["minimumDurationViolations", "oscillations", "manualOverridesHonoured", "proposalCount", "directorAttemptCount", "directorCuts", "operatorTakeAttempts", "operatorCuts", "duplicateCallbacks", "failedEffects", "rejectedAttempts", "preparationsCommitted", "acknowledgementsAccepted", "acknowledgementsRejected", "readyEvaluations", "staleEffectsCommitted", "unqualifiedRefusals", "clockAnomalies", "wrongSubjectAttempts", "labelledSubjectAttempts", "proposalsMadeWhilePaused", "programChangesWithoutAuthority", "wrongSubjectProposals", "labelledSubjectProposals"],
+  "otherMetrics": ["cutsPerMinute", "staleProposalsRejected", "manualOverrideLatencies", "finalLevel", "finalPaused"],
+  "parameterGroups": {
+    "shotPolicy": ["minimumShotDuration", "maximumShotDuration", "wideCadence", "repetitionWindow", "maximumMovement", "cutOnMotionAllowed"],
+    "readiness": ["minimumSettledTime", "maximumMotion", "cutOnMotionAllowed", "minimumCutSettledTime", "maximumCutMotion"],
+    "replay": ["maximumProposalAge", "maximumEvidenceAge"]
+  },
+  "levels": ["assist", "auto", "backup"],
+  "routes": ["none", "rehearsal", "direct", "virtualCamera"],
+  "executionModes": ["shadow", "observing"],
+  "evidenceClasses": ["synthetic", "recorded", "live"],
+  "judgeKinds": ["rules", "recorded", "learned", "unobserved"]
+}

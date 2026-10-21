@@ -1,8 +1,10 @@
 # Alfie — operator-controlled live framing
 
-Alfie frames camera pictures into one Program feed. The operator chooses the subject and composition. Current Stage code provides Camera A/B Program/Preview, manual Take and deliberate Edit Live; Webcam uses the single-camera workflow. Automatic Director cuts, active-speaker listening, hardware motion and microphone control are not integrated.
+Alfie frames camera pictures into one Program feed. The operator chooses the subject and composition. Current Stage code provides Camera A/B Program/Preview, manual Take and deliberate Edit Live; Webcam uses the single-camera workflow.
 
-See the [current candidate operator guide](docs/user-guide/README.md). It is source-checked against `7691e6e`; actual installation, 1280-point walkthrough, screenshots and real-camera/downstream-output qualification remain pending. This README describes implemented code, not a certified rig or released build.
+The Debug candidate also attaches Director status and controls. Preparation, automatic-cut, Backup, discovery and local-model study components require explicit settings and current prerequisites; ordinary app construction installs no execution-study settings, discovery budget or learned scorer. Every launch starts Manual. Release disables Director shadow, Assist and automatic effects. Active-speaker listening, microphone control and hardware motion remain deferred.
+
+See the [current candidate operator guide](docs/user-guide/README.md). The capability summary was source-reviewed on 21 October 2026 for the PR #71 candidate; the guide retains pending installation, 1280-point walkthrough, screenshots and real-camera/downstream-output checks. Verify the supplied build fingerprint before use. Source and synthetic evidence describe a software review candidate, not a certified rig or released build.
 
 ## Inputs and framing
 
@@ -25,7 +27,11 @@ Use an Apple Silicon Mac and an Xcode/toolchain supporting the project's Swift f
 
 Current implementation includes framing, manual A/B routing/Take, Multiview and diagnostics. Release qualification remains open: candidate fingerprints, named rigs, sustained single/two-input loads, faults/recovery, install and actual downstream output. Development overrides are not certified production behavior. See [R1 evidence](reports/release-1/README.md) and the [multicamera specification](docs/ALFIE_MULTICAMERA_SPEC.md).
 
-Optional Training Data recording persists person/pose/crop observations and metadata after explicit consent; it is not raw video recording. Session diagnostics are automatic. Review the [current-source privacy audit](docs/privacy/current-source-audit.md) before making storage/retention/export claims.
+Optional Training Data recording persists person/pose/crop observations and metadata after explicit consent; it is not raw video recording. Consent can be revoked during recording: new observation admission stops immediately, existing batches finish with normal drop accounting, and restart waits for shutdown and renewed consent. Existing files remain.
+
+Session diagnostics are automatic. The separate [explicit metrics exporter](docs/privacy/current-source-audit.md#explicit-metrics-export) creates a local allowlisted projection from selected CSV files; the detailed diagnostics report and raw logs retain identifying context. Review the [current-source privacy inventory](docs/privacy/current-source-audit.md) and the selected artifact before sharing.
+
+The [subject-tools software report](reports/auto-director/subject-tools-2026-10-21/README.md) and [execution-boundary report](reports/auto-director/execution-sinks-2026-10-21/README.md) describe the preceding Director candidate evidence. Current PRIVACY/DOCS software changes need human review; live permission/install/output and operator walkthrough acceptance remain open.
 
 ## License
 

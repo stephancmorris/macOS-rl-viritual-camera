@@ -316,7 +316,7 @@ nonisolated final class DirectorShadowLog: @unchecked Sendable {
                     // Foundation can decode 1.0/1e0 as Int; the strict offline
                     // reader requires an integer JSON token for these fields.
                     // UInt64 counters remain strings and are not inspected here.
-                    if ["schemaVersion", "preferencesVersion", "observedPersonCount", "acceptedRank", "judgementIndex"].contains(key) {
+                    if ["schemaVersion", "preferencesVersion", "observedPersonCount", "acceptedRank", "judgementIndex", "featureSchemaVersion", "candidateRank"].contains(key) {
                         var value = next + 1
                         while value < bytes.count && [9, 10, 13, 32].contains(bytes[value]) { value += 1 }
                         var end = value
@@ -472,6 +472,6 @@ nonisolated private extension DirectorShadowRecord {
         .init(schemaVersion: schemaVersion, recordID: recordID, sessionID: sessionID, sequence: sequence,
               recordedAtUTC: recordedAtUTC, eventTime: eventTime, evidenceClass: evidenceClass,
               executionMode: executionMode, context: context, parameters: parameters, evidence: evidence,
-              judgements: judgements, event: event, invalidFields: invalidFields, droppedRecordsBefore: .init(count))
+              judgements: judgements, event: event, invalidFields: invalidFields, droppedRecordsBefore: .init(count), scorerInputs: scorerInputs)
     }
 }

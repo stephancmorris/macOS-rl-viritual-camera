@@ -1,5 +1,5 @@
 {
-  "version": 1,
+  "version": 2,
   "objects": {
     "Context": {
       "inputs": "[String]",
@@ -160,7 +160,8 @@
       "judgements": "[JudgementSummary]",
       "event": "Event",
       "invalidFields": "[String]",
-      "droppedRecordsBefore": "Counter"
+      "droppedRecordsBefore": "Counter",
+      "scorerInputs": "[ScorerInput]?"
     },
     "ExportManifest": {
       "exportSchemaVersion": "Int",
@@ -171,6 +172,12 @@
       "evidenceClasses": "[EvidenceClass]",
       "recordSchemaVersions": "[Int]",
       "retention": "ExportRetention"
+    },
+    "ScorerInput": {
+      "featureSchemaVersion": "Int",
+      "judgementIndex": "Int",
+      "candidateRank": "Int",
+      "features": "[Double]"
     }
   },
   "enums": {
@@ -364,5 +371,9 @@
     "ExportRetention": [
       "explicitExport"
     ]
-  }
+  },
+  "supportedVersions": [
+    1,
+    2
+  ]
 }

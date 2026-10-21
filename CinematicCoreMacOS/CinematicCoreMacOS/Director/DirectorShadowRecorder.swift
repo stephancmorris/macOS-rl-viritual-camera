@@ -63,6 +63,7 @@ final class DirectorShadowRecorder {
         let validPreferences = preferences.flatMap { try? $0.validated() }
         var measurements = R.Measurements()
         var judgements: [R.JudgementSummary] = []
+        var scorerInputs: [R.ScorerInput]?
         if let comparison = judgeObservation {
             let aliases = Dictionary(uniqueKeysWithValues: channels.map { ($0.channelID, alias($0.channelID)) })
             do {
@@ -72,6 +73,17 @@ final class DirectorShadowRecorder {
                 judgements.append(try .init(comparison.evaluation.judgement, kind: learned ? .learned : .rules,
                     modelVersion: learned ? comparison.evaluation.modelVersion : nil,
                     aliases: aliases, path: "judgements[1]", gate: nil, measurements: &measurements))
+                if case .ranked(let ranked) = comparison.evaluation.rules.outcome, !ranked.isEmpty {
+                    var inputs: [R.ScorerInput] = []
+                    for (rank, item) in ranked.enumerated() {
+                        guard let features = DirectorJudgeFeatures.extract(item.candidate, context: comparison.context) else {
+                            log.noteDropped(); return
+                        }
+                        inputs.append(.init(featureSchemaVersion: DirectorJudgeFeatures.schemaVersion,
+                            judgementIndex: 0, candidateRank: rank, features: features.values.map(Double.init)))
+                    }
+                    scorerInputs = inputs
+                }
             } catch { log.noteDropped(); return }
         }
         let record = R(schemaVersion: R.currentSchemaVersion, recordID: .init(UUID()), sessionID: .init(log.sessionID),
@@ -82,7 +94,7 @@ final class DirectorShadowRecorder {
                 resolvedStyle: judgeObservation.map { .init($0.style) }, readiness: nil, adapter: nil,
                 judgeMaximumAge: judgeObservation?.maximumAge,
                 minimumProbability: judgeObservation.flatMap { (0...1).contains($0.minimumProbability) && $0.minimumProbability.isFinite ? $0.minimumProbability : nil }),
-            evidence: [], judgements: judgements, event: event, invalidFields: measurements.invalidFields, droppedRecordsBefore: .init(0))
+            evidence: [], judgements: judgements, event: event, invalidFields: measurements.invalidFields, droppedRecordsBefore: .init(0), scorerInputs: scorerInputs)
         log.append(record, provenance: provenance)
     }
 

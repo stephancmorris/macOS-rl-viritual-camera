@@ -12,7 +12,7 @@ import AppKit
 import OSLog
 
 /// Writer seam for isolated storage and deterministic shutdown tests.
-protocol TrainingDataWriting: Sendable {
+nonisolated protocol TrainingDataWriting: Sendable {
     func write(_ data: Data) async throws -> Int64
     func close() async throws
 }
