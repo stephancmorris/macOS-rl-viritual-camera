@@ -52,3 +52,7 @@ Use a disposable app-data fixture/new test account and an identified candidate w
 - Inspect a metrics projection and any deliberately shared raw package separately. Check privacy declarations in the actual built app and extension before distribution.
 
 R2 PRIVACY remains **Human Review for these software changes**, with permission, retention-policy, signed export, disclosure and distribution acceptance open. No network, anonymity or legal-compliance claim is made.
+
+### Isolated diagnostics cleanup check — 21 October 2026
+
+`DiagnosticsCleanupTests` exercises the actual queued deletion path in disposable storage using an injected wall clock. Five expanded cases cover old/exact-cutoff/recent CSV and session-JSON files, unrelated/outside-root preservation, age advancing on the next session and all three session artifacts staying in the selected temporary root. Production directory, thirty-day modification-time policy, strict boundary and session-start trigger are unchanged. This verifies diagnostics cleanup software; permission/disclosure, other stores and owner retention acceptance remain open. Final full Swift/Release evidence is linked from the [batch report](../../reports/auto-director/evaluation-tools-2026-10-21/implementation.md).
