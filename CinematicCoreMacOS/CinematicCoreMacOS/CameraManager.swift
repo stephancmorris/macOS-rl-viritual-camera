@@ -304,6 +304,9 @@ final class CameraManager: NSObject, ObservableObject {
     /// The operator mode this channel runs in. Set with the composer format by
     /// `OperatorModeStore.apply(to:)`; read for diagnostics.
     var operatorMode: OperatorMode = .singleCam
+    /// Explicit show configuration, applied while all inputs are stopped.
+    /// Eligibility is rechecked against the actual AVCaptureDevice at setup.
+    var builtInCameraTestEnabled: Bool = false
     let outputPort: any ChannelOutputPort
 
     /// Discrete shot-intent revision (see ChannelFrame.swift). Increments on
@@ -341,7 +344,8 @@ final class CameraManager: NSObject, ObservableObject {
             deliveredWidth: sourcePixelWidth > 0 ? sourcePixelWidth : nil,
             deliveredHeight: sourcePixelHeight > 0 ? sourcePixelHeight : nil,
             captureFPS: configuredCaptureFPS,
-            captureProfile: CaptureProfilePolicy.Profile(shotComposer.config.cinematicFormat).identifier,
+            captureProfile: sourceIdentity?.captureProfile
+                ?? CaptureProfilePolicy.Profile(shotComposer.config.cinematicFormat).identifier,
             mode: mode)
     }
     private(set) var repeatedFrameCount: UInt64 = 0
@@ -776,7 +780,22 @@ final class CameraManager: NSObject, ObservableObject {
         let maxResolution: String
         let supports4K: Bool
         let formatCount: Int
-        
+        /// Discovery metadata for UI only. Capture checks the live device type.
+        let isBuiltIn: Bool
+
+        init(id: String, name: String, modelID: String, uniqueID: String,
+             maxResolution: String, supports4K: Bool, formatCount: Int,
+             isBuiltIn: Bool = false) {
+            self.id = id
+            self.name = name
+            self.modelID = modelID
+            self.uniqueID = uniqueID
+            self.maxResolution = maxResolution
+            self.supports4K = supports4K
+            self.formatCount = formatCount
+            self.isBuiltIn = isBuiltIn
+        }
+
         var displayName: String {
             "\(name) - \(maxResolution)"
         }
@@ -957,7 +976,8 @@ final class CameraManager: NSObject, ObservableObject {
                 uniqueID: device.uniqueID,
                 maxResolution: maxResString,
                 supports4K: supports4K,
-                formatCount: device.formats.count
+                formatCount: device.formats.count,
+                isBuiltIn: device.deviceType == .builtInWideAngleCamera
             )
             cameraDevices.append(cameraDevice)
         }
@@ -2982,7 +3002,9 @@ final class CameraManager: NSObject, ObservableObject {
         }
         guard let selection = CaptureProfilePolicy.select(
             candidates, profile: profile, showRate: Config.targetFrameRate,
-            allowStageBelowShowRate: DeveloperFlags.allowStageBelowShowRate) else {
+            allowStageBelowShowRate: DeveloperFlags.allowStageBelowShowRate,
+            builtInCameraTestEnabled: builtInCameraTestEnabled,
+            isBuiltInCamera: device.deviceType == .builtInWideAngleCamera) else {
             error = .unsupportedFormat
             throw CameraError.unsupportedFormat
         }
@@ -3004,21 +3026,20 @@ final class CameraManager: NSObject, ObservableObject {
         configuredCaptureFPS = selection.frameRate
         // Webcam mode may run below the show rate (see CaptureProfilePolicy);
         // say the real capture rate rather than implying the show standard.
-        configuredCaptureRateLabel = selection.reason.isBelowShowRate
-            ? String(format: "%g fps (show standard %@)", selection.frameRate, ShowStandard.activeOrCurrent.title)
-            : ShowStandard.activeOrCurrent.title
+        configuredCaptureRateLabel = selection.rateLabel(
+            showRate: Config.targetFrameRate, showStandardTitle: ShowStandard.activeOrCurrent.title)
         captureProfileStatus = "Requested \(dims.width)×\(dims.height) at \(configuredCaptureRateLabel): \(selection.reason.description). Waiting for delivered frame."
         recordSourceIdentity(DiagnosticsSessionIdentity.Source(
             inputKind: "Live camera",
             deviceName: device.localizedName,
             deviceModelID: device.modelID,
-            captureProfile: profile.identifier,
+            captureProfile: profile.identifier(for: selection.reason),
             operatorMode: operatorMode.diagnosticsName,
             requestedWidth: Int(dims.width),
             requestedHeight: Int(dims.height),
             configuredCaptureFPS: selection.frameRate,
             captureSelectionReason: selection.reason.description,
-            belowShowRate: selection.reason.isBelowShowRate))
+            belowShowRate: selection.isBelowShowRate(Config.targetFrameRate)))
 
         if dims.height > 0 {
             let sourceAspect = CGFloat(dims.width) / CGFloat(dims.height)

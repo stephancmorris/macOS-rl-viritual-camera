@@ -12,18 +12,25 @@ struct CinematicCoreMacOSApp: App {
     @StateObject private var systemExtensionManager = SystemExtensionActivationManager()
     /// Owns the single program output and the channels.
     @StateObject private var show: ShowCoordinator
-    /// Channel A, the routed single camera the current UI drives.
-    @StateObject private var cameraManager: CameraManager
+    /// Always derive A from the retained show. Independent StateObject storage
+    /// for this alias could preserve a camera from a different show instance.
+    private var cameraManager: CameraManager { show.channelA }
     @StateObject private var settingsWindowController = SettingsWindowController()
 
     init() {
+        // StateObject defers this factory until its retained storage needs an
+        // instance. Recreating the App value must not construct or start a
+        // second show whose camera/output can escape into another scene.
+        _show = StateObject(wrappedValue: Self.makeShow())
+    }
+
+    private static func makeShow() -> ShowCoordinator {
         let show = ShowCoordinator()
         show.startDirectorShadow()
-        _show = StateObject(wrappedValue: show)
-        _cameraManager = StateObject(wrappedValue: show.channelA)
         #if DEBUG
         DebugLaunchHooks.startWindowDumps()
         #endif
+        return show
     }
 
     var body: some Scene {

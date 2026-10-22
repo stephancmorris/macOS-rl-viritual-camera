@@ -243,6 +243,16 @@ def build_report(session: Session, expected_override: float | None = None, caden
     if session.manifest:
         identity = session.manifest.get("identity", {})
         build, source, output = identity.get("build", {}), identity.get("source", {}), identity.get("output", {})
+        below_rate = ""
+        if source.get("belowShowRate"):
+            profile = source.get("captureProfile")
+            if profile == "stage-built-in-test":
+                label = " (built-in camera test)"
+            elif profile == "webcam":
+                label = " (Webcam fallback)"
+            else:
+                label = ""
+            below_rate = f" · below the show rate{label}"
         lines += [
             f"- Build: {build.get('appVersion', '?')} ({build.get('buildNumber', '?')}), "
             f"source fingerprint `{build.get('sourceFingerprint', 'unrecorded')}`",
@@ -253,7 +263,7 @@ def build_report(session: Session, expected_override: float | None = None, caden
             f"- Requested {source.get('requestedWidth', '–')}×{source.get('requestedHeight', '–')} at "
             f"{fmt(source.get('configuredCaptureFPS'), 2)} fps; delivered "
             f"{source.get('deliveredWidth', '–')}×{source.get('deliveredHeight', '–')}"
-            + (" · below the show rate (Webcam fallback)" if source.get("belowShowRate") else ""),
+            + below_rate,
             f"- Capture choice: {source.get('captureSelectionReason') or '–'}",
             f"- Output: {output.get('route') or 'no active route'} · show standard {output.get('showStandard', '?')}"
             f" · playout clock {fmt(output.get('playoutFPS'), 2)} fps",

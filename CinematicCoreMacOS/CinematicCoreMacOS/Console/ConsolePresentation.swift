@@ -41,6 +41,18 @@ nonisolated enum ConsolePresentation: Equatable, Sendable {
         case stopped
     }
 
+    /// Select from the real channel/show state used by ContentView. Multi Cam
+    /// must keep its console visible while any attached channel is starting or
+    /// running. The traditional view belongs to A and appears once A is running.
+    @MainActor
+    static func screen(for mode: OperatorMode, channelA: CameraManager,
+                       show: ShowCoordinator?) -> Screen {
+        let captureIsLive = mode == .multiCam
+            ? (show?.isAnyChannelLive ?? channelA.isRunning)
+            : channelA.isRunning
+        return screen(for: mode, isCaptureRunning: captureIsLive, hasShow: show != nil)
+    }
+
     /// The single mapping from mode and capture state to the main screen.
     /// Without a show (previews) there is no Multiview console.
     static func screen(for mode: OperatorMode, isCaptureRunning: Bool, hasShow: Bool) -> Screen {

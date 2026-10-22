@@ -205,6 +205,10 @@ struct InspectorDrawer: View {
                 .fixedSize()
             }
 
+            if let show {
+                BuiltInCameraTestControl(show: show, cameraManager: cameraManager)
+            }
+
             row("Source Resolution") {
                 valueText(cameraManager.sourcePixelHeight > 0
                     ? "\(cameraManager.sourcePixelWidth)×\(cameraManager.sourcePixelHeight) delivered"
@@ -716,5 +720,30 @@ struct InspectorHandle: View {
                 .shadow(color: .black.opacity(0.4), radius: 12, y: 4)
         }
         .buttonStyle(.plain)
+    }
+}
+
+/// Show observation keeps the lock honest when another channel starts. The
+/// coordinator forwards lifecycle state, never the other channel's frames.
+private struct BuiltInCameraTestControl: View {
+    @ObservedObject var show: ShowCoordinator
+    @ObservedObject var cameraManager: CameraManager
+
+    var body: some View {
+        if cameraManager.availableCameras.contains(where: \.isBuiltIn) {
+            VStack(alignment: .leading, spacing: 5) {
+                Toggle("Built-in camera testing", isOn: Binding(
+                    get: { show.isBuiltInCameraTestEnabled },
+                    set: { _ = show.setBuiltInCameraTestEnabled($0) }))
+                    .toggleStyle(.switch)
+                    .disabled(show.isAnyChannelLive)
+                    .help("Stop all cameras before changing built-in camera testing.")
+                Text(ShowSetupModel.builtInCameraTestDetail)
+                    .font(.caption2)
+                    .foregroundStyle(.white.opacity(0.65))
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            .padding(.vertical, 8)
+        }
     }
 }

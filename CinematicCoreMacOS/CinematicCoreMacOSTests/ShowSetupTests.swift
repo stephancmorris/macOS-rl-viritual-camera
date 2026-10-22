@@ -12,6 +12,7 @@
 
 #if DEBUG
 import AppKit
+import Combine
 import Foundation
 import SwiftUI
 import Testing
@@ -448,18 +449,181 @@ struct ShowSetupTests {
         #expect(show.channel(.b) == nil)
     }
 
+    // MARK: Built-in camera testing
+
+    private var builtIn: ShowSetupModel.Device {
+        .init(uniqueID: "builtin-test", name: "MacBook camera", modelID: "builtin-model", isBuiltIn: true)
+    }
+
+    private func builtInPair(_ status: AdmissionStatus? = nil) -> ShowSetupModel {
+        var record = ShowSetupModel.galleryRecord(status ?? .provisional)
+        record.inputs["B"] = builtIn.modelID
+        return ShowSetupModel(standard: .p50, output: .display,
+                              devices: [wide, side, builtIn],
+                              saved: [.a: wide.uniqueID, .b: builtIn.uniqueID], machine: machine,
+                              records: status == nil ? [] : [record])
+    }
+
+    @Test func builtInCameraTestingDefaultsOffAndOnlyDiscoveryEstablishesEligibility() {
+        let setup = builtInPair()
+        #expect(setup.hasBuiltInCamera)
+        #expect(!setup.isBuiltInCameraTestEnabled)
+        #expect(!setup.usesBuiltInCameraTest)
+        let namedLikeBuiltIn = ShowSetupModel.Device(uniqueID: "usb", name: "MacBook camera", modelID: "builtin-model")
+        let external = ShowSetupModel(standard: .p50, output: .display,
+                                      devices: [namedLikeBuiltIn], machine: machine)
+        #expect(!external.hasBuiltInCamera)
+        #expect(ShowSetupModel.builtInCameraTestDetail.contains("repeats frames"))
+        #expect(ShowSetupModel.builtInCameraTestDetail.contains("unqualified"))
+    }
+
+    @Test func builtInCameraTestOptionInvalidatesAPendingCheckAndLocksWhileLive() {
+        var setup = builtInPair()
+        setup.beginCheck()
+        #expect(setup.isChecking)
+        setup.setBuiltInCameraTestEnabled(true)
+        #expect(!setup.isChecking)
+        #expect(setup.isBuiltInCameraTestEnabled)
+        #expect(setup.usesBuiltInCameraTest)
+        setup.isRunning = true
+        setup.setBuiltInCameraTestEnabled(false)
+        #expect(setup.isBuiltInCameraTestEnabled)
+    }
+
+    @Test(arguments: [AdmissionStatus.certified, .provisional,
+                      .unsupported([AdmissionReason(code: "test.capture", bottleneck: .capture,
+                                                    message: "Old native-rate failure")])])
+    func builtInTestSelectionNeverInheritsNativeHistory(status: AdmissionStatus) {
+        var setup = builtInPair(status)
+        #expect(setup.pairCheck != .notRun)
+        setup.setBuiltInCameraTestEnabled(true)
+        #expect(setup.matchingRecords.isEmpty)
+        #expect(setup.pairCheck == .notRun)
+        #expect(setup.canStartPair)
+        #expect(setup.rowState(.distinctDevices) == .passed)
+        #expect(setup.rowState(.showRate) == .notMeasured)
+        #expect(setup.pairCheckDetail.contains("Previous native-rate checks do not apply"))
+        #expect(setup.pairCheckDetail.contains("do not qualify"))
+        setup.setBuiltInCameraTestEnabled(false)
+        #expect(setup.pairCheck != .notRun)
+    }
+
+    @Test func testOptionDoesNotBypassHistoryForAnExternalPair() {
+        let failure = ShowSetupModel.galleryRecord(.unsupported([reason(.capture)]))
+        var setup = ShowSetupModel(standard: .p50, output: .display,
+                                  devices: [wide, side, builtIn],
+                                  saved: [.a: wide.uniqueID, .b: side.uniqueID], machine: machine,
+                                  records: [failure])
+        setup.setBuiltInCameraTestEnabled(true)
+        #expect(setup.hasBuiltInCamera)
+        #expect(!setup.usesBuiltInCameraTest)
+        #expect(setup.matchingRecords == [failure])
+        #expect(!setup.canStartPair)
+        #expect(setup.pairCheckDetail.hasPrefix("The previous check reported:"))
+    }
+
+    @Test func storedTestFallbackRecordNeverMasqueradesAsNativeHistory() throws {
+        let fingerprint = AdmissionFingerprint(
+            machineModel: machine.model, osVersion: machine.osVersion,
+            showStandard: "1080p50", route: ProgramOutputManager.Route.display.title,
+            inputs: [.init(channel: "A", deviceModelID: wide.modelID, mode: "track"),
+                     .init(channel: "B", deviceModelID: builtIn.modelID, deliveredWidth: 1920,
+                           deliveredHeight: 1080, captureFPS: 30,
+                           captureProfile: "stage-built-in-test", mode: "wide")])
+        let record = try #require(StoredPairRecord.parse(key: fingerprint.key, status: .certified, measuredAt: Date()))
+        #expect(record.hasBuiltInCameraTestInput)
+        var setup = builtInPair()
+        setup.records = [record]
+        #expect(setup.pairCheck == .notRun)
+        #expect(setup.canStartPair)
+        setup.setBuiltInCameraTestEnabled(true)
+        #expect(setup.pairCheck == .notRun)
+    }
+
+    @Test func liveAdapterPropagatesDiscoveryAndTheStoppedOnlyShowOption() {
+        let show = show()
+        let camera = CameraManager.CameraDevice(id: builtIn.uniqueID, name: builtIn.name,
+                                                modelID: builtIn.modelID, uniqueID: builtIn.uniqueID,
+                                                maxResolution: "1920×1080", supports4K: false,
+                                                formatCount: 1, isBuiltIn: true)
+        let live = LiveShowSetupModel(show: show,
+                                      defaults: UserDefaults(suiteName: "alfie-setup-test-camera-\(UUID().uuidString)")!,
+                                      machine: machine, cameras: { [camera] }) {
+            Issue.record("Changing setup options must not start capture")
+        }
+        #expect(live.setup.hasBuiltInCamera)
+        #expect(!live.setup.isBuiltInCameraTestEnabled)
+        #expect(live.actions.setBuiltInCameraTestEnabled != nil)
+        live.actions.setBuiltInCameraTestEnabled?(true)
+        #expect(show.isBuiltInCameraTestEnabled)
+        #expect(show.channelA.builtInCameraTestEnabled)
+        #expect(live.setup.isBuiltInCameraTestEnabled)
+        let b = show.addChannel(.b)
+        #expect(b.builtInCameraTestEnabled)
+        b.setStartingForTesting(true)
+        live.actions.setBuiltInCameraTestEnabled?(false)
+        #expect(show.isBuiltInCameraTestEnabled)
+        #expect(b.builtInCameraTestEnabled)
+        #expect(!show.channelA.isStartingSession)
+        b.setStartingForTesting(false)
+        live.setBuiltInCameraTestEnabled(false)
+        #expect(!show.isBuiltInCameraTestEnabled)
+        #expect(!show.channelA.builtInCameraTestEnabled)
+        #expect(!b.builtInCameraTestEnabled)
+    }
+
+    @Test func liveSetupLocksForBOnlyLivenessAndGuardsActionsBeforeTheUIRefresh() async {
+        let (show, live) = pairedLiveSetup { _ in
+            Issue.record("A must not start while B is live or starting")
+        }
+        let b = show.addChannel(.b)
+        b.setStartingForTesting(true)
+        let savedA = live.setup.device(for: .a)
+        let standard = live.setup.standard
+        let output = live.setup.output
+        // The adapter's display projection is scheduled after willSet. Every
+        // command independently consults current show state in this interval.
+        live.select(side.uniqueID, for: .a)
+        live.selectStandard(.p60)
+        live.selectOutput(.virtualCamera)
+        live.startAOnly()
+        live.startPair()
+        #expect(live.setup.device(for: .a) == savedA)
+        #expect(live.setup.standard == standard)
+        #expect(live.setup.output == output)
+        for await setup in live.$setup.values where setup.isRunning { break }
+        #expect(live.setup.isRunning)
+        #expect(!live.setup.canStartAOnly && !live.setup.canStartPair)
+        b.setRunningForTesting(true)
+        b.setStartingForTesting(false)
+        #expect(show.isAnyChannelLive)
+        b.setRunningForTesting(false)
+        for await setup in live.$setup.values where !setup.isRunning { break }
+        #expect(live.setup.canStartPair)
+        await live.waitForStartForTesting()
+    }
+
     // MARK: Renders
 
     @Test(arguments: [
-        (ShowSetupModel.GalleryScenario.notRun, "setup-notrun.png"),
-        (.checking, "setup-checking.png"),
-        (.pass, "setup-pass.png"),
-        (.unsupported, "setup-unsupported.png")
+        (ShowSetupModel.GalleryScenario.notRun, "setup-notrun.png", false),
+        (.checking, "setup-checking.png", false),
+        (.pass, "setup-pass.png", false),
+        (.unsupported, "setup-unsupported.png", false),
+        (.notRun, "setup-builtin-test.png", true)
     ])
-    func rendersTheSetupAt1280(scenario: ShowSetupModel.GalleryScenario, file: String) throws {
-        let view = ShowSetupView(model: .gallery(scenario), actions: ShowSetupActions(
+    func rendersTheSetupAt1280(scenario: ShowSetupModel.GalleryScenario, file: String,
+                              builtInTest: Bool) throws {
+        var setup = ShowSetupModel.gallery(scenario)
+        if builtInTest {
+            setup.updateDevices(setup.devices + [builtIn])
+            setup.select(builtIn.uniqueID, for: .b)
+            setup.setBuiltInCameraTestEnabled(true)
+        }
+        let view = ShowSetupView(model: setup, actions: ShowSetupActions(
             selectDevice: { _, _ in }, selectStandard: { _ in }, selectOutput: { _ in },
-            startAOnly: {}, startPair: {}, checkPair: nil))
+            startAOnly: {}, startPair: {}, checkPair: nil,
+            setBuiltInCameraTestEnabled: builtInTest ? { _ in } : nil))
         let host = NSHostingView(rootView: view.environment(\.colorScheme, .dark))
         host.frame = CGRect(x: 0, y: 0, width: 1280, height: 800)
         let window = NSWindow(contentRect: host.frame, styleMask: [.borderless], backing: .buffered, defer: false)

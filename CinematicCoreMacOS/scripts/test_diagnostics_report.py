@@ -89,6 +89,82 @@ class ReportTests(unittest.TestCase):
         self.assertIn("**Cadence:** 0 of 12 full windows", text)
         self.assertIn("Nothing outside the expected ranges", text)
 
+    def report_with_source(self, *, profile, configured_fps, below_show_rate, reason,
+                           operator_mode="multi_cam", show_fps=50):
+        with tempfile.TemporaryDirectory() as tmp:
+            folder = write_session(Path(tmp), admitted=round(configured_fps * 5))
+            path = next(folder.glob("alfie_session_*.json"))
+            manifest = json.loads(path.read_text())
+            source = manifest["identity"]["source"]
+            source.update(captureProfile=profile, configuredCaptureFPS=configured_fps,
+                          belowShowRate=below_show_rate, captureSelectionReason=reason,
+                          operatorMode=operator_mode, requestedWidth=1920, requestedHeight=1080,
+                          deliveredWidth=1920, deliveredHeight=1080)
+            manifest["identity"]["output"].update(showFPS=show_fps, playoutFPS=show_fps)
+            path.write_text(json.dumps(manifest))
+            session = report.load(report.locate(path))
+            original_identity = json.loads(json.dumps(session.manifest["identity"]))
+            text = report.build_report(session)
+            self.assertEqual(session.manifest["identity"], original_identity)
+            return text
+
+    def test_native_stage_source_has_no_fallback_claim(self):
+        text = self.report_with_source(profile="stage", configured_fps=50, below_show_rate=False,
+                                       reason="preferred format")
+        self.assertIn("profile stage · mode multi_cam", text)
+        self.assertIn("Requested 1920×1080 at 50.00 fps; delivered 1920×1080\n", text)
+        self.assertNotIn("below the show rate", text)
+        self.assertNotIn("Webcam fallback", text)
+        self.assertNotIn("built-in camera test", text)
+
+    def test_built_in_30_fps_test_is_identified_without_claiming_native_show_cadence(self):
+        text = self.report_with_source(profile="stage-built-in-test", configured_fps=30,
+                                       below_show_rate=True, reason="explicit built-in camera test fallback")
+        self.assertIn("profile stage-built-in-test · mode multi_cam", text)
+        self.assertIn("Requested 1920×1080 at 30.00 fps; delivered 1920×1080"
+                      " · below the show rate (built-in camera test)", text)
+        self.assertIn("Expected rate: 30.00 fps (manifest configured capture rate)", text)
+        self.assertIn("| Delivered to Alfie | 1800 | 30.0 |", text)
+        self.assertIn("playout clock 50.00 fps", text)
+        self.assertIn("| Presented downstream | unknown | unknown |", text)
+        self.assertIn("Capture choice: explicit built-in camera test fallback", text)
+        self.assertNotIn("Webcam fallback", text)
+        self.assertNotIn("qualified", text.lower())
+        self.assertNotIn("certified", text.lower())
+
+    def test_webcam_profile_keeps_its_specific_fallback_label(self):
+        # Source profile is authoritative; do not infer it from operator mode.
+        text = self.report_with_source(profile="webcam", configured_fps=30, below_show_rate=True,
+                                       reason="nearest lower rate", operator_mode="single_cam")
+        self.assertIn("below the show rate (Webcam fallback)", text)
+        self.assertIn("profile webcam · mode single_cam", text)
+        self.assertIn("Capture choice: nearest lower rate", text)
+        self.assertNotIn("built-in camera test", text)
+
+    def test_unknown_or_stage_fallback_does_not_invent_a_profile_or_mode(self):
+        for profile in ("stage", "debug-stage", "future-profile", None):
+            with self.subTest(profile=profile):
+                text = self.report_with_source(profile=profile, configured_fps=30, below_show_rate=True,
+                                               reason="recorded source selection reason", operator_mode="unknown")
+                self.assertIn(f"profile {profile or '–'} · mode unknown", text)
+                self.assertIn("delivered 1920×1080 · below the show rate\n", text)
+                self.assertIn("Capture choice: recorded source selection reason", text)
+                self.assertIn("Expected rate: 30.00 fps", text)
+                self.assertNotIn("Webcam fallback", text)
+                self.assertNotIn("built-in camera test", text)
+
+    def test_60_fps_source_uses_recorded_below_rate_flag_without_rate_or_reason_inference(self):
+        text = self.report_with_source(profile="stage-built-in-test", configured_fps=60,
+                                       below_show_rate=False, show_fps=60,
+                                       reason="original built-in test selection detail")
+        self.assertIn("profile stage-built-in-test", text)
+        self.assertIn("Requested 1920×1080 at 60.00 fps; delivered 1920×1080\n", text)
+        self.assertIn("Expected rate: 60.00 fps", text)
+        self.assertIn("Capture choice: original built-in test selection detail", text)
+        self.assertNotIn("below the show rate", text)
+        self.assertNotIn("Webcam fallback", text)
+        self.assertNotIn("(built-in camera test)", text)
+
     def test_cadence_shortfall_and_refusals_are_observed(self):
         with tempfile.TemporaryDirectory() as tmp:
             text = self.run_report(write_session(Path(tmp), short_window_at=4, refused_at=7))

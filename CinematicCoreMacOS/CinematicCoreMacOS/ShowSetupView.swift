@@ -18,6 +18,7 @@ struct ShowSetupActions {
     var startPair: () -> Void
     /// See PairCheckPanel.onCheck.
     var checkPair: (() -> Void)?
+    var setBuiltInCameraTestEnabled: ((Bool) -> Void)? = nil
 }
 
 struct ShowSetupView: View {
@@ -34,6 +35,21 @@ struct ShowSetupView: View {
         VStack(alignment: .leading, spacing: 0) {
             header
                 .padding(.bottom, 18)
+
+            if model.hasBuiltInCamera, let setEnabled = actions.setBuiltInCameraTestEnabled {
+                VStack(alignment: .leading, spacing: 4) {
+                    Toggle("Built-in camera testing", isOn: Binding(
+                        get: { model.isBuiltInCameraTestEnabled }, set: setEnabled))
+                        .toggleStyle(.switch)
+                        .disabled(model.isRunning)
+                        .help("Stop all cameras before changing built-in camera testing.")
+                    Text(ShowSetupModel.builtInCameraTestDetail)
+                        .font(.system(size: 11))
+                        .foregroundStyle(.white.opacity(0.65))
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                .padding(.bottom, 14)
+            }
 
             LazyVGrid(columns: [GridItem(.flexible(), spacing: 16), GridItem(.flexible(), spacing: 16)],
                       alignment: .leading, spacing: 10) {
