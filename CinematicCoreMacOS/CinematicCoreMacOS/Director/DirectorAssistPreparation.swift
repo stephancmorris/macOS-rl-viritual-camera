@@ -59,8 +59,8 @@ final class DirectorAssistPreparation {
                 policyRevision: controller.policyRevision, nominationRevision: controller.nominationRevision),
               let request = preparation.propose(proposal, maximumAge: c.maximumRequestAge, now: now) else { return nil }
         configuration = c
-        if let binding = c.capture {
-            if let parameters = controller.captureParameters(binding, readiness: c.readiness) {
+        if c.capture != nil || controller.hasCaptureBindingProvider {
+            if let parameters = controller.captureParameters(c.capture, readiness: c.readiness) {
                 controller.captureDecision(DirectorShadowRecorder.preparation(request), evaluation: .init(now: now,
                     parameters: parameters, sample: current.sample, revisions: revisions, adapter: controller.adapter,
                     readinessInputs: current.inputs, prepareReadiness: current.measuredReadiness,

@@ -110,9 +110,9 @@ import Testing
     }
     private func configureCuts(_ r: Rig, version: UInt64 = 11,
                                provenance: [DirectorShadowRecord.EvidenceClass]? = [.synthetic],
-                               contextChange: String? = nil) {
+                               contextChange: String? = nil, judge: any DirectorJudge = RuleJudge()) {
         r.controller.configureAutomaticCuts(.init(autoNoticeLength: 2, maximumLateness: 1, permitValidity: 0,
-            judgeMaximumAge: 1, minimumProbability: nil, judge: RuleJudge(), capture: binding(version)),
+            judgeMaximumAge: 1, minimumProbability: nil, judge: judge, capture: binding(version)),
             context: { now in
                 guard let preview = r.show.previewChannel, let offAir = r.show.channel(preview),
                       let program = r.show.channel(r.show.programChannel) else { return nil }
@@ -162,7 +162,9 @@ import Testing
         #expect(cut.parameters.resolvedStyle == .init(style) && cut.parameters.judgeMaximumAge == 1)
         #expect(cut.eventTime == 101 && cut.context.programStartedAt == 81 && cut.context.lastWideAt == 71)
         #expect(cut.evidence.first?.cutReadiness?.isReady == true && cut.evidence.first?.prepareReadiness == nil)
-        #expect(cut.judgements.isEmpty && cut.scorerInputs == nil)
+        #expect(cut.judgements.count == 1 && cut.judgements[0].judgeKind == .rules)
+        #expect(cut.judgements[0].gateResult == .accepted && cut.judgements[0].acceptedRank == 0)
+        #expect(cut.event.judgementIndex == 0 && cut.scorerInputs == nil)
         let takes = records.filter { $0.event.action == .take }
         #expect(takes.count == 2 && takes[0].parameters == takes[1].parameters)
         #expect(takes[1].event.outcome == .completed && takes[1].context.programShot == cut.event.shot)
@@ -173,6 +175,29 @@ import Testing
         let exported = try await r.log.export(selection: .init(sessionIDs: [r.log.sessionID], fromUTC: utc, throughUTC: utc),
             toNewBundle: destination)
         #expect(exported.manifest.recordCount == records.count && exported.manifest.recordSchemaVersions == [2])
+        r.controller.detach()
+    }
+
+    private nonisolated struct UnattributedJudge: DirectorJudge {
+        let malformedIdentity: Bool
+        func judge(_ context: DirectorJudgeContext) -> DirectorJudgement { RuleJudge().judge(context) }
+        func judgeWithAttribution(_ context: DirectorJudgeContext) -> DirectorJudgeEvaluation {
+            .init(judgement: judge(context), attribution: malformedIdentity ? .learned(modelVersion: "trial-v1\n") : nil)
+        }
+    }
+
+    @Test(arguments: [false, true])
+    func missingOrMalformedAttributionDoesNotInventIdentityOrLoseTheDecision(malformed: Bool) async throws {
+        let r = try rig(); defer { try? FileManager.default.removeItem(at: r.base) }
+        guard case .committed = prepare(r, capture: binding()) else { Issue.record("Preparation refused"); return }
+        r.clock.now += 1; try refresh(r); r.controller.tick()
+        configureCuts(r, judge: UnattributedJudge(malformedIdentity: malformed))
+        #expect(r.controller.setLevel(.auto) == .accepted)
+        r.controller.evaluateAutomaticCuts()
+        await r.log.flush()
+        let cut = try #require(try rows(r.log).first { $0.event.kind == .wouldCut })
+        #expect(cut.judgements.isEmpty && cut.event.judgementIndex == nil)
+        #expect(r.log.metrics.dropped == 0 && r.show.programChannel == .a)
         r.controller.detach()
     }
 

@@ -6,6 +6,28 @@ import Foundation
 /// already allow, and authority, staleness and permits stay elsewhere.
 nonisolated protocol DirectorJudge: Sendable {
     func judge(_ context: DirectorJudgeContext) -> DirectorJudgement
+    /// Opt-in identity for this exact invocation, including any fallback.
+    /// Implementations must return the same judgement as `judge` would.
+    func judgeWithAttribution(_ context: DirectorJudgeContext) -> DirectorJudgeEvaluation
+}
+
+/// Explicit provenance of the output actually returned, never inferred from
+/// a judge's concrete type, probabilities, or configured model.
+nonisolated enum DirectorJudgeAttribution: Equatable, Sendable {
+    case rules, recorded
+    case learned(modelVersion: String)
+}
+
+nonisolated struct DirectorJudgeEvaluation: Equatable, Sendable {
+    let judgement: DirectorJudgement
+    let attribution: DirectorJudgeAttribution?
+}
+
+nonisolated extension DirectorJudge {
+    /// Existing arbitrary judges keep their one invocation and remain unattributed.
+    func judgeWithAttribution(_ context: DirectorJudgeContext) -> DirectorJudgeEvaluation {
+        .init(judgement: judge(context), attribution: nil)
+    }
 }
 
 nonisolated struct DirectorJudgeContext: Sendable {
@@ -53,6 +75,10 @@ nonisolated struct DirectorJudgement: Equatable, Sendable {
 
 /// Today's deterministic rules as a judge: the baseline and the fallback.
 nonisolated struct RuleJudge: DirectorJudge {
+    func judgeWithAttribution(_ context: DirectorJudgeContext) -> DirectorJudgeEvaluation {
+        .init(judgement: judge(context), attribution: .rules)
+    }
+
     func judge(_ context: DirectorJudgeContext) -> DirectorJudgement {
         let outcome: DirectorJudgement.Outcome
         switch DirectorShotPolicy.rank(context.timeline, preview: context.preview, parameters: context.parameters) {
@@ -72,6 +98,10 @@ nonisolated struct RuleJudge: DirectorJudge {
 /// replay with any judge plugged in stays deterministic.
 nonisolated struct RecordedJudge: DirectorJudge {
     let records: [UInt64: DirectorJudgement.Outcome]
+
+    func judgeWithAttribution(_ context: DirectorJudgeContext) -> DirectorJudgeEvaluation {
+        .init(judgement: judge(context), attribution: .recorded)
+    }
 
     func judge(_ context: DirectorJudgeContext) -> DirectorJudgement {
         DirectorJudgement(outcome: records[context.evidenceRevision] ?? .abstain(.notRecorded),

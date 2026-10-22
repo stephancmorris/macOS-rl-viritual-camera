@@ -96,7 +96,7 @@ class EvaluationTests(unittest.TestCase):
         self.assertEqual(sum(r['counts']['completed_actions'] for r in data['rows']), 1)
         # C-05 may compare the tightly scoped manual Take. D-06 does not pool
         # this off/assist/auto integration rehearsal into a per-level trial.
-        self.assertEqual(data['sessions'][0]['judgeModels'], [])
+        self.assertEqual(data['sessions'][0]['judgeModels'], [['rules', None]])
         self.assertEqual(sum(p['subjectSpeed']['reportedSamples']
                              for p in data['parameterEvidence']), 2)
 

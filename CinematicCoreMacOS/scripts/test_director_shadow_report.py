@@ -134,6 +134,48 @@ class ShadowReportTests(unittest.TestCase):
             issues = run(changed)['issues']
             self.assertGreater(issues['inconsistent_action_pairs'] + issues['rejected_records'], 0)
 
+    def explicit_segment_pair(self, *, changed=True, before='10', after='11'):
+        rows = [record(0, 10, action('attempt', name='explicit-advance', kind='advanceSegment')),
+                record(1, 10, action('result', name='explicit-advance', kind='advanceSegment', outcome='accepted'))]
+        rows[0]['context']['segmentToken'] = token('explicit-first')
+        rows[1]['context'].update(segmentType='panel', segmentToken=token('explicit-next'), policyRevision='2')
+        for row, version in zip(rows, (before, after)):
+            row['parameters'].update(parametersVersion=version,
+                readiness={'minimumSettledTime': 0, 'minimumCutSettledTime': 0,
+                           'maximumMotion': 0.2, 'maximumCutMotion': 0.1, 'cutOnMotionAllowed': False},
+                adapter={'stillSpeed': 0.2, 'maximumObservationAge': 2, 'debounce': 0}, judgeMaximumAge=1)
+        if changed:
+            rows[1]['parameters']['resolvedStyle']['minimumShotDuration'] = 9
+        return rows
+
+    def test_complete_segment_capture_uses_explicit_versions_independent_of_policy(self):
+        for rows in (self.explicit_segment_pair(),
+                     self.explicit_segment_pair(changed=False, after='10'),
+                     self.explicit_segment_pair(changed=False)):
+            data = run(rows)
+            self.assertEqual(data['issues']['inconsistent_action_pairs'], 0)
+            self.assertEqual(data['issues']['inconsistent_parameters'], 0)
+
+    def test_complete_segment_capture_rejects_rollback_reuse_or_unrelated_setting_changes(self):
+        cases = [self.explicit_segment_pair(after='10'), self.explicit_segment_pair(after='9')]
+        for group, key, value in [('readiness', 'maximumMotion', 0.3),
+                                  ('adapter', 'debounce', 0.1)]:
+            rows = self.explicit_segment_pair(); rows[1]['parameters'][group][key] = value; cases.append(rows)
+        rows = self.explicit_segment_pair(); rows[1]['parameters']['judgeMaximumAge'] = 2; cases.append(rows)
+        rows = self.explicit_segment_pair(); rows[1]['context']['policyRevision'] = '3'; cases.append(rows)
+        rows = self.explicit_segment_pair(); rows[1]['context']['routeGeneration'] = '2'; cases.append(rows)
+        for rows in cases:
+            self.assertGreater(run(rows)['issues']['inconsistent_action_pairs'], 0)
+
+    def test_complete_parameter_version_cannot_change_groups_across_segment_types(self):
+        rows = self.explicit_segment_pair(after='10')
+        data = run(rows)
+        self.assertGreater(data['issues']['inconsistent_parameters'], 0)
+        # A legacy partial row keeps its historical segment-scoped contract.
+        for row in rows:
+            row['parameters'].pop('readiness'); row['parameters'].pop('adapter')
+        self.assertEqual(run(rows)['issues']['inconsistent_parameters'], 0)
+
     def test_control_state_changes_and_unobserved_settings_are_complete_pairs_without_cut_credit(self):
         for kind, outcome in [('setLevel', 'accepted'), ('setLevel', 'refused'), ('handToAlfie', 'accepted'),
                               ('takeOver', 'accepted'), ('settingsChanged', 'unobserved')]:
@@ -160,6 +202,22 @@ class ShadowReportTests(unittest.TestCase):
         self.assertEqual(sum(s['completed_actions'] for _, s, _ in data['groups']), 1)
         self.assertEqual(sum(s['compared'] for _, s, _ in data['groups']), 0)
         self.assertEqual(sum(s['unscored_actions'] for _, s, _ in data['groups']), 1)
+
+    def test_actual_complete_binding_bundle_when_explicitly_supplied(self):
+        requested = os.environ.get('ALFIE_DIRECTOR_BINDING_EXPORT')
+        if not requested:
+            return
+        records, issues, source = report.load_input(Path(requested))
+        data = report.analyze(records, 2, issues, source)
+        self.assertEqual(len(records), 6)
+        self.assertFalse(report.blocking_input(data['issues']), data['issues'])
+        self.assertTrue(all(report.complete_parameter_group(r['parameters']) for r in records))
+        self.assertEqual({r['parameters']['parametersVersion'] for r in records}, {'10', '11'})
+        self.assertEqual(sum(len(r['judgements']) for r in records), 4)
+        self.assertEqual(data['issues']['incomplete_or_duplicate_action_pairs'], 0)
+        self.assertEqual(data['issues']['inconsistent_action_pairs'], 0)
+        self.assertEqual(data['issues']['inconsistent_parameters'], 0)
+        self.assertEqual(data['groups'], [])  # Off-level decisions give no cut credit.
 
     def test_actual_swift_decision_bundle_when_explicitly_supplied(self):
         requested = os.environ.get('ALFIE_DIRECTOR_DECISION_EXPORT')
