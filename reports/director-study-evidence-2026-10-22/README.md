@@ -34,3 +34,5 @@ The [Show Stop export](evidence/show-stop-origin-export/manifest.json) preserves
 ## Remaining work
 
 Real two-camera/output evidence, permission/revocation, sustained load, signed install, consented study data, independent opportunities, owner budgets and per-level sign-off remain open. The source-classification Stop tests inject device identity without physical capture; a live wire label in those fixtures is classification evidence only. Lifecycle/termination is intentionally not recorded as a human action; the prior batch's reference to the App Session-menu call as termination was inaccurate. No framing training, checkpoint save, framing CoreML conversion, model promotion, deployment-timing parity claim or main merge occurred. No project settings, entitlements, Info.plist or extension-shared Director references changed.
+
+The [next-group handoff](next-group.md) groups five rig tickets in execution order and records setup, evidence fields and the separate clean-Mac/qualification gates. Their runtime cells remain not run.
