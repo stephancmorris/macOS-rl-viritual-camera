@@ -489,14 +489,19 @@ def analyze(records, window, issues=None, source=None):
                         issues['backward_clocks'] += 1
             issues['invalid_measurements'] += len(r['invalidFields'])
             previous = r
-    snapshots = {}
+    snapshots, latest_complete_versions = {}, {}
     for r in records:
         p = r['parameters']
         if p['status'] != 'available':
             continue
         complete = complete_parameter_group(p)
-        key = (r['sessionID'], r['evidenceClass'], None if complete else r['context']['segmentType'], p['parametersVersion'])
+        key = (r['sessionID'], None if complete else r['evidenceClass'], None if complete else r['context']['segmentType'], p['parametersVersion'])
         if complete:
+            version = int(p['parametersVersion'])
+            previous = latest_complete_versions.get(r['sessionID'], version)
+            if version < previous:
+                issues['parameter_version_rollback_records'] += 1; blocked.add(r['sessionID'])
+            latest_complete_versions[r['sessionID']] = max(previous, version)
             # Full snapshots share one session version namespace even across
             # segment types. Optional nil fields have one canonical meaning.
             full = {k: p.get(k) for k in ('status', 'parametersVersion', 'preferencesVersion',

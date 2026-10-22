@@ -176,6 +176,22 @@ class ShadowReportTests(unittest.TestCase):
             row['parameters'].pop('readiness'); row['parameters'].pop('adapter')
         self.assertEqual(run(rows)['issues']['inconsistent_parameters'], 0)
 
+    def test_complete_version_namespace_spans_evidence_classes_and_never_rolls_back(self):
+        rows = self.explicit_segment_pair(after='10')
+        rows[1]['evidenceClass'] = 'recorded'
+        self.assertGreater(run(rows)['issues']['inconsistent_parameters'], 0)
+        complete = self.explicit_segment_pair()[0]['parameters']
+        rows = fixture()
+        for row in rows:
+            row['parameters'] = copy.deepcopy(complete)
+        rows[0]['parameters']['parametersVersion'] = '11'
+        data = run(rows)
+        self.assertGreater(data['issues']['parameter_version_rollback_records'], 0)
+        self.assertEqual(sum(stats['compared'] for _, stats, _ in data['groups']), 0)
+        # Unavailable rows cannot reset the high-water mark.
+        rows[1]['parameters'] = {'status': 'unavailable', 'preferencesVersion': 2}
+        self.assertGreater(run(rows)['issues']['parameter_version_rollback_records'], 0)
+
     def test_control_state_changes_and_unobserved_settings_are_complete_pairs_without_cut_credit(self):
         for kind, outcome in [('setLevel', 'accepted'), ('setLevel', 'refused'), ('handToAlfie', 'accepted'),
                               ('takeOver', 'accepted'), ('settingsChanged', 'unobserved')]:

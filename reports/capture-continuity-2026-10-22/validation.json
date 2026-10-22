@@ -14,12 +14,12 @@
     "coreMLCpuInterop": "configured-passed"
   },
   "python": {
-    "scriptsWithActualBundles": 82,
+    "scriptsWithActualBundles": 83,
     "directorTraining": 14,
     "loader": 12,
     "writerSessions": 5,
     "checkpointTrust": 4,
-    "totalPassed": 117,
+    "totalPassed": 118,
     "failed": 0
   },
   "release": {
@@ -54,5 +54,7 @@
     "real-rig-permission-output-load-and-signoff",
     "framing-training-timing-gaps"
   ],
-  "localArtifacts": "/private/tmp/alfie-capture-continuity-20261022"
+  "localArtifacts": "/private/tmp/alfie-capture-continuity-20261022",
+  "shadowReportScriptSha256": "8e126feefaee4546c018e53b9684a4fe4e450a8b0db15a9b05a3a7a142abf2f2",
+  "sourceFingerprintScope": "App build inputs; final offline report script separately hashed"
 }
