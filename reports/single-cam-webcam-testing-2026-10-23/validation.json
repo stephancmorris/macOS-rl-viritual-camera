@@ -50,12 +50,20 @@
         "Auto Pan",
         "Return to Wide",
         "zoom to Waist Up",
-        "Stop"
+        "Stop",
+        "Detect",
+        "tap subject",
+        "Locked confirmation",
+        "Waist Up program crop visual verification"
       ],
       "testingToggleLockedWhileLive": true,
       "testingToggleUnlockedAfterStop": true,
       "sourceIdentityProfile": "stage-built-in-test",
-      "subjectLockOrCorrectnessVerified": false
+      "nativePreviewVisuallyVerified": true,
+      "subjectLockAcquired": true,
+      "subjectCropRendered": true,
+      "longRunSubjectCorrectnessVerified": false,
+      "finalSessionStopped": true
     },
     "multiCam": {
       "A": "MacBook built-in",
