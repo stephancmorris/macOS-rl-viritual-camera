@@ -51,7 +51,7 @@ def binding(rows, configuration='shadow-config-1', judge='unobserved', model=Non
     first = rows[0]
     return {'sessionID': first['sessionID'], 'evidenceClass': first['evidenceClass'],
             'level': first['context']['level'], 'executionMode': first['executionMode'], 'route': 'none',
-            'configurationID': configuration, 'parameterVersion': first['parameters']['parametersVersion'],
+            'configurationID': configuration, 'parameterVersion': first['parameters'].get('parametersVersion'),
             'judgeKind': judge, 'modelVersion': model}
 
 
@@ -78,6 +78,162 @@ def with_speed(rows, speed):
                             'holdingSteady': False, 'cropConverged': False, 'operatorGestureInProgress': False,
                             'identity': 'unavailable', 'identitySource': 'sampleClassifier'}]
     return rows
+
+
+def phase_binding(rows, first, last, phase_id):
+    scoped = [r for r in rows if first <= int(r['sequence']) <= last]
+    models = {(j['judgeKind'], j.get('modelVersion')) for r in scoped for j in r['judgements']}
+    judge, model = next(iter(models)) if models else ('unobserved', None)
+    value = binding(scoped, configuration=phase_id + '-config', judge=judge, model=model)
+    return {**value, 'phaseID': phase_id, 'firstSequence': str(first), 'lastSequence': str(last),
+            'parameterContext': copy.deepcopy(report.canonical_parameter_context(scoped[0]['parameters'])),
+            'routeGenerations': sorted({r['context']['routeGeneration'] for r in scoped}, key=int)}
+
+
+def analyze_phases(rows, bindings):
+    with tempfile.TemporaryDirectory() as directory:
+        path = Path(directory) / 'records.jsonl'
+        path.write_text(''.join(json.dumps(row) + '\n' for row in rows))
+        return report.summarize_shadow(path, 2, bindings, binding_schema_version=2)
+
+
+class PhaseEvaluationTests(unittest.TestCase):
+    def test_explicit_phases_preserve_actual_counts_and_isolate_parameter_samples(self):
+        rows = with_speed(shadow_rows(), 0.1)
+        for row in rows[3:]:
+            row['evidence'][0]['subjectSpeed'] = 0.9
+        bindings = [phase_binding(rows, 0, 2, 'first'), phase_binding(rows, 3, 6, 'second')]
+        data = analyze_phases(rows, bindings)
+        self.assertEqual(data['records'], 7)
+        self.assertEqual(data['bindingMode'], 'explicitPhases')
+        self.assertEqual({row['phaseID'] for row in data['rows']}, {'first', 'second'})
+        self.assertEqual(sum(row['counts']['compared'] for row in data['rows']), 2)
+        self.assertFalse(data['dwell'])
+        self.assertEqual([(p['phaseID'], p['subjectSpeed']['median']) for p in data['parameterEvidence']],
+                         [('first', 0.1), ('second', 0.9)])
+        value = envelope(); value['evaluationSchemaVersion'] = 2; value['shadowBindings'] = bindings
+        result = report.evaluate(value, shadow_data=data)
+        self.assertFalse(result['qualified'])
+        self.assertEqual(result['evaluationSchemaVersion'], 2)
+        self.assertEqual(result['qualificationStatus'], 'incomplete')
+        text = report.markdown(result)
+        self.assertIn('Physical routes are unverified declared labels', text)
+        self.assertIn('original sequences 3–6', text)
+        self.assertIn('/ phase second', report.parameter_memo(result))
+
+    def test_v1_stays_strict_and_does_not_implicitly_accept_phase_bindings(self):
+        rows = shadow_rows()
+        value = envelope(); value['shadowBindings'] = [phase_binding(rows, 0, 6, 'one')]
+        with self.assertRaises(ValueError):
+            report.validate_evaluation(value)
+        legacy = analyze_shadow(rows, [binding(rows)])
+        self.assertNotIn('bindingMode', legacy)
+        self.assertNotIn('phases', legacy)
+        self.assertEqual(sum(r['counts']['compared'] for r in legacy['rows']), 2)
+
+    def test_phase_metadata_rejects_overlap_duplicate_ids_unknown_fields_and_bad_counters(self):
+        rows = shadow_rows()
+        base = [phase_binding(rows, 0, 2, 'first'), phase_binding(rows, 3, 6, 'second')]
+        mutations = [lambda b: b[0].update(firstSequence=True),
+                     lambda b: b[0].update(firstSequence='00'),
+                     lambda b: b[0].update(lastSequence=str(2**64)),
+                     lambda b: b[0].update(firstSequence='3'),
+                     lambda b: b[1].update(firstSequence='2'),
+                     lambda b: b[1].update(phaseID='first'),
+                     lambda b: b[0].update(opportunities=1),
+                     lambda b: b[0].update(routeGenerations=['1', '1']),
+                     lambda b: b[0].update(routeGenerations=['2', '1']),
+                     lambda b: b[0].update(routeGenerations=[True]),
+                     lambda b: b[0]['parameterContext'].update(private='PRIVATE')]
+        for mutate in mutations:
+            candidate = copy.deepcopy(base); mutate(candidate)
+            value = envelope(); value.update(evaluationSchemaVersion=2, shadowBindings=candidate)
+            with self.subTest(mutate=mutate), self.assertRaises(ValueError):
+                report.validate_evaluation(value)
+
+    def test_every_accepted_row_and_span_endpoint_must_be_covered_exactly(self):
+        rows = shadow_rows()
+        variants = [[], [phase_binding(rows, 0, 2, 'first')],
+                    [phase_binding(rows, 0, 2, 'first'), phase_binding(rows, 4, 6, 'second')]]
+        too_far = phase_binding(rows, 0, 6, 'first'); too_far['lastSequence'] = '7'; variants.append([too_far])
+        nonexistent = phase_binding(rows, 0, 6, 'first'); nonexistent['sessionID'] = token('unknown-session'); variants.append([nonexistent])
+        for bindings in variants:
+            with self.subTest(bindings=bindings), self.assertRaises(ValueError):
+                analyze_phases(rows, bindings)
+
+    def test_each_phase_matches_actual_level_mode_class_model_parameters_and_routes(self):
+        rows = with_model(shadow_rows(), 'model-A')
+        mutations = [lambda b: b.update(level='auto'), lambda b: b.update(executionMode='observing'),
+                     lambda b: b.update(evidenceClass='recorded'), lambda b: b.update(modelVersion='model-B'),
+                     lambda b: b.update(routeGenerations=['99']),
+                     lambda b: b['parameterContext']['resolvedStyle'].update(wideCadence=91)]
+        for mutate in mutations:
+            candidate = phase_binding(rows, 0, 6, 'one'); mutate(candidate)
+            with self.subTest(mutate=mutate), self.assertRaises(ValueError):
+                analyze_phases(rows, [candidate])
+        mixed = copy.deepcopy(rows); mixed[-1]['judgements'][0]['modelVersion'] = 'model-B'
+        with self.assertRaises(ValueError):
+            analyze_phases(mixed, [phase_binding(rows, 0, 6, 'one')])
+        first, second = phase_binding(rows, 0, 2, 'first'), phase_binding(rows, 3, 6, 'second')
+        second['configurationID'] = first['configurationID']
+        second['parameterContext']['resolvedStyle']['wideCadence'] = 91
+        value = envelope(); value.update(evaluationSchemaVersion=2, shadowBindings=[first, second])
+        with self.assertRaises(ValueError):
+            report.validate_evaluation(value)
+
+    def test_phase_boundaries_preserve_completed_actions_and_cannot_repair_source_loss(self):
+        rows = shadow_rows()
+        data = analyze_phases(rows, [phase_binding(rows, 0, 1, 'before'), phase_binding(rows, 2, 6, 'after')])
+        self.assertEqual(sum(r['counts']['completed_actions'] for r in data['rows']), 2)
+        self.assertEqual(sum(r['counts']['unscored_actions'] for r in data['rows']), 1)
+        self.assertEqual(next(r for r in data['rows'] if r['phaseID'] == 'before')['status'], 'incomplete')
+        rows = shadow_rows(); rows[0]['droppedRecordsBefore'] = '1'
+        data = analyze_phases(rows, [phase_binding(rows, 0, 2, 'before'), phase_binding(rows, 3, 6, 'after')])
+        self.assertEqual(sum(r['counts']['compared'] for r in data['rows']), 0)
+        self.assertTrue(all(p['status'] == 'incomplete' for p in data['phases']))
+        rows = shadow_rows()
+        for row in rows:
+            row['sequence'] = str(int(row['sequence']) + 10)
+        data = analyze_phases(rows, [phase_binding(rows, 10, 12, 'before'), phase_binding(rows, 13, 16, 'after')])
+        self.assertEqual(data['issues']['leading_sequence_offset'], 10)
+        self.assertEqual(sum(r['counts']['compared'] for r in data['rows']), 0)
+        self.assertEqual(data['phases'][1]['binding']['firstSequence'], '13')
+
+    def test_actual_legacy_exports_accept_only_their_explicit_v2_scopes(self):
+        root = Path(__file__).resolve().parents[2]
+        for name, count, versions in [('binding', 6, {'10', '11'}), ('decision', 10, {None, '10', '11'})]:
+            path = root / 'reports/capture-continuity-2026-10-22/evidence' / (name + '-export')
+            if not path.exists():
+                self.skipTest('historical integration export unavailable')
+            sidecar = json.loads((FIXTURES / ('director-phase-' + name + '-v2.json')).read_text())
+            data = report.summarize_shadow(path, 2, sidecar['shadowBindings'], binding_schema_version=2)
+            self.assertTrue(data['exportValidated'])
+            self.assertEqual(data['records'], count)
+            self.assertEqual(sum(p['acceptedRecords'] for p in data['phases']), count)
+            self.assertEqual({p['binding']['parameterVersion'] for p in data['phases']}, versions)
+            self.assertEqual(data['issues'].get('incomplete_or_duplicate_action_pairs', 0), 0)
+            self.assertEqual(data['issues'].get('inconsistent_action_pairs', 0), 0)
+            if name == 'decision':
+                self.assertEqual(sum(row['counts']['completed_actions'] for row in data['rows']), 1)
+                self.assertEqual(sum(row['counts']['compared'] for row in data['rows']), 1)
+                self.assertEqual({p['binding']['level'] for p in data['phases']}, {'off', 'assist', 'auto'})
+                self.assertFalse(data['dwell'])
+
+    def test_cli_v2_sidecar_is_explicit_and_reports_its_own_digest(self):
+        rows = shadow_rows()
+        with tempfile.TemporaryDirectory() as directory:
+            src, sidecar, records, out = [Path(directory) / name for name in ('input.json', 'sidecar.json', 'records.jsonl', 'report.json')]
+            src.write_text(json.dumps(envelope()))
+            sidecar.write_text(json.dumps({'evaluationSchemaVersion': 2, 'shadowBindings': [phase_binding(rows, 0, 6, 'whole')]}))
+            records.write_text(''.join(json.dumps(row) + '\n' for row in rows))
+            command = [sys.executable, str(Path(report.__file__)), str(src), '--shadow-bundle', str(records),
+                       '--shadow-sidecar', str(sidecar), '--match-window-seconds', '2', '--json-output', str(out)]
+            result = subprocess.run(command, capture_output=True)
+            self.assertEqual(result.returncode, 0, result.stderr)
+            data = json.loads(out.read_text())
+            self.assertEqual(data['evaluationSchemaVersion'], 2)
+            self.assertEqual(len(data['shadowBindingSHA256']), 64)
+            self.assertFalse(data['qualified'])
 
 
 class EvaluationTests(unittest.TestCase):

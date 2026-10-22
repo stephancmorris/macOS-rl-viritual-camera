@@ -79,6 +79,177 @@ def run(rows, window=2):
     return report.analyze(records, window, issues)
 
 
+class PredictionSequencePrecedenceTests(unittest.TestCase):
+    def assert_matching_in_v1_and_v2(self, rows, expected):
+        records, issues = report.load_records(io.BytesIO(('\n'.join(json.dumps(r) for r in rows) + '\n').encode()))
+        self.assertEqual(len(records), len(rows))
+        self.assertFalse(issues)
+        for phased in (False, True):
+            assignments = {r['recordID']: 'whole' for r in records} if phased else None
+            data = report.analyze(records, 2, issues, phase_assignments=assignments)
+            counts = sum((s for _, s, _ in data['groups']), report.Counter())
+            with self.subTest(mode='v2' if phased else 'v1'):
+                self.assertFalse(any(blocked for _, _, blocked in data['groups']))
+                for metric, value in expected.items():
+                    self.assertEqual(counts[metric], value, metric)
+
+    def test_equal_clock_future_prediction_cannot_receive_take_credit(self):
+        rows = [record(0, 10, action('attempt')),
+                record(1, 10, prediction()),
+                record(2, 10.1, action('result'), program='input-2', preview='input-1', preset='waistUp')]
+        rows[-1]['context']['routeGeneration'] = '2'
+        self.assert_matching_in_v1_and_v2(rows, {'predictions': 1, 'completed_actions': 1,
+            'compared': 0, 'exact': 0, 'unmatched_predictions': 1, 'unmatched_actions': 1,
+            'unscored_actions': 0})
+
+    def test_equal_clock_future_prediction_preserves_latest_earlier_candidate(self):
+        rows = [record(0, 10, prediction('wouldPrepare', preset='fullBody', name='older')),
+                record(1, 10, prediction('wouldPrepare', name='latest-before')),
+                record(2, 10, action('attempt', kind='selectPreset', target='input-2')),
+                record(3, 10, prediction('wouldPrepare', preset='fullBody', name='after')),
+                record(4, 10.1, action('result', kind='selectPreset', target='input-2'))]
+        self.assert_matching_in_v1_and_v2(rows, {'predictions': 3, 'completed_actions': 1,
+            'compared': 1, 'exact': 1, 'unmatched_predictions': 2, 'unmatched_actions': 0,
+            'unscored_actions': 0})
+
+    def test_equal_clock_future_prediction_remains_available_for_later_attempt(self):
+        rows = [record(0, 10, action('attempt', name='first', kind='selectPreset', target='input-2')),
+                record(1, 10, prediction('wouldPrepare')),
+                record(2, 10.1, action('result', name='first', kind='selectPreset', target='input-2')),
+                record(3, 10.2, action('attempt', name='second', kind='selectPreset', target='input-2')),
+                record(4, 10.3, action('result', name='second', kind='selectPreset', target='input-2'))]
+        self.assert_matching_in_v1_and_v2(rows, {'predictions': 1, 'completed_actions': 2,
+            'compared': 1, 'exact': 1, 'unmatched_predictions': 0, 'unmatched_actions': 1,
+            'unscored_actions': 0})
+
+
+class ShowStopPairTests(unittest.TestCase):
+    def rows(self, *, program='input-2', single=False, route=1):
+        preview = None if single else ('input-2' if program == 'input-1' else 'input-1')
+        rows = [record(0, 10, action('attempt', name='show-stop', kind='stopSession'), program=program, preview=preview),
+                record(1, 10.1, action('result', name='show-stop', kind='stopSession', outcome='accepted'),
+                       program='input-1', preview=None if single else 'input-2')]
+        rows[0]['context'].update(level='auto', editLive=True)
+        rows[0]['executionMode'] = 'observing'
+        rows[0]['context']['routeGeneration'] = str(route)
+        rows[1]['context'].update(level='off', running=False, editLive=False, paused=False,
+                                  mayPropose=False, mayPrepare=False, mayTake=False,
+                                  routeGeneration=str(route + int(program != 'input-1')))
+        rows[1]['event']['programAfter'] = 'input-1'
+        if not single:
+            rows[1]['event']['previewAfter'] = 'input-2'
+        if single:
+            for row in rows:
+                row['context']['inputs'] = ['input-1']
+        return rows
+
+    def test_explicit_show_stop_closes_only_its_exact_logical_reset(self):
+        for program, single in [('input-1', True), ('input-1', False), ('input-2', False)]:
+            rows = self.rows(program=program, single=single)
+            data = run(rows)
+            with self.subTest(program=program, single=single):
+                self.assertEqual(data['issues']['inconsistent_action_pairs'], 0)
+                self.assertEqual(data['issues']['incomplete_or_duplicate_action_pairs'], 0)
+                self.assertEqual(data['issues']['operator_accepted'], 1)
+                self.assertEqual(data['groups'], [])
+                self.assertFalse(data['dwell'])
+
+    def test_explicit_show_stop_rejects_unrelated_scope_or_terminal_changes(self):
+        mutations = [lambda r: r[1]['event'].update(programAfter='input-2'),
+                     lambda r: r[1]['event'].update(previewAfter='input-1'),
+                     lambda r: r[1]['context'].update(program='input-2', preview='input-1'),
+                     lambda r: r[1]['context'].update(routeGeneration='1'),
+                     lambda r: r[1]['context'].update(routeGeneration='3'),
+                     lambda r: r[1].update(evidenceClass='recorded'),
+                     lambda r: r[1]['context'].update(inputs=['input-1', 'input-2', 'input-3']),
+                     lambda r: r[1]['parameters'].update(parametersVersion='2'),
+                     lambda r: r[1]['context'].update(policyRevision='2'),
+                     lambda r: r[1]['context'].update(nominationRevision='2'),
+                     lambda r: r[1]['event'].update(outcome='completed'),
+                     lambda r: r[1]['event'].update(outcome='refused'),
+                     lambda r: r[1]['context'].update(editLive=True),
+                     lambda r: r[1]['context'].update(running=True),
+                     lambda r: r[1]['context'].update(level='auto'),
+                     lambda r: r[1].update(executionMode='observing'),
+                     lambda r: r[1]['context'].update(paused=True),
+                     lambda r: r[1]['context'].update(pinnedInput='input-1'),
+                     lambda r: r[1]['context'].update(mayPrepare=True),
+                     lambda r: r[1]['judgements'].append({'judgeKind': 'learned', 'modelVersion': 'other',
+                         'evidenceRevision': '1', 'outcome': {'kind': 'abstain',
+                         'reason': {'domain': 'judge', 'code': 'lowConfidence'}}, 'gateResult': 'notEvaluated'})]
+        for mutate in mutations:
+            rows = self.rows(); mutate(rows)
+            with self.subTest(mutate=mutate):
+                self.assertFalse(report.action_pair_scope_matches(*rows))
+                issues = run(rows)['issues']
+                self.assertGreater(issues['inconsistent_action_pairs'] + issues['rejected_records'], 0)
+        rows = self.rows()
+        rows[0]['context']['routeGeneration'] = str(2**64 - 1)
+        rows[1]['context']['routeGeneration'] = '0'
+        self.assertFalse(report.action_pair_scope_matches(*rows))
+        self.assertGreater(run(rows)['issues']['inconsistent_action_pairs'], 0)
+
+    def test_supported_long_alias_does_not_require_integer_conversion(self):
+        rows = self.rows()
+        alias = 'input-' + '9' * 5000
+        for row in rows:
+            context = row['context']
+            context['inputs'] = ['input-1', alias]
+            for key in ('program', 'preview'):
+                if context.get(key) == 'input-2':
+                    context[key] = alias
+        rows[1]['event']['previewAfter'] = alias
+        data = run(rows)
+        self.assertEqual(data['issues']['rejected_records'], 0)
+        self.assertEqual(data['issues']['inconsistent_action_pairs'], 0)
+        self.assertEqual(data['issues']['operator_accepted'], 1)
+
+    def test_legacy_camera_stop_keeps_its_exact_scope_rule(self):
+        rows = [record(0, 10, action('attempt', kind='stopSession')),
+                record(1, 10.1, action('result', kind='stopSession', outcome='accepted'))]
+        self.assertEqual(run(rows)['issues']['operator_accepted'], 1)
+        changed = self.rows()
+        changed[1]['event'].pop('programAfter'); changed[1]['event'].pop('previewAfter')
+        self.assertGreater(run(changed)['issues']['inconsistent_action_pairs'], 0)
+
+    def test_show_stop_does_not_block_prior_valid_matching_or_dwell(self):
+        rows = fixture()
+        stop = self.rows(program='input-1', route=3)
+        for index, row in enumerate(stop, start=7):
+            row['sequence'] = str(index)
+            row['recordID'] = token('stop-after-' + str(index))
+            row['eventTime'] = 22 + (index - 7) * 0.1
+        data = run(rows + stop)
+        self.assertEqual(data['issues']['inconsistent_action_pairs'], 0)
+        self.assertEqual(sum(s['compared'] for _, s, _ in data['groups']), 2)
+        self.assertEqual(sum(s['exact'] for _, s, _ in data['groups']), 2)
+        values = [value for group in data['dwell'].values() for value in group]
+        self.assertEqual(len(values), 1)
+        self.assertAlmostEqual(values[0], 10)
+
+    def test_actual_swift_show_stop_bundle_when_explicitly_supplied(self):
+        requested = os.environ.get('ALFIE_DIRECTOR_SHOW_STOP_EXPORT')
+        if not requested:
+            return
+        records, issues, source = report.load_input(Path(requested))
+        data = report.analyze(records, 2, issues, source,
+            phase_assignments={r['recordID']: 'actual-stop' for r in records})
+        self.assertFalse(report.blocking_input(data['issues']))
+        self.assertIsNotNone(source['manifest'])
+        self.assertEqual(len(records), 2)
+        self.assertEqual({r['evidenceClass'] for r in records}, {'live'})
+        attempt, result = records
+        self.assertEqual((attempt['context']['program'], result['context']['program']), ('input-2', 'input-1'))
+        self.assertEqual(int(result['context']['routeGeneration']), int(attempt['context']['routeGeneration']) + 1)
+        self.assertEqual(result['event']['outcome'], 'accepted')
+        self.assertEqual(data['issues']['operator_accepted'], 1)
+        self.assertEqual(data['issues']['inconsistent_action_pairs'], 0)
+        self.assertEqual(data['issues']['incomplete_or_duplicate_action_pairs'], 0)
+        self.assertEqual(data['blockedSessions'], [])
+        self.assertEqual(data['groups'], [])
+        self.assertFalse(data['dwell'])
+
+
 class ShadowReportTests(unittest.TestCase):
     def test_completed_take_requires_exact_route_increment_and_preserves_attempt_partition(self):
         data = run(fixture())
@@ -426,6 +597,82 @@ def run_bundle(rows, manifest=None, raw_manifest=None, **limits):
         write_bundle(directory, rows, manifest, raw_manifest)
         records, issues, source = report.load_input(directory, **limits)
         return report.analyze(records, 2, issues, source)
+
+
+class PhaseAssignmentTests(unittest.TestCase):
+    def analyze(self, rows, labels):
+        records, issues = report.load_records(io.BytesIO(jsonl_bytes(rows)))
+        assignments = {r['recordID']: label for r, label in zip(records, labels)}
+        return report.analyze(records, 2, issues, phase_assignments=assignments)
+
+    def totals(self, data):
+        return sum((counts for _, counts, _ in data['groups']), report.Counter())
+
+    def test_one_phase_preserves_whole_session_counts_and_original_strata(self):
+        baseline = run(fixture())
+        phased = self.analyze(fixture(), ['whole'] * 7)
+        self.assertEqual(self.totals(phased), self.totals(baseline))
+        self.assertEqual([(k[:-2] + (k[-1],), c, b) for k, c, b in phased['groups']], baseline['groups'])
+        self.assertEqual({k[:-1]: v for k, v in phased['dwell'].items()}, baseline['dwell'])
+        self.assertEqual(phased['blockedSessions'], [])
+
+    def test_predictions_and_interior_dwell_never_cross_phases(self):
+        phased = self.analyze(fixture(), ['before'] + ['after'] * 6)
+        counts = self.totals(phased)
+        self.assertEqual((counts['predictions'], counts['completed_actions'], counts['compared']), (2, 2, 1))
+        self.assertEqual((counts['unmatched_predictions'], counts['unmatched_actions']), (1, 1))
+        phased = self.analyze(fixture(), ['first'] * 3 + ['second'] * 4)
+        self.assertEqual(self.totals(phased)['compared'], 2)
+        self.assertFalse(phased['dwell'])
+
+    def test_cross_phase_completed_take_is_retained_as_unscored_at_attempt(self):
+        phased = self.analyze(fixture(), ['first'] * 2 + ['second'] * 5)
+        counts = self.totals(phased)
+        self.assertEqual((counts['completed_actions'], counts['compared'], counts['unscored_actions']), (2, 1, 1))
+        first = next(c for k, c, _ in phased['groups'] if k[-2] == 'first')
+        self.assertEqual((first['completed_actions'], first['unscored_actions']), (1, 1))
+        self.assertEqual(phased['issues']['phase_boundary_actions'], 1)
+        self.assertEqual(phased['issues']['incomplete_or_duplicate_action_pairs'], 0)
+        self.assertFalse(phased['dwell'])
+        text = report.markdown(phased, 2)
+        self.assertIn('phase first | wouldCut', text)
+        self.assertIn('Original whole-session loss', text)
+
+    def test_reused_phase_label_cannot_match_across_an_intervening_phase(self):
+        rows = [record(0, 9, prediction('wouldPrepare')),
+                record(1, 9.5, fixture()[-1]['event']),
+                record(2, 10, action('attempt', kind='selectPreset', target='input-2')),
+                record(3, 10.1, action('result', kind='selectPreset', target='input-2'))]
+        counts = self.totals(self.analyze(rows, ['same', 'other', 'same', 'same']))
+        self.assertEqual((counts['compared'], counts['unmatched_actions']), (0, 1))
+
+    def test_full_session_loss_and_bad_pairs_still_block_every_phase(self):
+        variants = []
+        rows = fixture(); rows[0]['droppedRecordsBefore'] = '1'; variants.append(rows)
+        rows = fixture()
+        for row in rows:
+            row['sequence'] = str(int(row['sequence']) + 10)
+        variants.append(rows)
+        rows = fixture(); rows[-1]['event'] = action('attempt', name='orphan'); variants.append(rows)
+        for rows in variants:
+            with self.subTest(rows=rows[0]['sequence']):
+                data = self.analyze(rows, ['first'] * 3 + ['second'] * 4)
+                self.assertEqual(self.totals(data)['compared'], 0)
+                self.assertEqual(self.totals(data)['unscored_actions'], 2)
+                self.assertTrue(data['blockedSessions'])
+                self.assertFalse(data['dwell'])
+        self.assertEqual(self.analyze(variants[1], ['first'] * 3 + ['second'] * 4)['issues']['leading_sequence_offset'], 10)
+
+    def test_phase_assignment_requires_exact_record_coverage_and_safe_labels(self):
+        rows = fixture()
+        assignments = {r['recordID']: 'phase' for r in rows}
+        variants = [None, True, {}, {**assignments, token('extra'): 'phase'},
+                    {**assignments, rows[0]['recordID']: True},
+                    {**assignments, rows[0]['recordID']: 'PRIVATE TEXT'}]
+        for candidate in variants[1:]:
+            with self.subTest(candidate=candidate), self.assertRaises(ValueError):
+                report.analyze(rows, 2, phase_assignments=candidate)
+        self.assertEqual(report.analyze(rows, 2, phase_assignments=None), report.analyze(rows, 2))
 
 
 class ExportBundleTests(unittest.TestCase):

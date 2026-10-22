@@ -24,6 +24,10 @@ final class ShowCoordinator: ObservableObject {
     /// Channels by ID. A always exists; R2 adds at most B (C/D are reserved).
     private(set) var channels: [ChannelID: CameraManager] = [:]
 
+    /// Only liveness changes refresh show-level controls; frame publications
+    /// remain local to each camera. Entries exist only for attached channels.
+    private var channelLivenessSubscriptions: [ChannelID: Set<AnyCancellable>] = [:]
+
     /// Sole owner of routing: which channel feeds `programOutput`, the output
     /// clock, route generations and source-loss hold / standby.
     let router: ProgramRouter
@@ -86,6 +90,7 @@ final class ShowCoordinator: ObservableObject {
         a.workScheduler = workScheduler
         self.operatorModes.apply(to: a)
         channels[.a] = a
+        observeChannelLiveness(a)
         self.operatorModes.switchDecision = { [weak self] from, to in
             guard let self else { return .allowed }
             return OperatorModeSwitch.decide(from: from, to: to, state: self.modeSwitchState)
@@ -96,6 +101,17 @@ final class ShowCoordinator: ObservableObject {
     /// Any channel is running or starting.
     var isAnyChannelLive: Bool {
         channels.values.contains { $0.isRunning || $0.isStartingSession }
+    }
+
+    private func observeChannelLiveness(_ channel: CameraManager) {
+        var subscriptions: Set<AnyCancellable> = []
+        channel.$isRunning.removeDuplicates().dropFirst()
+            .sink { [weak self] _ in self?.objectWillChange.send() }
+            .store(in: &subscriptions)
+        channel.$isStartingSession.removeDuplicates().dropFirst()
+            .sink { [weak self] _ in self?.objectWillChange.send() }
+            .store(in: &subscriptions)
+        channelLivenessSubscriptions[channel.channelID] = subscriptions
     }
 
     /// What the live-switch rule needs to know about the show.
@@ -136,6 +152,7 @@ final class ShowCoordinator: ObservableObject {
         channel.workScheduler = workScheduler
         operatorModes.apply(to: channel)
         channels[id] = channel
+        observeChannelLiveness(channel)
         retarget()
         channelsChangedObserver?(.added(id))
         return channel
@@ -149,18 +166,34 @@ final class ShowCoordinator: ObservableObject {
     func removeChannel(_ id: ChannelID) {
         guard id != programChannel, id != .a, let channel = channels[id] else { return }
         channel.stopCapture()
+        channelLivenessSubscriptions[id] = nil
         channels[id] = nil
         retarget()
         channelsChangedObserver?(.removed(id))
     }
 
-    /// Show-level Stop: retires every channel's generation and epoch.
-    func stopShow() {
+    /// Only an explicit console or menu action is human evidence. Lifecycle
+    /// callers preserve Stop's behavior without being attributed to an operator.
+    enum StopOrigin { case operatorUI, lifecycle }
+    struct StopAction {
+        let id: UUID
+        let origin: StopOrigin
+    }
+    var stopAttemptObserver: ((StopAction) -> Void)?
+    var stopResultObserver: ((StopAction) -> Void)?
+
+    /// Show-level Stop: retires every channel's generation and epoch. The
+    /// result boundary observes this synchronous state change, not completion
+    /// of a capture executor's asynchronous stop.
+    func stopShow(origin: StopOrigin = .lifecycle) {
+        let action = StopAction(id: UUID(), origin: origin)
+        stopAttemptObserver?(action)
         for id in ChannelID.allCases { channels[id]?.stopCapture() }
         editLive = false
         resetProgramToA()
         retarget()
         channelsChangedObserver?(.showStopped)
+        stopResultObserver?(action)
     }
 
     /// A new show starts from A as Program with no other channel, whatever

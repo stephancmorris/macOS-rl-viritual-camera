@@ -68,6 +68,7 @@ final class DirectorController: ObservableObject, DirectorConsoleControlling {
     private(set) var shadowRecorder: DirectorShadowRecorder?
     private var shadowTakeID: UUID?
     private var shadowStopCapture: DirectorShadowRecorder.StopActionCapture?
+    private var shadowShowStopCapture: DirectorShadowRecorder.ShowStopActionCapture?
     private lazy var subjectConsole = DirectorSubjectConsole(show: show)
     private let judgeShadow = DirectorJudgeShadow()
     private var captureBindingProvider: DirectorShadowRecorder.CaptureBindingProvider?
@@ -141,6 +142,8 @@ final class DirectorController: ObservableObject, DirectorConsoleControlling {
         detachHooks()
         show.takeAttemptObserver = { [weak self] origin in self?.takeAttempted(origin: origin) }
         show.takeResultObserver = { [weak self] origin, result in self?.takeFinished(origin: origin, result: result) }
+        show.stopAttemptObserver = { [weak self] action in self?.showStopAttempted(action) }
+        show.stopResultObserver = { [weak self] action in self?.showStopFinished(action) }
         show.channelsChangedObserver = { [weak self] change in self?.channelsChanged(change) }
         show.router.stateObserver = { [weak self] state in self?.routerStateChanged(state) }
         show.programOutput.$activeRoute.removeDuplicates().dropFirst()
@@ -165,6 +168,7 @@ final class DirectorController: ObservableObject, DirectorConsoleControlling {
 
     func detach() {
         shadowStopCapture = nil
+        shadowShowStopCapture = nil
         let wasAttached = isAttached
         isAttached = false
         assistPreparation.retire()
@@ -184,6 +188,8 @@ final class DirectorController: ObservableObject, DirectorConsoleControlling {
         guard let show else { return }
         show.takeAttemptObserver = nil
         show.takeResultObserver = nil
+        show.stopAttemptObserver = nil
+        show.stopResultObserver = nil
         show.channelsChangedObserver = nil
         show.router.stateObserver = nil
         showCancellables.removeAll()
@@ -214,6 +220,7 @@ final class DirectorController: ObservableObject, DirectorConsoleControlling {
 
     private func removeChannelHooks(_ id: ChannelID) {
         shadowStopCapture = nil
+        shadowShowStopCapture = nil
         show?.channel(id)?.manualActionObserver = nil
         show?.channel(id)?.manualResultObserver = nil
         channelCancellables[id] = nil
@@ -223,6 +230,7 @@ final class DirectorController: ObservableObject, DirectorConsoleControlling {
 
     private func manualAction(_ action: CameraManager.ManualCameraAction, on channel: ChannelID) {
         shadowStopCapture = nil
+        shadowShowStopCapture = nil
         retireSubjectDiscovery()
         switch action {
         case .command(let command):
@@ -253,6 +261,28 @@ final class DirectorController: ObservableObject, DirectorConsoleControlling {
             return .init(now: clock(), minimumShotDuration: value.minimumShotDuration)
         }
         forward(.operatorTake, pause: .operatorTookOver, takeTiming: timing)
+    }
+
+    private func showStopAttempted(_ action: ShowCoordinator.StopAction) {
+        shadowStopCapture = nil
+        shadowShowStopCapture = nil
+        guard action.origin == .operatorUI else { return }
+        let capture = show.flatMap { shadowRecorder?.captureShowStopAttempt(action, show: $0) }
+        if emitShadow(DirectorShadowRecorder.action(.stopSession, id: action.id), authority: authority) {
+            shadowShowStopCapture = capture
+        }
+    }
+
+    private func showStopFinished(_ action: ShowCoordinator.StopAction) {
+        let capture = shadowShowStopCapture
+        shadowShowStopCapture = nil
+        guard action.origin == .operatorUI else { return }
+        func alias(_ id: ChannelID) -> String { "input-\((ChannelID.allCases.firstIndex(of: id) ?? 0) + 1)" }
+        // Accepted describes the observed logical Stop, not physical capture
+        // executor completion, which this synchronous boundary cannot observe.
+        emitShadow(DirectorShadowRecorder.action(.stopSession, id: action.id, outcome: .accepted,
+            programAfter: show.map { alias($0.programChannel) }, previewAfter: show?.previewChannel.map(alias)),
+            authority: authority, showStopActionCapture: capture)
     }
 
     private func channelsChanged(_ change: ShowCoordinator.ChannelChange) {
@@ -378,8 +408,9 @@ final class DirectorController: ObservableObject, DirectorConsoleControlling {
                             evaluation: DirectorShadowRecorder.Evaluation? = nil,
                             studyParameters: DirectorShadowRecorder.Parameters? = nil,
                             stopActionCapture: DirectorShadowRecorder.StopActionCapture? = nil,
-                            stopActionChannel: ChannelID? = nil) -> Bool {
-        if event.kind == .operatorAction { shadowStopCapture = nil }
+                            stopActionChannel: ChannelID? = nil,
+                            showStopActionCapture: DirectorShadowRecorder.ShowStopActionCapture? = nil) -> Bool {
+        if event.kind == .operatorAction { shadowStopCapture = nil; shadowShowStopCapture = nil }
         guard let show else { return false }
         let requiresBinding = hasCaptureBindingProvider
         let parameters = studyParameters ?? (judgeObservation == nil && evaluation == nil ? cutExecution.captureParameters : nil)
@@ -390,7 +421,8 @@ final class DirectorController: ObservableObject, DirectorConsoleControlling {
             nomination: nominationRevision, evidence: evidenceRevision, preferences: preferences, segment: runSheet?.current,
             judgeObservation: judgeObservation, eventTime: clock(),
             studyParameters: parameters,
-            evaluation: evaluation, stopActionCapture: stopActionCapture, stopActionChannel: stopActionChannel) ?? false
+            evaluation: evaluation, stopActionCapture: stopActionCapture, stopActionChannel: stopActionChannel,
+            showStopActionCapture: showStopActionCapture) ?? false
     }
 
     /// Explicit study naming only. A configured provider owns every capture
@@ -820,7 +852,7 @@ final class DirectorController: ObservableObject, DirectorConsoleControlling {
         if transition.cancellations.contains(.prepare) { assistPreparation.retire(); retireSubjectDiscovery() }
         if event == .policyChanged { policyRevision &+= 1 }
         if event == .nominationChanged { nominationRevision &+= 1 }
-        if event == .restart { shadowStopCapture = nil; shadowRecorder?.restart() }
+        if event == .restart { shadowStopCapture = nil; shadowShowStopCapture = nil; shadowRecorder?.restart() }
         appliedEvents.append(event)
         if appliedEvents.count > Self.eventHistoryLimit { appliedEvents.removeFirst(appliedEvents.count - Self.eventHistoryLimit) }
         if let refusal = transition.refusal { log("\(note ?? "event") refused: \(refusal)") }

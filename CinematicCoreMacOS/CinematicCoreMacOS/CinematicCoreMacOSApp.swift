@@ -49,10 +49,10 @@ struct CinematicCoreMacOSApp: App {
                 Button("Stop Session") {
                     cameraManager.programOutput.noteDiagnostics("stopped via hotkey")
                     // Show-level Stop: stops every input, not just camera A.
-                    show.stopShow()
+                    show.stopShow(origin: .operatorUI)
                 }
                 .keyboardShortcut("s", modifiers: [.command, .option, .shift])
-                .disabled(!cameraManager.isRunning)
+                .disabled(!show.isAnyChannelLive)
             }
         }
 

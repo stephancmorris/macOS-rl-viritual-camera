@@ -1,9 +1,11 @@
 {
   "evaluationSchemaVersion": 1,
+  "supportedEvaluationVersions": [1, 2],
   "producer": "DirectorReplay",
   "requiredTopLevelKeys": ["evaluationSchemaVersion", "producer", "runs", "shadowBindings"],
   "requiredRunKeys": ["scenarioID", "sessionID", "evidenceClass", "level", "executionMode", "route", "configurationID", "parameterVersion", "judgeKind", "modelVersion", "durationSeconds", "parameters", "opportunities", "metrics"],
   "requiredBindingKeys": ["sessionID", "evidenceClass", "level", "executionMode", "route", "configurationID", "parameterVersion", "judgeKind", "modelVersion"],
+  "requiredPhaseBindingKeys": ["sessionID", "evidenceClass", "level", "executionMode", "route", "configurationID", "parameterVersion", "judgeKind", "modelVersion", "phaseID", "firstSequence", "lastSequence", "parameterContext", "routeGenerations"],
   "countMetrics": ["minimumDurationViolations", "oscillations", "manualOverridesHonoured", "proposalCount", "directorAttemptCount", "directorCuts", "operatorTakeAttempts", "operatorCuts", "duplicateCallbacks", "failedEffects", "rejectedAttempts", "preparationsCommitted", "acknowledgementsAccepted", "acknowledgementsRejected", "readyEvaluations", "staleEffectsCommitted", "unqualifiedRefusals", "clockAnomalies", "wrongSubjectAttempts", "labelledSubjectAttempts", "proposalsMadeWhilePaused", "programChangesWithoutAuthority", "wrongSubjectProposals", "labelledSubjectProposals"],
   "otherMetrics": ["cutsPerMinute", "staleProposalsRejected", "manualOverrideLatencies", "finalLevel", "finalPaused"],
   "parameterGroups": {

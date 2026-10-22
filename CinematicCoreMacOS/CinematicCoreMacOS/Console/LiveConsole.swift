@@ -252,7 +252,7 @@ final class LiveConsoleModel: ObservableObject, ConsoleActions {
 
     func stopShow() {
         pairCheck.cancel()
-        show.stopShow()
+        show.stopShow(origin: .operatorUI)
     }
 
     /// Cameras that could become input B (not already used by A).

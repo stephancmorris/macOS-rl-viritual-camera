@@ -65,7 +65,23 @@ New Python writer sessions append a UUID to the timestamped directory name and e
 
 `scan_sessions` validates observations and metadata before returning a session. Invalid FPS, non-object rows, nonfinite numeric labels and inconsistent provided session IDs or completed row counts raise `ValueError`; repair or explicitly replace the source corpus rather than treating rejected input as training evidence. A completed `total_frames` counts persisted rows, not the highest source frame index. Missing optional legacy metadata retains the existing fallback behavior.
 
-Frame-index strides from subsampling and dropped frames remain accepted. The current environment and behavioral-cloning consumers still assume adjacent rows at fixed FPS for velocity/action calculations. This loader validation does not correct irregular elapsed-time motion; a timing-contract follow-up remains open. No full training run or model-quality result follows from passing loader checks.
+Frame-index strides from subsampling and dropped frames remain accepted. By default, framing replay retains the legacy assumption that adjacent stored rows are fixed-rate control steps: speaker velocity is position change times metadata FPS, and expert crop actions are fixed increments per step. Environment `info` and dataset `timing_info` explicitly label timing and continuity as assumed; a missing timestamp does not become measured elapsed time. Metadata FPS is the declared stored-row rate, not proof of source-frame adjacency.
+
+For a study with verified timestamp semantics, opt in to `TimestampTiming(continuity=...)` through `CinematicFramingEnv`, `ExpertDataset`, `train_bc` or `train_ppo`. Every row must supply finite numeric `t` in seconds, and the required caller callback must return a Boolean for every adjacent stored pair. `True` declares a continuous edge with strictly positive finite elapsed time; `False` starts a new partition and permits a clock reset. The implementation supplies no gap threshold, expected index stride, timestamp tolerance or FPS-based timestamp fallback. For example, this **synthetic three-row study** explicitly declares `(0, 10)` to be its missing interval and all other edges continuous:
+
+```python
+from replay_timing import TimestampTiming
+
+timing = TimestampTiming(
+    continuity=lambda previous, current:
+        (previous["frame_idx"], current["frame_idx"]) != (0, 10)
+)
+# Supply the same reviewed study contract as timing= to dataset and environment.
+```
+
+Timestamp mode computes speaker velocity as position change divided by actual elapsed seconds. BC excludes boundary-spanning pairs; replay episodes stay within a declared partition, reset history at its start, and clear speaker-velocity history after a missing detection. Partitions with fewer than two rows provide no transitions. Timestamp replay chooses uniformly among eligible partitions, then uses the existing random slice selection inside that partition; this is not elapsed-time weighting or a guarantee of equal session exposure. Review sampling with the study contract. Timestamp episodes truncate upon reaching the last real row; legacy terminal behavior is preserved. Crop actions and the jitter reward retain their existing per-control-step units, including on any longer edge the caller explicitly accepts as continuous. No action is divided or multiplied by elapsed time.
+
+The command-line trainers retain their legacy default; an explicit study contract is supplied through the Python APIs. The live Swift inference path still uses its existing show-rate velocity and fixed crop increments, so these replay tests establish neither training-to-live timing parity nor model quality. Run `python -m unittest test_replay_timing test_replay_consumers` from `training/` for synthetic timing and shared NumPy checks plus actual Gym/Torch adapter tests when those dependencies are available. No full training run, export or model promotion follows from passing these checks.
 
 ### Recommended Videos
 
@@ -104,6 +120,8 @@ python train_bc.py --data-dir output --epochs 100 --lr 1e-3 --batch-size 512
 ```
 
 ### What to Look For
+
+BC requires a finite `val_split` strictly between zero and one and at least one derived sample in each partition. It retains the existing validation-count rounding and refuses an empty partition before constructing a model; this is a structural check, not a minimum study-size claim.
 
 The script prints training and validation loss every few epochs:
 
@@ -178,6 +196,8 @@ The exported model:
 - **Input:** 18-dim float32 observation vector
 - **Output:** 3-dim float32 action vector (pan, tilt, zoom velocities in [-1, 1])
 - **Target:** macOS 14+, Float32 precision
+
+Export supports the standard SB3 `ActorCriticPolicy` with unsquashed diagonal Gaussian actions, a float32 `(18,)` Box observation space, and a float32 `(3,)` Box action space bounded by `[-1, 1]`, as produced by this framing pipeline. The actor wrapper clips its raw deterministic actions exactly as SB3 prediction does; it does not add an extra `tanh`. Unsupported policy, distribution or space configurations raise `ValueError`. Inference-only parity tests do not establish CoreML conversion or model quality.
 
 **Output:** `models/CinematicFraming.mlpackage`
 

@@ -59,8 +59,20 @@ final class DirectorShadowRecorder {
         let route: UInt64
     }
 
+    /// Separate from a per-camera command: every attached input retires and
+    /// the show resets its roles. Source identities remain in memory only.
+    struct ShowStopActionCapture {
+        let session: UUID
+        let resultSequence: UInt64
+        let action: UUID
+        let inputs: [StopActionCapture.Input]
+        let program: ChannelID
+        let controlRevision: UInt64
+        let route: UInt64
+    }
+
     private static func sourceKind(_ camera: CameraManager) -> R.EvidenceClass? {
-        guard camera.isRunning, let source = camera.sourceIdentity else { return nil }
+        guard camera.isRunning, !camera.isStartingSession, let source = camera.sourceIdentity else { return nil }
         switch camera.activeInputSource {
         case .liveCamera: return source.inputKind == "Live camera" ? .live : nil
         case .validationClip: return source.inputKind == "Validation clip" ? .recorded : nil
@@ -88,6 +100,54 @@ final class DirectorShadowRecorder {
             channel: channel, commandEpoch: command.epoch, inputs: inputs, program: show.programChannel,
             preview: show.previewChannel, controlTarget: show.controlTarget,
             controlRevision: show.controlTargetRevision, route: show.router.routeGeneration)
+    }
+
+    func captureShowStopAttempt(_ action: ShowCoordinator.StopAction,
+                                show: ShowCoordinator) -> ShowStopActionCapture? {
+        guard action.origin == .operatorUI, !exhausted, sequence < .max else { return nil }
+        #if DEBUG
+        guard provenanceForTesting == nil else { return nil }
+        #endif
+        let channels = ChannelID.allCases.compactMap { show.channel($0) }
+        let inputs = channels.compactMap { camera -> StopActionCapture.Input? in
+            guard let kind = Self.sourceKind(camera), let source = camera.sourceIdentity,
+                  !camera.isStartingSession else { return nil }
+            return .init(channel: camera.channelID, camera: ObjectIdentifier(camera), source: source,
+                         active: camera.activeInputSource, preferred: camera.preferredInputSource,
+                         revisions: camera.revisions, missing: camera.sourceMissing, kind: kind)
+        }
+        guard inputs.count == channels.count, let kind = inputs.first?.kind,
+              inputs.allSatisfy({ $0.kind == kind }) else { return nil }
+        return .init(session: log.sessionID, resultSequence: sequence + 1, action: action.id,
+            inputs: inputs, program: show.programChannel, controlRevision: show.controlTargetRevision,
+            route: show.router.routeGeneration)
+    }
+
+    private func showStopProvenance(_ capture: ShowStopActionCapture?, event: R.Event,
+                                    show: ShowCoordinator, sequence: UInt64) -> [R.EvidenceClass]? {
+        guard let capture, capture.session == log.sessionID, capture.resultSequence == sequence,
+              capture.action == event.actionID?.value, event.targetScope == .session, event.target == nil,
+              event.outcome == .accepted,
+              capture.inputs.map(\.channel) == ChannelID.allCases.filter({ show.channel($0) != nil }) else { return nil }
+        let route = capture.route.addingReportingOverflow(capture.program == .a ? 0 : 1)
+        let control = capture.controlRevision.addingReportingOverflow(1)
+        let preview = capture.inputs.first(where: { $0.channel != .a })?.channel
+        guard !route.overflow, !control.overflow, show.programChannel == .a, !show.editLive,
+              show.previewChannel == preview, show.controlTarget == (preview ?? .a),
+              event.programAfter == Self.alias(.a), event.previewAfter == preview.map(Self.alias),
+              show.router.routeGeneration == route.partialValue,
+              show.controlTargetRevision == control.partialValue else { return nil }
+        for input in capture.inputs {
+            let generation = input.revisions.sourceGeneration.addingReportingOverflow(1)
+            let epoch = input.revisions.controlEpoch.addingReportingOverflow(1)
+            guard let camera = show.channel(input.channel), ObjectIdentifier(camera) == input.camera,
+                  camera.sourceIdentity == input.source, camera.preferredInputSource == input.preferred,
+                  !generation.overflow, !epoch.overflow, !camera.isRunning, !camera.isStartingSession,
+                  !camera.sourceMissing, camera.activeInputSource == input.preferred,
+                  camera.revisions == ChannelRevisions(sourceGeneration: generation.partialValue,
+                      controlEpoch: epoch.partialValue, shotRevision: input.revisions.shotRevision) else { return nil }
+        }
+        return capture.inputs.map(\.kind)
     }
 
     private func stopProvenance(_ capture: StopActionCapture?, event: R.Event,
@@ -122,7 +182,7 @@ final class DirectorShadowRecorder {
     private(set) var log: DirectorShadowLog
     private var sequence: UInt64 = 0
     private var exhausted = false
-    private var segmentTokens: [UUID: UUID] = [:]
+    private let segmentAliases = DirectorSegmentAliases()
     private var latestParameters: R.ParameterContext?
     #if DEBUG
     var provenanceForTesting: [R.EvidenceClass]?
@@ -130,7 +190,7 @@ final class DirectorShadowRecorder {
     init(log: DirectorShadowLog) { self.log = log }
 
     func restart() {
-        do { log = try log.renewed(); sequence = 0; exhausted = false; segmentTokens.removeAll(); latestParameters = nil }
+        do { log = try log.renewed(); sequence = 0; exhausted = false; segmentAliases.renew(); latestParameters = nil }
         catch { log.noteDropped() }
     }
 
@@ -138,15 +198,22 @@ final class DirectorShadowRecorder {
               policy: UInt64, nomination: UInt64, evidence: UInt64, preferences: DirectorPreferences?, segment: RunSheet.Segment? = nil,
               judgeObservation: DirectorJudgeShadow.Observation? = nil, eventTime: TimeInterval? = nil,
               studyParameters: Parameters? = nil, evaluation: Evaluation? = nil,
-              stopActionCapture: StopActionCapture? = nil, stopActionChannel: ChannelID? = nil) -> Bool {
+              stopActionCapture: StopActionCapture? = nil, stopActionChannel: ChannelID? = nil,
+              showStopActionCapture: ShowStopActionCapture? = nil) -> Bool {
         guard !exhausted else { log.noteDropped(); return false }
         let number = sequence
         if sequence == .max { exhausted = true } else { sequence += 1 }
         let channels = ChannelID.allCases.compactMap { show.channel($0) }
         var provenance = channels.compactMap { Self.sourceKind($0) }
         if event.action == .stopSession, event.phase == .result {
-            guard let origin = stopProvenance(stopActionCapture, event: event, channel: stopActionChannel,
-                                              show: show, sequence: number) else { log.noteDropped(); return false }
+            let origin: [R.EvidenceClass]?
+            if let showStopActionCapture {
+                origin = showStopProvenance(showStopActionCapture, event: event, show: show, sequence: number)
+            } else {
+                origin = stopProvenance(stopActionCapture, event: event, channel: stopActionChannel,
+                                        show: show, sequence: number)
+            }
+            guard let origin else { log.noteDropped(); return false }
             provenance = origin
         } else {
             #if DEBUG
@@ -169,9 +236,7 @@ final class DirectorShadowRecorder {
         switch a.level { case .off: level = .off; case .suggest: level = .suggest; case .assist: level = .assist; case .auto: level = .auto; case .backup: level = .backup }
         let segmentToken: R.Token?
         if let segment {
-            let token = segmentTokens[segment.id] ?? UUID()
-            segmentTokens[segment.id] = token
-            segmentToken = .init(token)
+            segmentToken = .init(segmentAliases.token(for: segment.id))
         } else { segmentToken = nil }
         let context = R.Context(inputs: channels.map { alias($0.channelID) }, program: alias(show.programChannel),
             preview: show.previewChannel.map(alias), programShot: (evaluation?.timeline?.programShot ?? judgeObservation?.context.timeline.programShot ?? show.channel(show.programChannel)?.directorShot).map { .init($0) },
