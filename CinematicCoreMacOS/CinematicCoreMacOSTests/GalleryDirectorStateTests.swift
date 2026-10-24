@@ -132,8 +132,10 @@ struct GalleryDirectorStateTests {
         }
     }
 
-    @Test(arguments: DirectorGalleryCatalog.cases)
-    func rendersEachState(item: DirectorGalleryCase) throws {
+    // Discovery passes plain IDs; resolve the fixture inside the actor that renders it.
+    @Test(arguments: DirectorGalleryCatalog.cases.map(\.id))
+    func rendersEachState(caseID: String) throws {
+        let item = try #require(DirectorGalleryCatalog.cases.first { $0.id == caseID })
         let card = DirectorStateCard(item: item)
             .padding(24)
             .frame(width: 1280, alignment: .topLeading)
@@ -176,9 +178,5 @@ struct GalleryDirectorStateTests {
         return FileManager.default.temporaryDirectory
             .appendingPathComponent("AlfieMultiviewGallery", isDirectory: true)
     }
-}
-
-extension DirectorGalleryCase: CustomTestStringConvertible {
-    public nonisolated var testDescription: String { id }
 }
 #endif

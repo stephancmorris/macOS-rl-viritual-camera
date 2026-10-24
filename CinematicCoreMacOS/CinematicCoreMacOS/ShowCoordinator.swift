@@ -61,7 +61,10 @@ final class ShowCoordinator: ObservableObject {
     /// - Parameter programOutput: injected in tests; the app passes nil and
     ///   gets the real virtual-camera + Program Display output.
     init(programOutput: ProgramOutputManager? = nil, admissionRecords: AdmissionRecordStore? = nil,
-         qualificationRecords: DirectorQualificationStore? = nil) {
+         qualificationRecords: DirectorQualificationStore? = nil, directorShadowLog: DirectorShadowLog? = nil,
+         directorRunSheet: RunSheet? = nil) {
+        self.initialDirectorShadowLog = directorShadowLog
+        self.initialDirectorRunSheet = directorRunSheet
         self.admissionRecords = admissionRecords ?? AdmissionRecordStore()
         self.qualificationRecords = qualificationRecords ?? .applicationSupport()
         let rehearsal: [any ProgramOutputSink] = DeveloperFlags.allowRehearsalOutput ? [RehearsalOutputSink()] : []
@@ -136,15 +139,33 @@ final class ShowCoordinator: ObservableObject {
 
     var channelsChangedObserver: ((ChannelChange) -> Void)?
 
-    /// The Auto Director, owned by the show. Shadow only (no camera effects)
-    /// until B-05; levels come from this rig's qualification records.
+    /// Optional, explicitly budgeted metadata storage; no implicit I/O defaults.
+    private let initialDirectorShadowLog: DirectorShadowLog?
+    private let initialDirectorRunSheet: RunSheet?
+    /// Read-only export access must not instantiate the lazy Director.
+    var shadowLogForExport: DirectorShadowLog? { initialDirectorShadowLog }
+    private weak var startedDirector: DirectorController?
+    var directorSectionForConsole: NextShotStatus.DirectorSection? {
+        guard DeveloperFlags.runDirectorShadow, let startedDirector, startedDirector.isAttached else { return nil }
+        return startedDirector.directorSection
+    }
+    /// The show owns authority and the configured Debug-only effect boundaries.
     private(set) lazy var director = DirectorController(
-        show: self, qualifiedLevels: { [weak self] in self?.qualifiedDirectorLevels ?? [] })
+        show: self, clock: { [weak self] in self?.clock() ?? CACurrentMediaTime() },
+        qualifiedLevels: { [weak self] in self?.qualifiedDirectorLevels ?? [] },
+        shadowLog: initialDirectorShadowLog, runSheet: initialDirectorRunSheet)
 
     /// Start the Director's shadow when the flag allows it. Every launch is Manual.
     func startDirectorShadow() {
         guard DeveloperFlags.runDirectorShadow else { return }
         director.attach()
+        startedDirector = director
+    }
+
+    /// Explicit operator action against an already attached Director only.
+    func advanceDirectorSegment() {
+        guard DeveloperFlags.runDirectorShadow, let startedDirector, startedDirector.isAttached else { return }
+        startedDirector.advanceSegment()
     }
 
     /// Styles saved in Settings reach the running Director (CR-037). Only
@@ -258,10 +279,27 @@ final class ShowCoordinator: ObservableObject {
     /// S3 B-02: every Take attempt, reported before any check so refused
     /// attempts are seen too.
     var takeAttemptObserver: ((TakeOrigin) -> Void)?
+    var takeResultObserver: ((TakeOrigin, TakeResult) -> Void)?
 
     @discardableResult
-    func take(_ request: TakeRequest? = nil, origin: TakeOrigin = .operatorUI) -> TakeResult {
+    func take(_ request: TakeRequest? = nil, origin: TakeOrigin = .operatorUI,
+              permit: TakePermit? = nil) -> TakeResult {
         takeAttemptObserver?(origin)
+        let result = performTake(request, origin: origin, permit: permit)
+        takeResultObserver?(origin, result)
+        return result
+    }
+
+    private func performTake(_ request: TakeRequest?, origin: TakeOrigin, permit: TakePermit?) -> TakeResult {
+        // B-07: consume before every technical check, including missing Preview
+        // and stale requests. No await or retry between authorization and effect.
+        if origin != .operatorUI {
+            guard let permit, director.consumeTakePermit(permit, now: clock()) else {
+                return .rejected(.directorNotAuthorized)
+            }
+            // Fault fallback needs B-12's distinct, source-loss-scoped permit.
+            guard origin == .director else { return .rejected(.directorNotAuthorized) }
+        }
         guard let request = request ?? makeTakeRequest(), let preview = previewChannel,
               let channel = channels[preview] else {
             return .rejected(.noPreview)

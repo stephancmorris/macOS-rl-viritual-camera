@@ -91,6 +91,9 @@ final class LiveConsoleModel: ObservableObject, ConsoleActions {
     let show: ShowCoordinator
 
     @Published private(set) var snapshot: ConsoleSnapshot
+    /// The started Director's actual status, sampled with the console refresh.
+    /// Nil when shadow is disabled or no controller is attached.
+    @Published private(set) var directorSection: NextShotStatus.DirectorSection?
     /// Latest operator-facing feedback (a refused Take, a failed start).
     @Published private(set) var message: String?
     @Published private(set) var pairCheckText: String?
@@ -100,6 +103,8 @@ final class LiveConsoleModel: ObservableObject, ConsoleActions {
     private var lastCounts: [ChannelID: (count: UInt64, at: TimeInterval)] = [:]
     private var rates: [ChannelID: Double] = [:]
     private let pairCheck: MultiInputCheck
+    private let readDirectorSection: () -> NextShotStatus.DirectorSection?
+    private let directorStatusEnabled: Bool
     private var pairCheckSubscription: AnyCancellable?
     /// Fingerprint key of the last configuration measured automatically, so
     /// a finished or cancelled check is not restarted for the same setup.
@@ -107,9 +112,17 @@ final class LiveConsoleModel: ObservableObject, ConsoleActions {
 
     static let refreshInterval: TimeInterval = 1.0 / 15.0
 
-    init(show: ShowCoordinator, pairCheck: MultiInputCheck? = nil) {
+    /// The reader is injectable for software projection tests. Production
+    /// reads the show's noncreating accessor; it never accesses lazy director.
+    init(show: ShowCoordinator, pairCheck: MultiInputCheck? = nil,
+         directorStatusEnabled: Bool = DeveloperFlags.runDirectorShadow,
+         directorStatus: (() -> NextShotStatus.DirectorSection?)? = nil) {
         self.show = show
         self.pairCheck = pairCheck ?? MultiInputCheck()
+        self.directorStatusEnabled = directorStatusEnabled
+        let reader = directorStatus ?? { [weak show] in show?.directorSectionForConsole }
+        self.readDirectorSection = reader
+        self.directorSection = directorStatusEnabled ? reader() : nil
         self.snapshot = LiveConsoleSnapshot.make(show: show, paneView: .shot, rates: [:], note: nil)
         pairCheckSubscription = self.pairCheck.$phase.sink { [weak self] phase in
             self?.pairCheckText = Self.describe(phase)
@@ -143,7 +156,15 @@ final class LiveConsoleModel: ObservableObject, ConsoleActions {
             show: show, paneView: paneView, rates: rates,
             note: message ?? target?.controlStatus ?? failure)
         if next != snapshot { snapshot = next }
+        // A Director-only change must repaint even when camera/Take state did
+        // not change. Coalesce equal values rather than observing frame writes.
+        let nextDirector = directorStatusEnabled ? readDirectorSection() : nil
+        if nextDirector != directorSection { directorSection = nextDirector }
     }
+
+    /// Badges reflect accepted current preparation; status and level alone
+    /// never imply that Alfie set a camera's shot.
+    var autoBadgeChannels: Set<ChannelID> { directorSection?.alfieSetShot ?? [] }
 
     private static let logger = Logger(subsystem: "com.alfie", category: "Console")
     private var refreshCount = 0
@@ -215,6 +236,12 @@ final class LiveConsoleModel: ObservableObject, ConsoleActions {
         refresh()
     }
 
+    /// Uses the already attached Director; a status panel never creates one.
+    func advanceDirectorSegment() {
+        show.advanceDirectorSegment()
+        refresh()
+    }
+
     // MARK: Show-level
 
     func stopShow() {
@@ -274,6 +301,7 @@ final class LiveConsoleModel: ObservableObject, ConsoleActions {
     static func describe(_ rejection: TakeRejection, show: ShowCoordinator) -> String {
         switch rejection {
         case .noPreview: return "No Preview camera"
+        case .directorNotAuthorized: return "Alfie Take refused: authorization is no longer current"
         case .superseded: return "Take ignored: roles changed since the click"
         case .tooSoon: return "Take ignored: too soon after the last Take"
         case .outputRefused:
@@ -318,9 +346,10 @@ struct LiveMultiviewConsole: View {
 
     private var console: some View {
         let snapshot = model.snapshot
-        var view = MultiviewConsoleView(snapshot: snapshot, actions: model) {
+        var view = MultiviewConsoleView(snapshot: snapshot, actions: model, director: model.directorSection) {
             InputStripView(snapshot: snapshot, actions: model,
-                           tilePicture: { [model] id in LiveTilePicture.make(id: id, show: model.show) })
+                           tilePicture: { [model] id in LiveTilePicture.make(id: id, show: model.show) },
+                           autoBadgeChannels: model.autoBadgeChannels)
         } pill: {
             pill(for: snapshot)
         }
@@ -424,6 +453,18 @@ struct LiveConsoleHeader: View {
 
     var body: some View {
         HStack(spacing: 12) {
+            if let sheet = model.directorSection?.runSheet {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("Current: \(sheet.current)").font(ConsoleStyle.label(10)).lineLimit(1)
+                    Text(sheet.next.map { "Next: \($0)" } ?? "End of run sheet")
+                        .font(ConsoleStyle.label(10)).foregroundStyle(.secondary).lineLimit(1)
+                }
+                Button("Advance") { model.advanceDirectorSegment() }
+                    .controlSize(.small)
+                    .disabled(sheet.next == nil)
+                    .accessibilityLabel("Advance run sheet")
+                    .accessibilityHint("Changes segment style only. Never advances automatically or wraps.")
+            }
             if let text = model.pairCheckText ?? model.admissionTitle {
                 Text(text)
                     .font(ConsoleStyle.label(10))

@@ -147,8 +147,11 @@ struct DirectorNextCutNoticeTests {
         #expect(!catcher.performKeyEquivalent(with: try event()))
     }
 
-    @Test(arguments: DirectorNextCutGallery.cards)
-    func rendersEachNotice(card: DirectorNextCutCard) throws {
+    // Test discovery receives Sendable IDs; actor-bound controllers are
+    // resolved only inside this MainActor test.
+    @Test(arguments: ["auto-notice", "backup-next"])
+    func rendersEachNotice(cardID: String) throws {
+        let card = try #require(DirectorNextCutGallery.cards.first { $0.id == cardID })
         let view = VStack(alignment: .leading, spacing: 8) {
             Text(card.title.uppercased())
                 .font(ConsoleStyle.label(11))
@@ -182,8 +185,4 @@ private func findEscapeKeyViews(_ view: NSView) -> [DirectorEscapeKeyView] {
     var found = (view as? DirectorEscapeKeyView).map { [$0] } ?? []
     for child in view.subviews { found += findEscapeKeyViews(child) }
     return found
-}
-
-extension DirectorNextCutCard: CustomTestStringConvertible {
-    public nonisolated var testDescription: String { id }
 }

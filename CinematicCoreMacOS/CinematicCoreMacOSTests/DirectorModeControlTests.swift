@@ -128,8 +128,11 @@ struct DirectorModeControlTests {
         #expect(DirectorHandShortcut.modifiers == [.command, .shift])
     }
 
-    @Test(arguments: DirectorControlGallery.cards)
-    func rendersEachControlState(card: DirectorControlCard) throws {
+    // Test discovery receives Sendable IDs; actor-bound controllers are
+    // resolved only inside this MainActor test.
+    @Test(arguments: ["launch-manual", "qualified-still-manual", "assist-handed", "refused", "takeover"])
+    func rendersEachControlState(cardID: String) throws {
+        let card = try #require(DirectorControlGallery.cards.first { $0.id == cardID })
         let cardView = VStack(alignment: .leading, spacing: 8) {
             Text(card.title.uppercased())
                 .font(ConsoleStyle.label(11))
@@ -163,8 +166,4 @@ struct DirectorModeControlTests {
         let data = try #require(rep.representation(using: NSBitmapImageRep.FileType.png, properties: [:]))
         try data.write(to: dir.appendingPathComponent("control-\(card.id).png"))
     }
-}
-
-extension DirectorControlCard: CustomTestStringConvertible {
-    public nonisolated var testDescription: String { id }
 }

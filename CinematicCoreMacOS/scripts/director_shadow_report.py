@@ -2,7 +2,7 @@
 """C-05: local metadata-only schema-1 JSONL analysis. No authority or I/O to the app."""
 import argparse
 from collections import Counter, defaultdict, deque
-from datetime import datetime
+from datetime import datetime, timedelta
 import json
 import math
 from pathlib import Path
@@ -12,6 +12,13 @@ import sys
 import uuid
 
 SCHEMA = json.loads(Path(__file__).with_name('director_shadow_schema.json').read_text())
+DEFAULT_MAX_RECORDS = 100000
+MAX_LINE_BYTES = 1048576
+MAX_INPUT_BYTES = 67108864
+SOURCE_RETENTION = timedelta(days=30)
+BLOCKING_INPUT_ISSUES = (
+    'rejected_records', 'input_limit', 'invalid_export_manifest', 'missing_bundle_records',
+)
 REASONS = {
     'proposalStale': 'authorityRevoked routeChanged sourceRestarted shotChangedByOperator targetBecameProgram sourceMissing expired requestReplaced policyChanged nominationChanged evidenceUnavailable',
     'policy': 'invalidInput minimumDuration noEligibleCandidate repetition movement noPreview',
@@ -34,6 +41,21 @@ CHANNEL_ACTIONS = set('detect cancelDetect selectSubject unlock resumeTracking s
 def require(condition):
     if not condition:
         raise ValueError('invalid metadata')
+
+
+def canonical_token(value):
+    require(type(value) is str and str(uuid.UUID(value)).upper() == value)
+    return value
+
+
+def parse_utc(value):
+    require(type(value) is str and re.fullmatch(
+        r'[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}\.[0-9]{3}Z', value))
+    return datetime.strptime(value, '%Y-%m-%dT%H:%M:%S.%fZ')
+
+
+def blocking_input(issues):
+    return any(issues.get(key, 0) for key in BLOCKING_INPUT_ISSUES)
 
 
 def validate(value, typename='Record', path=''):
@@ -61,13 +83,12 @@ def validate(value, typename='Record', path=''):
     elif typename == 'Counter':
         require(type(value) is str and re.fullmatch(r'0|[1-9][0-9]{0,19}', value) and int(value) <= 2**64 - 1)
     elif typename == 'Token':
-        require(type(value) is str and str(uuid.UUID(value)).upper() == value)
+        canonical_token(value)
+    elif typename == 'UTC':
+        parse_utc(value)
     elif typename == 'String':
         require(type(value) is str)
-        if path == 'recordedAtUTC':
-            require(re.fullmatch(r'\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d\.\d{3}Z', value))
-            datetime.strptime(value, '%Y-%m-%dT%H:%M:%S.%fZ')
-        elif path.endswith('.modelVersion'):
+        if path.endswith('.modelVersion'):
             require(re.fullmatch(r'[A-Za-z0-9][A-Za-z0-9._-]*', value))
         elif path.startswith('invalidFields['):
             require(re.fullmatch(r'[A-Za-z]+(?:\[\d+\])?(?:\.[A-Za-z]+(?:\[\d+\])?)+', value))
@@ -190,30 +211,116 @@ def semantic(record):
 
 def unique_object(pairs):
     result = {}
-    for k, v in pairs:
-        require(k not in result); result[k] = v
+    for key, value in pairs:
+        require(key not in result)
+        result[key] = value
     return result
 
 
-def load_records(stream, maximum_records=100000, maximum_line_bytes=1048576, maximum_input_bytes=67108864):
+def strict_json(raw):
+    # The transport is UTF-8, not JSON's optional UTF-16/32 byte autodetection.
+    return json.loads(raw.decode('utf-8'), object_pairs_hook=unique_object,
+                      parse_constant=lambda _: require(False))
+
+
+def load_records(stream, maximum_records=DEFAULT_MAX_RECORDS,
+                 maximum_line_bytes=MAX_LINE_BYTES, maximum_input_bytes=MAX_INPUT_BYTES):
     records, issues, ids, sequences = [], Counter(), set(), {}
     total_bytes = 0
-    for n in range(maximum_records + 1):
+    for count in range(maximum_records + 1):
         raw = stream.readline(maximum_line_bytes + 1)
         if not raw:
             break
         total_bytes += len(raw)
-        if n == maximum_records or len(raw) > maximum_line_bytes or total_bytes > maximum_input_bytes:
-            issues['input_limit'] += 1; break
+        if count == maximum_records or len(raw) > maximum_line_bytes or total_bytes > maximum_input_bytes:
+            issues['input_limit'] += 1
+            break
         try:
-            value = json.loads(raw, object_pairs_hook=unique_object, parse_constant=lambda _: require(False))
-            validate(value); semantic(value)
-            session, seq = value['sessionID'], int(value['sequence'])
-            require(value['recordID'] not in ids and seq > sequences.get(session, -1))
-            ids.add(value['recordID']); sequences[session] = seq; records.append(value)
+            value = strict_json(raw)
+            validate(value)
+            semantic(value)
+            session, sequence = value['sessionID'], int(value['sequence'])
+            require(value['recordID'] not in ids and sequence > sequences.get(session, -1))
+            ids.add(value['recordID'])
+            sequences[session] = sequence
+            records.append(value)
         except (ValueError, TypeError, KeyError, OverflowError, RecursionError, UnicodeError):
             issues['rejected_records'] += 1
     return records, issues
+
+
+def validate_export_manifest(manifest, records):
+    """The eight-field export projection is closed and must describe these rows.
+
+    Source retention is checked at export time. The exported copy itself has
+    no automatic expiry; the current analysis clock is deliberately unused.
+    """
+    validate(manifest, 'ExportManifest')
+    require(manifest['exportSchemaVersion'] == 1)
+    require(manifest['recordCount'] == len(records))
+    summaries = {
+        'sessionIDs': sorted({record['sessionID'] for record in records}),
+        'evidenceClasses': sorted({record['evidenceClass'] for record in records}),
+        'recordSchemaVersions': sorted({record['schemaVersion'] for record in records}),
+    }
+    for field, expected in summaries.items():
+        require(manifest[field] == expected)
+    require(set(manifest['recordSchemaVersions']) <= {SCHEMA['version']})
+    exported_at = parse_utc(manifest['exportedAtUTC'])
+    for record in records:
+        age = exported_at - parse_utc(record['recordedAtUTC'])
+        require(timedelta(0) <= age < SOURCE_RETENTION)
+    return manifest
+
+
+def load_input(path, maximum_records=DEFAULT_MAX_RECORDS,
+               maximum_line_bytes=MAX_LINE_BYTES, maximum_input_bytes=MAX_INPUT_BYTES):
+    """A directory is an export bundle; a file is explicitly unbundled JSONL.
+
+    No companion guessing or recursive discovery can select a different
+    dataset. Bundle metadata and records share the existing byte budget.
+    """
+    path = Path(path)
+    if not path.is_dir():
+        with path.open('rb') as stream:
+            records, issues = load_records(stream, maximum_records, maximum_line_bytes, maximum_input_bytes)
+        return records, issues, {'kind': 'unbundled'}
+
+    source = {'kind': 'bundle', 'manifest': None}
+    issues = Counter()
+    manifest = None
+    manifest_bytes = 0
+    manifest_path = path / 'manifest.json'
+    if not manifest_path.is_file():
+        issues['invalid_export_manifest'] += 1
+    else:
+        with manifest_path.open('rb') as stream:
+            raw = stream.read(maximum_input_bytes + 1)
+        manifest_bytes = len(raw)
+        if manifest_bytes > maximum_input_bytes:
+            issues['input_limit'] += 1
+            return [], issues, source
+        try:
+            manifest = strict_json(raw)
+        except (ValueError, TypeError, KeyError, OverflowError, RecursionError, UnicodeError):
+            issues['invalid_export_manifest'] += 1
+
+    records_path = path / 'records.jsonl'
+    if not records_path.is_file():
+        issues['missing_bundle_records'] += 1
+        return [], issues, source
+    with records_path.open('rb') as stream:
+        records, record_issues = load_records(
+            stream, maximum_records, maximum_line_bytes, maximum_input_bytes - manifest_bytes)
+    issues.update(record_issues)
+    if not issues.get('invalid_export_manifest'):
+        try:
+            validate_export_manifest(manifest, records)
+            if not blocking_input(issues):
+                source['manifest'] = manifest
+        except (ValueError, TypeError, KeyError, OverflowError, RecursionError, UnicodeError):
+            issues['invalid_export_manifest'] += 1
+    return records, issues, source
 
 
 def stratum(r):
@@ -221,7 +328,7 @@ def stratum(r):
     return (r['sessionID'], r['evidenceClass'], c['segmentType'], c.get('segmentToken'), p.get('parametersVersion'), p.get('preferencesVersion'), c['policyRevision'], c['routeGeneration'])
 
 
-def analyze(records, window, issues=None):
+def analyze(records, window, issues=None, source=None):
     require(math.isfinite(window) and window >= 0)
     issues = Counter(issues or {})
     pairs, sessions, groups, abstentions = defaultdict(list), defaultdict(list), defaultdict(list), Counter()
@@ -281,7 +388,7 @@ def analyze(records, window, issues=None):
         elif be['action'] == 'selectPreset' and ae['target'] == a['context'].get('preview'):
             actions.append((a, b, 'wouldPrepare', be['target'], be['shot']))
     # Invalid/unattributable input invalidates scoring globally; identified losses invalidate their session.
-    if issues['rejected_records'] or issues['input_limit']:
+    if blocking_input(issues):
         blocked.update(sessions)
     result, dwell = [], defaultdict(list)
     for key, rows in sorted(groups.items(), key=lambda kv: repr(kv[0])):
@@ -330,17 +437,33 @@ def analyze(records, window, issues=None):
             disruption = any(stratum(r) != stratum(b) or (r['event']['kind'] == 'operatorAction' and r['event']['action'] not in ('take',)) or r['context']['program'] != b['context']['program'] for r in intervening)
             if stratum(b) == stratum(next_a) and b['context']['program'] == next_a['context']['program'] and not disruption:
                 dwell[stratum(b)].append(next_b['eventTime'] - b['eventTime'])
-    return {'groups': result, 'issues': issues, 'abstentions': abstentions, 'dwell': dwell, 'records': len(records)}
+    return {'groups': result, 'issues': issues, 'abstentions': abstentions, 'dwell': dwell,
+            'records': len(records), 'source': source or {'kind': 'unbundled'}}
 
 
 def markdown(data, window):
-    lines = ['# Director shadow report', '', 'Metadata observations only; no qualification or tuning recommendation.', '',
+    lines = ['# Director shadow report', '', 'Metadata observations only; no qualification or tuning recommendation.', '']
+    source = data.get('source', {'kind': 'unbundled'})
+    if source['kind'] == 'bundle':
+        manifest = source.get('manifest')
+        if manifest is None:
+            lines += ['Input: export bundle not validated. Agreement and dwell are unavailable.', '']
+        else:
+            lines += [
+                'Input: explicit-export bundle. Manifest summaries and source age at export are validated.',
+                f'Export ID: {manifest["exportID"]}. Exported at UTC: {manifest["exportedAtUTC"]}.',
+                'Retention: explicitExport. The exported copy is not aged out by the analysis clock.',
+                'Manifest validation does not prove complete capture. Session loss checks still apply.', '',
+            ]
+    else:
+        lines += ['Input: unbundled JSONL. Export metadata is unavailable; explicit-export retention is not established.', '']
+    lines += [
              f'Accepted records: {data["records"]}. Matching window: {window:g} seconds (supplied).', '',
              'Matching: latest unused preceding prediction of the same kind, within the supplied window,',
              'matched to a paired completed operator action at its attempt time. Target and preset must both agree.',
              'Partitions: session, source class, segment/token, parameter/preference versions, policy and route revision.',
              'Agreement = exact / compared; coverage = compared / predictions. Unmatched and unscored counts remain visible.',
-             'Malformed input suppresses all scoring; sequence loss, backward clocks or incomplete action pairs suppress their session.', '',
+             'Malformed input or export metadata suppresses all scoring; sequence loss, backward clocks or incomplete action pairs suppress their session.', '',
              '| Session | Evidence | Segment | Decision | Parameter version | Predictions | Completed actions | Compared | Exact | Agreement | Unmatched predictions | Unmatched actions | Unscored actions | Status |',
              '| --- | --- | --- | --- | --- | ---: | ---: | ---: | ---: | --- | ---: | ---: | ---: | --- |']
     for key, s, blocked in data['groups']:
@@ -367,23 +490,23 @@ def markdown(data, window):
 
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('input', type=Path)
+    parser.add_argument('input', type=Path, help='export bundle directory or unbundled JSONL file')
     parser.add_argument('--match-window-seconds', type=float, required=True)
     parser.add_argument('--output', type=Path)
-    parser.add_argument('--max-records', type=int, default=100000, help='offline analysis resource bound')
+    parser.add_argument('--max-records', type=int, default=DEFAULT_MAX_RECORDS, help='offline analysis resource bound')
     args = parser.parse_args(argv)
     if not math.isfinite(args.match_window_seconds) or args.match_window_seconds < 0 or args.max_records <= 0:
         parser.error('window must be finite/nonnegative and record limit positive')
     try:
-        with args.input.open('rb') as stream:
-            records, issues = load_records(stream, args.max_records)
-        text = markdown(analyze(records, args.match_window_seconds, issues), args.match_window_seconds)
+        records, issues, source = load_input(args.input, args.max_records)
+        data = analyze(records, args.match_window_seconds, issues, source)
+        text = markdown(data, args.match_window_seconds)
         if args.output:
             with args.output.open('x', encoding='utf-8') as output:
                 output.write(text)
         else:
             sys.stdout.write(text)
-        return 2 if issues['rejected_records'] or issues['input_limit'] else 0
+        return 2 if blocking_input(issues) else 0
     except OSError:
         print('Input/output unavailable; no existing output is overwritten.', file=sys.stderr)
         return 1
