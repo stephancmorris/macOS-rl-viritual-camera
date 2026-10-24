@@ -17,6 +17,8 @@ struct InspectorDrawer: View {
     @Binding var isOpen: Bool
     /// The show, when the app runs one. With a second input the drawer gains
     /// a Show section; nil (or a single input) leaves it exactly as before.
+    /// Single Cam and Webcam have no second input: entering them removes
+    /// it, and they offer no way to add one.
     var show: ShowCoordinator?
 
     @Environment(\.openSettings) private var openSettings
@@ -203,6 +205,10 @@ struct InspectorDrawer: View {
                 .fixedSize()
             }
 
+            if let show {
+                BuiltInCameraTestControl(show: show, cameraManager: cameraManager)
+            }
+
             row("Source Resolution") {
                 valueText(cameraManager.sourcePixelHeight > 0
                     ? "\(cameraManager.sourcePixelWidth)×\(cameraManager.sourcePixelHeight) delivered"
@@ -247,10 +253,7 @@ struct InspectorDrawer: View {
             get: { cameraManager.selectedCamera },
             set: { newValue in
                 guard let newValue else { return }
-                cameraManager.selectedCamera = newValue
-                if cameraManager.isRunning {
-                    Task { try? await cameraManager.restartWithCamera(newValue) }
-                }
+                Task { try? await cameraManager.restartWithCamera(newValue) }
             }
         )
     }
@@ -717,5 +720,30 @@ struct InspectorHandle: View {
                 .shadow(color: .black.opacity(0.4), radius: 12, y: 4)
         }
         .buttonStyle(.plain)
+    }
+}
+
+/// Show observation keeps the lock honest when another channel starts. The
+/// coordinator forwards lifecycle state, never the other channel's frames.
+private struct BuiltInCameraTestControl: View {
+    @ObservedObject var show: ShowCoordinator
+    @ObservedObject var cameraManager: CameraManager
+
+    var body: some View {
+        if cameraManager.availableCameras.contains(where: \.isBuiltIn) {
+            VStack(alignment: .leading, spacing: 5) {
+                Toggle("Built-in camera testing", isOn: Binding(
+                    get: { show.isBuiltInCameraTestEnabled },
+                    set: { _ = show.setBuiltInCameraTestEnabled($0) }))
+                    .toggleStyle(.switch)
+                    .disabled(show.isAnyChannelLive)
+                    .help("Stop all cameras before changing built-in camera testing.")
+                Text(ShowSetupModel.builtInCameraTestDetail)
+                    .font(.caption2)
+                    .foregroundStyle(.white.opacity(0.65))
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            .padding(.vertical, 8)
+        }
     }
 }

@@ -1,0 +1,100 @@
+{
+  "date": "2026-10-21",
+  "evidenceClass": "synthetic",
+  "tickets": [
+    "C-10",
+    "D-06",
+    "R2 PRIVACY",
+    "R1 DOCS"
+  ],
+  "basePullRequest": 71,
+  "baseCommit": "94137415e2ab14a16eb81953ee57ee943f046e7d",
+  "sourceFingerprint": "e87a9b0841e81d06a5eba95bb9173d2f95b45e6c62109034147111bf7fd5b12a",
+  "swift": {
+    "fullUnit": {
+      "result": "passed",
+      "testDefinitionsPassed": 932,
+      "expandedExecutionsPassed": 1449,
+      "failures": 0,
+      "skipped": 3,
+      "skipReasons": [
+        "consented-folder replay not configured",
+        "two real webcams not configured",
+        "explicit cadence investigation not configured"
+      ],
+      "resultBundle": "/private/tmp/alfie-evaluation-tools-20261021/full-unit-final.xcresult"
+    },
+    "focusedCapturePrivacy": {
+      "passedExpanded": 145,
+      "failures": 0,
+      "skipped": 0
+    },
+    "explicitExportHarness": {
+      "passed": 2,
+      "failures": 0
+    },
+    "actualCoreMLInterop": {
+      "passed": 1,
+      "failures": 0,
+      "device": "CPU",
+      "comparisonTolerance": 1e-05,
+      "artifact": "explicit Python-generated synthetic model; not bundled"
+    },
+    "diagnosticsCleanupFocused": {
+      "testDefinitionsPassed": 15,
+      "expandedExecutionsPassed": 17,
+      "newCleanupExpandedCases": 5,
+      "failures": 0,
+      "skipped": 0,
+      "resultBundle": "/private/tmp/alfie-evaluation-tools-20261021/privacy-cleanup-focused.xcresult"
+    }
+  },
+  "release": {
+    "result": "passed",
+    "configuration": "Release",
+    "codeSigningAllowed": false,
+    "signedInstallTested": false
+  },
+  "python": {
+    "status": "passed",
+    "scripts": 67,
+    "training": 14,
+    "total": 81,
+    "failures": 0,
+    "evaluatorFocused": 18,
+    "diagnosticsExporterFocused": 13
+  },
+  "sourceScope": {
+    "projectSettingsChanged": false,
+    "entitlementsChanged": false,
+    "infoPlistChanged": false,
+    "sharedExtensionFilesChanged": true,
+    "sharedExtensionFiles": [
+      "DiagnosticsLog.swift: directory/clock injection and async file-queue barrier only; no Director references"
+    ]
+  },
+  "replayExportSHA256": "0789608de68a766193538a10bf270f0dc038d434a8676b271d3547395d4d58d7",
+  "modelComparison": {
+    "scope": "synthetic held-out session",
+    "modelChoiceAgreement": {
+      "correct": 2,
+      "total": 4
+    },
+    "ruleJudgeChoiceAgreement": {
+      "correct": 2,
+      "total": 4
+    },
+    "wins": false,
+    "bundled": false,
+    "promoted": false
+  },
+  "qualifiedLevels": [],
+  "remainingGates": [
+    "real consented representative data and credible labels",
+    "event-aware held-out and calibration study",
+    "current physical rig on both output routes and per-level owner sign-off",
+    "privacy permission/refusal/revocation, retention and Store review",
+    "candidate 1280-point, VoiceOver and downstream installation walkthrough"
+  ],
+  "githubChecks": "No checks reported on branch at publication"
+}

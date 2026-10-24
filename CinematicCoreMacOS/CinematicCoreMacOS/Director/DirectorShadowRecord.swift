@@ -1,10 +1,10 @@
 import Foundation
 
-/// A-09 / D-02 schema 1. Passive metadata only; never restored as authority.
+/// A-09 / D-02 schemas 1 and 2. Passive metadata only; never restored as authority.
 /// Construction must call validated(); encoding and decoding also validate.
 /// B-04 owns bounded storage, 30-day expiry and explicit local export.
 nonisolated struct DirectorShadowRecord: Codable, Equatable, Sendable {
-    static let currentSchemaVersion = 1
+    static let currentSchemaVersion = 2
     enum ValidationError: Error, Equatable { case invalidRecord, mixedProvenance, unknownField }
     enum EvidenceClass: String, Codable, CaseIterable, Equatable, Sendable { case synthetic, recorded, live }
     enum ExecutionMode: String, Codable, CaseIterable, Equatable, Sendable { case shadow, observing }
@@ -186,6 +186,15 @@ nonisolated struct DirectorShadowRecord: Codable, Equatable, Sendable {
         let previewAfter: String?
         enum CodingKeys: String, CodingKey, CaseIterable { case kind, decisionID, target, shot, reason, proposalID, requestID, proposalCreatedAt, judgementIndex, stage, reasons, actionID, action, phase, targetScope, outcome, programAfter, previewAfter }
     }
+    /// Schema 2 materializes actual scorer inputs before history is discarded.
+    /// It never supplies operator labels or reconstructs missing evidence.
+    struct ScorerInput: Codable, Equatable, Sendable {
+        let featureSchemaVersion: Int
+        let judgementIndex: Int
+        let candidateRank: Int
+        let features: [Double]
+        enum CodingKeys: String, CodingKey, CaseIterable { case featureSchemaVersion, judgementIndex, candidateRank, features }
+    }
     let schemaVersion: Int
     let recordID: Token
     let sessionID: Token
@@ -201,7 +210,8 @@ nonisolated struct DirectorShadowRecord: Codable, Equatable, Sendable {
     let event: Event
     let invalidFields: [String]
     let droppedRecordsBefore: Counter
-    enum CodingKeys: String, CodingKey, CaseIterable { case schemaVersion, recordID, sessionID, sequence, recordedAtUTC, eventTime, evidenceClass, executionMode, context, parameters, evidence, judgements, event, invalidFields, droppedRecordsBefore }
+    var scorerInputs: [ScorerInput]? = nil
+    enum CodingKeys: String, CodingKey, CaseIterable { case schemaVersion, recordID, sessionID, sequence, recordedAtUTC, eventTime, evidenceClass, executionMode, context, parameters, evidence, judgements, event, invalidFields, droppedRecordsBefore, scorerInputs }
 
     /// Caller verifies the provenance of every contributing sample/history/judge input.
     /// A mixture cannot be given a single evidence class in schema 1.
@@ -226,7 +236,8 @@ nonisolated struct DirectorShadowRecord: Codable, Equatable, Sendable {
             value.map { $0.isReady == $0.reasons.isEmpty } ?? true
         }
         let diagnostic = parameters.status == .invalid && (event.kind == .abstention || event.kind == .operatorAction)
-        try require(schemaVersion == Self.currentSchemaVersion && scalar(eventTime))
+        try require([1, Self.currentSchemaVersion].contains(schemaVersion) && scalar(eventTime))
+        try require(schemaVersion != 1 || scorerInputs == nil)
         try require(Self.validUTC(recordedAtUTC))
         try require(!context.inputs.isEmpty && Set(context.inputs).count == context.inputs.count &&
                     context.inputs.allSatisfy(alias) && context.inputs.contains(context.program))
@@ -312,6 +323,7 @@ nonisolated struct DirectorShadowRecord: Codable, Equatable, Sendable {
                 try require(items.indices.contains(rank))
             } else { try require(j.acceptedRank == nil) }
         }
+        try validateScorerInputs()
         try require(invalidFields == Array(Set(invalidFields)).sorted() && invalidFields.allSatisfy { optionalNumbers[$0] == true })
         try require(known(event.target) && known(event.programAfter) && known(event.previewAfter))
         try require(event.shot.map(shot) ?? true)
@@ -629,6 +641,8 @@ nonisolated extension DirectorShadowRecord {
         try DirectorShadowRecord.rejectUnknownKeys(decoder, allowed: Set(CodingKeys.allCases.map(\.rawValue)))
         let c = try decoder.container(keyedBy: CodingKeys.self)
         schemaVersion = try c.decode(Int.self, forKey: .schemaVersion)
+        // Even an explicit null is an unknown key in historical schema 1.
+        if schemaVersion == 1, c.contains(.scorerInputs) { throw ValidationError.unknownField }
         recordID = try c.decode(DirectorShadowRecord.Token.self, forKey: .recordID)
         sessionID = try c.decode(DirectorShadowRecord.Token.self, forKey: .sessionID)
         sequence = try c.decode(DirectorShadowRecord.Counter.self, forKey: .sequence)
@@ -643,6 +657,7 @@ nonisolated extension DirectorShadowRecord {
         event = try c.decode(DirectorShadowRecord.Event.self, forKey: .event)
         invalidFields = try c.decode([String].self, forKey: .invalidFields)
         droppedRecordsBefore = try c.decode(DirectorShadowRecord.Counter.self, forKey: .droppedRecordsBefore)
+        scorerInputs = try c.decodeIfPresent([ScorerInput].self, forKey: .scorerInputs)
         _ = try validated()
     }
     func encode(to encoder: any Encoder) throws {
@@ -663,6 +678,7 @@ nonisolated extension DirectorShadowRecord {
         try c.encode(event, forKey: .event)
         try c.encode(invalidFields, forKey: .invalidFields)
         try c.encode(droppedRecordsBefore, forKey: .droppedRecordsBefore)
+        try c.encodeIfPresent(scorerInputs, forKey: .scorerInputs)
     }
 }
 
@@ -936,6 +952,80 @@ nonisolated extension DirectorShadowRecord.JudgementSummary {
                 throw DirectorShadowRecord.ValidationError.invalidRecord
             }
             gateResult = .accepted; gateReason = nil; acceptedRank = rank
+        }
+    }
+}
+
+
+nonisolated extension DirectorShadowRecord.ScorerInput {
+    init(from decoder: any Decoder) throws {
+        try DirectorShadowRecord.rejectUnknownKeys(decoder, allowed: Set(CodingKeys.allCases.map(\.rawValue)))
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        featureSchemaVersion = try c.decode(Int.self, forKey: .featureSchemaVersion)
+        judgementIndex = try c.decode(Int.self, forKey: .judgementIndex)
+        candidateRank = try c.decode(Int.self, forKey: .candidateRank)
+        features = try c.decode([Double].self, forKey: .features)
+    }
+}
+
+nonisolated extension DirectorShadowRecord {
+    /// Closed, lossless materialization. Missing history remains missing; it
+    /// cannot be imputed later by a training script.
+    private func validateScorerInputs() throws {
+        guard let scorerInputs else { return }
+        func require(_ valid: Bool) throws { if !valid { throw ValidationError.invalidRecord } }
+        try require(schemaVersion == 2 && parameters.status == .available && !scorerInputs.isEmpty)
+        var previousJudgement = -1, previousRank = -1
+        var groups: [Int: [ScorerInput]] = [:]
+        for input in scorerInputs {
+            try require(input.featureSchemaVersion == DirectorJudgeFeatures.schemaVersion &&
+                judgements.indices.contains(input.judgementIndex) && input.candidateRank >= 0 &&
+                input.features.count == DirectorJudgeFeatures.names.count)
+            try require(input.features.allSatisfy { $0.isFinite && $0 >= 0 && Float($0).isFinite && Double(Float($0)) == $0 })
+            try require(input.judgementIndex > previousJudgement ||
+                (input.judgementIndex == previousJudgement && input.candidateRank > previousRank))
+            previousJudgement = input.judgementIndex; previousRank = input.candidateRank
+            groups[input.judgementIndex, default: []].append(input)
+        }
+        func hot(_ shot: Shot) -> [Double] {
+            let index: Int
+            switch (shot.format, shot.preset) {
+            case (.stage, .wide): index = 0
+            case (.stage, .fullBody): index = 1
+            case (.stage, .waistUp): index = 2
+            case (.webcam, .wide): index = 3
+            case (.webcam, .tight): index = 4
+            default: return []
+            }
+            return (0..<5).map { $0 == index ? 1 : 0 }
+        }
+        for (index, group) in groups {
+            let judgement = judgements[index]
+            guard judgement.judgeKind == .rules, judgement.evidenceRevision == context.evidenceRevision,
+                  judgement.outcome.kind == .ranked, let ranked = judgement.outcome.ranked,
+                  let computed = judgement.computedAt, let started = context.programStartedAt,
+                  let wide = context.lastWideAt, let programShot = context.programShot else {
+                throw ValidationError.invalidRecord
+            }
+            try require(computed >= started && computed >= wide && computed <= eventTime &&
+                        group.count == ranked.count && group.map(\.candidateRank) == Array(ranked.indices))
+            var total: Double?, counts: [String: Double] = [:]
+            for input in group {
+                let candidate = ranked[input.candidateRank].candidate, f = input.features
+                guard let confidence = candidate.subjectConfidence, let movement = candidate.movement else {
+                    throw ValidationError.invalidRecord
+                }
+                try require(candidate.channel == context.preview && candidate.shot != programShot &&
+                    candidate.isWide == (candidate.shot.preset == .wide))
+                try require(f[0] == Double(Float(confidence)) && f[1] == Double(Float(movement)) &&
+                    f[2] == Double(Float(computed - started)) && f[3] == Double(Float(computed - wide)))
+                try require(f[4].rounded(.towardZero) == f[4] && f[5].rounded(.towardZero) == f[5] && f[5] <= f[4])
+                if let total { try require(f[4] == total) } else { total = f[4] }
+                let key = candidate.shot.format.rawValue + ":" + candidate.shot.preset.rawValue
+                if let old = counts[key] { try require(old == f[5]) } else { counts[key] = f[5] }
+                try require(Array(f[6..<11]) == hot(candidate.shot) && Array(f[11..<16]) == hot(programShot))
+            }
+            try require(counts.values.reduce(0, +) <= (total ?? 0))
         }
     }
 }

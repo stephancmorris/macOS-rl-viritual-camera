@@ -105,4 +105,8 @@ The gallery only shows `DirectorSection` reason text. These contract lines have 
 
 ## C-03 · Pass the director section into the live console (B-03)
 
-`MultiviewConsoleView` and `InputStripView` accept an optional director section and the channels whose shot Alfie set. The gallery uses them. `LiveConsole.swift` still builds the strip and the panel without that section, so the live AUTO badge and the third line stay off until the live console passes `DirectorConsoleControlling.directorSection` through. Please wire that in B-03. Group C does not edit `LiveConsole.swift`.
+`LiveConsoleModel` now samples the explicitly started Director's section through `ShowCoordinator.directorSectionForConsole` with its existing console refresh. Status changes publish independently of camera-snapshot changes, and equal values are coalesced. The next-shot panel receives that section; input badges derive only from its actual `alfieSetShot` set. The disabled/unattached path stays nil and cannot create the lazy Director. Manual Take eligibility and dispatch continue to use the existing show path, independently of Director display status. This software projection does not qualify preparation, cuts or a named rig; live operator/output verification remains separate.
+
+## C-06 · Live Esc rehearsal (B-08)
+
+The reusable notice now accepts any observable `DirectorConsoleControlling`; its Cancel button and plain Esc re-read the current cancellable notice. Removed and Backup notices do not consume Esc. The gallery uses one synthetic shortcut owner. B-08 still owns the real notice/deadline identity and atomic cancellation/Take boundary, and its live Debug rehearsal remains pending. The notice length stays a parameter.

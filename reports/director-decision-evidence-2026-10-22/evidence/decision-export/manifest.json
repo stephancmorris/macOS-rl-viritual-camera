@@ -1,0 +1,16 @@
+{
+  "evidenceClasses" : [
+    "synthetic"
+  ],
+  "exportID" : "237E6A98-DDFD-4E09-A99B-B397EC3636B2",
+  "exportSchemaVersion" : 1,
+  "exportedAtUTC" : "2026-10-22T00:00:00.000Z",
+  "recordCount" : 10,
+  "recordSchemaVersions" : [
+    2
+  ],
+  "retention" : "explicitExport",
+  "sessionIDs" : [
+    "953ECAC0-B8CE-44CB-8DC5-CB4DECE5F394"
+  ]
+}

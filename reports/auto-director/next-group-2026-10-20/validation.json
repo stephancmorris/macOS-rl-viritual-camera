@@ -1,0 +1,21 @@
+{
+  "fullSuite": {
+    "result": "Passed",
+    "passedDefinitions": 787,
+    "passedExecutions": 1125,
+    "failed": 0,
+    "skipped": 3
+  },
+  "afterInitialSheetRepair": {
+    "result": "Passed",
+    "passedDefinitions": 38,
+    "passedExecutions": 41,
+    "failed": 0,
+    "skipped": 0
+  },
+  "pythonTests": 31,
+  "evidence": "synthetic",
+  "signedExportValidated": false,
+  "liveRigQualified": false,
+  "sourceFingerprint": "a0097ef1854d8e2e2109fdc93b9c2250b484ab142333a0da10ee0478c75e2c05"
+}

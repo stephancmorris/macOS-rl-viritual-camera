@@ -2,7 +2,7 @@
 Session writer for JSONL frames and metadata.json output.
 
 Produces the same directory structure as the Swift TrainingDataRecorder:
-  <output_dir>/session_youtube_YYYY-MM-DD_HH-mm-ss/
+  <output_dir>/session_youtube_YYYY-MM-DD_HH-mm-ss_UUID/
     frames.jsonl
     metadata.json
 """
@@ -12,6 +12,7 @@ from __future__ import annotations
 import json
 from datetime import datetime, timezone
 from pathlib import Path
+from uuid import uuid4
 
 from schema import FrameObservation, SessionMetadata
 
@@ -27,12 +28,13 @@ class SessionWriter:
         model_complexity: int = 1,
     ):
         timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
-        self.session_id = f"session_youtube_{timestamp}"
+        self.session_id = f"session_youtube_{timestamp}_{uuid4()}"
         self.session_dir = base_dir / self.session_id
-        self.session_dir.mkdir(parents=True, exist_ok=True)
+        # Refuse even an improbable UUID collision before touching its files.
+        self.session_dir.mkdir(parents=True, exist_ok=False)
 
         self.frames_path = self.session_dir / "frames.jsonl"
-        self._file = open(self.frames_path, "w", encoding="utf-8")
+        self._file = open(self.frames_path, "x", encoding="utf-8")
 
         self._metadata = SessionMetadata(
             session_id=self.session_id,
@@ -71,7 +73,7 @@ class SessionWriter:
         self._metadata.total_frames = total_frames
 
         metadata_path = self.session_dir / "metadata.json"
-        with open(metadata_path, "w", encoding="utf-8") as f:
+        with open(metadata_path, "x", encoding="utf-8") as f:
             json.dump(self._metadata.to_dict(), f, indent=2, sort_keys=True)
 
     def close(self) -> None:

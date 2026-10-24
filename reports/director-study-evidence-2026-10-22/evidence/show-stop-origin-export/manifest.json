@@ -1,0 +1,16 @@
+{
+  "evidenceClasses" : [
+    "live"
+  ],
+  "exportID" : "451EFE47-7B99-4565-AA2A-B50AF54105A9",
+  "exportSchemaVersion" : 1,
+  "exportedAtUTC" : "2026-10-22T05:03:25.178Z",
+  "recordCount" : 2,
+  "recordSchemaVersions" : [
+    2
+  ],
+  "retention" : "explicitExport",
+  "sessionIDs" : [
+    "1A591F14-C08C-425C-AF54-7D513286D8C7"
+  ]
+}

@@ -12,6 +12,7 @@
 
 #if DEBUG
 import AppKit
+import Combine
 import Foundation
 import SwiftUI
 import Testing
@@ -174,8 +175,8 @@ struct ShowSetupTests {
             #expect(setup.failingRows == [row])
             #expect(setup.rowState(row) == .failed("why it failed"))
             #expect(setup.rowState(.distinctDevices) == .passed)
-            #expect(setup.pairCheckTitle == "Camera B unsupported at 1080p50 with Camera A")
-            #expect(setup.pairCheckDetail.hasPrefix("Failed: \(row.title)."))
+            #expect(setup.pairCheckTitle == "Previous A + B check failed at 1080p50")
+            #expect(setup.pairCheckDetail.hasPrefix("The previous check reported: \(row.title)."))
         }
         let render = paired([ShowSetupModel.galleryRecord(.unsupported([reason(.render)]))])
         #expect(render.suggestion.contains("Wide or Pan"))
@@ -195,12 +196,34 @@ struct ShowSetupTests {
 
     @Test func passAndCertifiedCopy() {
         let certified = paired([ShowSetupModel.galleryRecord(.certified)])
-        #expect(certified.pairCheckTitle == "A + B hold 1080p50 on this Mac · certified")
+        #expect(certified.pairCheckTitle == "Previous A + B certification at 1080p50")
         let trial = model(saved: [.a: wide.uniqueID, .b: side.uniqueID])
         var measured = trial
         measured.records = [ShowSetupModel.galleryRecord(.provisional)]
-        #expect(measured.pairCheckTitle == "A + B hold 1080p50 on this Mac · trial")
-        #expect(measured.pairCheckDetail.hasSuffix(", not certified. Certification needs the 60-minute two-input soak on this exact setup."))
+        #expect(measured.pairCheckTitle == "Previous A + B trial at 1080p50")
+        #expect(measured.pairCheckDetail.contains("Current delivered formats, capture profiles and camera modes have not been checked."))
+    }
+
+    @Test(arguments: [AdmissionStatus.provisional, .certified])
+    func historicalPassNeverMarksUnmeasuredCurrentRowsAsPassed(status: AdmissionStatus) {
+        let setup = paired([ShowSetupModel.galleryRecord(status)])
+        #expect(setup.rowState(.distinctDevices) == .passed)
+        for row in [ShowSetupModel.PairCheckRow.showRate, .renderHeadroom, .memoryAndHeat] {
+            #expect(setup.rowState(row) == .notMeasured)
+            #expect(setup.accessibilityLabel(for: row).contains("Not measured yet"))
+        }
+        #expect(setup.canStartPair) // Existing guarded trial policy is unchanged.
+        #expect(setup.pairCheckDetail.contains("camera models"))
+        #expect(!setup.pairCheckDetail.contains("this exact setup"))
+    }
+
+    @Test func historicalFailureDoesNotInventPassesForUnreportedMeasurements() {
+        let setup = paired([ShowSetupModel.galleryRecord(.unsupported([reason(.render)]))])
+        #expect(setup.rowState(.renderHeadroom) == .failed("measured failure"))
+        #expect(setup.rowState(.showRate) == .notMeasured)
+        #expect(setup.rowState(.memoryAndHeat) == .notMeasured)
+        #expect(setup.accessibilityLabel(for: .renderHeadroom).contains("previous check failed"))
+        #expect(setup.canStartAOnly && !setup.canStartPair)
     }
 
     @Test func notRunCopyIsHonestAboutWhenAlfieMeasures() {
@@ -253,8 +276,8 @@ struct ShowSetupTests {
         checking.beginCheck()
         #expect(checking.accessibilityLabel(for: .renderHeadroom) == "Render headroom: checking")
         let unsupported = paired([ShowSetupModel.galleryRecord(.unsupported([reason(.heat, "Thermal state reached serious.")]))])
-        #expect(unsupported.accessibilityLabel(for: .memoryAndHeat) == "Memory and heat: failed. Thermal state reached serious.")
-        #expect(unsupported.accessibilityLabel(for: .renderHeadroom) == "Render headroom: passed")
+        #expect(unsupported.accessibilityLabel(for: .memoryAndHeat) == "Memory and heat: previous check failed. Thermal state reached serious.")
+        #expect(unsupported.accessibilityLabel(for: .renderHeadroom) == "Render headroom: Not measured yet")
         let empty = model()
         #expect(empty.accessibilityLabel(for: .distinctDevices) == "Two distinct devices: Choose A and B")
         for row in ShowSetupModel.PairCheckRow.allCases {
@@ -302,18 +325,305 @@ struct ShowSetupTests {
         #expect(!show.editLive)
     }
 
+    private func pairedLiveSetup(
+        startChannelB: @escaping (CameraManager) -> Void = { _ in
+            Issue.record("this retired pair start must not request B capture")
+        },
+        startChannelA: @escaping @MainActor (ShowCoordinator) async -> Void)
+        -> (ShowCoordinator, LiveShowSetupModel) {
+        let defaults = UserDefaults(suiteName: "alfie-setup-start-\(UUID().uuidString)")!
+        defaults.set(OperatorMode.multiCam.rawValue, forKey: OperatorModeStore.key)
+        defaults.set(wide.uniqueID, forKey: LiveShowSetupModel.deviceAKey)
+        defaults.set(side.uniqueID, forKey: LiveShowSetupModel.deviceBKey)
+        let show = ShowCoordinator(
+            programOutput: ProgramOutputManager(sinks: []),
+            admissionRecords: AdmissionRecordStore(defaults: defaults),
+            operatorModes: OperatorModeStore(defaults: defaults, multiviewEnabled: true))
+        let cameras = [wide, side].map {
+            CameraManager.CameraDevice(id: $0.uniqueID, name: $0.name, modelID: $0.modelID,
+                                       uniqueID: $0.uniqueID, maxResolution: "3840×2160",
+                                       supports4K: true, formatCount: 1)
+        }
+        let live = LiveShowSetupModel(show: show, defaults: defaults, machine: machine,
+                                      cameras: { cameras }, startChannelB: startChannelB) { await startChannelA(show) }
+        return (show, live)
+    }
+
+    @Test(arguments: [
+        (OperatorMode.singleCam, true), (.webcam, true),
+        (.singleCam, false), (.webcam, false)
+    ])
+    func leavingMultiCamDuringPairStartNeverAddsAHiddenCamera(mode: OperatorMode, awaitingStart: Bool) async {
+        let entered = SetupStartLatch()
+        let release = SetupStartLatch()
+        let (show, live) = pairedLiveSetup { show in
+            show.channelA.setStartingForTesting(true)
+            entered.signal()
+            if awaitingStart {
+                await release.wait()
+                show.channelA.setRunningForTesting(true)
+                show.channelA.setStartingForTesting(false)
+            }
+        }
+        #expect(live.setup.canStartPair)
+        live.startPair()
+        await entered.wait()
+        let routeGeneration = show.router.routeGeneration
+
+        // No B exists yet, so the A-only live switch is allowed. Test both
+        // suspension points: the Start/preflight closure and A's capture wait.
+        #expect(show.operatorModes.request(mode) == nil)
+        if !awaitingStart {
+            show.channelA.setRunningForTesting(true)
+            show.channelA.setStartingForTesting(false)
+        }
+        release.signal()
+        await live.waitForStartForTesting()
+
+        #expect(show.operatorModes.mode == mode)
+        #expect(show.channelA.isRunning)
+        #expect(show.channel(.b) == nil)
+        #expect(show.programChannel == .a)
+        #expect(show.router.routeGeneration == routeGeneration)
+    }
+
+    @Test func returningToMultiCamDoesNotReviveTheRetiredPairStart() async {
+        let entered = SetupStartLatch()
+        let release = SetupStartLatch()
+        let (show, live) = pairedLiveSetup { show in
+            show.channelA.setStartingForTesting(true)
+            entered.signal()
+            await release.wait()
+            show.channelA.setRunningForTesting(true)
+            show.channelA.setStartingForTesting(false)
+        }
+        live.startPair()
+        await entered.wait()
+        #expect(show.operatorModes.request(.singleCam) == nil)
+        #expect(show.operatorModes.request(.multiCam) == nil)
+        release.signal()
+        await live.waitForStartForTesting()
+
+        #expect(show.channelA.isRunning)
+        #expect(show.operatorModes.mode == .multiCam)
+        #expect(show.channel(.b) == nil)
+    }
+
+    @Test func stayingInMultiCamStartsTheSelectedCameraBOnceAfterA() async {
+        let entered = SetupStartLatch()
+        let release = SetupStartLatch()
+        var requestedB: [CameraManager] = []
+        let (show, live) = pairedLiveSetup(startChannelB: { requestedB.append($0) }) { show in
+            show.channelA.setStartingForTesting(true)
+            entered.signal()
+            await release.wait()
+            show.channelA.setRunningForTesting(true)
+            show.channelA.setStartingForTesting(false)
+        }
+        live.startPair()
+        await entered.wait()
+        #expect(show.channel(.b) == nil)
+        #expect(requestedB.isEmpty)
+        release.signal()
+        await live.waitForStartForTesting()
+
+        #expect(show.operatorModes.mode == .multiCam)
+        #expect(show.channelA.isRunning)
+        #expect(show.programChannel == .a)
+        #expect(show.previewChannel == .b)
+        #expect(show.channel(.b)?.selectedCamera?.uniqueID == side.uniqueID)
+        #expect(requestedB.count == 1)
+        #expect(requestedB.first === show.channel(.b))
+    }
+
+    @Test func aRetiredSetupScreenCannotStartCapture() async {
+        let (show, live) = pairedLiveSetup { _ in
+            Issue.record("a retired setup screen must not start capture")
+        }
+        #expect(show.operatorModes.request(.singleCam) == nil)
+        live.startAOnly()
+        live.startPair()
+        await live.waitForStartForTesting()
+        #expect(!show.channelA.isRunning)
+        #expect(!show.channelA.isStartingSession)
+        #expect(show.channel(.b) == nil)
+    }
+
+    // MARK: Built-in camera testing
+
+    private var builtIn: ShowSetupModel.Device {
+        .init(uniqueID: "builtin-test", name: "MacBook camera", modelID: "builtin-model", isBuiltIn: true)
+    }
+
+    private func builtInPair(_ status: AdmissionStatus? = nil) -> ShowSetupModel {
+        var record = ShowSetupModel.galleryRecord(status ?? .provisional)
+        record.inputs["B"] = builtIn.modelID
+        return ShowSetupModel(standard: .p50, output: .display,
+                              devices: [wide, side, builtIn],
+                              saved: [.a: wide.uniqueID, .b: builtIn.uniqueID], machine: machine,
+                              records: status == nil ? [] : [record])
+    }
+
+    @Test func builtInCameraTestingDefaultsOffAndOnlyDiscoveryEstablishesEligibility() {
+        let setup = builtInPair()
+        #expect(setup.hasBuiltInCamera)
+        #expect(!setup.isBuiltInCameraTestEnabled)
+        #expect(!setup.usesBuiltInCameraTest)
+        let namedLikeBuiltIn = ShowSetupModel.Device(uniqueID: "usb", name: "MacBook camera", modelID: "builtin-model")
+        let external = ShowSetupModel(standard: .p50, output: .display,
+                                      devices: [namedLikeBuiltIn], machine: machine)
+        #expect(!external.hasBuiltInCamera)
+        #expect(ShowSetupModel.builtInCameraTestDetail.contains("repeats frames"))
+        #expect(ShowSetupModel.builtInCameraTestDetail.contains("unqualified"))
+    }
+
+    @Test func builtInCameraTestOptionInvalidatesAPendingCheckAndLocksWhileLive() {
+        var setup = builtInPair()
+        setup.beginCheck()
+        #expect(setup.isChecking)
+        setup.setBuiltInCameraTestEnabled(true)
+        #expect(!setup.isChecking)
+        #expect(setup.isBuiltInCameraTestEnabled)
+        #expect(setup.usesBuiltInCameraTest)
+        setup.isRunning = true
+        setup.setBuiltInCameraTestEnabled(false)
+        #expect(setup.isBuiltInCameraTestEnabled)
+    }
+
+    @Test(arguments: [AdmissionStatus.certified, .provisional,
+                      .unsupported([AdmissionReason(code: "test.capture", bottleneck: .capture,
+                                                    message: "Old native-rate failure")])])
+    func builtInTestSelectionNeverInheritsNativeHistory(status: AdmissionStatus) {
+        var setup = builtInPair(status)
+        #expect(setup.pairCheck != .notRun)
+        setup.setBuiltInCameraTestEnabled(true)
+        #expect(setup.matchingRecords.isEmpty)
+        #expect(setup.pairCheck == .notRun)
+        #expect(setup.canStartPair)
+        #expect(setup.rowState(.distinctDevices) == .passed)
+        #expect(setup.rowState(.showRate) == .notMeasured)
+        #expect(setup.pairCheckDetail.contains("Previous native-rate checks do not apply"))
+        #expect(setup.pairCheckDetail.contains("do not qualify"))
+        setup.setBuiltInCameraTestEnabled(false)
+        #expect(setup.pairCheck != .notRun)
+    }
+
+    @Test func testOptionDoesNotBypassHistoryForAnExternalPair() {
+        let failure = ShowSetupModel.galleryRecord(.unsupported([reason(.capture)]))
+        var setup = ShowSetupModel(standard: .p50, output: .display,
+                                  devices: [wide, side, builtIn],
+                                  saved: [.a: wide.uniqueID, .b: side.uniqueID], machine: machine,
+                                  records: [failure])
+        setup.setBuiltInCameraTestEnabled(true)
+        #expect(setup.hasBuiltInCamera)
+        #expect(!setup.usesBuiltInCameraTest)
+        #expect(setup.matchingRecords == [failure])
+        #expect(!setup.canStartPair)
+        #expect(setup.pairCheckDetail.hasPrefix("The previous check reported:"))
+    }
+
+    @Test func storedTestFallbackRecordNeverMasqueradesAsNativeHistory() throws {
+        let fingerprint = AdmissionFingerprint(
+            machineModel: machine.model, osVersion: machine.osVersion,
+            showStandard: "1080p50", route: ProgramOutputManager.Route.display.title,
+            inputs: [.init(channel: "A", deviceModelID: wide.modelID, mode: "track"),
+                     .init(channel: "B", deviceModelID: builtIn.modelID, deliveredWidth: 1920,
+                           deliveredHeight: 1080, captureFPS: 30,
+                           captureProfile: "stage-built-in-test", mode: "wide")])
+        let record = try #require(StoredPairRecord.parse(key: fingerprint.key, status: .certified, measuredAt: Date()))
+        #expect(record.hasBuiltInCameraTestInput)
+        var setup = builtInPair()
+        setup.records = [record]
+        #expect(setup.pairCheck == .notRun)
+        #expect(setup.canStartPair)
+        setup.setBuiltInCameraTestEnabled(true)
+        #expect(setup.pairCheck == .notRun)
+    }
+
+    @Test func liveAdapterPropagatesDiscoveryAndTheStoppedOnlyShowOption() {
+        let show = show()
+        let camera = CameraManager.CameraDevice(id: builtIn.uniqueID, name: builtIn.name,
+                                                modelID: builtIn.modelID, uniqueID: builtIn.uniqueID,
+                                                maxResolution: "1920×1080", supports4K: false,
+                                                formatCount: 1, isBuiltIn: true)
+        let live = LiveShowSetupModel(show: show,
+                                      defaults: UserDefaults(suiteName: "alfie-setup-test-camera-\(UUID().uuidString)")!,
+                                      machine: machine, cameras: { [camera] }) {
+            Issue.record("Changing setup options must not start capture")
+        }
+        #expect(live.setup.hasBuiltInCamera)
+        #expect(!live.setup.isBuiltInCameraTestEnabled)
+        #expect(live.actions.setBuiltInCameraTestEnabled != nil)
+        live.actions.setBuiltInCameraTestEnabled?(true)
+        #expect(show.isBuiltInCameraTestEnabled)
+        #expect(show.channelA.builtInCameraTestEnabled)
+        #expect(live.setup.isBuiltInCameraTestEnabled)
+        let b = show.addChannel(.b)
+        #expect(b.builtInCameraTestEnabled)
+        b.setStartingForTesting(true)
+        live.actions.setBuiltInCameraTestEnabled?(false)
+        #expect(show.isBuiltInCameraTestEnabled)
+        #expect(b.builtInCameraTestEnabled)
+        #expect(!show.channelA.isStartingSession)
+        b.setStartingForTesting(false)
+        live.setBuiltInCameraTestEnabled(false)
+        #expect(!show.isBuiltInCameraTestEnabled)
+        #expect(!show.channelA.builtInCameraTestEnabled)
+        #expect(!b.builtInCameraTestEnabled)
+    }
+
+    @Test func liveSetupLocksForBOnlyLivenessAndGuardsActionsBeforeTheUIRefresh() async {
+        let (show, live) = pairedLiveSetup { _ in
+            Issue.record("A must not start while B is live or starting")
+        }
+        let b = show.addChannel(.b)
+        b.setStartingForTesting(true)
+        let savedA = live.setup.device(for: .a)
+        let standard = live.setup.standard
+        let output = live.setup.output
+        // The adapter's display projection is scheduled after willSet. Every
+        // command independently consults current show state in this interval.
+        live.select(side.uniqueID, for: .a)
+        live.selectStandard(.p60)
+        live.selectOutput(.virtualCamera)
+        live.startAOnly()
+        live.startPair()
+        #expect(live.setup.device(for: .a) == savedA)
+        #expect(live.setup.standard == standard)
+        #expect(live.setup.output == output)
+        for await setup in live.$setup.values where setup.isRunning { break }
+        #expect(live.setup.isRunning)
+        #expect(!live.setup.canStartAOnly && !live.setup.canStartPair)
+        b.setRunningForTesting(true)
+        b.setStartingForTesting(false)
+        #expect(show.isAnyChannelLive)
+        b.setRunningForTesting(false)
+        for await setup in live.$setup.values where !setup.isRunning { break }
+        #expect(live.setup.canStartPair)
+        await live.waitForStartForTesting()
+    }
+
     // MARK: Renders
 
     @Test(arguments: [
-        (ShowSetupModel.GalleryScenario.notRun, "setup-notrun.png"),
-        (.checking, "setup-checking.png"),
-        (.pass, "setup-pass.png"),
-        (.unsupported, "setup-unsupported.png")
+        (ShowSetupModel.GalleryScenario.notRun, "setup-notrun.png", false),
+        (.checking, "setup-checking.png", false),
+        (.pass, "setup-pass.png", false),
+        (.unsupported, "setup-unsupported.png", false),
+        (.notRun, "setup-builtin-test.png", true)
     ])
-    func rendersTheSetupAt1280(scenario: ShowSetupModel.GalleryScenario, file: String) throws {
-        let view = ShowSetupView(model: .gallery(scenario), actions: ShowSetupActions(
+    func rendersTheSetupAt1280(scenario: ShowSetupModel.GalleryScenario, file: String,
+                              builtInTest: Bool) throws {
+        var setup = ShowSetupModel.gallery(scenario)
+        if builtInTest {
+            setup.updateDevices(setup.devices + [builtIn])
+            setup.select(builtIn.uniqueID, for: .b)
+            setup.setBuiltInCameraTestEnabled(true)
+        }
+        let view = ShowSetupView(model: setup, actions: ShowSetupActions(
             selectDevice: { _, _ in }, selectStandard: { _ in }, selectOutput: { _ in },
-            startAOnly: {}, startPair: {}, checkPair: nil))
+            startAOnly: {}, startPair: {}, checkPair: nil,
+            setBuiltInCameraTestEnabled: builtInTest ? { _ in } : nil))
         let host = NSHostingView(rootView: view.environment(\.colorScheme, .dark))
         host.frame = CGRect(x: 0, y: 0, width: 1280, height: 800)
         let window = NSWindow(contentRect: host.frame, styleMask: [.borderless], backing: .buffered, defer: false)
@@ -331,6 +641,25 @@ struct ShowSetupTests {
             let data = try #require(rep.representation(using: NSBitmapImageRep.FileType.png, properties: [:]))
             try data.write(to: dir.appendingPathComponent(file))
         }
+    }
+}
+
+/// Main-actor rendezvous: race tests release each continuation explicitly,
+/// without hardware, sleeps or a timing-dependent number of task yields.
+@MainActor
+private final class SetupStartLatch {
+    private var signalled = false
+    private var continuation: CheckedContinuation<Void, Never>?
+
+    func signal() {
+        signalled = true
+        continuation?.resume()
+        continuation = nil
+    }
+
+    func wait() async {
+        if signalled { return }
+        await withCheckedContinuation { continuation = $0 }
     }
 }
 #endif

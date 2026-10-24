@@ -134,6 +134,16 @@ final class FrameWorkScheduler {
         }
     }
 
+    /// Cancel only this lane's waiting request. A discovery owner calls this
+    /// only while its own one-in-flight job is current; render admission and
+    /// running work are unaffected.
+    func cancelWaiting(_ workClass: WorkClass, for channel: ChannelID) {
+        guard var lane = lanes[workClass], let waiter = lane.waiting.removeValue(forKey: channel) else { return }
+        lanes[workClass] = lane
+        stats[channel, default: .init()].cancelled += 1
+        waiter.continuation.resume(returning: nil)
+    }
+
     private func makePermit(_ workClass: WorkClass, _ channel: ChannelID) -> Permit {
         nextID &+= 1
         return Permit(workClass: workClass, channel: channel, id: nextID)

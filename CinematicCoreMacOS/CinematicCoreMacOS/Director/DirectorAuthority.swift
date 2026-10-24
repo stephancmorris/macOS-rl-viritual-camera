@@ -81,6 +81,15 @@ nonisolated struct DirectorAuthority: Equatable, Sendable {
         case .take: return false // Bare epochs never authorize a cut; consume a TakePermit.
         }
     }
+    /// Cancel retires the notice's epoch and starts the same dwell inhibition
+    /// as a nudge. It never resumes authority after manual takeover.
+    @discardableResult mutating func holdAfterCutCancellation(_ timing: TakeTiming) -> Transition {
+        guard Self.cuts(level) else {
+            return Transition(state: self, cancellations: [], refusal: .prerequisites)
+        }
+        return apply(.operatorTake, takeTiming: timing)
+    }
+
     private mutating func retire() {
         guard epoch < UInt64.max else { exhausted = true; level = .off; paused = true; return }
         epoch += 1

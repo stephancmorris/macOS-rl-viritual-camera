@@ -12,18 +12,25 @@ struct CinematicCoreMacOSApp: App {
     @StateObject private var systemExtensionManager = SystemExtensionActivationManager()
     /// Owns the single program output and the channels.
     @StateObject private var show: ShowCoordinator
-    /// Channel A, the routed single camera the current UI drives.
-    @StateObject private var cameraManager: CameraManager
+    /// Always derive A from the retained show. Independent StateObject storage
+    /// for this alias could preserve a camera from a different show instance.
+    private var cameraManager: CameraManager { show.channelA }
     @StateObject private var settingsWindowController = SettingsWindowController()
 
     init() {
+        // StateObject defers this factory until its retained storage needs an
+        // instance. Recreating the App value must not construct or start a
+        // second show whose camera/output can escape into another scene.
+        _show = StateObject(wrappedValue: Self.makeShow())
+    }
+
+    private static func makeShow() -> ShowCoordinator {
         let show = ShowCoordinator()
         show.startDirectorShadow()
-        _show = StateObject(wrappedValue: show)
-        _cameraManager = StateObject(wrappedValue: show.channelA)
         #if DEBUG
         DebugLaunchHooks.startWindowDumps()
         #endif
+        return show
     }
 
     var body: some Scene {
@@ -49,19 +56,21 @@ struct CinematicCoreMacOSApp: App {
                 Button("Stop Session") {
                     cameraManager.programOutput.noteDiagnostics("stopped via hotkey")
                     // Show-level Stop: stops every input, not just camera A.
-                    show.stopShow()
+                    show.stopShow(origin: .operatorUI)
                 }
                 .keyboardShortcut("s", modifiers: [.command, .option, .shift])
-                .disabled(!cameraManager.isRunning)
+                .disabled(!show.isAnyChannelLive)
             }
         }
 
         Settings {
             SettingsWindow(
                 cameraManager: cameraManager,
+                operatorModes: show.operatorModes,
                 systemExtensionManager: systemExtensionManager,
                 controller: settingsWindowController,
-                onDirectorPreferencesChanged: { [show] in show.directorPreferencesChanged($0) }
+                onDirectorPreferencesChanged: { [show] in show.directorPreferencesChanged($0) },
+                shadowLogProvider: { [show] in show.shadowLogForExport }
             )
         }
 

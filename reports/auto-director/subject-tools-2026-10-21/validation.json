@@ -1,0 +1,46 @@
+{
+  "date": "2026-10-21",
+  "basePR": 70,
+  "baseCommit": "a20a3487a5cc8ca6818d88bd216fb63ec3951cd6",
+  "tickets": [
+    "B-10",
+    "C-08",
+    "A-16"
+  ],
+  "dependency": {
+    "ticket": "A-14",
+    "pr": 58,
+    "sourceCommit": "364d0a8",
+    "cherryPick": "589c94e"
+  },
+  "evidenceClass": "synthetic",
+  "swift": {
+    "result": "Passed",
+    "definitions": 925,
+    "passedDefinitions": 922,
+    "expandedPasses": 1436,
+    "failures": 0,
+    "skips": 3,
+    "resultBundle": "/private/tmp/alfie-subject-tools-20261021/full-unit.xcresult"
+  },
+  "python": {
+    "passed": 31,
+    "failures": 0
+  },
+  "release": {
+    "unsigned": true,
+    "appAndCameraExtension": "BUILD SUCCEEDED",
+    "log": "/private/tmp/alfie-subject-tools-20261021/release-build.log"
+  },
+  "sourceFingerprint": "035ffabeb208aec3e68c4d91c8cee14b2a25510c92ca00fcfd319f08c8596ef8",
+  "liveQualified": false,
+  "modelBundled": false,
+  "defaultDiscoveryConfiguration": null,
+  "defaultJudgeConfiguration": null,
+  "remaining": [
+    "D-03 rig budget/soak and Take-overlap decision",
+    "C-08 visible source/route/VoiceOver walkthrough",
+    "C-10 real training data, held-out agreement/calibration and accepted model",
+    "owner qualification/sign-off"
+  ]
+}

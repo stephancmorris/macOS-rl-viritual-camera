@@ -25,8 +25,7 @@ HEADER = ("elapsed_s,clock,window_kind,thermal,low_power,cpu_cores,cpu_pct,threa
 
 
 def write_session(folder: Path, *, admitted=250, short_window_at=None, refused_at=None, closing=True,
-                  thermal_at=None, windows=12):
-    stamp = "2026-09-28_120000"
+                  thermal_at=None, windows=12, stamp="2026-09-28_120000"):
     rows, total = [], 0
     marker = {k: "" for k in HEADER}
     marker.update(elapsed_s="0.0", clock="12:00:00", window_kind="marker", thermal="nominal", low_power="no",
@@ -59,7 +58,7 @@ def write_session(folder: Path, *, admitted=250, short_window_at=None, refused_a
             "build": {"appVersion": "1.0", "buildNumber": "4", "sourceFingerprint": "abc123",
                       "osVersion": "26.0", "machineModel": "Mac16,1"},
             "source": {"inputKind": "Live camera", "deviceName": "Elgato 4K X", "captureProfile": "stage",
-                       "requestedWidth": 3840, "requestedHeight": 2160, "configuredCaptureFPS": 50,
+                       "operatorMode": "single_cam", "requestedWidth": 3840, "requestedHeight": 2160, "configuredCaptureFPS": 50,
                        "captureSelectionReason": "preferred format", "belowShowRate": False,
                        "deliveredWidth": 3840, "deliveredHeight": 2160},
             "output": {"route": "Program Display", "showStandard": "1080p50", "showFPS": 50,
@@ -84,10 +83,87 @@ class ReportTests(unittest.TestCase):
         self.assertIn("Schema 2", text)
         self.assertIn("Expected rate: 50.00 fps (manifest configured capture rate)", text)
         self.assertIn("Elgato 4K X", text)
+        self.assertIn("profile stage · mode single_cam", text)
         self.assertIn("| Delivered to Alfie | 3000 | 50.0 |", text)
         self.assertIn("| Presented downstream | unknown | unknown |", text)
         self.assertIn("**Cadence:** 0 of 12 full windows", text)
         self.assertIn("Nothing outside the expected ranges", text)
+
+    def report_with_source(self, *, profile, configured_fps, below_show_rate, reason,
+                           operator_mode="multi_cam", show_fps=50):
+        with tempfile.TemporaryDirectory() as tmp:
+            folder = write_session(Path(tmp), admitted=round(configured_fps * 5))
+            path = next(folder.glob("alfie_session_*.json"))
+            manifest = json.loads(path.read_text())
+            source = manifest["identity"]["source"]
+            source.update(captureProfile=profile, configuredCaptureFPS=configured_fps,
+                          belowShowRate=below_show_rate, captureSelectionReason=reason,
+                          operatorMode=operator_mode, requestedWidth=1920, requestedHeight=1080,
+                          deliveredWidth=1920, deliveredHeight=1080)
+            manifest["identity"]["output"].update(showFPS=show_fps, playoutFPS=show_fps)
+            path.write_text(json.dumps(manifest))
+            session = report.load(report.locate(path))
+            original_identity = json.loads(json.dumps(session.manifest["identity"]))
+            text = report.build_report(session)
+            self.assertEqual(session.manifest["identity"], original_identity)
+            return text
+
+    def test_native_stage_source_has_no_fallback_claim(self):
+        text = self.report_with_source(profile="stage", configured_fps=50, below_show_rate=False,
+                                       reason="preferred format")
+        self.assertIn("profile stage · mode multi_cam", text)
+        self.assertIn("Requested 1920×1080 at 50.00 fps; delivered 1920×1080\n", text)
+        self.assertNotIn("below the show rate", text)
+        self.assertNotIn("Webcam fallback", text)
+        self.assertNotIn("built-in camera test", text)
+
+    def test_built_in_30_fps_test_is_identified_without_claiming_native_show_cadence(self):
+        text = self.report_with_source(profile="stage-built-in-test", configured_fps=30,
+                                       below_show_rate=True, reason="explicit built-in camera test fallback")
+        self.assertIn("profile stage-built-in-test · mode multi_cam", text)
+        self.assertIn("Requested 1920×1080 at 30.00 fps; delivered 1920×1080"
+                      " · below the show rate (built-in camera test)", text)
+        self.assertIn("Expected rate: 30.00 fps (manifest configured capture rate)", text)
+        self.assertIn("| Delivered to Alfie | 1800 | 30.0 |", text)
+        self.assertIn("playout clock 50.00 fps", text)
+        self.assertIn("| Presented downstream | unknown | unknown |", text)
+        self.assertIn("Capture choice: explicit built-in camera test fallback", text)
+        self.assertNotIn("Webcam fallback", text)
+        self.assertNotIn("qualified", text.lower())
+        self.assertNotIn("certified", text.lower())
+
+    def test_webcam_profile_keeps_its_specific_fallback_label(self):
+        # Source profile is authoritative; do not infer it from operator mode.
+        text = self.report_with_source(profile="webcam", configured_fps=30, below_show_rate=True,
+                                       reason="nearest lower rate", operator_mode="single_cam")
+        self.assertIn("below the show rate (Webcam fallback)", text)
+        self.assertIn("profile webcam · mode single_cam", text)
+        self.assertIn("Capture choice: nearest lower rate", text)
+        self.assertNotIn("built-in camera test", text)
+
+    def test_unknown_or_stage_fallback_does_not_invent_a_profile_or_mode(self):
+        for profile in ("stage", "debug-stage", "future-profile", None):
+            with self.subTest(profile=profile):
+                text = self.report_with_source(profile=profile, configured_fps=30, below_show_rate=True,
+                                               reason="recorded source selection reason", operator_mode="unknown")
+                self.assertIn(f"profile {profile or '–'} · mode unknown", text)
+                self.assertIn("delivered 1920×1080 · below the show rate\n", text)
+                self.assertIn("Capture choice: recorded source selection reason", text)
+                self.assertIn("Expected rate: 30.00 fps", text)
+                self.assertNotIn("Webcam fallback", text)
+                self.assertNotIn("built-in camera test", text)
+
+    def test_60_fps_source_uses_recorded_below_rate_flag_without_rate_or_reason_inference(self):
+        text = self.report_with_source(profile="stage-built-in-test", configured_fps=60,
+                                       below_show_rate=False, show_fps=60,
+                                       reason="original built-in test selection detail")
+        self.assertIn("profile stage-built-in-test", text)
+        self.assertIn("Requested 1920×1080 at 60.00 fps; delivered 1920×1080\n", text)
+        self.assertIn("Expected rate: 60.00 fps", text)
+        self.assertIn("Capture choice: original built-in test selection detail", text)
+        self.assertNotIn("below the show rate", text)
+        self.assertNotIn("Webcam fallback", text)
+        self.assertNotIn("(built-in camera test)", text)
 
     def test_cadence_shortfall_and_refusals_are_observed(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -108,6 +184,53 @@ class ReportTests(unittest.TestCase):
             (folder / "alfie_soak_2026-01-01_000000.csv").write_text(",".join(HEADER) + "\n")
             session = report.locate(folder)
         self.assertEqual(session.stamp, "2026-09-28_120000")
+
+    def test_uuid_session_token_selects_only_its_own_exact_companions(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            folder = Path(tmp)
+            first = "2026-09-28_120000_00000000-0000-0000-0000-000000000001"
+            second = "2026-09-28_120000_00000000-0000-0000-0000-000000000002"
+            write_session(folder, admitted=250, stamp=first)
+            write_session(folder, admitted=100, stamp=second)
+            (folder / f"alfie_memory_{first}.csv").write_text("elapsed_s,heap_blocks\n5,100\n")
+            (folder / f"alfie_memory_{second}.csv").write_text("elapsed_s,heap_blocks\n5,999\n")
+            for kind, extension in (("soak", "csv"), ("memory", "csv"), ("session", "json")):
+                with self.subTest(kind=kind):
+                    selected = report.load(report.locate(folder / f"alfie_{kind}_{first}.{extension}"))
+                    self.assertEqual(selected.stamp, first)
+                    self.assertEqual(selected.soak_path.name, f"alfie_soak_{first}.csv")
+                    self.assertEqual(selected.memory_path.name, f"alfie_memory_{first}.csv")
+                    self.assertEqual(selected.manifest_path.name, f"alfie_session_{first}.json")
+                    self.assertEqual(selected.memory[0]["heap_blocks"], "100")
+                    self.assertIn("| Delivered to Alfie | 3000 |", report.build_report(selected))
+            with self.assertRaisesRegex(SystemExit, "select an explicit"):
+                report.locate(folder)
+
+    def test_mixed_legacy_and_uuid_names_keep_the_same_local_time_chronology(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            folder = Path(tmp)
+            legacy = "2026-10-21_105959"
+            newer = "2026-10-21_110000_00000000-0000-0000-0000-000000000001"
+            write_session(folder, admitted=100, stamp=legacy)
+            write_session(folder, admitted=250, stamp=newer)
+            selected = report.load(report.locate(folder))
+            self.assertEqual(selected.stamp, newer)
+            self.assertIn("| Delivered to Alfie | 3000 |", report.build_report(selected))
+            # A later legacy session remains selectable in a mixed archive too.
+            latest = "2026-10-21_110001"
+            write_session(folder, admitted=200, stamp=latest)
+            self.assertEqual(report.locate(folder).stamp, latest)
+
+    def test_folder_can_choose_a_unique_new_token_without_matching_filename_prefixes(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            folder = Path(tmp)
+            write_session(folder)
+            newest = "2026-09-29_120000_00000000-0000-0000-0000-000000000001"
+            write_session(folder, stamp=newest)
+            (folder / "backup_alfie_soak_2099-01-01_000000.csv").write_text("ignored")
+            (folder / "alfie_soak_2099-01-01_000000.csv.bak").write_text("ignored")
+            (folder / "alfie_session_2099-01-01_000000.csv").write_text("ignored")
+            self.assertEqual(report.locate(folder).stamp, newest)
 
     @unittest.skipUnless(LEGACY.exists(), "legacy fixture not present")
     def test_legacy_schema1_session_is_summarised_with_its_limits(self):

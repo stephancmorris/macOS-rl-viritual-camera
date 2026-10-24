@@ -1,0 +1,13 @@
+# Debug Backup fallback execution
+
+B-12 integrates the A-17 exception with the existing synchronous `ShowCoordinator.take` and rendered-frame `ProgramRouter.commitTake` boundary. This is synthetic software evidence; R1/R2 decisions, live unplug drills, downstream observation and Q-Backup sign-off remain pending. No fallback configuration is installed by the app. Release automatic effects remain disabled.
+
+An explicit rehearsal configuration supplies the verified safe-wide channel, its exact source/control/shot revisions and preset, a finite nonnegative maximum frame age, and a separate current fallback qualification lookup. The ordinary Backup-level qualification, current admission, current Preview eligibility and operator priority remain mandatory. A Wide preset alone does not establish verified coverage.
+
+Camera loss can arrive before the router's 0.5-second loss detection. The controller immediately applies its ordinary source-loss cancellation and pause, then reserves the exact resulting authority/context. That reservation grants no cut and carries no invented deadline. At the first actual router hold callback, the adapter may issue one fault-specific permit bound to the absolute two-second hold deadline. Router detection can also arrive first and uses the same transition. Duplicate events never extend the window or retry a failed attempt.
+
+A typed fallback permit cannot substitute for a normal Take permit. Consumption precedes all existing technical Take checks, and the router rechecks the exact hold window and strict `now < deadline` immediately before sending the rendered Preview buffer. Missing, stale, held, rebound, changed, unverified, unqualified or otherwise ineligible Preview remains on the ordinary hold-to-generated-black-standby path. Output refusal is terminal. No raw-source path exists.
+
+Successful fallback pauses with the destination alert and handback caption. Reconnect retains pause; explicit handback rechecks authority and clears the alert. Manual actions, operator Takes, source/revision/route changes, style/nomination changes, admission/output faults, stop, restart, detach and configuration replacement retire pending work. Segment styles do not grant authority.
+
+`DirectorBackupExecutionTests` cover synthetic event ordering, immediate pause and ordinary-permit revocation, rendered-buffer routing, no configuration, current safety bindings, operator priority, duplicate faults/output refusal, held/both-missing inputs and deadline refusal even before watchdog standby notification. Existing `DirectorBackupFallbackPolicyTests` cover isolated permutation and stale-callback behavior. These tests do not qualify a physical rig or either downstream output route.

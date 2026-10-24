@@ -4,6 +4,12 @@ Status: **D-04 integration proposal, AWAITING OWNER (Q1–Q3), 2026-10-10.** Thi
 
 Evidence inspected at main `42191c71ec303e3f7d388c7cdafb5d5ef93d89db`: [MultiInputAdmission.swift](../../CinematicCoreMacOS/CinematicCoreMacOS/MultiInputAdmission.swift), [ShowCoordinator.swift](../../CinematicCoreMacOS/CinematicCoreMacOS/ShowCoordinator.swift), [CameraManager.swift](../../CinematicCoreMacOS/CinematicCoreMacOS/CameraManager.swift) and [ProgramOutputManager.swift](../../CinematicCoreMacOS/CinematicCoreMacOS/ProgramOutputManager.swift). The inspected main has no `QualificationLookup` or Director per-level record store. B-06 names that future seam; method signatures and fields below are integration requests. This memo does not edit or approve code.
 
+## Current implementation review — 18 October 2026
+
+Main `434e26a` now contains `DirectorQualificationLookup` and `DirectorQualificationStore` in [DirectorQualificationStore.swift](../../CinematicCoreMacOS/CinematicCoreMacOS/Director/DirectorQualificationStore.swift). Its version-1 `QualificationRecord` stores only `level`, `fingerprintKey` and `signedOffAt`; lookup matches the flattened key. This is B-06's initial persistence seam, not the full proposed envelope below.
+
+Structured setup/scope binding, evidence digests, verified signatories, explicit validity/retention checks and a persistent supersession/revocation history are still integration work. Existing store tests establish their exercised persistence/refusal behavior, not these missing guarantees. The historical source inspection above and proposed sections below are retained for traceability. See the [review and acceptance limits](../../reports/auto-director/d01-d04-review-2026-10-18.md). Q1–Q3 remain AWAITING OWNER.
+
 ## 1. Options and recommendation — AWAITING OWNER
 
 | Choice | Options | Recommendation / tradeoff | Evidence required |
@@ -31,12 +37,12 @@ No new production duration, exposure count, timeout, threshold or storage limit 
 | `inputs[].deviceModelID` | Optional `String`; `selectedCamera?.modelID`, **not** a unique device ID or serial |
 | `inputs[].deliveredWidth`, `deliveredHeight` | Optional `Int` pixels; source dimensions when positive, otherwise nil |
 | `inputs[].captureFPS` | Optional `Double` frames/s; configured capture rate, nil before configuration or for a validation clip |
-| `inputs[].captureProfile` | Optional `String`; producer currently supplies `stage` or `webcam` |
+| `inputs[].captureProfile` | Optional `String`; producer supplies `stage`, `webcam`, or `stage-built-in-test` for an actual explicit built-in test fallback |
 | `inputs[].mode` | `String`; `wide`, `track`, `manual`, `pan` from active camera mode |
 
 `AdmissionFingerprint.key` is a delimiter-joined string, sorting inputs by channel. Its optional substitutions are `route ?? "none"`, model/profile `?? "?"`, dimensions/FPS `?? 0`. It is a store lookup key, **not a cryptographic digest or complete proof of a known measurement**. Nil and zero must remain distinct in the proposed typed snapshot. Recommend full structured comparison after validating complete live fields, not trusting only the flattened key or Swift's process-dependent `hashValue`.
 
-Current route titles are `Direct output (HDMI / USB-C)`, `Virtual Camera`, and `Rehearsal · no output`. The active route and downstream observation must establish which physical output was tested; a preferred title alone is not proof that any frame reached it. A rehearsal sink cannot qualify either output route. Store separate records for exact route/configuration rows; do not put a wildcard in `route`.
+Current route titles are `Direct output (HDMI / USB-C)`, `Virtual Camera`, and `Rehearsal · no output`. The active route and downstream observation must establish which physical output was tested; a preferred title alone is not proof that any frame reached it. A rehearsal sink cannot qualify either output route. The built-in test profile distinguishes a measured fallback from native-rate capture; repeated output frames do not establish source cadence or qualification. The opt-in alone does not relabel native-rate selection. Store separate records for exact route/configuration rows; do not put a wildcard in `route`.
 
 `AdmissionRecordStore.Record` currently contains only `status`, `measuredAt: Date` and `policyVersion`, keyed by the fingerprint key in `admissionRecords.v1`. Status is `unknown`, `provisional`, `certified`, or `unsupported(reasons)`. `PairAdmission.evaluate` yields unknown/unsupported/provisional; `markCertified` is the separate MULTI-QA entry point. None means Director Assist/Auto/Backup is qualified. `ShowCoordinator` treats fewer than two channels as provisional; that shortcut is not the required two-input R2 certification.
 

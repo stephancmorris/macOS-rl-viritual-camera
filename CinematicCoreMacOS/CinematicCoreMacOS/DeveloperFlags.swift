@@ -84,11 +84,11 @@ enum DeveloperFlags {
     /// effect in Release; it never touches the live pipeline.
     nonisolated static let exposeMultiviewGallery = true
 
-    /// Shows the Multiview console (Preview / Program / Take / inputs) in
-    /// Stage format, driven by the live ShowCoordinator, instead of the
-    /// single-camera wide + program layout. On for R2 builds; set false to
-    /// get the R1 single-camera Stage view back. Webcam format always keeps
-    /// the single-camera view.
+    /// Kill switch for Multi Cam, the operator mode that shows the Multiview
+    /// console (Preview / Program / Take / inputs) driven by the live
+    /// ShowCoordinator. On for R2 builds. Off removes Multi Cam from the mode
+    /// choices and opens a saved Multi Cam as Single Cam, the single-camera
+    /// view with Stage shots (see OperatorModeStore).
     nonisolated static let useMultiviewConsole = true
 
     /// DEVELOPMENT ONLY — on in Debug builds, always off in Release. Lets
@@ -137,4 +137,20 @@ enum DeveloperFlags {
     #else
     nonisolated static let runDirectorShadow = false
     #endif
+    /// B-07/B-08: automatic Take is a Debug-only capability. Qualification,
+    /// current readiness and a one-shot permit remain mandatory.
+    #if DEBUG
+    nonisolated static let allowDirectorAuto = true
+    #else
+    nonisolated static let allowDirectorAuto = false
+    #endif
+
+    /// B-05: effect adapter only; current qualification/readiness and explicit
+    /// study settings are still mandatory. Never available in Release.
+    #if DEBUG
+    nonisolated static let allowDirectorAssist = true
+    #else
+    nonisolated static let allowDirectorAssist = false
+    #endif
+
 }

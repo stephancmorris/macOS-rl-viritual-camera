@@ -13,8 +13,10 @@ struct ContentView: View {
     @ObservedObject var cameraManager: CameraManager
     @ObservedObject var systemExtensionManager: SystemExtensionActivationManager
     @ObservedObject var settingsWindowController: SettingsWindowController
-    /// The show; drives the Multiview console when it is enabled.
+    /// The show; drives the Multiview console in Multi Cam.
     let show: ShowCoordinator?
+    /// The operator mode, observed so a change swaps the console.
+    @ObservedObject private var operatorModes: OperatorModeStore
 
     @State private var showError = false
     @State private var inspectorOpen = false
@@ -31,31 +33,48 @@ struct ContentView: View {
         settingsWindowController: SettingsWindowController,
         show: ShowCoordinator? = nil
     ) {
-        self.cameraManager = cameraManager
+        // A real show's channel is authoritative. Keep the standalone camera
+        // argument for previews, never as a second source of app ownership.
+        self.cameraManager = show?.channelA ?? cameraManager
         self.systemExtensionManager = systemExtensionManager
         self.settingsWindowController = settingsWindowController
         self.show = show
+        // Without a show (previews) there is no Multi Cam: a throwaway store
+        // that never touches the saved mode.
+        _operatorModes = ObservedObject(wrappedValue: show?.operatorModes
+            ?? OperatorModeStore(defaults: UserDefaults(suiteName: "com.alfie.preview") ?? .standard,
+                                 multiviewEnabled: false))
     }
 
-    /// Multiview console only in Stage format, behind the developer flag, and
-    /// only while capture runs (ConsolePresentation: Webcam keeps this view).
-    private var multiviewShow: ShowCoordinator? {
-        guard DeveloperFlags.useMultiviewConsole, cameraManager.isRunning, let show else { return nil }
-        let profile: CaptureProfilePolicy.Profile =
-            cameraManager.shotComposer.config.cinematicFormat == .webcam ? .webcam : .stage
-        return ConsolePresentation.resolve(for: profile) == .multiview ? show : nil
+    /// Multiview console and Show setup only in Multi Cam; Single Cam and
+    /// Webcam get the single-camera view (ConsolePresentation.screen). The
+    /// kill switch is applied by the store: with it off, Multi Cam is never
+    /// the mode.
+    private var screen: ConsolePresentation.Screen {
+        ConsolePresentation.screen(for: operatorModes.mode, channelA: cameraManager, show: show)
     }
 
     var body: some View {
+        // The optional show needs its own observed boundary: watching A alone
+        // misses B starting or remaining live after A stops. The show forwards
+        // lifecycle changes only, so this adds no per-frame subscription.
+        if let show {
+            ShowLifecycleContent(show: show) { content }
+        } else {
+            content
+        }
+    }
+
+    private var content: some View {
         ZStack {
             // Layer 0: backdrop
             LiquidGlassBackdrop()
 
             // Layer 1: dual feed (or stopped screen) fills the window
-            if let show = multiviewShow {
+            if screen == .multiviewConsole, let show {
                 LiveMultiviewConsole(show: show)
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
-            } else if cameraManager.isRunning {
+            } else if screen == .singleCameraLive {
                 CropPreviewView(
                     originalFrame: cameraManager.currentFrameBuffer,
                     croppedFrame: cameraManager.croppedFrameBuffer,
@@ -75,26 +94,29 @@ struct ContentView: View {
                     onHoldPoint: holdPointHandler
                 )
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
-            } else if DeveloperFlags.useMultiviewConsole, let show,
-                      ConsolePresentation.resolve(
-                        for: cameraManager.shotComposer.config.cinematicFormat == .webcam ? .webcam : .stage
-                      ) == .multiview {
-                // Show setup (SHOW-SETUP) replaces the stopped screen where
-                // the Multiview console applies. Channel A starts through
-                // startCamera() so extension preflight is unchanged.
+            } else if screen == .showSetup, let show {
+                // Show setup (SHOW-SETUP) replaces the stopped screen in
+                // Multi Cam. Channel A starts through startCamera() so
+                // extension preflight is unchanged.
                 LiveShowSetup(show: show, startChannelA: { await startCamera() })
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
             } else {
                 StoppedScreen(
+                    operatorModes: operatorModes,
                     lastSessionEndedAt: lastSessionEndedAt,
-                    onStart: { Task { await startCamera() } }
+                    onStart: {
+                        // A single-camera session is a new show on A alone:
+                        // A is Program and no other channel is kept.
+                        show?.prepareForNewShow()
+                        Task { await startCamera() }
+                    }
                 )
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
             }
 
-            // Layer 2: floating overlays — only while running (the Multiview
-            // console carries its own pill and status)
-            if cameraManager.isRunning, multiviewShow == nil {
+            // Layer 2: floating overlays — only in the single-camera view (the
+            // Multiview console carries its own pill and status)
+            if screen == .singleCameraLive {
                 IdentityStackOverlay(
                     cameraManager: cameraManager,
                     elapsedSeconds: elapsedSeconds
@@ -214,13 +236,24 @@ struct ContentView: View {
         let command = OperatorCommand(target: .session, epoch: cameraManager.commands.epoch,
                                       expiry: ProcessInfo.processInfo.systemUptime + 120,
                                       action: .startSession)
-        if cameraManager.shouldPreflightVirtualCameraInstallation, !systemExtensionManager.isInstallReady {
+        // Only the route that needs the virtual camera should invoke its
+        // installer. Direct output and the explicit rehearsal destination can
+        // start without an installed extension, including Xcode-run builds.
+        let directOutputAvailable = ProgramDisplaySelection.resolvedTargetDisplayID()
+            .flatMap(ProgramDisplaySelection.screen(for:)) != nil
+        let needsVirtualCamera = Self.startNeedsVirtualCamera(
+            preferredRoute: cameraManager.programOutput.preferredRoute,
+            directOutputAvailable: directOutputAvailable)
+        if cameraManager.shouldPreflightVirtualCameraInstallation, needsVirtualCamera,
+           !systemExtensionManager.isInstallReady {
             let extensionReady = await systemExtensionManager.ensureInstalledForSessionStart()
             if !extensionReady {
                 showSystemExtensionStatus = true
                 // Without the virtual camera, Program would have nowhere to go
                 // unless Direct output is the chosen, connected destination
                 // (CR-036).
+                // Installation UI suspended this request; use the route and
+                // connected displays that are current after it returns.
                 let directOutputAvailable = ProgramDisplaySelection.resolvedTargetDisplayID()
                     .flatMap(ProgramDisplaySelection.screen(for:)) != nil
                 if Self.startNeedsVirtualCamera(preferredRoute: cameraManager.programOutput.preferredRoute,
@@ -458,4 +491,13 @@ struct GlassPanelModifier: ViewModifier {
         settingsWindowController: SettingsWindowController()
     )
     .frame(width: 1200, height: 800)
+}
+
+/// Observes the show only when a real show exists. The wrapped content still
+/// reads authoritative state; this boundary stores no copy of channel liveness.
+struct ShowLifecycleContent<Content: View>: View {
+    @ObservedObject var show: ShowCoordinator
+    @ViewBuilder var content: () -> Content
+
+    var body: some View { content() }
 }

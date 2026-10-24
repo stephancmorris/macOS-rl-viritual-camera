@@ -301,6 +301,12 @@ final class CameraManager: NSObject, ObservableObject {
     /// port is `programOutput` itself; any other channel's port is unrouted and
     /// cannot touch the output (see CameraChannel.swift).
     let channelID: ChannelID
+    /// The operator mode this channel runs in. Set with the composer format by
+    /// `OperatorModeStore.apply(to:)`; read for diagnostics.
+    var operatorMode: OperatorMode = .singleCam
+    /// Explicit show configuration, applied while all inputs are stopped.
+    /// Eligibility is rechecked against the actual AVCaptureDevice at setup.
+    var builtInCameraTestEnabled: Bool = false
     let outputPort: any ChannelOutputPort
 
     /// Discrete shot-intent revision (see ChannelFrame.swift). Increments on
@@ -338,7 +344,8 @@ final class CameraManager: NSObject, ObservableObject {
             deliveredWidth: sourcePixelWidth > 0 ? sourcePixelWidth : nil,
             deliveredHeight: sourcePixelHeight > 0 ? sourcePixelHeight : nil,
             captureFPS: configuredCaptureFPS,
-            captureProfile: shotComposer.config.cinematicFormat == .webcam ? "webcam" : "stage",
+            captureProfile: sourceIdentity?.captureProfile
+                ?? CaptureProfilePolicy.Profile(shotComposer.config.cinematicFormat).identifier,
             mode: mode)
     }
     private(set) var repeatedFrameCount: UInt64 = 0
@@ -453,6 +460,162 @@ final class CameraManager: NSObject, ObservableObject {
     /// the composer) so ROI scanning stays tight throughout acquisition.
     private var lastSubjectROIBox: CGRect?
 
+    // MARK: - Explicit bounded Director discovery (B-10)
+
+    private var subjectDiscoveryConfiguration: DirectorSubjectDiscovery.Configuration?
+    private var subjectDiscoveryContext: (() -> DirectorSubjectDiscovery.Context?)?
+    private var subjectDiscoveryState = DirectorSubjectDiscovery.State()
+    private var subjectDiscoveryToken: DirectorSubjectDiscovery.WorkToken?
+    /// Plain metadata, sampled by the existing UI/controller refresh.
+    var subjectDiscoverySnapshot: DirectorSubjectDiscovery.Snapshot { subjectDiscoveryState.snapshot }
+    /// Controller/UI reads must supply their current monotonic clock so an
+    /// idle source cannot leave an old pick or ambiguous boxes visible.
+    func subjectDiscoverySnapshot(at now: TimeInterval) -> DirectorSubjectDiscovery.Snapshot {
+        let maximumAge = subjectDiscoveryConfiguration.map {
+            min($0.maximumResultAge, min($0.selectorParameters.maximumSampleAge, $0.selectorParameters.maximumObservationAge))
+        } ?? 0
+        subjectDiscoveryState.expireSnapshot(at: now, maximumAge: maximumAge)
+        return subjectDiscoveryState.snapshot
+    }
+    /// Successful acquisition origin survives Take and normal tracking. An
+    /// operator nomination/unlock or source/identity reset clears it.
+    private var discoveredSubjectOrigin: SubjectSelector.Selection?
+    var directorDiscoveredSubject: SubjectSelector.Selection? {
+        guard let origin = discoveredSubjectOrigin, origin.sourceGeneration == captureGeneration,
+              manualLockedTargetID == origin.subject else { return nil }
+        return origin
+    }
+
+    #if DEBUG
+    /// No normal app path installs this. Missing/invalid study settings fail
+    /// closed; scan permission and acquisition authority remain independent.
+    func configureSubjectDiscoveryForStudy(_ configuration: DirectorSubjectDiscovery.Configuration?,
+                                           eligibility: @escaping () -> DirectorSubjectDiscovery.Context?) {
+        retireSubjectDiscovery()
+        subjectDiscoveryConfiguration = configuration.flatMap { $0.isValid ? $0 : nil }
+        subjectDiscoveryContext = subjectDiscoveryConfiguration == nil ? nil : eligibility
+        subjectDiscoveryState.configure(subjectDiscoveryConfiguration)
+    }
+    #endif
+
+    /// Synchronous lifecycle retirement, including every Take origin. This
+    /// cancels a token that has not started, or rejects an already-running
+    /// result and counts its overlap truthfully. It never drains/waits for
+    /// Vision or invalidates ordinary tracking observations.
+    func retireSubjectDiscovery() {
+        if let token = subjectDiscoveryToken {
+            subjectDiscoveryState.recordRetirement(token.retire())
+            // detectionInFlight excludes a normal scheduled tracking waiter
+            // while this token is current. Cancel only our perception lane;
+            // render and the operator-tap path are left alone.
+            workScheduler?.cancelWaiting(.perception, for: channelID)
+        }
+        subjectDiscoveryState.retire()
+    }
+
+    private func subjectDiscoveryBinding() -> DirectorSubjectDiscovery.Binding? {
+        #if DEBUG
+        guard let configuration = subjectDiscoveryConfiguration, configuration.isValid,
+              let context = subjectDiscoveryContext?(), context.permitted,
+              context.program != channelID, isRunning, !sourceMissing,
+              workScheduler != nil, activeMode == .wide,
+              shotComposer.manualLockedTargetID == nil, !operatorGestureInProgress,
+              case .inactive = shotComposer.lockState else { return nil }
+        return .init(channel: channelID, sourceGeneration: captureGeneration,
+                     controlEpoch: commands.epoch, shotRevision: shotRevision,
+                     configurationRevision: configuration.revision, context: context)
+        #else
+        return nil
+        #endif
+    }
+
+    private func scheduleSubjectDiscoveryIfDue(pixelBuffer: CVPixelBuffer) {
+        guard let binding = subjectDiscoveryBinding(), let configuration = subjectDiscoveryConfiguration else {
+            retireSubjectDiscovery(); return
+        }
+        guard !detectionInFlight else { return }
+        let requestedAt = CACurrentMediaTime()
+        guard let token = subjectDiscoveryState.request(binding: binding, configuration: configuration, now: requestedAt) else { return }
+        detectionInFlight = true
+        subjectDiscoveryToken = token
+        let box = SendablePixelBufferBox(pixelBuffer)
+        Task { [weak self] in
+            guard let self else { return }
+            var permitAt: TimeInterval?
+            defer {
+                self.subjectDiscoveryState.completed(token, requestedAt: requestedAt, permitAt: permitAt)
+                self.detectionInFlight = false
+                if self.subjectDiscoveryToken === token { self.subjectDiscoveryToken = nil }
+            }
+            guard self.subjectDiscoveryBinding() == binding, let scheduler = self.workScheduler else {
+                self.subjectDiscoveryState.recordRetirement(token.retire()); return
+            }
+            guard let permit = await scheduler.acquire(.perception, for: self.channelID) else {
+                self.subjectDiscoveryState.recordRetirement(token.retire()); return
+            }
+            defer { scheduler.release(permit) }
+            permitAt = CACurrentMediaTime()
+            guard self.subjectDiscoveryBinding() == binding else {
+                self.subjectDiscoveryState.recordRetirement(token.retire()); return
+            }
+            let persons = await self.personDetector.processFrame(box.pixelBuffer,
+                plan: .init(mode: .discovery, roi: nil), discoveryToken: token)
+            // No suspension is permitted between these final checks and the
+            // acquisition effect below. A source/route/authority/gesture change
+            // cannot substitute a later person or a later input.
+            guard token.mayPublish, self.subjectDiscoveryBinding() == binding else {
+                self.subjectDiscoveryState.rejectResult(); return
+            }
+            _ = self.applySubjectDiscoveryResult(persons, capturedAt: requestedAt, now: CACurrentMediaTime(),
+                binding: binding, configuration: configuration)
+        }
+    }
+
+    @discardableResult
+    private func applySubjectDiscoveryResult(_ persons: [PersonDetector.DetectedPerson], capturedAt: TimeInterval,
+                                             now: TimeInterval, binding: DirectorSubjectDiscovery.Binding,
+                                             configuration: DirectorSubjectDiscovery.Configuration) -> Bool {
+        guard subjectDiscoveryBinding() == binding else { subjectDiscoveryState.rejectResult(); return false }
+        let candidates = persons.map { DirectorSubjectDiscovery.Candidate(id: $0.id, bounds: $0.boundingBox) }
+        guard let decision = subjectDiscoveryState.ingest(candidates, capturedAt: capturedAt,
+            now: now, binding: binding, configuration: configuration),
+              case .selected(let selection) = decision, binding.context.mayAcquire,
+              let person = persons.first(where: { $0.id == selection.subject }) else { return false }
+        return acquireDiscoveredSubject(selection, person: person, binding: binding)
+    }
+
+    #if DEBUG
+    /// Raw synthetic detector output for acquire-boundary tests. Production
+    /// scheduling and detector-token tests separately exercise actual starts.
+    @discardableResult
+    func acceptSubjectDiscoveryForTesting(_ persons: [PersonDetector.DetectedPerson],
+                                         capturedAt: TimeInterval, now: TimeInterval) -> Bool {
+        guard let binding = subjectDiscoveryBinding(), let configuration = subjectDiscoveryConfiguration,
+              subjectDiscoveryState.request(binding: binding, configuration: configuration, now: capturedAt) != nil else { return false }
+        return applySubjectDiscoveryResult(persons, capturedAt: capturedAt, now: now,
+            binding: binding, configuration: configuration)
+    }
+    #endif
+
+    /// Narrow automatic acquisition boundary. The general Director command
+    /// dispatcher remains shot-size-only. Discovery provides a local body
+    /// candidate; ordinary acquiring/face-gallery/lock readiness must follow.
+    private func acquireDiscoveredSubject(_ selection: SubjectSelector.Selection,
+                                           person: PersonDetector.DetectedPerson,
+                                           binding: DirectorSubjectDiscovery.Binding) -> Bool {
+        guard binding.context.mayAcquire, subjectDiscoveryBinding() == binding,
+              selection.channel == channelID, selection.sourceGeneration == captureGeneration,
+              selection.subject == person.id else { return false }
+        commands.setTrackingOwnership(true)
+        commands.invalidateMotion()
+        shotRevision &+= 1
+        lockTarget(personID: selection.subject)
+        lastSubjectROIBox = person.boundingBox
+        discoveredSubjectOrigin = selection
+        subjectDiscoveryState.acquired()
+        return true
+    }
+
     // MARK: - Off-critical-path detection
     //
     // Detection used to be awaited inline, so every frame waited for Vision
@@ -512,6 +675,8 @@ final class CameraManager: NSObject, ObservableObject {
     /// only re-checks and arms the work. Returns immediately either way — the
     /// caller never awaits.
     private func invalidateDetection(clearTracks: Bool = true) {
+        retireSubjectDiscovery()
+        if clearTracks { discoveredSubjectOrigin = nil }
         detectionFrames.invalidate()
         personDetector.invalidatePendingWork(clearTracks: clearTracks)
         detectionFrameCounter = 0
@@ -615,7 +780,22 @@ final class CameraManager: NSObject, ObservableObject {
         let maxResolution: String
         let supports4K: Bool
         let formatCount: Int
-        
+        /// Discovery metadata for UI only. Capture checks the live device type.
+        let isBuiltIn: Bool
+
+        init(id: String, name: String, modelID: String, uniqueID: String,
+             maxResolution: String, supports4K: Bool, formatCount: Int,
+             isBuiltIn: Bool = false) {
+            self.id = id
+            self.name = name
+            self.modelID = modelID
+            self.uniqueID = uniqueID
+            self.maxResolution = maxResolution
+            self.supports4K = supports4K
+            self.formatCount = formatCount
+            self.isBuiltIn = isBuiltIn
+        }
+
         var displayName: String {
             "\(name) - \(maxResolution)"
         }
@@ -732,12 +912,8 @@ final class CameraManager: NSObject, ObservableObject {
             Self.logger.notice("CropEngine initialized successfully")
         }
 
-        // Restore the persisted cinematic format (Stage/Webcam) before wiring
-        // bindings so the initial state matches the operator's last choice.
-        if let raw = UserDefaults.standard.string(forKey: "cinematicFormat"),
-           let fmt = ShotComposer.Config.CinematicFormat(rawValue: raw) {
-            shotComposer.config.cinematicFormat = fmt
-        }
+        // The cinematic format comes from the operator mode: the show applies
+        // it (OperatorModeStore.apply) as soon as it creates this channel.
         shotComposer.config.restoreStageHeadroom()
 
         configureFramingBindings()
@@ -800,7 +976,8 @@ final class CameraManager: NSObject, ObservableObject {
                 uniqueID: device.uniqueID,
                 maxResolution: maxResString,
                 supports4K: supports4K,
-                formatCount: device.formats.count
+                formatCount: device.formats.count,
+                isBuiltIn: device.deviceType == .builtInWideAngleCamera
             )
             cameraDevices.append(cameraDevice)
         }
@@ -824,6 +1001,43 @@ final class CameraManager: NSObject, ObservableObject {
     @Published private(set) var isProgramHolding = false
     @Published private(set) var zoomMoveDirection: OperatorCommand.ZoomDirection?
     private var sessionStartTask: Task<Void, Never>?
+    /// One operator intent owns startup, including the camera-switch wait.
+    /// Stop or a replacement retires it before any suspended work can resume.
+    private var sessionStartRequest: UUID?
+    #if DEBUG
+    var sessionRestartWaitForTesting: (() async throws -> Void)?
+    var sessionCaptureStartForTesting: (() async throws -> Void)?
+    var sessionConfigureForTesting: (() async throws -> Void)?
+    var sessionStartRunningForTesting: (() async -> Void)?
+    var sessionStopRunningForTesting: (() -> Void)?
+    var sessionStartTaskForTesting: Task<Void, Never>? { sessionStartTask }
+    #endif
+
+    private func beginSessionStart() -> UUID {
+        sessionStartTask?.cancel()
+        sessionStartTask = nil
+        let request = UUID()
+        sessionStartRequest = request
+        isStartingSession = true
+        return request
+    }
+
+    private func checkSessionStart(_ request: UUID) throws {
+        try Task.checkCancellation()
+        guard sessionStartRequest == request else { throw CancellationError() }
+    }
+
+    private func finishSessionStart(_ request: UUID) {
+        guard sessionStartRequest == request else { return }
+        sessionStartRequest = nil
+        sessionStartTask = nil
+        isStartingSession = false
+    }
+
+    private func stopFailedSessionStart(_ request: UUID) {
+        guard sessionStartRequest == request else { return }
+        stopCapture()
+    }
     private var lastGoodProgramBuffer: CVPixelBuffer?
     private var lastGoodProgramCrop: CropEngine.CropRect?
     private var lastTrackingCrop: CropEngine.CropRect?
@@ -835,8 +1049,11 @@ final class CameraManager: NSObject, ObservableObject {
         var direction: OperatorCommand.ZoomDirection
         var originIsUncropped = false
         var destinationIsUncropped = false
+        var commandOrigin: OperatorCommand.Origin = .operatorUI
     }
     private var shotMove: ShotMove?
+    private var directorShotMoveID: UUID?
+    private var directorShotMoveIsCurrent: (() -> Bool)?
 
     var isZoomLimited: Bool {
         activeMode != .wide && (cropEngine?.isZoomLimited == true ||
@@ -848,6 +1065,8 @@ final class CameraManager: NSObject, ObservableObject {
     private var selectedShot: OperatorCommand.Preset {
         shotComposer.config.cinematicFormat == .webcam ? .webcam(shotComposer.config.webcamPreset) : .stage(shotComposer.config.shotPreset)
     }
+    var directorShot: DirectorShot { .init(preset: selectedShot) }
+
     private var shotLadder: [OperatorCommand.Preset] {
         shotComposer.config.cinematicFormat == .webcam ? [.webcam(.wide), .webcam(.tight)] :
             [.stage(.wide), .stage(.fullBody), .stage(.waistUp)]
@@ -884,6 +1103,8 @@ final class CameraManager: NSObject, ObservableObject {
     /// A tap owns exactly one destination, not an unbounded held velocity.
     func beginZoom(_ direction: OperatorCommand.ZoomDirection) {
         guard canBeginZoom(direction), let engine = cropEngine else { return }
+        directorShotMoveID = nil
+        directorShotMoveIsCurrent = nil
         let visible = lastGoodProgramCrop ?? engine.currentCrop
         let move: ShotMove
         if let prior = shotMove {
@@ -916,11 +1137,64 @@ final class CameraManager: NSObject, ObservableObject {
         engine.beginZoom(direction, to: move.destinationHeight, visibleCrop: visible)
     }
 
+    /// B-09: dedicated slow admission. The caller consumes its one-shot policy
+    /// plan in this same MainActor turn; the closure checks its live ownership
+    /// before every subsequent frame's size advance. No preset snap or mode change.
+    @discardableResult
+    func beginDirectorShotMove(id: UUID, to target: DirectorShot, maximumRate: Double,
+                               isCurrent: @escaping () -> Bool) -> CommandResult {
+        guard DeveloperFlags.allowDirectorAuto, isCurrent(), isRunning, !sourceMissing,
+              activeMode == .autoTracking, manualLockedTargetID != nil,
+              recoveryState.trackingOwnsControl, !operatorGestureInProgress, shotMove == nil,
+              let engine = cropEngine, let from = shotLadder.firstIndex(of: selectedShot),
+              let to = shotLadder.firstIndex(of: target.preset), abs(from - to) == 1,
+              let height = shotComposer.destinationHeight(for: target.preset),
+              commands.epoch < UInt64.max, shotRevision < UInt64.max else { return .rejected("Director move unavailable") }
+        let direction: OperatorCommand.ZoomDirection = to > from ? .pushIn : .pullOut
+        let command = makeCommand(.beginZoom(direction), origin: .director)
+        if let reason = commands.rejection(for: command, now: CACurrentMediaTime()) { return .rejected(reason) }
+        let visible = lastGoodProgramCrop ?? engine.currentCrop
+        guard engine.beginDirectorZoom(direction, to: height, maximumRate: maximumRate, visibleCrop: visible) else {
+            return .rejected("Director move geometry unavailable")
+        }
+        commands.accept(command)
+        shotRevision += 1
+        shotMove = ShotMove(origin: selectedShot, destination: target.preset,
+            originHeight: visible.size.height, destinationHeight: height, direction: direction, commandOrigin: .director)
+        directorShotMoveID = id
+        directorShotMoveIsCurrent = isCurrent
+        zoomMoveDirection = direction
+        return .accepted
+    }
+
+    /// Never cancels an operator move that superseded this Director owner.
+    func cancelDirectorShotMove(id: UUID) {
+        guard directorShotMoveID == id, shotMove?.commandOrigin == .director else { return }
+        cropEngine?.endZoom()
+        shotMove = nil
+        zoomMoveDirection = nil
+        directorShotMoveID = nil
+        directorShotMoveIsCurrent = nil
+    }
+
+    func hasDirectorShotMove(id: UUID) -> Bool {
+        directorShotMoveID == id && shotMove?.commandOrigin == .director
+    }
+
     func advanceShotMove(now: TimeInterval) {
         guard let engine = cropEngine else { return }
+        if let id = directorShotMoveID, shotMove?.commandOrigin == .director,
+           directorShotMoveIsCurrent?() != true {
+            cancelDirectorShotMove(id: id)
+            return
+        }
         engine.zoomUsesTopAnchor = activeMode == .autoTracking &&
             (shotComposer.config.cinematicFormat == .webcam || shotComposer.config.shotPreset == .waistUp)
         engine.advanceZoom(now: now, aspect: shotComposer.normalizedAspect)
+        if let id = directorShotMoveID, shotMove?.commandOrigin == .director,
+           engine.zoomDirection == nil, !engine.zoomHasLanded {
+            cancelDirectorShotMove(id: id)
+        }
         shotComposer.setVisibleZoomHeight(engine.adjustedHeight)
         if let move = shotMove, engine.zoomHasLanded {
             choosePreset(move.destination)
@@ -930,6 +1204,8 @@ final class CameraManager: NSObject, ObservableObject {
             engine.clearZoomAdjustment()
             shotMove = nil
             zoomMoveDirection = nil
+            directorShotMoveID = nil
+            directorShotMoveIsCurrent = nil
             // Reversing a move that began uncropped returns to that view,
             // never silently re-applying a selected crop on the next frame.
             if move.destinationIsUncropped { returnToWide() }
@@ -956,6 +1232,7 @@ final class CameraManager: NSObject, ObservableObject {
     /// the ContentView, pill and console paths all reach `dispatch`. The show
     /// installs it; Director-origin commands are not reported.
     var manualActionObserver: ((ManualCameraAction) -> Void)?
+    var manualResultObserver: ((OperatorCommand, CommandResult) -> Void)?
 
     /// True while the camera itself writes the shot settings (applying an
     /// admitted preset or finishing a zoom move), so those writes are not
@@ -964,14 +1241,42 @@ final class CameraManager: NSObject, ObservableObject {
 
     @discardableResult
     func dispatch(_ command: OperatorCommand) -> CommandResult {
-        if command.origin != .director { manualActionObserver?(.command(command)) }
+        // Manual takeover retires Director motion synchronously. Retain only
+        // this command's reversal geometry until normal admission completes;
+        // other cancellations never become dormant operator gestures.
+        let interrupted: ShotMove?
+        if command.origin != .director, case .beginZoom = command.action,
+           shotMove?.commandOrigin == .director { interrupted = shotMove }
+        else { interrupted = nil }
+        if command.origin != .director {
+            retireSubjectDiscovery()
+            manualActionObserver?(.command(command))
+        }
+        let result = dispatchAdmittedCommand(command, interruptedDirectorMove: interrupted)
+        if command.origin != .director { manualResultObserver?(command, result) }
+        return result
+    }
+
+    private func dispatchAdmittedCommand(_ command: OperatorCommand, interruptedDirectorMove: ShotMove? = nil) -> CommandResult {
+        if command.origin == .director {
+            switch command.action {
+            case .beginZoom, .endZoom: return .rejected("Director moves require slow admission")
+            default: break
+            }
+        }
         if let reason = commands.rejection(for: command, now: CACurrentMediaTime()) { return .rejected(reason) }
         switch command.action {
         case .startSession, .stopSession: break
         default: guard isRunning else { return .rejected("Session is stopped") }
         }
+        let handoff: ShotMove?
+        if case .beginZoom(let direction) = command.action, let interruptedDirectorMove,
+           shotMove == nil, activeMode == .autoTracking,
+           interruptedDirectorMove.origin == selectedShot, direction != interruptedDirectorMove.direction {
+            handoff = interruptedDirectorMove
+        } else { handoff = nil }
         if case .beginZoom(let direction) = command.action {
-            guard canBeginZoom(direction) else { return .rejected("Shot limit") }
+            guard handoff != nil || canBeginZoom(direction) else { return .rejected("Shot limit") }
             if activeMode == .autoTracking, shotComposer.destinationHeight(for: selectedShot) == nil {
                 return .rejected("Waiting for subject framing")
             }
@@ -996,6 +1301,8 @@ final class CameraManager: NSObject, ObservableObject {
         switch command.action {
         case .beginZoom: break
         default:
+            directorShotMoveID = nil
+            directorShotMoveIsCurrent = nil
             cropEngine?.endZoom()
             shotMove = nil
             zoomMoveDirection = nil
@@ -1009,21 +1316,34 @@ final class CameraManager: NSObject, ObservableObject {
         case .unlock: clearManualTargetLock()
         case .resumeTracking: resumeTracking()
         case .setMode(let mode): setOperationMode(mode)
-        case .selectPreset(let preset): selectPreset(preset)
-        case .beginZoom(let direction): beginZoom(direction)
+        case .selectPreset(let preset):
+            if command.origin == .director {
+                // accept() already revoked the previous epoch, and the common
+                // dispatch path ended motion above. Keep B-05's exact +1 receipt.
+                choosePreset(preset)
+                boostFramingTransition()
+            } else { selectPreset(preset) }
+        case .beginZoom(let direction):
+            if var handoff { handoff.commandOrigin = .operatorUI; shotMove = handoff }
+            beginZoom(direction)
         case .endZoom: break
         case .moveManualCenter(let point):
             manualCropPoint = CGPoint(x: min(1, max(0, point.x)), y: min(1, max(0, point.y)))
         case .returnToWide: returnToWide()
         case .startSession:
             guard !isRunning, !isStartingSession else { return .completed }
-            isStartingSession = true
+            let request = beginSessionStart()
             sessionStartTask = Task { [weak self] in
                 guard let self else { return }
-                defer { self.isStartingSession = false }
-                do { try await self.startCapture() }
-                catch is CancellationError { }
-                catch { self.error = error as? CameraError; self.controlStatus = error.localizedDescription }
+                defer { self.finishSessionStart(request) }
+                do { try await self.startCapture(request: request) }
+                catch is CancellationError { self.stopFailedSessionStart(request) }
+                catch {
+                    guard self.sessionStartRequest == request else { return }
+                    self.stopFailedSessionStart(request)
+                    self.error = error as? CameraError
+                    self.controlStatus = error.localizedDescription
+                }
             }
         case .stopSession: stopCapture()
         }
@@ -1034,6 +1354,7 @@ final class CameraManager: NSObject, ObservableObject {
     /// waiting for its ROI scan). Called when the control target moves away
     /// from this channel. Already-admitted moves and running work continue.
     func cancelPendingOperatorGestures() {
+        retireSubjectDiscovery()
         detectionDiscoveryActive = false
         pendingTapPoint = nil
         pendingTapIsRetarget = false
@@ -1043,6 +1364,19 @@ final class CameraManager: NSObject, ObservableObject {
     #if DEBUG
     /// Test seam: lets unit tests exercise command admission without a camera.
     func setRunningForTesting(_ running: Bool) { isRunning = running }
+    /// Raw synthetic perception only. Actual subject, revisions, geometry,
+    /// observation age and current host time still come from this channel.
+    struct DirectorPerceptionForTesting {
+        let phase: RecoveryState.Phase
+        let galleryReady: Bool
+        let holdingSteady: Bool
+        let subjectSpeed: Double
+    }
+    var directorPerceptionForTesting: DirectorPerceptionForTesting?
+    /// Synthetic pending UI gesture, independent of lock/gallery acquisition.
+    func setOperatorGestureForTesting(_ pending: Bool) { tapPending = pending }
+    /// Test seam: a session that is still starting.
+    func setStartingForTesting(_ starting: Bool) { isStartingSession = starting }
     /// Test seam: a rendered frame as if processFrame had produced it.
     func setLatestRenderedFrameForTesting(_ frame: RenderedChannelFrame?) { latestRenderedFrame = frame }
     /// Test seam: a detection observation as if the frame path consumed it.
@@ -1052,6 +1386,8 @@ final class CameraManager: NSObject, ObservableObject {
     }
     /// Test seam: mark the source missing as a hot unplug would.
     func setSourceMissingForTesting(_ missing: Bool) { sourceMissing = missing }
+
+    func setDeviceLeaseForTesting(_ lease: CaptureDeviceRegistry.Lease?) { deviceLease = lease }
     /// Test seam: feed one captured buffer through the frame path.
     func processFrameForTesting(_ pixelBuffer: CVPixelBuffer, timestampSeconds: Double) async {
         await processFrame(pixelBuffer: pixelBuffer, timestampSeconds: timestampSeconds)
@@ -1113,6 +1449,9 @@ final class CameraManager: NSObject, ObservableObject {
     }
 
     func cancelOperatorMotion() {
+        retireSubjectDiscovery()
+        directorShotMoveID = nil
+        directorShotMoveIsCurrent = nil
         commands.invalidateMotion()
         cropEngine?.endZoom()
         shotMove = nil
@@ -1228,6 +1567,15 @@ final class CameraManager: NSObject, ObservableObject {
 
     func startCapture() async throws {
         try Task.checkCancellation()
+        if isStartingSession { stopCapture() }
+        let request = beginSessionStart()
+        defer { finishSessionStart(request) }
+        do { try await startCapture(request: request) }
+        catch { stopFailedSessionStart(request); throw error }
+    }
+
+    private func startCapture(request: UUID) async throws {
+        try checkSessionStart(request)
         cancelOperatorMotion()
         commands.setTrackingOwnership(false)
         lastGoodProgramBuffer = nil
@@ -1245,25 +1593,28 @@ final class CameraManager: NSObject, ObservableObject {
         sourcePixelHeight = 0
         captureProfileStatus = "Configuring capture…"
 
+        #if DEBUG
+        if let sessionCaptureStartForTesting {
+            try await sessionCaptureStartForTesting()
+            try checkSessionStart(request)
+            return
+        }
+        #endif
+
         if preferredInputSource == .validationClip {
-            do {
-                try await startValidationClipPlayback()
-            } catch {
-                outputPort.stop()
-                throw error
-            }
+            try await startValidationClipPlayback()
+            try checkSessionStart(request)
             return
         }
         
         // Check authorization
         let generation = captureGeneration
         let authorized = await checkAuthorization()
-        try Task.checkCancellation()
+        try checkSessionStart(request)
         guard generation == captureGeneration else { throw CancellationError() }
         guard authorized else {
             Self.logger.error("Camera authorization denied")
             error = .authorizationDenied
-            outputPort.stop()
             throw CameraError.authorizationDenied
         }
         Self.logger.notice("Camera authorized")
@@ -1276,32 +1627,18 @@ final class CameraManager: NSObject, ObservableObject {
         
         // Configure session
         Self.logger.notice("Configuring capture session")
-        do {
-            try await configureSession()
-        } catch {
-            releaseDevice()
-            outputPort.stop()
-            throw error
-        }
-        try Task.checkCancellation()
+        try await configureSession()
+        try checkSessionStart(request)
         guard generation == captureGeneration else { throw CancellationError() }
         Self.logger.notice("Capture session configured")
         
         // Start running on this channel's session executor: startRunning()
         // blocks, and must never block the MainActor or the other channel.
-        let session = CaptureSessionBox(captureSession)
-        await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in
-            sessionQueue.async { @Sendable in
-                session.value.startRunning()
-                continuation.resume()
-            }
-        }
+        await startSessionAsync()
         // A Stop during startup retired this generation: the late start must
         // not revive it.
-        guard generation == captureGeneration else {
-            sessionQueue.async { @Sendable in session.value.stopRunning() }
-            throw CancellationError()
-        }
+        try checkSessionStart(request)
+        guard generation == captureGeneration else { throw CancellationError() }
         do {
             // macOS has no .inputPriority preset, and the session's default
             // .high preset re-configures the device's activeFormat (4K →
@@ -1327,6 +1664,7 @@ final class CameraManager: NSObject, ObservableObject {
     
     /// Stop the capture session
     func stopCapture() {
+        sessionStartRequest = nil
         sessionStartTask?.cancel()
         sessionStartTask = nil
         isStartingSession = false
@@ -1422,6 +1760,7 @@ final class CameraManager: NSObject, ObservableObject {
     }
 
     func lockTarget(personID: UUID) {
+        discoveredSubjectOrigin = nil
         cropEngine?.clearZoomAdjustment()
         lastTrackingCrop = nil
         invalidateDetection(clearTracks: false)
@@ -1442,6 +1781,7 @@ final class CameraManager: NSObject, ObservableObject {
     /// retarget on the preview instead, so an accidental click can't drop a
     /// healthy lock.
     func beginDetection() {
+        retireSubjectDiscovery()
         guard activeMode != .autoPan && activeMode != .manualCrop else { return }
         if case .tracking = shotComposer.lockState { return }
         if case .acquiring = shotComposer.lockState { return }
@@ -1503,7 +1843,7 @@ final class CameraManager: NSObject, ObservableObject {
     /// Detect armed, a tap waiting for its ROI scan, or a zoom move in flight.
     /// A Director command now would supersede it, so the Director must wait.
     var operatorGestureInProgress: Bool {
-        detectionDiscoveryActive || tapPending || shotMove != nil
+        detectionDiscoveryActive || tapPending || (shotMove != nil && shotMove?.commandOrigin != .director)
     }
 
     /// The crop has reached its target: no interpolation and no zoom move.
@@ -1519,6 +1859,8 @@ final class CameraManager: NSObject, ObservableObject {
     /// armed (Detect flow) or while directly re-acquiring from HOLD /
     /// WIDE-WAITING.
     func selectSubject(at point: CGPoint) {
+        retireSubjectDiscovery()
+        discoveredSubjectOrigin = nil
         guard activeMode != .autoPan && activeMode != .manualCrop else { return }
         guard detectionDiscoveryActive || canDirectlyReacquire else { return }
         commands.setTrackingOwnership(true)
@@ -1541,6 +1883,8 @@ final class CameraManager: NSObject, ObservableObject {
     /// pending tap priority over the lock state, so the next frame scans around
     /// the held point exactly as a first selection would.
     func retargetSubject(at point: CGPoint) {
+        retireSubjectDiscovery()
+        discoveredSubjectOrigin = nil
         guard activeMode != .autoPan && activeMode != .manualCrop else { return }
         guard shotComposer.manualLockedTargetID != nil else { return }
         commands.setTrackingOwnership(true)
@@ -1620,6 +1964,9 @@ final class CameraManager: NSObject, ObservableObject {
         case .hold, .wideWaiting:
             return PersonDetector.DetectionRequestPlan(mode: .reacquiring, roi: nil)
         case .inactive:
+            if !detectionDiscoveryActive, subjectDiscoveryBinding() != nil {
+                return .init(mode: .discovery, roi: nil)
+            }
             return detectionDiscoveryActive
                 ? PersonDetector.DetectionRequestPlan(mode: .awaitingTap, roi: nil)
                 : .off
@@ -1681,25 +2028,33 @@ final class CameraManager: NSObject, ObservableObject {
     
     /// Restart capture with a different camera
     func restartWithCamera(_ cameraDevice: CameraDevice) async throws {
+        try Task.checkCancellation()
         Self.logger.notice("Switching to camera: \(cameraDevice.name, privacy: .public)")
-        
-        // Stop current session
-        let wasRunning = isRunning && activeInputSource == .liveCamera
-        if wasRunning {
-            Self.logger.debug("Stopping current session before camera switch")
-            stopCapture()
-            // Give the session time to fully stop
-            try await Task.sleep(for: .milliseconds(500))
+        let needsRestart = (isRunning && activeInputSource == .liveCamera)
+            || (isStartingSession && preferredInputSource == .liveCamera)
+        guard needsRestart else {
+            selectedCamera = cameraDevice
+            return
         }
-        
-        // Update selected camera
-        selectedCamera = cameraDevice
-        Self.logger.notice("Selected camera updated")
-        
-        // Start new session if it was running before
-        if wasRunning {
-            Self.logger.debug("Restarting capture after camera switch")
-            try await startCapture()
+
+        stopCapture()
+        let request = beginSessionStart()
+        defer { finishSessionStart(request) }
+        do {
+            // Preserve the existing settling interval, owned by this request.
+            #if DEBUG
+            if let sessionRestartWaitForTesting { try await sessionRestartWaitForTesting() }
+            else { try await Task.sleep(for: .milliseconds(500)) }
+            #else
+            try await Task.sleep(for: .milliseconds(500))
+            #endif
+            try checkSessionStart(request)
+            selectedCamera = cameraDevice
+            Self.logger.notice("Selected camera updated")
+            try await startCapture(request: request)
+        } catch {
+            stopFailedSessionStart(request)
+            throw error
         }
     }
 
@@ -1765,7 +2120,7 @@ final class CameraManager: NSObject, ObservableObject {
             .sink { [weak self] format in
                 guard let self else { return }
                 if self.isRunning && self.activeInputSource == .liveCamera {
-                    self.captureProfileStatus = "\(format == .webcam ? "Webcam" : "Stage") capture profile applies on the next session start."
+                    self.captureProfileStatus = "\(CaptureProfilePolicy.Profile(format).title) capture profile applies on the next session start."
                 }
                 if format == .webcam,
                    self.activeMode == .manualCrop || self.activeMode == .autoPan {
@@ -1799,6 +2154,7 @@ final class CameraManager: NSObject, ObservableObject {
         recordSourceIdentity(DiagnosticsSessionIdentity.Source(
             inputKind: "Validation clip",
             deviceName: validationClipURL.lastPathComponent,
+            operatorMode: operatorMode.diagnosticsName,
             belowShowRate: false))
         activeInputSource = .validationClip
         activeMode = .wide
@@ -1968,6 +2324,9 @@ final class CameraManager: NSObject, ObservableObject {
         // first with a relaxed threshold (PersonDetector.swift assignTracks).
         personDetector.lockedTargetID = shotComposer.manualLockedTargetID
 
+        if detectionPlan.mode != .discovery, subjectDiscoveryToken != nil {
+            retireSubjectDiscovery()
+        }
         if !detectionPlan.runsVision {
             // Release the retained source pixels immediately and reject any
             // scheduled detection that has not entered Vision yet. Without
@@ -1976,6 +2335,8 @@ final class CameraManager: NSObject, ObservableObject {
             // retained until the next explicit operator action.
             detectionFrames.invalidate()
             personDetector.clearForInactiveMode()
+        } else if detectionPlan.mode == .discovery {
+            scheduleSubjectDiscoveryIfDue(pixelBuffer: pixelBuffer)
         } else if pendingTapPoint != nil {
             let generation = detectionFrames.generation
             let id = detectionFrames.nextObservationID()
@@ -1998,7 +2359,8 @@ final class CameraManager: NSObject, ObservableObject {
             scheduleDetectionIfDue(pixelBuffer: pixelBuffer, sourceTimestamp: timestampSeconds,
                 plan: detectionPlan, due: detectionDue)
         }
-        let observation = detectionPlan.runsVision ? detectionFrames.consume(at: CACurrentMediaTime()) : (frame: nil, isFresh: false)
+        let observation = detectionPlan.runsVision && detectionPlan.mode != .discovery
+            ? detectionFrames.consume(at: CACurrentMediaTime()) : (frame: nil, isFresh: false)
         let detectedPersons = observation.frame?.persons ?? []
         let detectionIsFresh = observation.isFresh
 
@@ -2391,6 +2753,9 @@ final class CameraManager: NSObject, ObservableObject {
     }
     
     private func configureSession() async throws {
+        #if DEBUG
+        if let sessionConfigureForTesting { try await sessionConfigureForTesting(); return }
+        #endif
         captureSession.beginConfiguration()
         defer { captureSession.commitConfiguration() }
         
@@ -2498,9 +2863,25 @@ final class CameraManager: NSObject, ObservableObject {
 
     /// Stop the session on this channel's executor without blocking.
     private func stopSessionAsync() {
+        #if DEBUG
+        if let sessionStopRunningForTesting { sessionStopRunningForTesting(); return }
+        #endif
         let session = CaptureSessionBox(captureSession)
         sessionQueue.async { @Sendable in
             if session.value.isRunning { session.value.stopRunning() }
+        }
+    }
+
+    private func startSessionAsync() async {
+        #if DEBUG
+        if let sessionStartRunningForTesting { await sessionStartRunningForTesting(); return }
+        #endif
+        let session = CaptureSessionBox(captureSession)
+        await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in
+            sessionQueue.async { @Sendable in
+                session.value.startRunning()
+                continuation.resume()
+            }
         }
     }
 
@@ -2550,17 +2931,10 @@ final class CameraManager: NSObject, ObservableObject {
         frameProcessingGate.reset()
         try await configureSession()
         guard generation == captureGeneration else { throw CancellationError() }
-        let session = CaptureSessionBox(captureSession)
-        await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in
-            sessionQueue.async { @Sendable in
-                session.value.startRunning()
-                continuation.resume()
-            }
-        }
-        guard generation == captureGeneration else {
-            sessionQueue.async { @Sendable in session.value.stopRunning() }
-            throw CancellationError()
-        }
+        await startSessionAsync()
+        // Stop/replacement already queued the retiring generation's stop.
+        // Another stop here could run after the replacement's start.
+        guard generation == captureGeneration else { throw CancellationError() }
         reassertConfiguredFormatIfNeeded()
         if captureSession.isRunning {
             sourceMissing = false
@@ -2618,7 +2992,7 @@ final class CameraManager: NSObject, ObservableObject {
         try device.lockForConfiguration()
         defer { device.unlockForConfiguration() }
         
-        let profile: CaptureProfilePolicy.Profile = shotComposer.config.cinematicFormat == .webcam ? .webcam : .stage
+        let profile = CaptureProfilePolicy.Profile(shotComposer.config.cinematicFormat)
         let candidates = device.formats.map { format in
             let dims = CMVideoFormatDescriptionGetDimensions(format.formatDescription)
             return CaptureProfilePolicy.Candidate(
@@ -2628,7 +3002,9 @@ final class CameraManager: NSObject, ObservableObject {
         }
         guard let selection = CaptureProfilePolicy.select(
             candidates, profile: profile, showRate: Config.targetFrameRate,
-            allowStageBelowShowRate: DeveloperFlags.allowStageBelowShowRate) else {
+            allowStageBelowShowRate: DeveloperFlags.allowStageBelowShowRate,
+            builtInCameraTestEnabled: builtInCameraTestEnabled,
+            isBuiltInCamera: device.deviceType == .builtInWideAngleCamera) else {
             error = .unsupportedFormat
             throw CameraError.unsupportedFormat
         }
@@ -2650,20 +3026,20 @@ final class CameraManager: NSObject, ObservableObject {
         configuredCaptureFPS = selection.frameRate
         // Webcam mode may run below the show rate (see CaptureProfilePolicy);
         // say the real capture rate rather than implying the show standard.
-        configuredCaptureRateLabel = selection.reason.isBelowShowRate
-            ? String(format: "%g fps (show standard %@)", selection.frameRate, ShowStandard.activeOrCurrent.title)
-            : ShowStandard.activeOrCurrent.title
+        configuredCaptureRateLabel = selection.rateLabel(
+            showRate: Config.targetFrameRate, showStandardTitle: ShowStandard.activeOrCurrent.title)
         captureProfileStatus = "Requested \(dims.width)×\(dims.height) at \(configuredCaptureRateLabel): \(selection.reason.description). Waiting for delivered frame."
         recordSourceIdentity(DiagnosticsSessionIdentity.Source(
             inputKind: "Live camera",
             deviceName: device.localizedName,
             deviceModelID: device.modelID,
-            captureProfile: profile == .webcam ? "webcam" : "stage",
+            captureProfile: profile.identifier(for: selection.reason),
+            operatorMode: operatorMode.diagnosticsName,
             requestedWidth: Int(dims.width),
             requestedHeight: Int(dims.height),
             configuredCaptureFPS: selection.frameRate,
             captureSelectionReason: selection.reason.description,
-            belowShowRate: selection.reason.isBelowShowRate))
+            belowShowRate: selection.isBelowShowRate(Config.targetFrameRate)))
 
         if dims.height > 0 {
             let sourceAspect = CGFloat(dims.width) / CGFloat(dims.height)

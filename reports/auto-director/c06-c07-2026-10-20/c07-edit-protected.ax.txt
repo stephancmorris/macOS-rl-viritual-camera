@@ -1,0 +1,100 @@
+Window: "Multiview Gallery", App: Alfie.
+0 standard window Multiview Gallery, ID: multiview-gallery, Secondary Actions: Raise
+	1 container
+		2 pop up button Scenario, Value: Ready
+		3 pop up button Show standard, Value: 1080p50
+		4 text No actions yet
+		5 scroll area Secondary Actions: Scroll Up, Scroll Down (showing 68-168 of 168 items)
+			6 text INTERACTIVE EXAMPLE · ESC CANCELS
+			7 button Restore Auto notice
+			8 button Show Backup notice
+			9 button Remove notice
+			10 text Next: Cam B
+			11 text Value: Cancelled examples: 2 AUTO · NEXT CUT, ID: director.cancelCount
+			12 container
+				13 text Next: Cam B · 2 s · Esc to cancel
+				14 button Description: Cancel next cut to Cam B, Help: Cancels this example's next cut, ID: director.cancelNextCut
+			15 text BACKUP · NO COUNTDOWN
+			16 text Next: Cam B
+			17 text RUN SHEET · C-07 Synthetic run sheets. Each show has its own UUID and temporary store. No live preferences, Director authority or rig qualification is changed.
+			18 Synthetic show
+				19 radio button Description: Show A (synthetic), Value: 1
+				20 radio button Description: Show B (synthetic), Value: 0
+			21 text Show A (synthetic)
+			22 button Load synthetic run sheet
+			23 text The example replaces this show's unsaved draft. Save explicitly to keep it in this gallery session. The Advance shortcut is suspended while a name field is focused. Current: Panel · Discussion · Centre Next: Performance · Performance
+			24 button Description: Advance run sheet, Help: Moves to the next segment. Never advances automatically or wraps.
+			25 text Shortcut Command Shift Return Unsaved run sheet changes. 1. Presenter · Opening · Lectern
+			26 button (disabled) Edit segment 1
+			27 button (disabled) Move segment 1 up
+			28 button Move segment 1 down
+			29 button Remove segment 1
+			30 text 2. Panel · Discussion · Centre Current
+			31 button (disabled) Edit segment 2
+			32 button Move segment 2 up
+			33 button Move segment 2 down
+			34 button
+			35 text 3. Performance · Performance
+			36 button
+			37 button
+			38 button
+			39 text 4. Video break · Break
+			40 button
+			41 button
+			42 text Add segment
+			43 pop up button Type, Value: Presenter
+			44 text field (settable) Description: New segment name (optional), Placeholder: Name (optional)
+			45 pop up button Position, Value: None
+			46 button
+			47 text Edit segment
+			48 pop up button Type, Value: Panel
+			49 text field (settable) Description: Edited segment name (optional), Value: Edited discussion, Placeholder: Name (optional)
+			50 pop up button Position, Value: Centre
+			51 button
+			52 button
+			53 text Apply or cancel the segment edit before saving.
+			54 button
+			55 text Saved for this show only. Segments guide style and never grant authority. INPUT STRIP · INPUT-STRIP
+			56 pop up button Input scenario, Value: Ready
+			57 text INPUTS · 2 OF 4 Locked · Band side
+			58 text Tap a tile to cue Preview SHOW SETUP · SHOW-SETUP
+			59 Pair-check scenario
+				60 radio button Description: Not run, Value: 1
+				61 radio button Description: Checking, Value: 0
+				62 radio button Description: Pass · trial, Value: 0
+				63 radio button Description: Certified, Value: 0
+				64 radio button Description: Unsupported, Value: 0
+				65 radio button Description: Saved B missing, Value: 0
+			66 text SESSION STOPPED Show standard Program output Show setup
+			67 pop up button 1080p50
+			68 pop up button Direct output (HDMI / USB-C)
+			69 container
+				70 button Secondary Actions: Check pair
+				71 text Alfie measures A + B together right after Start and shows the result in the console header. It will not lower the output rate to make them fit.
+			72 button
+			73 button
+			74 text Nothing goes to the ATEM until you press Start. Alfie never restores a Program/Preview state from the last show. OPERATOR PILL · PILL-TARGET CAM B · PREVIEW
+			75 button
+			76 button
+			77 button
+			78 collection Secondary Actions: AXScrollToTop, AXScrollToBottom
+			79 scroll bar (settable, float) 0.8810514564092154
+				80 value indicator (settable, float) 0.8810514564092154
+				81 increment arrow button
+				82 decrement arrow button
+				83 increment page button
+				84 decrement page button
+	85 close button
+	86 zoom button
+	87 minimize button
+	88 text Multiview Gallery
+89 menu bar
+	90 Alfie
+	91 File
+	92 Edit
+	93 View
+	94 Session
+	95 Window
+	96 Help
+
+The focused UI element is 49 text field (settable) Description: Edited segment name (optional), Value: Edited discussion, Placeholder: Name (optional)

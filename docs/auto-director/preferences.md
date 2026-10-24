@@ -10,7 +10,7 @@ Status: reconciled 2026-10-10 for D-01. [Recorded decisions](../handoff/stage3-4
 
 There is no saved authority level, grant, cut permit, countdown, live composition, nomination gallery or qualification approval in this schema. Launch starts Manual with no handback, even when qualification records allow other levels. A preferences file cannot select an unqualified level or authorize a cut.
 
-`DirectorStyle.resolve` resolves explicit style conflicts conservatively. `DirectorPreferences.resolve` currently merges explicit dictionary keys; a review finding notes that a one-sided segment can ignore the other input's effective Live-event fallback. Do not claim the current merge is conservative across all effective profiles until that is resolved and tested. No defaults are supplied for study numbers.
+`DirectorStyle.resolve` resolves explicit style conflicts conservatively. The 18 October review repair makes `DirectorPreferences.resolve` merge each segment's effective styles, including the other input's Live-event fallback for a one-sided segment. Incompatible effective constraints refuse the merge. The pinned A-07 snapshot did not handle that fallback; regression coverage now checks both input orders and conflicts. No defaults are supplied for study numbers.
 
 ## Product requirements and open choices — AWAITING OWNER
 

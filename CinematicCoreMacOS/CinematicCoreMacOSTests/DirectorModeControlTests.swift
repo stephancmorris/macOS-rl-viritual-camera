@@ -74,6 +74,31 @@ struct DirectorModeControlTests {
         #expect(resumed.directorSection.statusLine == "Watching · Alfie is not changing shots")
     }
 
+    @Test func syntheticScenariosResetToManualAndKeepHigherLevelsUnqualified() {
+        for scenario in DirectorControlScenario.allCases {
+            let controller = scenario.makeController()
+            #expect(controller.directorSection.level == .manual)
+            #expect(!controller.directorSection.handedToAlfie)
+            #expect(controller.handToAlfie() == .refused("Choose Assist, Auto or Backup"))
+            #expect(controller.setLevel(.auto) == .refused("Auto, not qualified"))
+            #expect(controller.setLevel(.backup) == .refused("Backup, not qualified"))
+            let result = controller.setLevel(.assist)
+            if scenario == .qualifiedAssist {
+                #expect(result == .accepted)
+                controller.takeOver()
+                #expect(controller.handToAlfie() == .accepted)
+                #expect(controller.directorSection.handedToAlfie)
+                #expect(controller.directorSection.statusLine == "Watching · Alfie is not changing shots")
+            } else {
+                #expect(result == .refused("Assist, not qualified"))
+                #expect(!controller.directorSection.handedToAlfie)
+            }
+            // A scenario reset creates fresh synthetic state; it cannot carry
+            // the previous fixture's handback or selection into the next run.
+            #expect(scenario.makeController().directorSection.level == .manual)
+        }
+    }
+
     /// A controller that is not the gallery fake: the view must work with any
     /// `DirectorConsoleControlling` (the live Director is B-03's).
     @MainActor private final class OtherController: ObservableObject, DirectorConsoleControlling {
@@ -103,8 +128,11 @@ struct DirectorModeControlTests {
         #expect(DirectorHandShortcut.modifiers == [.command, .shift])
     }
 
-    @Test(arguments: DirectorControlGallery.cards)
-    func rendersEachControlState(card: DirectorControlCard) throws {
+    // Test discovery receives Sendable IDs; actor-bound controllers are
+    // resolved only inside this MainActor test.
+    @Test(arguments: ["launch-manual", "qualified-still-manual", "assist-handed", "refused", "takeover"])
+    func rendersEachControlState(cardID: String) throws {
+        let card = try #require(DirectorControlGallery.cards.first { $0.id == cardID })
         let cardView = VStack(alignment: .leading, spacing: 8) {
             Text(card.title.uppercased())
                 .font(ConsoleStyle.label(11))
@@ -138,8 +166,4 @@ struct DirectorModeControlTests {
         let data = try #require(rep.representation(using: NSBitmapImageRep.FileType.png, properties: [:]))
         try data.write(to: dir.appendingPathComponent("control-\(card.id).png"))
     }
-}
-
-extension DirectorControlCard: CustomTestStringConvertible {
-    public nonisolated var testDescription: String { id }
 }

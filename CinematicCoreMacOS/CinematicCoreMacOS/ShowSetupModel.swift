@@ -25,6 +25,8 @@ struct ShowSetupModel: Equatable {
         let name: String
         /// AVCaptureDevice.modelID: what an admission fingerprint records.
         let modelID: String
+        /// Discovery identifies the Mac's own camera; names are not identity.
+        var isBuiltIn: Bool = false
         var id: String { uniqueID }
     }
 
@@ -108,6 +110,9 @@ struct ShowSetupModel: Equatable {
     var outputs: [ProgramOutputManager.Route]
     /// Starting or running: every picker is locked.
     var isRunning = false
+    /// An explicit, non-persisted permission to use a built-in test fallback.
+    /// The capture engine decides whether a fallback is actually needed.
+    private(set) var isBuiltInCameraTestEnabled = false
     private(set) var devices: [Device]
     /// Chosen device unique IDs for A and B.
     private(set) var selection: [ChannelID: String] = [:]
@@ -193,6 +198,12 @@ struct ShowSetupModel: Equatable {
         isChecking = false
     }
 
+    mutating func setBuiltInCameraTestEnabled(_ enabled: Bool) {
+        guard !isRunning, enabled != isBuiltInCameraTestEnabled else { return }
+        isBuiltInCameraTestEnabled = enabled
+        isChecking = false
+    }
+
     /// Hot-plug: a chosen device that disappears is cleared, never replaced.
     mutating func updateDevices(_ value: [Device]) {
         guard value != devices else { return }
@@ -253,8 +264,20 @@ struct ShowSetupModel: Equatable {
 
     /// What the channel renders for the output (not the camera's native format).
     var deliveryTitle: String {
-        String(format: "Delivering 1920×1080 at %.2f fps", standard.frameRate)
+        String(format: "Planned output: 1920×1080 at %.2f fps", standard.frameRate)
     }
+
+    // MARK: Built-in camera testing
+
+    var hasBuiltInCamera: Bool { devices.contains(where: \.isBuiltIn) }
+
+    var usesBuiltInCameraTest: Bool {
+        isBuiltInCameraTestEnabled && Self.assignableSlots.contains {
+            device(for: $0)?.isBuiltIn == true
+        }
+    }
+
+    static let builtInCameraTestDetail = "Allows this Mac's built-in camera to use its own size and rate when needed. Program output repeats frames at the show rate. For testing; performance remains unqualified."
 
     // MARK: Pair check
 
@@ -265,7 +288,10 @@ struct ShowSetupModel: Equatable {
 
     /// Stored records for this Mac, standard, route and A/B camera models.
     var matchingRecords: [StoredPairRecord] {
-        guard let a = device(for: .a), let b = device(for: .b), hasDistinctPair else { return [] }
+        // Historical setup records discard delivered format/profile detail.
+        // They cannot establish compatibility with this explicit test path.
+        guard !usesBuiltInCameraTest,
+              let a = device(for: .a), let b = device(for: .b), hasDistinctPair else { return [] }
         return records.filter {
             $0.matches(machine: machine, standard: standard, route: output, modelA: a.modelID, modelB: b.modelID)
         }
@@ -298,10 +324,10 @@ struct ShowSetupModel: Equatable {
         switch pairCheck {
         case .notRun: return .notMeasured
         case .checking: return .checking
-        case .pass: return .passed
+        case .pass: return .notMeasured
         case .unsupported(let reasons):
             let failing = reasons.filter { PairCheckRow.row(for: $0.bottleneck) == row }
-            return failing.isEmpty ? .passed : .failed(failing.first?.message)
+            return failing.isEmpty ? .notMeasured : .failed(failing.first?.message)
         }
     }
 
@@ -317,26 +343,27 @@ struct ShowSetupModel: Equatable {
         case .notRun: return "A + B at \(standard.title): unknown on this Mac"
         case .checking: return "Checking A + B at \(standard.title) on this Mac"
         case .pass(let certified, _):
-            return "A + B hold \(standard.title) on this Mac · \(certified ? "certified" : "trial")"
-        case .unsupported: return "Camera B unsupported at \(standard.title) with Camera A"
+            return "Previous A + B \(certified ? "certification" : "trial") at \(standard.title)"
+        case .unsupported: return "Previous A + B check failed at \(standard.title)"
         }
     }
 
     var pairCheckDetail: String {
         switch pairCheck {
         case .notRun:
+            if usesBuiltInCameraTest {
+                return "Built-in camera testing is enabled. Previous native-rate checks do not apply to this setup. Alfie still measures the running pair; repeated frames do not qualify a camera for the native show rate."
+            }
             return "Alfie measures A + B together right after Start and shows the result in the console header. It will not lower the output rate to make them fit."
         case .checking:
             return "Measuring both cameras together on this Mac. It will not lower the output rate to make them fit."
-        case .pass(true, _):
-            return "Certified by the 60-minute two-input soak on this exact setup."
-        case .pass(false, let measuredAt):
-            // The card's copy says "Measured now"; a stored record says when.
-            let when = measuredAt.map { "Measured \(Self.dateFormatter.string(from: $0))" } ?? "Measured now"
-            return "\(when), not certified. Certification needs the 60-minute two-input soak on this exact setup."
+        case .pass(let certified, let measuredAt):
+            let when = measuredAt.map { "Recorded \(Self.dateFormatter.string(from: $0)). " } ?? ""
+            let kind = certified ? "certification" : "trial"
+            return "\(when)A previous \(kind) matches this Mac, show standard, output route and camera models. Current delivered formats, capture profiles and camera modes have not been checked. Alfie measures the current pair after Start."
         case .unsupported:
             let failed = failingRows.map(\.title).joined(separator: ", ")
-            return "Failed: \(failed). \(suggestion)"
+            return "The previous check reported: \(failed). Current settings may differ. \(suggestion)"
         }
     }
 
@@ -361,7 +388,7 @@ struct ShowSetupModel: Equatable {
         case .checking: return "Checking…"
         case .passed:
             return row == .distinctDevices ? "Different cameras" : "Passed"
-        case .failed(let message): return message ?? "Failed"
+        case .failed(let message): return "Previous check: " + (message ?? "Failed")
         }
     }
 
@@ -371,7 +398,7 @@ struct ShowSetupModel: Equatable {
         case .notMeasured: return "\(row.title): \(rowStatusText(row))"
         case .checking: return "\(row.title): checking"
         case .passed: return "\(row.title): passed"
-        case .failed(let message): return "\(row.title): failed. \(message ?? "")".trimmingCharacters(in: .whitespaces)
+        case .failed(let message): return "\(row.title): previous check failed. \(message ?? "")".trimmingCharacters(in: .whitespaces)
         }
     }
 
@@ -414,10 +441,13 @@ struct StoredPairRecord: Equatable {
     var inputs: [String: String]
     var status: AdmissionStatus
     var measuredAt: Date
+    /// Test fallback records have a distinct full admission fingerprint.
+    /// Setup must not reinterpret them as ordinary native-format history.
+    var hasBuiltInCameraTestInput: Bool = false
 
     func matches(machine: ShowSetupModel.Machine, standard: ShowStandard,
                  route selectedRoute: ProgramOutputManager.Route, modelA: String, modelB: String) -> Bool {
-        policyVersion == AdmissionPolicy.version
+        !hasBuiltInCameraTestInput && policyVersion == AdmissionPolicy.version
             && machineModel == machine.model && osVersion == machine.osVersion
             && showStandard == standard.title && route == selectedRoute.title
             && inputs.count == 2
@@ -432,14 +462,17 @@ struct StoredPairRecord: Equatable {
         let parts = key.components(separatedBy: "|")
         guard parts.count >= 5, let version = Int(parts[0]) else { return nil }
         var inputs: [String: String] = [:]
+        var hasBuiltInCameraTestInput = false
         for segment in parts.dropFirst(5) {
             let fields = segment.components(separatedBy: ":")
             guard fields.count >= 5 else { return nil }
             let model = fields[1..<(fields.count - 3)].joined(separator: ":")
             inputs[fields[0]] = model
+            if fields[fields.count - 2] == "stage-built-in-test" { hasBuiltInCameraTestInput = true }
         }
         return StoredPairRecord(policyVersion: version, machineModel: parts[1], osVersion: parts[2],
                                 showStandard: parts[3], route: parts[4] == "none" ? nil : parts[4],
-                                inputs: inputs, status: status, measuredAt: measuredAt)
+                                inputs: inputs, status: status, measuredAt: measuredAt,
+                                hasBuiltInCameraTestInput: hasBuiltInCameraTestInput)
     }
 }

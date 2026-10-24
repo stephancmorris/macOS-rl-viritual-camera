@@ -3,8 +3,7 @@
 //  CinematicCoreMacOS
 //
 //  Connects the show-setup screen (SHOW-SETUP) to the engine. Shown on the
-//  stopped screen in Stage format when DeveloperFlags.useMultiviewConsole is
-//  on.
+//  stopped screen in Multi Cam (see OperatorMode).
 //
 //  - Launching never starts video: devices come from discovery only (no
 //    session opens) and nothing starts until an operator presses Start.
@@ -31,7 +30,9 @@ final class LiveShowSetupModel: ObservableObject {
 
     let show: ShowCoordinator
     private let defaults: UserDefaults
+    private let cameras: () -> [CameraManager.CameraDevice]
     private let startChannelA: @MainActor () async -> Void
+    private let startChannelB: (CameraManager) -> Void
     private var cancellables = Set<AnyCancellable>()
     private var startTask: Task<Void, Never>?
 
@@ -39,13 +40,22 @@ final class LiveShowSetupModel: ObservableObject {
     ///   - defaults: where the standard and device proposals live; the app
     ///     passes nil for `.standard`.
     ///   - machine: this Mac, for record matching; nil reads the host.
+    ///   - cameras: discovery results; nil reads channel A's current list.
+    ///   - startChannelB: requests B's capture start; nil dispatches its session command.
     ///   - startChannelA: ContentView's start path for channel A.
     init(show: ShowCoordinator, defaults: UserDefaults? = nil, machine: ShowSetupModel.Machine? = nil,
+         cameras: (() -> [CameraManager.CameraDevice])? = nil,
+         startChannelB: ((CameraManager) -> Void)? = nil,
          startChannelA: @escaping @MainActor () async -> Void) {
         let defaults = defaults ?? .standard
+        let cameras = cameras ?? { show.channelA.availableCameras }
         self.show = show
         self.defaults = defaults
+        self.cameras = cameras
         self.startChannelA = startChannelA
+        self.startChannelB = startChannelB ?? { channel in
+            _ = channel.dispatch(channel.makeCommand(.startSession))
+        }
         let build = DiagnosticsLog.currentBuildIdentity()
         var saved: [ChannelID: String] = [:]
         saved[.a] = defaults.string(forKey: Self.deviceAKey)
@@ -56,13 +66,14 @@ final class LiveShowSetupModel: ObservableObject {
             output: show.programOutput.preferredRoute,
             outputs: show.programOutput.configuredRoutes.isEmpty
                 ? ProgramOutputManager.Route.allCases : show.programOutput.configuredRoutes,
-            devices: channelA.availableCameras.map(Self.device),
+            devices: cameras().map(Self.device),
             saved: saved,
             fallbackA: channelA.selectedCamera?.uniqueID,
-            captureProfile: channelA.shotComposer.config.cinematicFormat == .webcam ? "Webcam" : "Stage",
+            captureProfile: show.operatorModes.mode.captureProfile.title,
             machine: machine ?? .init(model: build.machineModel, osVersion: build.osVersion),
             records: show.admissionRecords.storedPairRecords())
-        setup.isRunning = channelA.isRunning || channelA.isStartingSession
+        setup.setBuiltInCameraTestEnabled(show.isBuiltInCameraTestEnabled)
+        setup.isRunning = show.isAnyChannelLive
         observe()
     }
 
@@ -70,12 +81,25 @@ final class LiveShowSetupModel: ObservableObject {
 
     private func observe() {
         let channelA = show.channelA
+        show.operatorModes.$mode
+            .dropFirst()
+            .sink { [weak self] mode in
+                // A pair Start can still be awaiting A when the operator
+                // leaves this screen. Retire that intent even if they switch
+                // back before A finishes: the old task must never add B later.
+                if mode != .multiCam { self?.startTask?.cancel() }
+            }
+            .store(in: &cancellables)
         channelA.$availableCameras
             .dropFirst()
             .sink { [weak self] cameras in self?.setup.updateDevices(cameras.map(Self.device)) }
             .store(in: &cancellables)
-        channelA.$isRunning.combineLatest(channelA.$isStartingSession)
-            .sink { [weak self] running, starting in self?.setup.isRunning = running || starting }
+        // ShowCoordinator forwards only channel lifecycle changes. Deliver
+        // after @Published's willSet signal so the authoritative all-channel
+        // state has changed before rebuilding this value model.
+        show.objectWillChange
+            .receive(on: RunLoop.main)
+            .sink { [weak self] _ in self?.refreshShowState() }
             .store(in: &cancellables)
         // Settings can change the route or standard while setup is showing.
         show.programOutput.$preferredRoute
@@ -106,33 +130,52 @@ final class LiveShowSetupModel: ObservableObject {
             selectOutput: { [weak self] in self?.selectOutput($0) },
             startAOnly: { [weak self] in self?.startAOnly() },
             startPair: { [weak self] in self?.startPair() },
-            checkPair: nil)
+            checkPair: nil,
+            setBuiltInCameraTestEnabled: { [weak self] in self?.setBuiltInCameraTestEnabled($0) })
     }
 
     func select(_ uniqueID: String, for slot: ChannelID) {
-        guard setup.select(uniqueID, for: slot) else { return }
+        guard !show.isAnyChannelLive, setup.select(uniqueID, for: slot) else { return }
         persistProposals()
     }
 
     /// Same persisted key the Settings picker binds with @AppStorage.
     func selectStandard(_ standard: ShowStandard) {
-        guard !setup.isRunning else { return }
+        guard !show.isAnyChannelLive, !setup.isRunning else { return }
         defaults.set(standard.rawValue, forKey: ShowStandard.userDefaultsKey)
         setup.setStandard(standard)
     }
 
     /// Same property the Settings "Preferred Route" picker binds.
     func selectOutput(_ route: ProgramOutputManager.Route) {
-        guard !setup.isRunning else { return }
+        guard !show.isAnyChannelLive, !setup.isRunning else { return }
         show.programOutput.preferredRoute = route
         setup.setOutput(route)
     }
 
+    func setBuiltInCameraTestEnabled(_ enabled: Bool) {
+        guard show.setBuiltInCameraTestEnabled(enabled) else { return }
+        refreshShowState()
+    }
+
+    private func refreshShowState() {
+        // Refresh a show-level option even when a source has since started.
+        // The model's mutation guard concerns operator requests, not syncing.
+        var next = setup
+        next.isRunning = false
+        next.setBuiltInCameraTestEnabled(show.isBuiltInCameraTestEnabled)
+        next.isRunning = show.isAnyChannelLive
+        if next != setup { setup = next }
+    }
+
     func startAOnly() {
-        guard setup.canStartAOnly, startTask == nil, let a = camera(for: .a) else { return }
+        guard !show.isAnyChannelLive, show.operatorModes.mode == .multiCam,
+              setup.canStartAOnly, startTask == nil, let a = camera(for: .a) else { return }
         persistProposals()
         startTask = Task { [self] in
             defer { startTask = nil }
+            guard !Task.isCancelled, !show.isAnyChannelLive,
+                  show.operatorModes.mode == .multiCam else { return }
             show.prepareForNewShow()
             show.channelA.selectedCamera = a
             await startChannelA()
@@ -140,21 +183,31 @@ final class LiveShowSetupModel: ObservableObject {
     }
 
     func startPair() {
-        guard setup.canStartPair, startTask == nil, let a = camera(for: .a), let b = camera(for: .b) else { return }
+        guard !show.isAnyChannelLive, show.operatorModes.mode == .multiCam,
+              setup.canStartPair, startTask == nil, let a = camera(for: .a), let b = camera(for: .b) else { return }
         persistProposals()
         startTask = Task { [self] in
             defer { startTask = nil }
+            guard !Task.isCancelled, !show.isAnyChannelLive,
+                  show.operatorModes.mode == .multiCam else { return }
             show.prepareForNewShow()
             show.channelA.selectedCamera = a
             await startChannelA()
+            guard !Task.isCancelled, show.operatorModes.mode == .multiCam else { return }
             // B joins only once A (Program, owner of the output) is up.
             for await starting in show.channelA.$isStartingSession.values where !starting { break }
-            guard show.channelA.isRunning else { return }
+            guard !Task.isCancelled, show.operatorModes.mode == .multiCam,
+                  show.channelA.isRunning else { return }
             let channelB = show.addChannel(.b)
             channelB.selectedCamera = b
-            _ = channelB.dispatch(channelB.makeCommand(.startSession))
+            startChannelB(channelB)
         }
     }
+
+    #if DEBUG
+    /// Wait for the setup intent without opening a camera in race tests.
+    func waitForStartForTesting() async { await startTask?.value }
+    #endif
 
     // MARK: Helpers
 
@@ -166,11 +219,11 @@ final class LiveShowSetupModel: ObservableObject {
 
     private func camera(for slot: ChannelID) -> CameraManager.CameraDevice? {
         guard let id = setup.device(for: slot)?.uniqueID else { return nil }
-        return show.channelA.availableCameras.first { $0.uniqueID == id }
+        return cameras().first { $0.uniqueID == id }
     }
 
     private nonisolated static func device(_ camera: CameraManager.CameraDevice) -> ShowSetupModel.Device {
-        .init(uniqueID: camera.uniqueID, name: camera.name, modelID: camera.modelID)
+        .init(uniqueID: camera.uniqueID, name: camera.name, modelID: camera.modelID, isBuiltIn: camera.isBuiltIn)
     }
 
     private static func standard(in defaults: UserDefaults) -> ShowStandard {
@@ -188,7 +241,7 @@ struct LiveShowSetup: View {
     }
 
     var body: some View {
-        ShowSetupView(model: model.setup, actions: model.actions)
+        ShowSetupView(model: model.setup, actions: model.actions, operatorModes: model.show.operatorModes)
             #if DEBUG
             .task { [model] in
                 await DebugLaunchHooks.autostartIfRequested(model) { model.show.channelA.availableCameras }

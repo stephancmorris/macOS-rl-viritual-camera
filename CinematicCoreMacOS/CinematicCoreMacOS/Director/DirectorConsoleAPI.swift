@@ -155,15 +155,56 @@ extension NextShotStatus {
                 var parts = ["Next: \(input.cameraLabel)"]
                 if let countdown, countdown.isFinite, countdown >= 0 {
                     parts.append(Self.seconds(countdown))
-                    if cancellable { parts.append("Esc to cancel") }
                 }
+                if cancellable { parts.append("Esc to cancel") }
                 return parts.joined(separator: " · ")
             }
 
             static func seconds(_ value: TimeInterval) -> String {
                 let whole = value.rounded()
-                if abs(value - whole) < 0.05 { return "\(Int(whole)) s" }
-                return "\((value * 10).rounded() / 10) s"
+                if abs(value - whole) < 0.05, let integer = Int(exactly: whole) {
+                    return "\(integer) s"
+                }
+                // Display rounding must not overflow either Int or Double.
+                // Extremely large finite supplied values remain representable
+                // as text; formatting never chooses a valid notice duration.
+                let tenths = value * 10
+                let display = tenths.isFinite ? tenths.rounded() / 10 : value
+                return "\(display) s"
+            }
+        }
+
+        /// B-12 reports facts only. This alert never authorizes a fallback or
+        /// changes authority; a successful fallback remains paused.
+        enum BackupAlert: Equatable, Sendable {
+            case switchedTo(ChannelID)
+            case bothInputsStale
+            case pausedAfterFallback
+
+            var title: String {
+                switch self {
+                case .switchedTo(let channel): return "Program lost → switched to \(channel.cameraLabel)"
+                case .bothInputsStale: return "Both inputs stale"
+                case .pausedAfterFallback: return "Paused after fallback"
+                }
+            }
+
+            var detail: String {
+                switch self {
+                case .switchedTo, .pausedAfterFallback:
+                    return "Paused after fallback · Hand to Alfie when ready"
+                case .bothInputsStale:
+                    return "No safe input is ready. Check the cameras and output."
+                }
+            }
+
+            var accessibilityLabel: String {
+                switch self {
+                case .switchedTo(let channel):
+                    return "Program lost. Switched to \(channel.cameraLabel). \(detail)"
+                case .bothInputsStale, .pausedAfterFallback:
+                    return "\(title). \(detail)"
+                }
             }
         }
 
@@ -204,6 +245,10 @@ extension NextShotStatus {
         /// False at every launch and after any takeover.
         var handedToAlfie: Bool
         var runSheet: RunSheetLine?
+        var backupAlert: BackupAlert? = nil
+        /// Source-bound selection facts, sampled with the existing console refresh.
+        /// Empty means the Director supplies no subject selection display.
+        var subjectPicks: [ChannelID: DirectorSubjectPick] = [:]
 
         /// Every launch: Manual, not handed to Alfie, nothing prepared or badged.
         static func atLaunch(qualified: Qualification) -> DirectorSection {
@@ -238,6 +283,103 @@ protocol DirectorConsoleControlling: AnyObject {
     func advanceSegment()
     /// One tap on an input: the operator nominates the subject there (E1).
     func overrideSubject(on channel: ChannelID, at point: CGPoint)
+    /// UI nomination bound to the source and route that were actually painted.
+    /// Implementations must revalidate every binding before dispatching.
+    @discardableResult
+    func overrideSubject(_ request: DirectorSubjectOverrideRequest) -> DirectorControlResult
+}
+
+extension DirectorConsoleControlling {
+    /// Old controllers must never silently downgrade a bound UI request.
+    @discardableResult
+    func overrideSubject(_ request: DirectorSubjectOverrideRequest) -> DirectorControlResult {
+        .refused("Subject selection is unavailable")
+    }
+}
+
+/// C-08 selection facts only. No pixels, identity probabilities or readiness
+/// thresholds. Rectangles use normalized Vision coordinates (bottom-left).
+nonisolated struct DirectorSubjectPick: Equatable, Sendable {
+    enum Phase: Equatable, Sendable {
+        case unavailable, ambiguous, suggested, acquiring, tracking, recovering, lost
+    }
+
+    enum Rule: Equatable, Sendable {
+        case positionHint, centralPresenter
+    }
+
+    enum Provenance: Equatable, Sendable {
+        case operatorNomination
+        case alfie(Rule)
+    }
+
+    struct Candidate: Equatable, Sendable, Identifiable {
+        let id: UUID
+        let bounds: CGRect
+
+        var isValid: Bool {
+            Self.validBounds(bounds)
+        }
+
+        static func validBounds(_ bounds: CGRect) -> Bool {
+            let values = [bounds.minX, bounds.minY, bounds.width, bounds.height,
+                          bounds.maxX, bounds.maxY]
+            return values.allSatisfy(\.isFinite) && bounds.minX >= 0 && bounds.minY >= 0 &&
+                bounds.width > 0 && bounds.height > 0 && bounds.maxX <= 1 && bounds.maxY <= 1
+        }
+    }
+
+    /// A defensive UI bound, not a detector workload or qualification budget.
+    static let maximumCandidates = 32
+
+    let channel: ChannelID
+    let sourceGeneration: UInt64
+    let selectionRevision: UInt64
+    let routeGeneration: UInt64
+    let phase: Phase
+    let selectedCandidateID: UUID?
+    let candidates: [Candidate]
+    let provenance: Provenance?
+    /// The controller's current permission to nominate; the effect rechecks it.
+    let canOverride: Bool
+
+    var isValid: Bool {
+        candidates.count <= Self.maximumCandidates && candidates.allSatisfy(\.isValid) &&
+            Set(candidates.map(\.id)).count == candidates.count &&
+            (selectedCandidateID == nil || candidates.contains { $0.id == selectedCandidateID }) &&
+            (!(phase == .ambiguous || phase == .unavailable || phase == .lost) || selectedCandidateID == nil)
+    }
+
+    var selectedCandidate: Candidate? {
+        guard isValid, let selectedCandidateID else { return nil }
+        return candidates.first { $0.id == selectedCandidateID }
+    }
+
+    func overrideRequest(at point: CGPoint) -> DirectorSubjectOverrideRequest? {
+        guard isValid, canOverride, DirectorSubjectOverrideRequest.isValid(point) else { return nil }
+        return .init(channel: channel, sourceGeneration: sourceGeneration,
+                     selectionRevision: selectionRevision, routeGeneration: routeGeneration, point: point)
+    }
+}
+
+nonisolated struct DirectorSubjectOverrideRequest: Equatable, Sendable {
+    let channel: ChannelID
+    let sourceGeneration: UInt64
+    let selectionRevision: UInt64
+    let routeGeneration: UInt64
+    let point: CGPoint
+
+    var isValid: Bool { Self.isValid(point) }
+
+    static func isValid(_ point: CGPoint) -> Bool {
+        point.x.isFinite && point.y.isFinite && (0...1).contains(point.x) && (0...1).contains(point.y)
+    }
+
+    func matches(_ pick: DirectorSubjectPick) -> Bool {
+        isValid && pick.isValid && pick.canOverride && channel == pick.channel &&
+            sourceGeneration == pick.sourceGeneration && selectionRevision == pick.selectionRevision &&
+            routeGeneration == pick.routeGeneration
+    }
 }
 
 nonisolated enum DirectorControlResult: Equatable, Sendable {

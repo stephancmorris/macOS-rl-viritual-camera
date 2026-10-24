@@ -1,0 +1,12 @@
+{
+  "evidence": "synthetic",
+  "passedDefinitions": 864,
+  "passedExecutions": 1343,
+  "failed": 0,
+  "skipped": 3,
+  "pythonTests": 31,
+  "releaseBuild": "unsigned app and extension passed",
+  "sourceFingerprint": "b7423d474094139195bcfb479a786972a212b7c84106d43325bca0ceee1b2495",
+  "liveRigQualified": false,
+  "defaultExecutionConfigurationInstalled": false
+}

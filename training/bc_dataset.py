@@ -18,22 +18,23 @@ import numpy as np
 import torch
 from torch.utils.data import Dataset
 
-from cinematic_env import (
-    MAX_PAN_SPEED,
-    MAX_TILT_SPEED,
-    MAX_ZOOM_SPEED,
-    build_observation,
-)
+from framing_samples import expert_pairs
 from env_loader import scan_sessions
+from replay_timing import TimestampTiming, partition_frames, timing_diagnostics
 
 
 class ExpertDataset(Dataset):
-    """PyTorch Dataset of (observation, expert_action) pairs from expert demos."""
+    """PyTorch samples with optional caller-declared timestamp partitions.
+
+    timing=None retains fixed-row-rate velocity and per-step expert actions.
+    TimestampTiming changes velocity time and excludes boundary-spanning pairs.
+    """
 
     def __init__(
         self,
         data_dirs: list[Path | str] | None = None,
         min_session_frames: int = 30,
+        timing: TimestampTiming | None = None,
     ):
         if data_dirs is None:
             data_dirs = [Path(__file__).parent / "output"]
@@ -44,8 +45,12 @@ class ExpertDataset(Dataset):
         self._observations: list[np.ndarray] = []
         self._actions: list[np.ndarray] = []
 
+        self.timing_info = timing_diagnostics(timing)
         for session in sessions:
-            self._extract_pairs(session.frames, session.fps)
+            for segment in partition_frames(
+                session.frames, timing=timing, context=session.session_id,
+            ):
+                self._extract_pairs(segment.frames, session.fps, segment.elapsed_seconds)
 
         if not self._observations:
             raise ValueError(
@@ -53,48 +58,14 @@ class ExpertDataset(Dataset):
                 "'ideal_crop' data (run extract_frames.py on YouTube clips)."
             )
 
-    def _extract_pairs(self, frames: list[dict], fps: int) -> None:
-        """Extract (obs, action) pairs from consecutive frames with ideal_crop."""
-        for i in range(len(frames) - 1):
-            frame_t = frames[i]
-            frame_t1 = frames[i + 1]
-
-            ideal_t = frame_t.get("ideal_crop")
-            ideal_t1 = frame_t1.get("ideal_crop")
-            if not ideal_t or not ideal_t1:
-                continue
-
-            # Derive expert action from consecutive ideal crops
-            dx = (ideal_t1.get("x", 0) - ideal_t.get("x", 0)) / MAX_PAN_SPEED
-            dy = (ideal_t1.get("y", 0) - ideal_t.get("y", 0)) / MAX_TILT_SPEED
-            dz = (ideal_t1.get("zoom", 1) - ideal_t.get("zoom", 1)) / MAX_ZOOM_SPEED
-            action = np.clip(np.array([dx, dy, dz], dtype=np.float32), -1.0, 1.0)
-
-            # Build observation from frame_t using ideal_crop as the current crop
-            crop_x = ideal_t.get("x", 0.0)
-            crop_y = ideal_t.get("y", 0.0)
-            crop_w = ideal_t.get("w", 1.0)
-            crop_h = ideal_t.get("h", 1.0)
-            zoom = ideal_t.get("zoom", 1.0)
-
-            # Compute speaker velocity
-            vel_x, vel_y = 0.0, 0.0
-            if i > 0:
-                prev = frames[i - 1]
-                sp_prev = prev.get("speaker")
-                sp_curr = frame_t.get("speaker")
-                if sp_prev and sp_curr:
-                    vel_x = float(np.clip(
-                        (sp_curr["x"] - sp_prev["x"]) * fps, -1.0, 1.0
-                    ))
-                    vel_y = float(np.clip(
-                        (sp_curr["y"] - sp_prev["y"]) * fps, -1.0, 1.0
-                    ))
-
-            obs = build_observation(
-                frame_t, crop_x, crop_y, crop_w, crop_h, zoom, vel_x, vel_y
-            )
-
+    def _extract_pairs(
+        self,
+        frames: list[dict],
+        fps: int | float,
+        elapsed_seconds: tuple[float, ...] | None = None,
+    ) -> None:
+        """Extract samples inside one partition without changing action units."""
+        for obs, action in expert_pairs(frames, fps, elapsed_seconds=elapsed_seconds):
             self._observations.append(obs)
             self._actions.append(action)
 

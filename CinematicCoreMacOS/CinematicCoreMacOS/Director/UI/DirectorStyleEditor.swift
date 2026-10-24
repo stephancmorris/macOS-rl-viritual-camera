@@ -23,7 +23,8 @@ struct DirectorStyleDraft: Equatable, Sendable {
     var cutOnMotionAllowed: Bool?
 
     var isBlank: Bool {
-        fields.allSatisfy(\.isEmpty) && cutOnMotionAllowed == nil
+        fields.allSatisfy { $0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
+            && cutOnMotionAllowed == nil
     }
 
     private var fields: [String] {
@@ -31,16 +32,30 @@ struct DirectorStyleDraft: Equatable, Sendable {
          repetitionWindow, maximumMovement, settleTime, onAirMoveRate]
     }
 
-    func makeStyle() -> DirectorStyle? {
-        guard let minimum = Self.number(minimumShotDuration),
-              let preferred = Self.number(preferredShotDuration),
-              let softMaximum = Self.number(softMaximumShotDuration),
-              let wide = Self.number(wideCadence),
-              let repetition = Self.number(repetitionWindow),
-              let movement = Self.number(maximumMovement),
-              let settle = Self.number(settleTime),
-              let moveRate = Self.number(onAirMoveRate),
-              let cutOnMotionAllowed else { return nil }
+    struct ValidationIssue: Error {
+        let message: String
+    }
+
+    /// Validate in the same order as the fields, so a refused save explains
+    /// the first value the owner can fix. The model remains the final gate.
+    func makeStyle() throws -> DirectorStyle {
+        let minimum = try Self.number(minimumShotDuration, field: "Minimum shot length", seconds: true)
+        let preferred = try Self.number(preferredShotDuration, field: "Preferred shot length", seconds: true)
+        let softMaximum = try Self.number(softMaximumShotDuration, field: "Soft maximum shot length", seconds: true)
+        let wide = try Self.number(wideCadence, field: "Wide cadence", positive: true, seconds: true)
+        let repetition = try Self.number(repetitionWindow, field: "Repetition window", seconds: true)
+        let movement = try Self.number(maximumMovement, field: "Maximum movement")
+        let settle = try Self.number(settleTime, field: "Settle time", seconds: true)
+        let moveRate = try Self.number(onAirMoveRate, field: "On-air move rate", positive: true)
+        guard let cutOnMotionAllowed else {
+            throw ValidationIssue(message: "Choose Yes or No for Cut while moving.")
+        }
+        guard minimum <= preferred else {
+            throw ValidationIssue(message: "Minimum shot length must be less than or equal to Preferred shot length.")
+        }
+        guard preferred <= softMaximum else {
+            throw ValidationIssue(message: "Preferred shot length must be less than or equal to Soft maximum shot length.")
+        }
         return DirectorStyle(
             minimumShotDuration: minimum,
             preferredShotDuration: preferred,
@@ -67,14 +82,27 @@ struct DirectorStyleDraft: Equatable, Sendable {
     }
 
     static func text(_ value: Double) -> String {
-        let whole = value.rounded()
-        if abs(value - whole) < 0.000_001 { return String(Int(whole)) }
+        // Only shorten exact, representable integers. Rounding here can turn
+        // a valid positive cadence/rate into zero, and Int(value) can trap for
+        // a finite style value outside Int's range.
+        if let whole = Int(exactly: value) { return String(whole) }
         return String(value)
     }
 
-    private static func number(_ text: String) -> Double? {
-        let trimmed = text.trimmingCharacters(in: .whitespaces)
-        guard !trimmed.isEmpty, let value = Double(trimmed), value.isFinite else { return nil }
+    private static func number(_ text: String, field: String, positive: Bool = false,
+                               seconds: Bool = false) throws -> Double {
+        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else {
+            throw ValidationIssue(message: "\(field) is required.")
+        }
+        guard let value = Double(trimmed), value.isFinite else {
+            throw ValidationIssue(message: "\(field) must be a finite number.")
+        }
+        guard positive ? value > 0 : value >= 0 else {
+            let bound = seconds ? "0 seconds" : "0"
+            let constraint = positive ? "greater than \(bound)" : "\(bound) or greater"
+            throw ValidationIssue(message: "\(field) must be \(constraint).")
+        }
         return value
     }
 }
@@ -96,6 +124,7 @@ final class DirectorStyleEditor: ObservableObject {
     @Published var selected: SegmentType = .liveEvent
     @Published var drafts: [SegmentType: DirectorStyleDraft] = [:]
     @Published private(set) var message = "No style set"
+    @Published private(set) var hasError = false
 
     let store: DirectorPreferencesStore
     /// False when this Mac has no place to keep the styles. Saving is refused
@@ -127,7 +156,10 @@ final class DirectorStyleEditor: ObservableObject {
         self.canSave = canSave
         self.onPreferencesChanged = onPreferencesChanged
         reload()
-        if !canSave { message = Self.noStorageMessage }
+        if !canSave {
+            message = Self.noStorageMessage
+            hasError = true
+        }
     }
 
     func draft(for segment: SegmentType) -> DirectorStyleDraft {
@@ -141,6 +173,7 @@ final class DirectorStyleEditor: ObservableObject {
     }
 
     func reload() {
+        hasError = false
         switch store.load() {
         case .empty:
             drafts = [:]
@@ -151,27 +184,36 @@ final class DirectorStyleEditor: ObservableObject {
         case .unreadable(let text):
             drafts = [:]
             message = text
+            hasError = true
         }
     }
 
     func save() {
+        hasError = true
         guard canSave else {
             message = Self.noStorageMessage
             return
         }
-        guard let live = draft(for: .liveEvent).makeStyle() else {
+        guard !draft(for: .liveEvent).isBlank else {
+            selected = .liveEvent
             message = Self.liveEventRequiredMessage
             return
         }
-        var styles: [SegmentType: DirectorStyle] = [.liveEvent: live]
-        for segment in SegmentType.allCases where segment != .liveEvent {
+        var styles: [SegmentType: DirectorStyle] = [:]
+        let segments = [SegmentType.liveEvent] + SegmentType.allCases.filter { $0 != .liveEvent }
+        for segment in segments {
             let draft = draft(for: segment)
             guard !draft.isBlank else { continue }
-            guard let style = draft.makeStyle() else {
-                message = "\(segment.styleTitle) is incomplete."
+            do {
+                styles[segment] = try draft.makeStyle()
+            } catch let issue as DirectorStyleDraft.ValidationIssue {
+                selected = segment
+                message = "\(segment.styleTitle): \(issue.message)"
+                return
+            } catch {
+                message = Self.cannotSaveMessage
                 return
             }
-            styles[segment] = style
         }
         do {
             let preferences = try DirectorPreferences(styles: styles).validated()
@@ -179,6 +221,7 @@ final class DirectorStyleEditor: ObservableObject {
             try store.save(preferences)
             onPreferencesChanged(preferences)
             message = kept == nil ? Self.savedMessage : Self.keptUnreadableMessage
+            hasError = false
         } catch {
             message = Self.cannotSaveMessage
         }

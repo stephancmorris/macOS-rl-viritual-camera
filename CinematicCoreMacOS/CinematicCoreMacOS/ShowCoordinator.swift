@@ -24,6 +24,10 @@ final class ShowCoordinator: ObservableObject {
     /// Channels by ID. A always exists; R2 adds at most B (C/D are reserved).
     private(set) var channels: [ChannelID: CameraManager] = [:]
 
+    /// Only liveness changes refresh show-level controls; frame publications
+    /// remain local to each camera. Entries exist only for attached channels.
+    private var channelLivenessSubscriptions: [ChannelID: Set<AnyCancellable>] = [:]
+
     /// Sole owner of routing: which channel feeds `programOutput`, the output
     /// clock, route generations and source-loss hold / standby.
     let router: ProgramRouter
@@ -38,6 +42,24 @@ final class ShowCoordinator: ObservableObject {
     let workScheduler = FrameWorkScheduler()
 
     var channelA: CameraManager { channels[.a]! }
+
+    /// Single Cam, Multi Cam or Webcam (MODES-SPEC). Every channel's composer
+    /// format follows it, including channels added later.
+    let operatorModes: OperatorModeStore
+
+    /// Explicit test choice for this app launch. It never changes the output
+    /// standard or grants qualification; each camera rechecks actual device
+    /// eligibility when configuring capture.
+    @Published private(set) var isBuiltInCameraTestEnabled = false
+
+    @discardableResult
+    func setBuiltInCameraTestEnabled(_ enabled: Bool) -> Bool {
+        guard !isAnyChannelLive else { return false }
+        guard enabled != isBuiltInCameraTestEnabled else { return true }
+        for channel in channels.values { channel.builtInCameraTestEnabled = enabled }
+        isBuiltInCameraTestEnabled = enabled
+        return true
+    }
 
     // MARK: Control target (CHANNEL-CMD)
 
@@ -60,8 +82,14 @@ final class ShowCoordinator: ObservableObject {
 
     /// - Parameter programOutput: injected in tests; the app passes nil and
     ///   gets the real virtual-camera + Program Display output.
+    /// - Parameter operatorModes: injected in tests; the app passes nil and
+    ///   gets the mode saved in standard user defaults.
     init(programOutput: ProgramOutputManager? = nil, admissionRecords: AdmissionRecordStore? = nil,
-         qualificationRecords: DirectorQualificationStore? = nil) {
+         qualificationRecords: DirectorQualificationStore? = nil, directorShadowLog: DirectorShadowLog? = nil,
+         directorRunSheet: RunSheet? = nil, operatorModes: OperatorModeStore? = nil) {
+        self.operatorModes = operatorModes ?? OperatorModeStore()
+        self.initialDirectorShadowLog = directorShadowLog
+        self.initialDirectorRunSheet = directorRunSheet
         self.admissionRecords = admissionRecords ?? AdmissionRecordStore()
         self.qualificationRecords = qualificationRecords ?? .applicationSupport()
         let rehearsal: [any ProgramOutputSink] = DeveloperFlags.allowRehearsalOutput ? [RehearsalOutputSink()] : []
@@ -74,7 +102,55 @@ final class ShowCoordinator: ObservableObject {
         let a = CameraManager(channelID: .a, programOutput: output, outputPort: router.port(for: .a))
         a.deviceRegistry = deviceRegistry
         a.workScheduler = workScheduler
+        self.operatorModes.apply(to: a)
         channels[.a] = a
+        observeChannelLiveness(a)
+        self.operatorModes.switchDecision = { [weak self] from, to in
+            guard let self else { return .allowed }
+            return OperatorModeSwitch.decide(from: from, to: to, state: self.modeSwitchState)
+        }
+        self.operatorModes.modeChanged = { [weak self] from, to in self?.operatorModeChanged(from: from, to: to) }
+    }
+
+    /// Any channel is running or starting.
+    var isAnyChannelLive: Bool {
+        channels.values.contains { $0.isRunning || $0.isStartingSession }
+    }
+
+    private func observeChannelLiveness(_ channel: CameraManager) {
+        var subscriptions: Set<AnyCancellable> = []
+        channel.$isRunning.removeDuplicates().dropFirst()
+            .sink { [weak self] _ in self?.objectWillChange.send() }
+            .store(in: &subscriptions)
+        channel.$isStartingSession.removeDuplicates().dropFirst()
+            .sink { [weak self] _ in self?.objectWillChange.send() }
+            .store(in: &subscriptions)
+        channelLivenessSubscriptions[channel.channelID] = subscriptions
+    }
+
+    /// What the live-switch rule needs to know about the show.
+    var modeSwitchState: OperatorModeSwitch.ShowState {
+        .init(isLive: isAnyChannelLive, programChannel: programChannel,
+              otherChannels: ChannelID.allCases.filter { $0 != .a && channels[$0] != nil })
+    }
+
+    private func operatorModeChanged(from: OperatorMode, to: OperatorMode) {
+        if isAnyChannelLive {
+            programOutput.noteDiagnostics("mode \(from.diagnosticsName) -> \(to.diagnosticsName) while live")
+        }
+        applyOperatorMode()
+    }
+
+    /// Bring every channel in line with the operator mode. A single-input
+    /// mode (Single Cam, Webcam) leaves Edit Live, and while everything is
+    /// stopped also prepares a new show, so no other channel is kept from
+    /// Multi Cam and A is Program.
+    private func applyOperatorMode() {
+        for channel in channels.values { operatorModes.apply(to: channel) }
+        if !operatorModes.mode.allowsMultipleInputs {
+            setEditLive(false)
+            prepareForNewShow()
+        }
     }
 
     func channel(_ id: ChannelID) -> CameraManager? { channels[id] }
@@ -88,7 +164,10 @@ final class ShowCoordinator: ObservableObject {
         let channel = CameraManager(channelID: id, programOutput: programOutput, outputPort: router.port(for: id))
         channel.deviceRegistry = deviceRegistry
         channel.workScheduler = workScheduler
+        operatorModes.apply(to: channel)
+        channel.builtInCameraTestEnabled = isBuiltInCameraTestEnabled
         channels[id] = channel
+        observeChannelLiveness(channel)
         retarget()
         channelsChangedObserver?(.added(id))
         return channel
@@ -102,18 +181,34 @@ final class ShowCoordinator: ObservableObject {
     func removeChannel(_ id: ChannelID) {
         guard id != programChannel, id != .a, let channel = channels[id] else { return }
         channel.stopCapture()
+        channelLivenessSubscriptions[id] = nil
         channels[id] = nil
         retarget()
         channelsChangedObserver?(.removed(id))
     }
 
-    /// Show-level Stop: retires every channel's generation and epoch.
-    func stopShow() {
+    /// Only an explicit console or menu action is human evidence. Lifecycle
+    /// callers preserve Stop's behavior without being attributed to an operator.
+    enum StopOrigin { case operatorUI, lifecycle }
+    struct StopAction {
+        let id: UUID
+        let origin: StopOrigin
+    }
+    var stopAttemptObserver: ((StopAction) -> Void)?
+    var stopResultObserver: ((StopAction) -> Void)?
+
+    /// Show-level Stop: retires every channel's generation and epoch. The
+    /// result boundary observes this synchronous state change, not completion
+    /// of a capture executor's asynchronous stop.
+    func stopShow(origin: StopOrigin = .lifecycle) {
+        let action = StopAction(id: UUID(), origin: origin)
+        stopAttemptObserver?(action)
         for id in ChannelID.allCases { channels[id]?.stopCapture() }
         editLive = false
         resetProgramToA()
         retarget()
         channelsChangedObserver?(.showStopped)
+        stopResultObserver?(action)
     }
 
     /// A new show starts from A as Program with no other channel, whatever
@@ -136,15 +231,38 @@ final class ShowCoordinator: ObservableObject {
 
     var channelsChangedObserver: ((ChannelChange) -> Void)?
 
-    /// The Auto Director, owned by the show. Shadow only (no camera effects)
-    /// until B-05; levels come from this rig's qualification records.
+    /// Optional, explicitly budgeted metadata storage; no implicit I/O defaults.
+    private let initialDirectorShadowLog: DirectorShadowLog?
+    private let initialDirectorRunSheet: RunSheet?
+    /// Read-only export access must not instantiate the lazy Director.
+    var shadowLogForExport: DirectorShadowLog? { initialDirectorShadowLog }
+    private weak var startedDirector: DirectorController?
+    var directorSectionForConsole: NextShotStatus.DirectorSection? {
+        guard DeveloperFlags.runDirectorShadow, let startedDirector, startedDirector.isAttached else { return nil }
+        return startedDirector.sampleSectionForConsole()
+    }
+    /// UI actions use the retained controller; reading status never starts it.
+    var directorControlForConsole: (any DirectorConsoleControlling)? {
+        guard DeveloperFlags.runDirectorShadow, let startedDirector, startedDirector.isAttached else { return nil }
+        return startedDirector
+    }
+    /// The show owns authority and the configured Debug-only effect boundaries.
     private(set) lazy var director = DirectorController(
-        show: self, qualifiedLevels: { [weak self] in self?.qualifiedDirectorLevels ?? [] })
+        show: self, clock: { [weak self] in self?.clock() ?? CACurrentMediaTime() },
+        qualifiedLevels: { [weak self] in self?.qualifiedDirectorLevels ?? [] },
+        shadowLog: initialDirectorShadowLog, runSheet: initialDirectorRunSheet)
 
     /// Start the Director's shadow when the flag allows it. Every launch is Manual.
     func startDirectorShadow() {
         guard DeveloperFlags.runDirectorShadow else { return }
         director.attach()
+        startedDirector = director
+    }
+
+    /// Explicit operator action against an already attached Director only.
+    func advanceDirectorSegment() {
+        guard DeveloperFlags.runDirectorShadow, let startedDirector, startedDirector.isAttached else { return }
+        startedDirector.advanceSegment()
     }
 
     /// Styles saved in Settings reach the running Director (CR-037). Only
@@ -188,8 +306,28 @@ final class ShowCoordinator: ObservableObject {
         AdmissionDecision.decide(admissionStatus)
     }
 
-    func recordAdmission(_ result: PairAdmissionResult) {
-        admissionRecords.record(result.status, for: admissionFingerprint())
+    func admissionCheckBinding(preview: ChannelID) -> PairAdmissionBinding? {
+        guard previewChannel == preview, let program = channels[programChannel],
+              let previewSource = channels[preview],
+              program.isRunning, !program.sourceMissing,
+              previewSource.isRunning, !previewSource.sourceMissing else { return nil }
+        return PairAdmissionBinding(
+            fingerprint: admissionFingerprint(), program: programChannel, preview: preview,
+            routeGeneration: router.routeGeneration,
+            operatorMode: operatorModes.mode, context: pairAdmissionContext(preview: preview),
+            sources: channels.mapValues {
+                .init(instance: ObjectIdentifier($0), generation: $0.revisions.sourceGeneration,
+                      deviceID: $0.selectedCamera?.uniqueID)
+            })
+    }
+
+    /// A delayed result cannot be attached to whichever setup happens to be
+    /// current at completion. Short checks remain provisional software evidence.
+    @discardableResult
+    func recordAdmission(_ result: PairAdmissionResult, for binding: PairAdmissionBinding) -> Bool {
+        guard admissionCheckBinding(preview: binding.preview) == binding else { return false }
+        admissionRecords.record(result.status, for: binding.fingerprint)
+        return true
     }
 
     // MARK: Director qualification (S3 B-06, C16)
@@ -258,10 +396,40 @@ final class ShowCoordinator: ObservableObject {
     /// S3 B-02: every Take attempt, reported before any check so refused
     /// attempts are seen too.
     var takeAttemptObserver: ((TakeOrigin) -> Void)?
+    var takeResultObserver: ((TakeOrigin, TakeResult) -> Void)?
 
     @discardableResult
-    func take(_ request: TakeRequest? = nil, origin: TakeOrigin = .operatorUI) -> TakeResult {
+    func take(_ request: TakeRequest? = nil, origin: TakeOrigin = .operatorUI,
+              permit: TakePermit? = nil, fallbackPermit: BackupFallbackPolicy.Permit? = nil) -> TakeResult {
+        // Retire only discovery leases before every origin's Take boundary.
+        // Never drain Vision or invalidate ordinary tracking evidence here.
+        for channel in channels.values { channel.retireSubjectDiscovery() }
         takeAttemptObserver?(origin)
+        let result = performTake(request, origin: origin, permit: permit, fallbackPermit: fallbackPermit)
+        takeResultObserver?(origin, result)
+        return result
+    }
+
+    private func performTake(_ request: TakeRequest?, origin: TakeOrigin, permit: TakePermit?,
+                             fallbackPermit: BackupFallbackPolicy.Permit?) -> TakeResult {
+        // Every matching attempt is consumed before technical checks. The
+        // fault grant is a distinct type and never borrows a normal permit.
+        var fallbackWindow: ProgramRouter.HoldWindow?
+        switch origin {
+        case .operatorUI: break
+        case .director:
+            guard let permit, director.consumeTakePermit(permit, now: clock()), fallbackPermit == nil else {
+                return .rejected(.directorNotAuthorized)
+            }
+        case .fallback:
+            // Preserve the old rejection's terminal normal-lease behavior.
+            if let permit { _ = director.consumeTakePermit(permit, now: clock()) }
+            guard let fallbackPermit,
+                  let window = director.backupExecution.consume(fallbackPermit, now: clock()), permit == nil else {
+                return .rejected(.directorNotAuthorized)
+            }
+            fallbackWindow = window
+        }
         guard let request = request ?? makeTakeRequest(), let preview = previewChannel,
               let channel = channels[preview] else {
             return .rejected(.noPreview)
@@ -280,7 +448,8 @@ final class ShowCoordinator: ObservableObject {
         guard availability.isEligible, let frame = channel.latestRenderedFrame else {
             return .rejected(.notEligible(availability.reason))
         }
-        guard router.commitTake(frame, to: preview, expectedRouteGeneration: request.routeGeneration) else {
+        guard router.commitTake(frame, to: preview, expectedRouteGeneration: request.routeGeneration,
+                                fallbackWindow: fallbackWindow) else {
             return .rejected(.outputRefused)
         }
         lastTakeAt = now

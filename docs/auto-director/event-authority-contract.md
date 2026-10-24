@@ -2,6 +2,8 @@
 
 Status: reconciled 2026-10-10 for D-01. [Recorded decisions](../handoff/stage3-4/DECISIONS.md) take precedence over older proposed text. Implementation references describe the open A-07 stack at `ecbf8814b7c77c64edfd2cc4a92ff6c80d892e42`, not merged or qualified behavior. Unrecorded choices and recommendations remain **AWAITING OWNER**. See the [product contract](product-contract.md) and [event contract](event-authority-contract.md).
 
+Current review: [18 October 2026 acceptance and implementation status](../../reports/auto-director/d01-d04-review-2026-10-18.md). The A-07 descriptions below remain a historical snapshot; the review distinguishes current main from unmerged candidates.
+
 ## Decision and implementation boundary
 
 This document reconciles the recorded live-event backup-producer contract with the open A-07 stack; it does not approve remaining product choices or certify implementation. The owner alone records decisions. The register's Recorded section overrides its older open-row wording and stale proposed headers elsewhere.
