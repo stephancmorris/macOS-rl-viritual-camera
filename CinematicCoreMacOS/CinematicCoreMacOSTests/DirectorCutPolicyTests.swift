@@ -13,7 +13,7 @@ nonisolated struct DirectorCutPolicyTests {
               outputHealthy: healthy, admissionCurrent: true, qualifiedLevels: levels)
     }
     private func authority(_ level: DirectorAuthority.Level = .auto) -> DirectorAuthority {
-        var a = DirectorAuthority(reviewPolicy: .conservative)
+        var a = DirectorAuthority()
         a.apply(.enable(level), prerequisites: prerequisites([.assist, .auto, .backup]))
         return a
     }
