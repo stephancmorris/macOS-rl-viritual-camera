@@ -241,7 +241,12 @@ final class CameraManager: NSObject, ObservableObject {
     @Published private(set) var currentFrameBuffer: CVPixelBuffer?
     
     /// Capture session status
-    @Published private(set) var isRunning: Bool = false
+    @Published private(set) var isRunning: Bool = false {
+        didSet { if isRunning != oldValue { sessionLivenessDidChange?() } }
+    }
+    /// Lifecycle-only notification after state is installed, unlike Published's
+    /// willSet signal. The owning show uses it to retain the frozen standard.
+    var sessionLivenessDidChange: (() -> Void)?
     
     /// Error state
     @Published private(set) var error: CameraError?
@@ -1002,7 +1007,9 @@ final class CameraManager: NSObject, ObservableObject {
     /// Request camera permissions and start the capture session
     let commands: CommandDispatcher
     @Published private(set) var controlStatus: String?
-    @Published private(set) var isStartingSession = false
+    @Published private(set) var isStartingSession = false {
+        didSet { if isStartingSession != oldValue { sessionLivenessDidChange?() } }
+    }
     @Published private(set) var isProgramHolding = false
     @Published private(set) var zoomMoveDirection: OperatorCommand.ZoomDirection?
     private var sessionStartTask: Task<Void, Never>?

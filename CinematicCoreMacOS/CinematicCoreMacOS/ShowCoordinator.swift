@@ -27,6 +27,7 @@ final class ShowCoordinator: ObservableObject {
     /// Only liveness changes refresh show-level controls; frame publications
     /// remain local to each camera. Entries exist only for attached channels.
     private var channelLivenessSubscriptions: [ChannelID: Set<AnyCancellable>] = [:]
+    private var ownsShowStandard = false
 
     /// Sole owner of routing: which channel feeds `programOutput`, the output
     /// clock, route generations and source-loss hold / standby.
@@ -96,6 +97,7 @@ final class ShowCoordinator: ObservableObject {
         let output = programOutput
             ?? ProgramOutputManager(sinks: [VirtualCameraOutputSink(), DisplayOutputSink()] + rehearsal)
         self.programOutput = output
+        output.managesShowStandard = false
         self.router = ProgramRouter(output: output, programChannel: .a)
         let router = self.router
         workScheduler.isProgram = { router.isProgram($0) }
@@ -118,6 +120,7 @@ final class ShowCoordinator: ObservableObject {
     }
 
     private func observeChannelLiveness(_ channel: CameraManager) {
+        channel.sessionLivenessDidChange = { [weak self] in self?.updateShowStandardLifetime() }
         var subscriptions: Set<AnyCancellable> = []
         channel.$isRunning.removeDuplicates().dropFirst()
             .sink { [weak self] _ in self?.objectWillChange.send() }
@@ -126,6 +129,21 @@ final class ShowCoordinator: ObservableObject {
             .sink { [weak self] _ in self?.objectWillChange.send() }
             .store(in: &subscriptions)
         channelLivenessSubscriptions[channel.channelID] = subscriptions
+    }
+
+    private func updateShowStandardLifetime() {
+        if isAnyChannelLive {
+            guard !ownsShowStandard else { return }
+            ownsShowStandard = true
+            ShowStandard.beginSession()
+        } else if ownsShowStandard {
+            ownsShowStandard = false
+            ShowStandard.endSession()
+        }
+    }
+
+    isolated deinit {
+        if ownsShowStandard { ShowStandard.endSession() }
     }
 
     /// What the live-switch rule needs to know about the show.

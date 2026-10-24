@@ -2,7 +2,7 @@
   "date": "2026-10-24",
   "base": "12a2bc5",
   "branch": "codex/next-ticket-batches-2026-10-24",
-  "sourceFingerprint": "8e26aa507faf588f8a28c495b48affd4129acba72abf3a4521f2f8a50b20a650",
+  "sourceFingerprint": "b1c1bcbb20737674fd61f83805076cd7971e6dde1f3cceca95b6731530014796",
   "toolchain": "Xcode 26.3 (17C529)",
   "host": "Mac mini / Apple M2 Pro / macOS 27.0.1",
   "swift": {
@@ -125,6 +125,38 @@
       "skippedTests": 3,
       "totalTestCount": 1079,
       "passedExpanded": 1684
+    },
+    "show-standard-before": {
+      "result": "Failed",
+      "passedTests": 0,
+      "failedTests": 1,
+      "skippedTests": 0,
+      "totalTestCount": 1,
+      "passedExpanded": 0
+    },
+    "show-standard-after": {
+      "result": "unknown",
+      "passedTests": 0,
+      "failedTests": 0,
+      "skippedTests": 0,
+      "totalTestCount": 0,
+      "passedExpanded": 0
+    },
+    "show-standard-after-2": {
+      "result": "Passed",
+      "passedTests": 76,
+      "failedTests": 0,
+      "skippedTests": 0,
+      "totalTestCount": 76,
+      "passedExpanded": 99
+    },
+    "full-6": {
+      "result": "Passed",
+      "passedTests": 1081,
+      "failedTests": 0,
+      "skippedTests": 3,
+      "totalTestCount": 1084,
+      "passedExpanded": 1690
     }
   },
   "python": {
@@ -157,5 +189,13 @@
     "releaseLog": "/private/tmp/alfie-batches-20261024/release-admission-lifetime.log",
     "coreMLInterop": "configured in full suite",
     "qualification": "unchanged; no hardware test performed"
+  },
+  "admissionAndLifetimeSourceFingerprint": "8e26aa507faf588f8a28c495b48affd4129acba72abf3a4521f2f8a50b20a650",
+  "showFormatLifetime": {
+    "ticket": "https://trello.com/c/oFzfzIib",
+    "fullFinal": "full-6",
+    "releaseLog": "/private/tmp/alfie-batches-20261024/release-show-standard.log",
+    "guideStaticCheck": "unique IDs and local references passed",
+    "nativeWalkthrough": "not performed"
   }
 }

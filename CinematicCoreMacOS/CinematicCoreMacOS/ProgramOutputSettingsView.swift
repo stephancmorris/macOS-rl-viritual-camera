@@ -39,7 +39,7 @@ struct ProgramOutputSettingsView<SystemExtensionManager: SystemExtensionStatusPr
                     }
                 }
 
-                Text("Must match the ATEM switcher's video standard. Applies the next time capture starts.")
+                Text("Must match the ATEM switcher's video standard. Applies after the show stops and starts again.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
 
