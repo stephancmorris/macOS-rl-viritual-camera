@@ -63,6 +63,48 @@ struct OperatorPill: View {
         cameraManager.shotComposer.config.cinematicFormat == .webcam
     }
 
+    /// One control group on the pill.
+    nonisolated enum Section: Hashable, Sendable {
+        case targetChip, lockState, detect, stageShots, webcamShots, crop, manual, autoPan, zoom, returnToWide, stopSession
+    }
+
+    /// The pill's controls, left to right. Stage format (Single Cam and
+    /// Multi Cam) gets the three Stage shots, Manual and Auto Pan; Webcam gets
+    /// Wide / Tight and neither mode. In the Multiview console Stop is
+    /// show-level and lives in the header ("Stop session"); a channel's pill
+    /// never stops the show.
+    nonisolated static func sections(isWebcam: Bool, showsTargetChip: Bool, showsStopSession: Bool) -> [Section] {
+        var sections: [Section] = showsTargetChip ? [.targetChip] : []
+        sections += [.lockState, .detect]
+        sections += isWebcam ? [.webcamShots, .crop] : [.stageShots, .crop, .manual, .autoPan]
+        sections += [.zoom, .returnToWide]
+        if showsStopSession { sections.append(.stopSession) }
+        return sections
+    }
+
+    /// This pill's controls, from its channel's format and target.
+    var sections: [Section] {
+        Self.sections(isWebcam: isWebcam, showsTargetChip: controlTarget != .singleCamera,
+                      showsStopSession: showsStopSession)
+    }
+
+    @ViewBuilder
+    private func control(for section: Section) -> some View {
+        switch section {
+        case .targetChip: targetChip
+        case .lockState: lockStateSection
+        case .detect: detectButton
+        case .stageShots: shotPresetSegmentedSection
+        case .webcamShots: webcamPresetSegmentedSection
+        case .crop: cropToggleButton
+        case .manual: manualCropButton
+        case .autoPan: autoPanButton
+        case .zoom: zoomButtons
+        case .returnToWide: returnToWideButton
+        case .stopSession: stopSessionButton
+        }
+    }
+
     private var operatorFeedback: String? {
         if cameraManager.isProgramHolding { return "Holding last good program" }
         if let status = cameraManager.controlStatus { return status }
@@ -83,36 +125,14 @@ struct OperatorPill: View {
 
     var body: some View {
         HStack(spacing: 0) {
-            if controlTarget != .singleCamera {
-                targetChip
-            }
-            lockStateSection
-            divider
-            detectButton
-            divider
-            if isWebcam {
-                webcamPresetSegmentedSection
-                divider
-                cropToggleButton
-                divider
-            } else {
-                shotPresetSegmentedSection
-                divider
-                cropToggleButton
-                divider
-                manualCropButton
-                divider
-                autoPanButton
-                divider
-            }
-            zoomButtons
-            divider
-            returnToWideButton
-            // In the Multiview console Stop is show-level and lives in the
-            // header ("Stop session"); a channel's pill never stops the show.
-            if showsStopSession {
-                divider
-                stopSessionButton
+            let sections = self.sections
+            ForEach(Array(sections.enumerated()), id: \.element) { index, section in
+                // Every control is divided from the last, except the target
+                // chip, which sits directly against the lock state.
+                if index > 0, sections[index - 1] != .targetChip {
+                    divider
+                }
+                control(for: section)
             }
         }
         .padding(.horizontal, 6)

@@ -168,6 +168,9 @@ nonisolated struct DiagnosticsSessionIdentity: Codable, Equatable, Sendable {
         var deviceModelID: String?
         /// "stage" or "webcam" (CaptureProfilePolicy profile).
         var captureProfile: String?
+        /// "single_cam", "multi_cam" or "webcam" (OperatorMode). Absent in
+        /// manifests written before the three modes.
+        var operatorMode: String?
         var requestedWidth: Int?
         var requestedHeight: Int?
         /// Capture rate Alfie configured on the device.

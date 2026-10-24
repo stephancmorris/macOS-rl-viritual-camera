@@ -93,6 +93,13 @@ struct ProgramPreviewPaneTests {
         #expect(PaneModel.program(from: snapshot(.programStandby)).status == "Standby · source missing")
     }
 
+    /// Multi Cam with only A: standby names no second camera.
+    @Test func oneInputStandbyNamesNoSecondCamera() {
+        var oneInput = snapshot(.oneInput)
+        oneInput.programOutput = .standby
+        #expect(PaneOverlayState.program(for: oneInput).detail == "Cam A disconnected. Alfie is sending black at 1080p50.")
+    }
+
     @Test func programStatusCopyNeverSaysOnAir() {
         let outputs: [ConsoleSnapshot.ProgramOutput] = [.routed, .holding(standbyIn: 2), .standby, .reconnecting]
         let labels = outputs.map(PaneOverlayState.programStatus(for:))

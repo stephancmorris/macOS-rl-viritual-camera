@@ -302,6 +302,130 @@ struct ShowSetupTests {
         #expect(!show.editLive)
     }
 
+    private func pairedLiveSetup(
+        startChannelB: @escaping (CameraManager) -> Void = { _ in
+            Issue.record("this retired pair start must not request B capture")
+        },
+        startChannelA: @escaping @MainActor (ShowCoordinator) async -> Void)
+        -> (ShowCoordinator, LiveShowSetupModel) {
+        let defaults = UserDefaults(suiteName: "alfie-setup-start-\(UUID().uuidString)")!
+        defaults.set(OperatorMode.multiCam.rawValue, forKey: OperatorModeStore.key)
+        defaults.set(wide.uniqueID, forKey: LiveShowSetupModel.deviceAKey)
+        defaults.set(side.uniqueID, forKey: LiveShowSetupModel.deviceBKey)
+        let show = ShowCoordinator(
+            programOutput: ProgramOutputManager(sinks: []),
+            admissionRecords: AdmissionRecordStore(defaults: defaults),
+            operatorModes: OperatorModeStore(defaults: defaults, multiviewEnabled: true))
+        let cameras = [wide, side].map {
+            CameraManager.CameraDevice(id: $0.uniqueID, name: $0.name, modelID: $0.modelID,
+                                       uniqueID: $0.uniqueID, maxResolution: "3840×2160",
+                                       supports4K: true, formatCount: 1)
+        }
+        let live = LiveShowSetupModel(show: show, defaults: defaults, machine: machine,
+                                      cameras: { cameras }, startChannelB: startChannelB) { await startChannelA(show) }
+        return (show, live)
+    }
+
+    @Test(arguments: [
+        (OperatorMode.singleCam, true), (.webcam, true),
+        (.singleCam, false), (.webcam, false)
+    ])
+    func leavingMultiCamDuringPairStartNeverAddsAHiddenCamera(mode: OperatorMode, awaitingStart: Bool) async {
+        let entered = SetupStartLatch()
+        let release = SetupStartLatch()
+        let (show, live) = pairedLiveSetup { show in
+            show.channelA.setStartingForTesting(true)
+            entered.signal()
+            if awaitingStart {
+                await release.wait()
+                show.channelA.setRunningForTesting(true)
+                show.channelA.setStartingForTesting(false)
+            }
+        }
+        #expect(live.setup.canStartPair)
+        live.startPair()
+        await entered.wait()
+        let routeGeneration = show.router.routeGeneration
+
+        // No B exists yet, so the A-only live switch is allowed. Test both
+        // suspension points: the Start/preflight closure and A's capture wait.
+        #expect(show.operatorModes.request(mode) == nil)
+        if !awaitingStart {
+            show.channelA.setRunningForTesting(true)
+            show.channelA.setStartingForTesting(false)
+        }
+        release.signal()
+        await live.waitForStartForTesting()
+
+        #expect(show.operatorModes.mode == mode)
+        #expect(show.channelA.isRunning)
+        #expect(show.channel(.b) == nil)
+        #expect(show.programChannel == .a)
+        #expect(show.router.routeGeneration == routeGeneration)
+    }
+
+    @Test func returningToMultiCamDoesNotReviveTheRetiredPairStart() async {
+        let entered = SetupStartLatch()
+        let release = SetupStartLatch()
+        let (show, live) = pairedLiveSetup { show in
+            show.channelA.setStartingForTesting(true)
+            entered.signal()
+            await release.wait()
+            show.channelA.setRunningForTesting(true)
+            show.channelA.setStartingForTesting(false)
+        }
+        live.startPair()
+        await entered.wait()
+        #expect(show.operatorModes.request(.singleCam) == nil)
+        #expect(show.operatorModes.request(.multiCam) == nil)
+        release.signal()
+        await live.waitForStartForTesting()
+
+        #expect(show.channelA.isRunning)
+        #expect(show.operatorModes.mode == .multiCam)
+        #expect(show.channel(.b) == nil)
+    }
+
+    @Test func stayingInMultiCamStartsTheSelectedCameraBOnceAfterA() async {
+        let entered = SetupStartLatch()
+        let release = SetupStartLatch()
+        var requestedB: [CameraManager] = []
+        let (show, live) = pairedLiveSetup(startChannelB: { requestedB.append($0) }) { show in
+            show.channelA.setStartingForTesting(true)
+            entered.signal()
+            await release.wait()
+            show.channelA.setRunningForTesting(true)
+            show.channelA.setStartingForTesting(false)
+        }
+        live.startPair()
+        await entered.wait()
+        #expect(show.channel(.b) == nil)
+        #expect(requestedB.isEmpty)
+        release.signal()
+        await live.waitForStartForTesting()
+
+        #expect(show.operatorModes.mode == .multiCam)
+        #expect(show.channelA.isRunning)
+        #expect(show.programChannel == .a)
+        #expect(show.previewChannel == .b)
+        #expect(show.channel(.b)?.selectedCamera?.uniqueID == side.uniqueID)
+        #expect(requestedB.count == 1)
+        #expect(requestedB.first === show.channel(.b))
+    }
+
+    @Test func aRetiredSetupScreenCannotStartCapture() async {
+        let (show, live) = pairedLiveSetup { _ in
+            Issue.record("a retired setup screen must not start capture")
+        }
+        #expect(show.operatorModes.request(.singleCam) == nil)
+        live.startAOnly()
+        live.startPair()
+        await live.waitForStartForTesting()
+        #expect(!show.channelA.isRunning)
+        #expect(!show.channelA.isStartingSession)
+        #expect(show.channel(.b) == nil)
+    }
+
     // MARK: Renders
 
     @Test(arguments: [
@@ -331,6 +455,25 @@ struct ShowSetupTests {
             let data = try #require(rep.representation(using: NSBitmapImageRep.FileType.png, properties: [:]))
             try data.write(to: dir.appendingPathComponent(file))
         }
+    }
+}
+
+/// Main-actor rendezvous: race tests release each continuation explicitly,
+/// without hardware, sleeps or a timing-dependent number of task yields.
+@MainActor
+private final class SetupStartLatch {
+    private var signalled = false
+    private var continuation: CheckedContinuation<Void, Never>?
+
+    func signal() {
+        signalled = true
+        continuation?.resume()
+        continuation = nil
+    }
+
+    func wait() async {
+        if signalled { return }
+        await withCheckedContinuation { continuation = $0 }
     }
 }
 #endif

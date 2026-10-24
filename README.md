@@ -1,12 +1,12 @@
 # Alfie — operator-controlled live framing
 
-Alfie frames camera pictures into one Program feed. The operator chooses the subject and composition. Current Stage code provides Camera A/B Program/Preview, manual Take and deliberate Edit Live; Webcam uses the single-camera workflow. Automatic Director cuts, active-speaker listening, hardware motion and microphone control are not integrated.
+Alfie frames camera pictures into one Program feed. The operator chooses the subject and composition. The operator picks one of three modes: Single Cam (one stage camera with every Stage shot), Multi Cam (Camera A/B Program/Preview, manual Take and deliberate Edit Live) and Webcam (close-range single camera). Automatic Director cuts, active-speaker listening, hardware motion and microphone control are not integrated.
 
 See the [current candidate operator guide](docs/user-guide/README.md). It is source-checked against `7691e6e`; actual installation, 1280-point walkthrough, screenshots and real-camera/downstream-output qualification remain pending. This README describes implemented code, not a certified rig or released build.
 
 ## Inputs and framing
 
-Camera/capture devices supply the delivered resolution and rate. Stage framing benefits from a clean wide 4K source; Webcam supports a closer source. Check actual delivery rather than advertised camera specifications. Capture follows the session show standard: default 1080p50, with 59.94/60 options. The active standard is frozen until Stop/restart.
+Camera/capture devices supply the delivered resolution and rate. Single Cam and Multi Cam framing benefit from a clean wide 4K source; Webcam supports a closer source. Check actual delivery rather than advertised camera specifications. Capture follows the session show standard: default 1080p50, with 59.94/60 options. The active standard is frozen until Stop/restart.
 
 Vision body/pose/face observations support operator-selected subject tracking. ShotComposer provides rule-based framing and recovery; the RL agent remains developer scaffolding. Core Image renders the crop to Program. Detection confidence alone is not qualified identity readiness.
 
