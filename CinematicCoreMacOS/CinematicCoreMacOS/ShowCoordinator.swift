@@ -197,10 +197,16 @@ final class ShowCoordinator: ObservableObject {
     var stopAttemptObserver: ((StopAction) -> Void)?
     var stopResultObserver: ((StopAction) -> Void)?
 
+    /// A setup Start may be waiting for installation or capture. Current
+    /// liveness cannot identify that intent after Stop followed by a new Start.
+    /// Change this token even when no camera has started yet.
+    private(set) var stopToken = UUID()
+
     /// Show-level Stop: retires every channel's generation and epoch. The
     /// result boundary observes this synchronous state change, not completion
     /// of a capture executor's asynchronous stop.
     func stopShow(origin: StopOrigin = .lifecycle) {
+        stopToken = UUID()
         let action = StopAction(id: UUID(), origin: origin)
         stopAttemptObserver?(action)
         for id in ChannelID.allCases { channels[id]?.stopCapture() }
