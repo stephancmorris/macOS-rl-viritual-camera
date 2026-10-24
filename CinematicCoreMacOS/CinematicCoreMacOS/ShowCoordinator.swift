@@ -47,6 +47,20 @@ final class ShowCoordinator: ObservableObject {
     /// format follows it, including channels added later.
     let operatorModes: OperatorModeStore
 
+    /// Explicit test choice for this app launch. It never changes the output
+    /// standard or grants qualification; each camera rechecks actual device
+    /// eligibility when configuring capture.
+    @Published private(set) var isBuiltInCameraTestEnabled = false
+
+    @discardableResult
+    func setBuiltInCameraTestEnabled(_ enabled: Bool) -> Bool {
+        guard !isAnyChannelLive else { return false }
+        guard enabled != isBuiltInCameraTestEnabled else { return true }
+        for channel in channels.values { channel.builtInCameraTestEnabled = enabled }
+        isBuiltInCameraTestEnabled = enabled
+        return true
+    }
+
     // MARK: Control target (CHANNEL-CMD)
 
     /// The channel every console control acts on: Preview by default, Program
@@ -151,6 +165,7 @@ final class ShowCoordinator: ObservableObject {
         channel.deviceRegistry = deviceRegistry
         channel.workScheduler = workScheduler
         operatorModes.apply(to: channel)
+        channel.builtInCameraTestEnabled = isBuiltInCameraTestEnabled
         channels[id] = channel
         observeChannelLiveness(channel)
         retarget()

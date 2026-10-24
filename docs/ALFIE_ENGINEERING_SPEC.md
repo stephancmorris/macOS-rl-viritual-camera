@@ -16,7 +16,7 @@ Related:
 
 ## 1. What Alfie is
 
-Alfie (Autonomous Live Framing Intelligence Engine) is a **macOS operator-controlled live-framing application**. Stage supports independent Camera A/B framing, Preview preparation, explicit Take and deliberate Edit Live into one 1080p Program feed. Webcam retains the traditional single-camera view. The separate Single Cam / Multi Cam / Webcam proposal is not implemented in this candidate.
+Alfie (Autonomous Live Framing Intelligence Engine) is a **macOS operator-controlled live-framing application**. The operator chooses Single Cam, Multi Cam or Webcam on either stopped screen or in Settings → Composer. Single Cam provides the traditional source-and-crop view with every Stage shot; Multi Cam provides independent Camera A/B framing, Preview preparation, explicit Take and deliberate Edit Live into one 1080p Program feed. Webcam uses the traditional view with close-range framing. The mode also selects the capture profile; see [Operator modes](ALFIE_MULTICAMERA_SPEC.md#operator-modes-single-cam-multi-cam-webcam) for migration and live-switch rules.
 
 Vision supplies observations; ShotComposer and CropEngine provide deterministic framing and motion. The legacy RL `CinematicAgent` remains developer scaffolding. The optional local Director scorer is a separate study component with rule fallback, not a bundled winning model. No microphone, active-speaker recognizer, physical-motion transport, NDI or direct Blackmagic SDI integration is installed by this candidate.
 

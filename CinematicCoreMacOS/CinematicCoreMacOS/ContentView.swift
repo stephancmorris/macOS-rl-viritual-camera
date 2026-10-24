@@ -33,7 +33,9 @@ struct ContentView: View {
         settingsWindowController: SettingsWindowController,
         show: ShowCoordinator? = nil
     ) {
-        self.cameraManager = cameraManager
+        // A real show's channel is authoritative. Keep the standalone camera
+        // argument for previews, never as a second source of app ownership.
+        self.cameraManager = show?.channelA ?? cameraManager
         self.systemExtensionManager = systemExtensionManager
         self.settingsWindowController = settingsWindowController
         self.show = show
@@ -49,11 +51,21 @@ struct ContentView: View {
     /// kill switch is applied by the store: with it off, Multi Cam is never
     /// the mode.
     private var screen: ConsolePresentation.Screen {
-        ConsolePresentation.screen(for: operatorModes.mode, isCaptureRunning: cameraManager.isRunning,
-                                   hasShow: show != nil)
+        ConsolePresentation.screen(for: operatorModes.mode, channelA: cameraManager, show: show)
     }
 
     var body: some View {
+        // The optional show needs its own observed boundary: watching A alone
+        // misses B starting or remaining live after A stops. The show forwards
+        // lifecycle changes only, so this adds no per-frame subscription.
+        if let show {
+            ShowLifecycleContent(show: show) { content }
+        } else {
+            content
+        }
+    }
+
+    private var content: some View {
         ZStack {
             // Layer 0: backdrop
             LiquidGlassBackdrop()
@@ -224,13 +236,24 @@ struct ContentView: View {
         let command = OperatorCommand(target: .session, epoch: cameraManager.commands.epoch,
                                       expiry: ProcessInfo.processInfo.systemUptime + 120,
                                       action: .startSession)
-        if cameraManager.shouldPreflightVirtualCameraInstallation, !systemExtensionManager.isInstallReady {
+        // Only the route that needs the virtual camera should invoke its
+        // installer. Direct output and the explicit rehearsal destination can
+        // start without an installed extension, including Xcode-run builds.
+        let directOutputAvailable = ProgramDisplaySelection.resolvedTargetDisplayID()
+            .flatMap(ProgramDisplaySelection.screen(for:)) != nil
+        let needsVirtualCamera = Self.startNeedsVirtualCamera(
+            preferredRoute: cameraManager.programOutput.preferredRoute,
+            directOutputAvailable: directOutputAvailable)
+        if cameraManager.shouldPreflightVirtualCameraInstallation, needsVirtualCamera,
+           !systemExtensionManager.isInstallReady {
             let extensionReady = await systemExtensionManager.ensureInstalledForSessionStart()
             if !extensionReady {
                 showSystemExtensionStatus = true
                 // Without the virtual camera, Program would have nowhere to go
                 // unless Direct output is the chosen, connected destination
                 // (CR-036).
+                // Installation UI suspended this request; use the route and
+                // connected displays that are current after it returns.
                 let directOutputAvailable = ProgramDisplaySelection.resolvedTargetDisplayID()
                     .flatMap(ProgramDisplaySelection.screen(for:)) != nil
                 if Self.startNeedsVirtualCamera(preferredRoute: cameraManager.programOutput.preferredRoute,
@@ -468,4 +491,13 @@ struct GlassPanelModifier: ViewModifier {
         settingsWindowController: SettingsWindowController()
     )
     .frame(width: 1200, height: 800)
+}
+
+/// Observes the show only when a real show exists. The wrapped content still
+/// reads authoritative state; this boundary stores no copy of channel liveness.
+struct ShowLifecycleContent<Content: View>: View {
+    @ObservedObject var show: ShowCoordinator
+    @ViewBuilder var content: () -> Content
+
+    var body: some View { content() }
 }

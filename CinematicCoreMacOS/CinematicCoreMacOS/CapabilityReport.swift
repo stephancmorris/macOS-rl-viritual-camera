@@ -195,7 +195,7 @@ nonisolated struct CapabilityReport: Equatable, Sendable {
 
         if context.belowShowRate {
             reasons.append(.init(code: "source.belowShowRate", kind: .note,
-                message: String(format: "Webcam runs at %@ fps, below the %@ show standard; the output repeats frames. Judged against %@ fps.",
+                message: String(format: "Source runs at %@ fps, below the %@ show standard; the output repeats frames. Judged against %@ fps.",
                                 Self.rate(captureFPS), context.showStandard, Self.rate(captureFPS))))
         }
 
