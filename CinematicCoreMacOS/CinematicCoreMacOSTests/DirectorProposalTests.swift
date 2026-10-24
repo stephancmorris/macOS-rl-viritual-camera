@@ -3,7 +3,7 @@ import Testing
 
 @MainActor struct DirectorProposalTests {
     @Test func staleDimensions() throws {
-        var authority = DirectorAuthority(reviewPolicy: .conservative)
+        var authority = DirectorAuthority()
         authority.apply(.enable(.assist), prerequisites: .init(nominationsCurrent: true, previewAvailable: true, sourcesHealthy: true, outputHealthy: true, admissionCurrent: true, qualifiedLevels: [.assist]))
         let revisions = ChannelRevisions(sourceGeneration: 1, controlEpoch: 2, shotRevision: 3)
         let shot = DirectorShot(preset: .stage(.waistUp))
@@ -34,7 +34,7 @@ import Testing
     }
 
     @Test func malformedProposalTimeAndExpiryFailClosed() throws {
-        var authority = DirectorAuthority(reviewPolicy: .conservative)
+        var authority = DirectorAuthority()
         authority.apply(.enable(.assist), prerequisites: .init(nominationsCurrent: true, previewAvailable: true, sourcesHealthy: true, outputHealthy: true, admissionCurrent: true, qualifiedLevels: [.assist]))
         let revisions = ChannelRevisions(sourceGeneration: 1, controlEpoch: 1, shotRevision: 1)
         let live = DirectorLiveState(authority: authority, program: .a, preview: .b,
@@ -86,7 +86,7 @@ extension DirectorProposalTests {
               minimumCutSettledTime: 0.5, maximumCutMotion: 0.05)
     }
     private func world() -> DirectorLiveState {
-        var authority = DirectorAuthority(reviewPolicy: .conservative)
+        var authority = DirectorAuthority()
         authority.apply(.enable(.assist), prerequisites: prerequisites)
         return .init(authority: authority, program: .a, preview: .b,
             revisions: .init(sourceGeneration: 1, controlEpoch: 2, shotRevision: 3),
