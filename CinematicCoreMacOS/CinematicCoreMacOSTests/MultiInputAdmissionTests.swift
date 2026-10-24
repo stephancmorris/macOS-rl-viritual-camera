@@ -234,6 +234,16 @@ struct AdmissionRecordTests {
         #expect(store.status(for: fingerprint()) == .certified)
     }
 
+    @Test func incompleteEvidenceCannotEraseAStoredConcreteFailure() {
+        let store = store()
+        let failed = evaluate(thermal: .critical).status
+        store.record(failed, for: fingerprint())
+        store.record(.unknown, for: fingerprint())
+        #expect(store.status(for: fingerprint()) == failed)
+        store.record(.provisional, for: fingerprint())
+        #expect(store.status(for: fingerprint()) == .provisional)
+    }
+
     @Test func recordsFromAnotherPolicyVersionAreIgnored() throws {
         let defaults = UserDefaults(suiteName: "alfie-admission-\(UUID().uuidString)")!
         let old = [fingerprint().key: AdmissionRecordStore.Record(status: .provisional, measuredAt: Date(),
@@ -255,6 +265,74 @@ struct AdmissionRecordTests {
         // Changing B's mode changes the fingerprint: back to unknown.
         show.channel(.b)!.setOperationMode(.autoPan)
         #expect(show.admissionDecision == .trialOnly)
+    }
+
+    @Test func aCurrentPairFailureOverridesHistoricalCertificationForTake() throws {
+        let show = ShowCoordinator(programOutput: ProgramOutputManager(sinks: []), admissionRecords: store())
+        show.channelA.setRunningForTesting(true)
+        show.addChannel(.b).setRunningForTesting(true)
+        let binding = try #require(show.admissionCheckBinding(preview: .b))
+        show.admissionRecords.markCertified(binding.fingerprint)
+        #expect(show.admissionDecision == .allowed(certified: true))
+        let failed = evaluate(thermal: .critical)
+        guard case .unsupported(let reasons) = failed.status else {
+            Issue.record("Expected the actual pair evaluator to refuse critical heat"); return
+        }
+        #expect(show.recordAdmission(failed, for: binding))
+        #expect(show.admissionDecision == .refused(reasons))
+        #expect(show.take() == .rejected(.notEligible(.unsupported)))
+        // A current failure is not permission to erase historical qualification.
+        #expect(show.admissionRecords.status(for: binding.fingerprint) == .certified)
+    }
+
+    @Test(arguments: [false, true])
+    func missingRecheckEvidenceCannotClearAFailureButACompletePassCan(certified: Bool) throws {
+        let show = ShowCoordinator(programOutput: ProgramOutputManager(sinks: []), admissionRecords: store())
+        show.channelA.setRunningForTesting(true)
+        show.addChannel(.b).setRunningForTesting(true)
+        let binding = try #require(show.admissionCheckBinding(preview: .b))
+        if certified { show.admissionRecords.markCertified(binding.fingerprint) }
+        let failed = evaluate(thermal: .critical)
+        #expect(show.recordAdmission(failed, for: binding))
+        let refusal = show.admissionDecision
+        guard case .refused = refusal else { Issue.record("Expected a live refusal"); return }
+        let incomplete = evaluate(windows: 0)
+        #expect(incomplete.status == .unknown)
+        #expect(show.recordAdmission(incomplete, for: binding))
+        #expect(show.admissionDecision == refusal)
+        #expect(show.recordAdmission(evaluate(), for: binding))
+        #expect(show.admissionDecision == .allowed(certified: certified))
+    }
+
+    @Test func sourceHealthLossCannotHideTheCurrentPairRefusal() throws {
+        let show = ShowCoordinator(programOutput: ProgramOutputManager(sinks: []), admissionRecords: store())
+        show.channelA.setRunningForTesting(true)
+        show.addChannel(.b).setRunningForTesting(true)
+        let binding = try #require(show.admissionCheckBinding(preview: .b))
+        show.admissionRecords.markCertified(binding.fingerprint)
+        #expect(show.recordAdmission(evaluate(thermal: .critical), for: binding))
+        let refusal = show.admissionDecision
+        show.channelA.setSourceMissingForTesting(true)
+        #expect(show.admissionCheckBinding(preview: .b) == nil)
+        #expect(show.admissionDecision == refusal)
+        #expect(show.take() == .rejected(.notEligible(.unsupported)))
+        #expect(show.programChannel == .a)
+    }
+
+    @Test func aReplacementSourceDoesNotInheritThePreviousSessionsRefusal() throws {
+        let show = ShowCoordinator(programOutput: ProgramOutputManager(sinks: []), admissionRecords: store())
+        show.channelA.setRunningForTesting(true)
+        show.addChannel(.b).setRunningForTesting(true)
+        let binding = try #require(show.admissionCheckBinding(preview: .b))
+        show.admissionRecords.markCertified(binding.fingerprint)
+        #expect(show.recordAdmission(evaluate(thermal: .critical), for: binding))
+        show.removeChannel(.b)
+        #expect(show.admissionDecision == .allowed(certified: false))
+        show.addChannel(.b).setRunningForTesting(true)
+        #expect(show.admissionCheckBinding(preview: .b) != binding)
+        #expect(show.admissionDecision == .allowed(certified: true))
+        #expect(!show.recordAdmission(evaluate(thermal: .critical), for: binding))
+        #expect(show.admissionDecision == .allowed(certified: true))
     }
 
     @Test func liveCheckDiscardsWarmUpAndMeasuresPreviewFrames() {

@@ -132,7 +132,7 @@ nonisolated struct PairAdmissionResult: Equatable, Sendable {
 /// identity also rejects removal/re-addition with a reused generation number.
 struct PairAdmissionBinding: Equatable {
     struct Source: Equatable {
-        let instance: ObjectIdentifier
+        let instance: UUID
         let generation: UInt64
         let deviceID: String?
     }
@@ -273,6 +273,9 @@ final class AdmissionRecordStore {
         var all = load()
         // A certified record is only replaced by MULTI-QA, never by a short sample.
         if case .certified = all[fingerprint.key]?.status, status != .certified { return }
+        // An incomplete recheck cannot erase a concrete failure for this
+        // exact configuration. A complete passing sample may still replace it.
+        if case .unsupported = all[fingerprint.key]?.status, status == .unknown { return }
         all[fingerprint.key] = Record(status: status, measuredAt: date, policyVersion: AdmissionPolicy.version)
         save(all)
     }

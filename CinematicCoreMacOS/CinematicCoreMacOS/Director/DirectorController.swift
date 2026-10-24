@@ -438,7 +438,7 @@ final class DirectorController: ObservableObject, DirectorConsoleControlling {
     private struct CaptureWorld: Equatable {
         struct Input: Equatable {
             let id: ChannelID
-            let object: ObjectIdentifier
+            let instance: UUID
             let source: DiagnosticsSessionIdentity.Source?
             let revisions: ChannelRevisions
             let running: Bool
@@ -454,7 +454,7 @@ final class DirectorController: ObservableObject, DirectorConsoleControlling {
         return .init(program: show.programChannel, preview: show.previewChannel,
             route: show.router.routeGeneration, inputs: ChannelID.allCases.compactMap { id in
                 guard let channel = show.channel(id) else { return nil }
-                return .init(id: id, object: ObjectIdentifier(channel), source: channel.sourceIdentity,
+                return .init(id: id, instance: channel.lifetimeID, source: channel.sourceIdentity,
                     revisions: channel.revisions, running: channel.isRunning, missing: channel.sourceMissing)
             })
     }

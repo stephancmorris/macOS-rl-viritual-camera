@@ -301,6 +301,9 @@ final class CameraManager: NSObject, ObservableObject {
     /// port is `programOutput` itself; any other channel's port is unrouted and
     /// cannot touch the output (see CameraChannel.swift).
     let channelID: ChannelID
+    /// In-memory owner identity, distinct from the reusable channel address
+    /// and an object's allocator address. Never persisted or exported.
+    let lifetimeID = UUID()
     /// The operator mode this channel runs in. Set with the composer format by
     /// `OperatorModeStore.apply(to:)`; read for diagnostics.
     var operatorMode: OperatorMode = .singleCam

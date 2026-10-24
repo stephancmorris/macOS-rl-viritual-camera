@@ -80,3 +80,7 @@ Explicit Show Stop captures bounded in-memory source identities only to correlat
 ### Recording controls — 24 October 2026 repair
 
 The recorder's shutdown gate was immediate once its async Stop method entered, but the recording toggle and camera Stop scheduled that call in a later Task. A regression through the actual toggle binding showed a synthetic observation admitted and persisted after the setter returned. Both controls now request shutdown synchronously in their MainActor action; camera Stop closes admission before publishing capture teardown. Already admitted writes and the terminal buffer still drain through the same shared task. Repeated/reentrant requests cannot reopen admission or start a second shutdown. Consent, recorded fields, retention and network behavior are unchanged. See [the implementation and validation record](../../reports/next-ticket-batches-2026-10-24/README.md); runtime permission and distribution acceptance remain open.
+
+### Runtime source ownership — 24 October 2026 repair
+
+Camera owners now have a random ID allocated once per instance. Local admission and Director capture/Stop provenance compare this token rather than an allocator address, which was observed being reused after a camera owner was released. The token stays in these in-memory bindings: it is not a new shadow-record field, saved setting, media identifier or export alias. Export regressions explicitly check that actual owner-token values are absent. This does not change consent, data collection, retention or any qualification decision.
