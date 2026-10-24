@@ -56,7 +56,7 @@ nonisolated struct DirectorShadowRecordTests {
         var e = try #require(o["event"] as? [String: Any])
         var s = try #require(p["resolvedStyle"] as? [String: Any])
         switch fault {
-        case "schema": o["schemaVersion"] = 2
+        case "schema": o["schemaVersion"] = 3
         case "envelopeKey": o["frame"] = "pixels"
         case "contextKey": c["name"] = "person"
         case "styleKey": s["audio"] = true

@@ -1,0 +1,65 @@
+{
+  "labelSchemaVersion": 1,
+  "labels": [
+    {
+      "recordID": "848AAA5F-519D-5A76-B56B-5CEBB0340C93",
+      "judgementIndex": 0,
+      "chosenRank": 1
+    },
+    {
+      "recordID": "7821C31D-7B0E-515B-821A-C6E6F37B5712",
+      "judgementIndex": 0,
+      "chosenRank": 1
+    },
+    {
+      "recordID": "D7053E94-2D21-5095-8E62-0B770F8D7A35",
+      "judgementIndex": 0,
+      "chosenRank": 1
+    },
+    {
+      "recordID": "3668A8A6-CBD5-5606-815B-950885C3F6F7",
+      "judgementIndex": 0,
+      "chosenRank": 1
+    },
+    {
+      "recordID": "7F86786A-F4D8-5A4D-A356-820506C45853",
+      "judgementIndex": 0,
+      "chosenRank": 1
+    },
+    {
+      "recordID": "B3201166-DAF9-5D73-BFCD-C0B4ABC35697",
+      "judgementIndex": 0,
+      "chosenRank": 1
+    },
+    {
+      "recordID": "EB7132B7-1616-5297-8243-762EDA821D1F",
+      "judgementIndex": 0,
+      "chosenRank": 1
+    },
+    {
+      "recordID": "D652786B-A8B4-5135-80B6-B8B67EF1EFA5",
+      "judgementIndex": 0,
+      "chosenRank": 1
+    },
+    {
+      "recordID": "6A1B223A-B441-5A46-AE2F-E672E1B8C54C",
+      "judgementIndex": 0,
+      "chosenRank": 1
+    },
+    {
+      "recordID": "C7472F54-15C3-590A-B163-A4BC1F47E867",
+      "judgementIndex": 0,
+      "chosenRank": 1
+    },
+    {
+      "recordID": "62424F2B-EA6D-5633-9A42-7ABF627C2222",
+      "judgementIndex": 0,
+      "chosenRank": 1
+    },
+    {
+      "recordID": "5A5ACB20-DF24-557E-9694-4816193D4D41",
+      "judgementIndex": 0,
+      "chosenRank": 1
+    }
+  ]
+}

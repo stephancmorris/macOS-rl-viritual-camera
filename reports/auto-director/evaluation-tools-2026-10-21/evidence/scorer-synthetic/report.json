@@ -1,0 +1,169 @@
+{
+  "calibrationClaim": "none",
+  "captureCompleteness": "observedOnlyNotProvenComplete",
+  "evidenceClass": "synthetic",
+  "interpretation": "descriptiveOfflineChoiceAgreement",
+  "metrics": {
+    "test": {
+      "candidateBrier": 0.25003393981455785,
+      "candidateLogLoss": 0.6932150648706217,
+      "candidates": 8,
+      "comparisonGroups": 4,
+      "modelAgreement": 0.5,
+      "modelExactChoices": 2,
+      "reliability": [
+        {
+          "count": 0,
+          "lower": 0.0,
+          "meanProbability": null,
+          "selectedFraction": null,
+          "upper": 0.2
+        },
+        {
+          "count": 0,
+          "lower": 0.2,
+          "meanProbability": null,
+          "selectedFraction": null,
+          "upper": 0.4
+        },
+        {
+          "count": 8,
+          "lower": 0.4,
+          "meanProbability": 0.4941858828582634,
+          "selectedFraction": 0.5,
+          "upper": 0.6
+        },
+        {
+          "count": 0,
+          "lower": 0.6,
+          "meanProbability": null,
+          "selectedFraction": null,
+          "upper": 0.8
+        },
+        {
+          "count": 0,
+          "lower": 0.8,
+          "meanProbability": null,
+          "selectedFraction": null,
+          "upper": 1.0
+        }
+      ],
+      "rulesAgreement": 0.5,
+      "rulesExactChoices": 2,
+      "rulesProbability": null
+    },
+    "train": {
+      "candidateBrier": 0.25003393981455785,
+      "candidateLogLoss": 0.6932150648706217,
+      "candidates": 8,
+      "comparisonGroups": 4,
+      "modelAgreement": 0.5,
+      "modelExactChoices": 2,
+      "reliability": [
+        {
+          "count": 0,
+          "lower": 0.0,
+          "meanProbability": null,
+          "selectedFraction": null,
+          "upper": 0.2
+        },
+        {
+          "count": 0,
+          "lower": 0.2,
+          "meanProbability": null,
+          "selectedFraction": null,
+          "upper": 0.4
+        },
+        {
+          "count": 8,
+          "lower": 0.4,
+          "meanProbability": 0.4941858828582634,
+          "selectedFraction": 0.5,
+          "upper": 0.6
+        },
+        {
+          "count": 0,
+          "lower": 0.6,
+          "meanProbability": null,
+          "selectedFraction": null,
+          "upper": 0.8
+        },
+        {
+          "count": 0,
+          "lower": 0.8,
+          "meanProbability": null,
+          "selectedFraction": null,
+          "upper": 1.0
+        }
+      ],
+      "rulesAgreement": 0.5,
+      "rulesExactChoices": 2,
+      "rulesProbability": null
+    },
+    "validation": {
+      "candidateBrier": 0.25003393981455785,
+      "candidateLogLoss": 0.6932150648706217,
+      "candidates": 8,
+      "comparisonGroups": 4,
+      "modelAgreement": 0.5,
+      "modelExactChoices": 2,
+      "reliability": [
+        {
+          "count": 0,
+          "lower": 0.0,
+          "meanProbability": null,
+          "selectedFraction": null,
+          "upper": 0.2
+        },
+        {
+          "count": 0,
+          "lower": 0.2,
+          "meanProbability": null,
+          "selectedFraction": null,
+          "upper": 0.4
+        },
+        {
+          "count": 8,
+          "lower": 0.4,
+          "meanProbability": 0.4941858828582634,
+          "selectedFraction": 0.5,
+          "upper": 0.6
+        },
+        {
+          "count": 0,
+          "lower": 0.6,
+          "meanProbability": null,
+          "selectedFraction": null,
+          "upper": 0.8
+        },
+        {
+          "count": 0,
+          "lower": 0.8,
+          "meanProbability": null,
+          "selectedFraction": null,
+          "upper": 1.0
+        }
+      ],
+      "rulesAgreement": 0.5,
+      "rulesExactChoices": 2,
+      "rulesProbability": null
+    }
+  },
+  "modelVersion": "synthetic-30b8503233ec9881",
+  "promotionDecision": "notPerformed",
+  "provenance": {
+    "captureCompleteness": "noObservedLoss",
+    "exportID": "756EF852-744E-4965-BB4C-8CD328154C78",
+    "exportedAtUTC": "2026-10-21T00:00:00.000Z",
+    "labelSource": "explicitSuppliedRanks",
+    "labelsSHA256": "ab4d9035c7c8fded746c2aa42abeedf21993805ee2617f68e08615f73f81cfe7",
+    "manifestSHA256": "2c43bb1e2bdf7983d3e28465e9e49d040e9ba54226b888db71469cac912edaf9",
+    "recordSchemaVersions": [
+      2
+    ],
+    "recordsSHA256": "50ce366cf7d17b38aee42a2c1333606ed29717ae2c822ec06393d52a988c44d8",
+    "sourceRecordCount": 12,
+    "splitsSHA256": "e2a412b6b34d0aca8fab76e8e6ba5323f8d02b0fb3c0a03dfbfa550acf1efcb6"
+  },
+  "reportSchemaVersion": 1
+}

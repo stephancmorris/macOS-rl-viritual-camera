@@ -282,9 +282,9 @@ private final class DiagnosticsFileWriter: @unchecked Sendable {
 
     /// Delete diagnostics files older than `days`. Runs on the write queue so it
     /// never touches the MainActor.
-    func prune(directory: URL, olderThan days: Int) {
+    func prune(directory: URL, olderThan days: Int, clock: @escaping @Sendable () -> Date) {
         queue.async { @Sendable in
-            let cutoff = Date().addingTimeInterval(-Double(days) * 24 * 60 * 60)
+            let cutoff = clock().addingTimeInterval(-Double(days) * 24 * 60 * 60)
             let fileManager = FileManager.default
             guard let urls = try? fileManager.contentsOfDirectory(
                 at: directory,
@@ -297,6 +297,13 @@ private final class DiagnosticsFileWriter: @unchecked Sendable {
                     try? fileManager.removeItem(at: url)
                 }
             }
+        }
+    }
+
+    /// Wait for already submitted operations without blocking the caller.
+    func drain() async {
+        await withCheckedContinuation { continuation in
+            queue.async { @Sendable in continuation.resume() }
         }
     }
 }
@@ -442,6 +449,22 @@ final class DiagnosticsLog {
     /// growth investigation. Kept separate from the throughput CSV so neither
     /// chart has to carry the other's columns.
     private let memoryWriter = DiagnosticsFileWriter()
+    private let directoryOverride: URL?
+    private let cleanupClock: @Sendable () -> Date
+    private var storageDirectory: URL { directoryOverride ?? Self.directory }
+
+    /// Default paths and the off-main cleanup clock are unchanged in production.
+    /// Isolated audits can supply a temporary directory and a fixed wall clock.
+    init(directory: URL? = nil, cleanupClock: @escaping @Sendable () -> Date = { Date() }) {
+        directoryOverride = directory
+        self.cleanupClock = cleanupClock
+    }
+
+    /// An audit/read barrier, not a frame-path flush or a new cleanup trigger.
+    func waitForPendingFileOperations() async {
+        await writer.drain()
+        await memoryWriter.drain()
+    }
 
     private var sessionStart: TimeInterval = 0
     private var isOpen = false
@@ -490,14 +513,14 @@ final class DiagnosticsLog {
         guard !isOpen else { return }
         let stamp = Self.fileStampFormatter.string(from: Date())
         let name = "alfie_soak_\(stamp).csv"
-        let url = Self.directory.appendingPathComponent(name)
+        let url = storageDirectory.appendingPathComponent(name)
         // Same folder, same timestamp, so the set from one run is obvious.
         let memoryName = "alfie_memory_\(stamp).csv"
-        let memoryURL = Self.directory.appendingPathComponent(memoryName)
+        let memoryURL = storageDirectory.appendingPathComponent(memoryName)
 
         writer.open(url: url, header: Self.header)
         memoryWriter.open(url: memoryURL, header: Self.memoryHeader)
-        writer.prune(directory: Self.directory, olderThan: 30)
+        writer.prune(directory: storageDirectory, olderThan: 30, clock: cleanupClock)
 
         sessionStart = CACurrentMediaTime()
         lastCPUSeconds = Self.processCPUSeconds()
@@ -519,7 +542,7 @@ final class DiagnosticsLog {
                 identity: identity,
                 columns: Self.columns,
                 unobservable: Self.alwaysUnobservable + [identity.output.presentation])
-            let manifestURL = Self.directory.appendingPathComponent("alfie_session_\(stamp).json")
+            let manifestURL = storageDirectory.appendingPathComponent("alfie_session_\(stamp).json")
             self.manifest = manifest
             self.manifestURL = manifestURL
             writeManifest()

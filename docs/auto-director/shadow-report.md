@@ -1,6 +1,6 @@
 # Director shadow report CLI
 
-C-05 is an offline, metadata-only analysis tool. It reads A-09 schema-1 JSONL, validates B-04 export bundles and produces Markdown. It does not open cameras, upload data, choose directing parameters or write qualification records.
+C-05 is an offline, metadata-only analysis tool. It reads A-09 schema-1 and schema-2 JSONL, validates B-04 export bundles and produces Markdown. It does not open cameras, upload data, choose directing parameters or write qualification records.
 
 From the repository root:
 
@@ -29,7 +29,7 @@ Manifest schema 1 has exactly eight required fields. Unknown keys, duplicate JSO
 | `sessionIDs` | Sorted, unique canonical UUIDs; exactly the sessions in the records |
 | `recordCount` | Nonnegative JSON integer; exactly the number of validated records |
 | `evidenceClasses` | Sorted, unique `live` / `recorded` / `synthetic` values; exactly the classes in the records |
-| `recordSchemaVersions` | Sorted, unique supported integers; exactly the record versions, currently `1` |
+| `recordSchemaVersions` | Sorted, unique supported integers; exactly the record versions, currently `1` and `2` |
 | `retention` | Exactly `explicitExport` |
 
 An empty bundle has count zero and empty summary arrays. Each record's original `recordedAtUTC` must be at or before `exportedAtUTC` and less than 30 × 24 hours old at export. The exact 30-day expiry is rejected. This implements the source-retention rule in [D-02 §8](shadow-record-schema.md#8-privacy-retention-and-explicit-export); it introduces no study threshold. The analysis clock does not expire explicit exported copies, so a valid archival export remains readable later. Ordinary source-log retention remains the writer's responsibility.
@@ -56,7 +56,7 @@ Only consecutive completed Takes with continuous role/parameter scope and no obs
 
 ## Invalid and incomplete evidence
 
-The companion `director_shadow_schema.json` mirrors schema-1 typed fields/enums from `DirectorShadowRecord.swift` and the eight-field export projection. Input must be UTF-8. Unknown fields, duplicate JSON keys, unsupported schemas, malformed tokens/counters/clocks, invalid event payloads and media-like additions refuse the record. Cross-field checks protect the analysis; this reader does not replace the app's authoritative serializer or validate human consent/ground truth. Schema changes require an explicit reader/table review.
+The companion `director_shadow_schema.json` mirrors supported schema-1/2 typed fields/enums from `DirectorShadowRecord.swift` and the eight-field export projection. Input must be UTF-8. Unknown fields, duplicate JSON keys, unsupported schemas, malformed tokens/counters/clocks, invalid event payloads and media-like additions refuse the record. Cross-field checks protect the analysis; this reader does not replace the app's authoritative serializer or validate human consent/ground truth. Schema changes require an explicit reader/table review. Schema 2 may carry complete materialized `scorerInputs` for actual rules candidates; these are strictly validated against their candidate, timeline, revision and Float32 feature contract. Schema 1 rejects that key even when null. C-05 agreement/dwell behavior is unchanged; C-10 consumes those inputs only with separately supplied explicit labels and whole-session splits in the [offline scorer pipeline](director-scorer-training.md).
 
 Malformed/unattributable input or invalid export metadata suppresses all scoring. Identified sequence gaps, a missing prefix, reported drops, backward clocks, inconsistent parameter versions or incomplete/duplicate/inconsistent action pairs suppress their session's agreement and dwell. Observed abstention reasons remain descriptive counts, not independent opportunities. Sequence gaps and reported drops are separate, potentially overlapping indicators; do not add them into an invented missing-record denominator. Zero reported loss cannot prove full capture.
 

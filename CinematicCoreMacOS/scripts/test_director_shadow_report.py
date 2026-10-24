@@ -161,7 +161,7 @@ class ShadowReportTests(unittest.TestCase):
             self.assertFalse(data['dwell'])
 
     def test_unknown_schema_keys_malformed_numbers_and_private_payloads_are_rejected(self):
-        changes = [lambda r: r['event'].update(phase=None), lambda r: r.update(schemaVersion=2), lambda r: r.update(frame='PRIVATE_FRAME'),
+        changes = [lambda r: r['event'].update(phase=None), lambda r: r.update(schemaVersion=3), lambda r: r.update(frame='PRIVATE_FRAME'),
                    lambda r: r['context'].update(name='PRIVATE_NAME'),
                    lambda r: r.update(eventTime=float('nan')),
                    lambda r: r['event']['shot'].update(format='webcam'),
@@ -451,6 +451,103 @@ class ExportBundleTests(unittest.TestCase):
             self.assertIn('unbundled JSONL', text)
             self.assertIn('explicit-export retention is not established', text)
             self.assertNotIn('PRIVATE', text)
+
+
+
+
+class ScorerInputSchemaTests(unittest.TestCase):
+    @staticmethod
+    def captured():
+        row = record(0, 10, {'kind': 'abstention', 'decisionID': token('scorer'), 'stage': 'judge',
+                             'reasons': [{'domain': 'observation', 'code': 'unclassified'}]})
+        row['schemaVersion'] = 2
+        row['context'].update(programStartedAt=0, lastWideAt=0)
+        ranked, captured = [], []
+        for rank, (preset, confidence) in enumerate((('fullBody', 0.9), ('waistUp', 0.8))):
+            ranked.append({'candidate': {'channel': 'input-2', 'shot': {'format': 'stage', 'preset': preset},
+                                          'isWide': False, 'subjectConfidence': confidence, 'movement': 0.1},
+                           'reason': {'domain': 'selection', 'code': 'subjectEvidence'}})
+            values = [report.float32(confidence), report.float32(0.1), 10, 10, 1, 0] + [int(i == rank + 1) for i in range(5)] + [1, 0, 0, 0, 0]
+            captured.append({'featureSchemaVersion': 1, 'judgementIndex': 0, 'candidateRank': rank, 'features': values})
+        row['judgements'] = [{'judgeKind': 'rules', 'evidenceRevision': '1', 'computedAt': 10,
+                               'outcome': {'kind': 'ranked', 'ranked': ranked}, 'gateResult': 'notEvaluated'}]
+        row['scorerInputs'] = captured
+        return row
+
+    def accepts(self, row):
+        rows, issues = report.load_records(io.BytesIO((json.dumps(row) + '\n').encode()))
+        return len(rows) == 1 and not issues
+
+    def test_v1_unchanged_v2_optional_and_complete_capture(self):
+        self.assertTrue(self.accepts(self.captured()))
+        row = self.captured(); del row['scorerInputs']
+        self.assertTrue(self.accepts(row))
+        row['scorerInputs'] = None
+        self.assertTrue(self.accepts(row))
+        row['schemaVersion'] = 1
+        self.assertFalse(self.accepts(row))
+        del row['scorerInputs']
+        self.assertTrue(self.accepts(row))
+
+    def test_capture_rejects_partial_reordered_duplicate_learned_and_extra_fields(self):
+        for mutation in (
+            lambda r: r['scorerInputs'].pop(),
+            lambda r: r['scorerInputs'].reverse(),
+            lambda r: r['scorerInputs'].append(copy.deepcopy(r['scorerInputs'][0])),
+            lambda r: r['judgements'][0].update(judgeKind='learned', modelVersion='synthetic-1'),
+            lambda r: r['scorerInputs'][0].update(media='forbidden'),
+            lambda r: r['scorerInputs'][0].update(featureSchemaVersion=True),
+            lambda r: r['scorerInputs'][0].update(judgementIndex=1),
+        ):
+            row = self.captured(); mutation(row)
+            self.assertFalse(self.accepts(row))
+
+    def test_capture_rejects_missing_mismatched_and_non_float32_values(self):
+        for mutation in (
+            lambda r: r['scorerInputs'][0]['features'].__setitem__(0, 0.9),
+            lambda r: r['scorerInputs'][0]['features'].__setitem__(1, float('nan')),
+            lambda r: r['scorerInputs'][0]['features'].__setitem__(2, 1e39),
+            lambda r: r['scorerInputs'][0]['features'].__setitem__(3, 11),
+            lambda r: r['scorerInputs'][0]['features'].__setitem__(4, 0.5),
+            lambda r: r['scorerInputs'][0]['features'].__setitem__(5, 2),
+            lambda r: r['scorerInputs'][0]['features'].__setitem__(7, 0),
+            lambda r: r['scorerInputs'][0]['features'].__setitem__(11, 0),
+            lambda r: r['scorerInputs'][0]['features'].pop(),
+            lambda r: r['context'].pop('programStartedAt'),
+            lambda r: r['judgements'][0].update(computedAt=11),
+            lambda r: r['judgements'][0].update(evidenceRevision='2'),
+            lambda r: r['judgements'][0]['outcome']['ranked'][0]['candidate'].update(channel='input-1'),
+            lambda r: r['judgements'][0]['outcome']['ranked'][0]['candidate'].update(isWide=True),
+        ):
+            row = self.captured(); mutation(row)
+            self.assertFalse(self.accepts(row))
+
+    def test_capture_history_consistency_and_multiple_complete_groups(self):
+        row = self.captured()
+        row['scorerInputs'][1]['features'][4] = 2
+        self.assertFalse(self.accepts(row))
+        row = self.captured()
+        row['scorerInputs'][0]['features'][5] = 1
+        row['scorerInputs'][1]['features'][5] = 1
+        self.assertFalse(self.accepts(row))
+        row = self.captured()
+        row['judgements'].append(copy.deepcopy(row['judgements'][0]))
+        more = copy.deepcopy(row['scorerInputs'])
+        for item in more:
+            item['judgementIndex'] = 1
+        row['scorerInputs'] += more
+        self.assertTrue(self.accepts(row))
+
+    def test_export_manifest_supports_v1_and_v2(self):
+        rows = [record(0, 9, prediction(), session='old'), self.captured()]
+        manifest = {'exportSchemaVersion': 1, 'exportID': token('scorer-export'),
+                    'exportedAtUTC': '2026-10-18T00:01:00.000Z',
+                    'sessionIDs': sorted(r['sessionID'] for r in rows), 'recordCount': 2,
+                    'evidenceClasses': ['synthetic'], 'recordSchemaVersions': [1, 2], 'retention': 'explicitExport'}
+        self.assertEqual(report.validate_export_manifest(manifest, rows), manifest)
+        manifest['recordSchemaVersions'] = [1, 2, 3]
+        with self.assertRaises(ValueError):
+            report.validate_export_manifest(manifest, rows)
 
 
 if __name__ == '__main__':

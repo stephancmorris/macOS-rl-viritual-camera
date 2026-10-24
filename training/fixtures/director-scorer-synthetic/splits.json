@@ -1,0 +1,13 @@
+{
+  "splitSchemaVersion": 1,
+  "evidenceClass": "synthetic",
+  "train": [
+    "62741D56-56AB-5028-BAB3-F2DCCC8A82A8"
+  ],
+  "validation": [
+    "47F2C30F-20C2-5FA6-8CC6-CE71666AC934"
+  ],
+  "test": [
+    "0A22D7B1-72B2-5BA3-BD57-B6F45AF32B78"
+  ]
+}

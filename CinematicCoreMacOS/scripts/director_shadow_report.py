@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""C-05: local metadata-only schema-1 JSONL analysis. No authority or I/O to the app."""
+"""C-05: local metadata-only schema-1/2 JSONL analysis. No authority or I/O to the app."""
 import argparse
 from collections import Counter, defaultdict, deque
 from datetime import datetime, timedelta
@@ -8,6 +8,7 @@ import math
 from pathlib import Path
 import re
 import statistics
+import struct
 import sys
 import uuid
 
@@ -101,7 +102,8 @@ def validate(value, typename='Record', path=''):
 
 def semantic(record):
     c, p, e = (record[k] for k in ('context', 'parameters', 'event'))
-    require(record['schemaVersion'] == 1)
+    require(record['schemaVersion'] in SCHEMA['supportedVersions'])
+    require(record['schemaVersion'] != 1 or 'scorerInputs' not in record)
     inputs = c['inputs']
     require(inputs and len(set(inputs)) == len(inputs) and c['program'] in inputs)
     for key in ('preview', 'pinnedInput'):
@@ -165,6 +167,7 @@ def semantic(record):
             require(j.get('acceptedRank') is not None and o.get('ranked') is not None and j['acceptedRank'] < len(o['ranked']))
         else:
             require(j.get('acceptedRank') is None)
+    validate_scorer_inputs(record)
     def traverse(v):
         if isinstance(v, dict):
             if set(v) == {'domain', 'code'}:
@@ -207,6 +210,85 @@ def semantic(record):
         require(e['action'] != 'take' or e.get('outcome') != 'completed' or e.get('programAfter') is not None)
         require(e['action'] not in SESSION_ACTIONS or e['targetScope'] == 'session')
         require(e['action'] not in CHANNEL_ACTIONS or e['targetScope'] == 'channel')
+
+
+
+def float32(value):
+    """Round exactly as the Swift feature extractor; overflow refuses input."""
+    require(type(value) in (int, float) and math.isfinite(value))
+    rounded = struct.unpack('<f', struct.pack('<f', value))[0]
+    require(math.isfinite(rounded))
+    return rounded
+
+
+DIRECTOR_FEATURE_NAMES = (
+    'subjectConfidence', 'movement', 'programDwellSeconds', 'sinceWideSeconds',
+    'historyCount', 'sameShotHistoryCount', 'candidateStageWide', 'candidateStageFullBody',
+    'candidateStageWaistUp', 'candidateWebcamWide', 'candidateWebcamTight', 'programStageWide',
+    'programStageFullBody', 'programStageWaistUp', 'programWebcamWide', 'programWebcamTight',
+)
+DIRECTOR_SHOTS = (('stage', 'wide'), ('stage', 'fullBody'), ('stage', 'waistUp'),
+                  ('webcam', 'wide'), ('webcam', 'tight'))
+
+
+def validate_scorer_inputs(record):
+    """Schema 2 captures actual vectors; it cannot reconstruct missing history."""
+    captured = record.get('scorerInputs')
+    if captured is None:
+        return
+    require(record['schemaVersion'] == 2 and bool(captured))
+    keys = [(item['judgementIndex'], item['candidateRank']) for item in captured]
+    require(keys == sorted(set(keys)))
+    groups = defaultdict(list)
+    for item in captured:
+        groups[item['judgementIndex']].append(item)
+    for index, items in groups.items():
+        validate_scorer_group(record, index, items)
+
+
+def validate_scorer_group(record, index, captured):
+    require(index < len(record['judgements']))
+    judgement = record['judgements'][index]
+    context, parameters = record['context'], record['parameters']
+    require(judgement['judgeKind'] == 'rules' and judgement['outcome']['kind'] == 'ranked')
+    ranked = judgement['outcome']['ranked']
+    require(bool(ranked) and len(captured) == len(ranked))
+    now = judgement.get('computedAt')
+    require(now is not None and now <= record['eventTime'] and
+            judgement['evidenceRevision'] == context['evidenceRevision'])
+    require(parameters['status'] == 'available' and context.get('preview') is not None and
+            context.get('programShot') is not None)
+    origins = [context.get('programStartedAt'), context.get('lastWideAt')]
+    require(all(origin is not None and origin <= now for origin in origins))
+    shared_history = None
+    same_shot_counts = {}
+    program = context['programShot']
+    program_index = DIRECTOR_SHOTS.index((program['format'], program['preset']))
+    for rank, item in enumerate(captured):
+        require(item['featureSchemaVersion'] == 1 and item['judgementIndex'] == index and
+                item['candidateRank'] == rank)
+        values = item['features']
+        require(len(values) == len(DIRECTOR_FEATURE_NAMES) and
+                all(value == float32(value) for value in values))
+        candidate = ranked[rank]['candidate']
+        shot = candidate['shot']
+        identity = (shot['format'], shot['preset'])
+        require(candidate['channel'] == context['preview'] and shot != program and
+                candidate['isWide'] == (shot['preset'] == 'wide'))
+        require(candidate.get('subjectConfidence') is not None and candidate.get('movement') is not None)
+        require(values[:4] == [float32(candidate['subjectConfidence']), float32(candidate['movement']),
+                              float32(now - origins[0]), float32(now - origins[1])])
+        require(values[0] <= 1 and values[4] == int(values[4]) and values[5] == int(values[5]) and
+                values[5] <= values[4])
+        if shared_history is None:
+            shared_history = values[4]
+        require(values[4] == shared_history)
+        previous = same_shot_counts.setdefault(identity, values[5])
+        require(previous == values[5])
+        candidate_index = DIRECTOR_SHOTS.index(identity)
+        require(values[6:11] == [int(i == candidate_index) for i in range(5)] and
+                values[11:16] == [int(i == program_index) for i in range(5)])
+    require(sum(same_shot_counts.values()) <= shared_history)
 
 
 def unique_object(pairs):
@@ -265,7 +347,7 @@ def validate_export_manifest(manifest, records):
     }
     for field, expected in summaries.items():
         require(manifest[field] == expected)
-    require(set(manifest['recordSchemaVersions']) <= {SCHEMA['version']})
+    require(set(manifest['recordSchemaVersions']) <= set(SCHEMA['supportedVersions']))
     exported_at = parse_utc(manifest['exportedAtUTC'])
     for record in records:
         age = exported_at - parse_utc(record['recordedAtUTC'])
