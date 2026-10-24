@@ -287,7 +287,7 @@ struct InspectorDrawer: View {
 
             HStack {
                 smallButton("Settings…", systemImage: "gearshape", equalWidth: true) {
-                    openSettingsWindow(.composer)
+                    openSettingsWindow(.framing)
                 }
             }
             .padding(.top, 10)
@@ -335,7 +335,7 @@ struct InspectorDrawer: View {
                 description: "Active. Heuristic controller v1.4.",
                 isActive: true
             ) {
-                openSettingsWindow(.composer)
+                openSettingsWindow(.framing)
             }
 
             if DeveloperFlags.exposeClipPlaybackControls {

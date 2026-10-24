@@ -106,7 +106,12 @@ struct ShowSetupView: View {
             }
             Spacer()
             if let operatorModes {
-                OperatorModePicker(store: operatorModes, style: .setupHeader)
+                OperatorModePicker(
+                    store: operatorModes,
+                    cameras: OperatorModeChoice.Cameras(devices: model.devices.map {
+                        (uniqueID: $0.uniqueID, isBuiltIn: $0.isBuiltIn)
+                    }),
+                    style: .setupHeader)
             }
             headerPicker("Show standard") {
                 Picker("Show standard", selection: Binding(

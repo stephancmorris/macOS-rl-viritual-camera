@@ -12,6 +12,8 @@ import SwiftUI
 struct StoppedScreen: View {
     /// Single Cam or Webcam, named above the title and picked above Start.
     @ObservedObject var operatorModes: OperatorModeStore
+    /// What discovery sees; decides which modes the picker offers.
+    let cameras: OperatorModeChoice.Cameras
     let lastSessionEndedAt: Date?
     var onStart: () -> Void
 
@@ -39,7 +41,7 @@ struct StoppedScreen: View {
                     .foregroundStyle(.white.opacity(0.6))
                     .multilineTextAlignment(.center)
 
-                OperatorModePicker(store: operatorModes, style: .stoppedScreen)
+                OperatorModePicker(store: operatorModes, cameras: cameras, style: .stoppedScreen)
                     .padding(.top, 4)
 
                 Button(action: onStart) {

@@ -5,6 +5,7 @@
 //  Created by Stephan Morris on 2/2/2026.
 //
 
+import AVFoundation
 import Combine
 import OSLog
 import SwiftUI
@@ -103,6 +104,7 @@ struct ContentView: View {
             } else {
                 StoppedScreen(
                     operatorModes: operatorModes,
+                    cameras: OperatorModeChoice.Cameras(cameraManager.availableCameras),
                     lastSessionEndedAt: lastSessionEndedAt,
                     onStart: {
                         // A single-camera session is a new show on A alone:
@@ -112,6 +114,13 @@ struct ContentView: View {
                     }
                 )
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
+                // Hot-plug: re-enumerate so a second camera unlocks Multi Cam
+                // in the mode picker (discovery only; no session opens).
+                .onReceive(NotificationCenter.default.publisher(for: AVCaptureDevice.wasConnectedNotification)
+                    .merge(with: NotificationCenter.default.publisher(for: AVCaptureDevice.wasDisconnectedNotification))
+                    .receive(on: RunLoop.main)) { _ in
+                    cameraManager.discoverCameras()
+                }
             }
 
             // Layer 2: floating overlays — only in the single-camera view (the

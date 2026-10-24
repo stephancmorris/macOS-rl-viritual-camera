@@ -41,6 +41,7 @@ struct CinematicCoreMacOSApp: App {
                 settingsWindowController: settingsWindowController,
                 show: show
             )
+            .onAppear { AppAppearance.current.apply() }
         }
         .windowStyle(.hiddenTitleBar)
         .commands {
@@ -66,7 +67,7 @@ struct CinematicCoreMacOSApp: App {
         Settings {
             SettingsWindow(
                 cameraManager: cameraManager,
-                operatorModes: show.operatorModes,
+                show: show,
                 systemExtensionManager: systemExtensionManager,
                 controller: settingsWindowController,
                 onDirectorPreferencesChanged: { [show] in show.directorPreferencesChanged($0) },
