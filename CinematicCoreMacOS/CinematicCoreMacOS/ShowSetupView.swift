@@ -45,7 +45,7 @@ struct ShowSetupView: View {
                         .help("Stop all cameras before changing built-in camera testing.")
                     Text(ShowSetupModel.builtInCameraTestDetail)
                         .font(.system(size: 11))
-                        .foregroundStyle(.white.opacity(0.65))
+                        .foregroundStyle(AlfieColor.ink.opacity(0.65))
                         .fixedSize(horizontal: false, vertical: true)
                 }
                 .padding(.bottom, 14)
@@ -82,13 +82,13 @@ struct ShowSetupView: View {
 
             Text("Nothing goes to the ATEM until you press Start. Alfie never restores a Program/Preview state from the last show.")
                 .font(.system(size: 11))
-                .foregroundStyle(.white.opacity(0.55))
+                .foregroundStyle(AlfieColor.ink.opacity(0.55))
         }
         .padding(.horizontal, Self.sidePadding)
         .padding(.top, 32)
         .padding(.bottom, 24)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-        .foregroundStyle(.white)
+        .foregroundStyle(AlfieColor.ink)
         .background(ConsoleStyle.background)
     }
 
@@ -100,13 +100,18 @@ struct ShowSetupView: View {
                 Text("SESSION STOPPED")
                     .font(ConsoleStyle.label(10))
                     .tracking(2)
-                    .foregroundStyle(.white.opacity(0.5))
+                    .foregroundStyle(AlfieColor.ink.opacity(0.5))
                 Text("Show setup")
                     .font(.system(size: 27, weight: .semibold))
             }
             Spacer()
             if let operatorModes {
-                OperatorModePicker(store: operatorModes, style: .setupHeader)
+                OperatorModePicker(
+                    store: operatorModes,
+                    cameras: OperatorModeChoice.Cameras(devices: model.devices.map {
+                        (uniqueID: $0.uniqueID, isBuiltIn: $0.isBuiltIn)
+                    }),
+                    style: .setupHeader)
             }
             headerPicker("Show standard") {
                 Picker("Show standard", selection: Binding(
@@ -134,7 +139,7 @@ struct ShowSetupView: View {
                 }
             }
             .font(.system(size: 11, weight: .medium))
-            .foregroundStyle(.white.opacity(0.6))
+            .foregroundStyle(AlfieColor.ink.opacity(0.6))
             picker()
                 .labelsHidden()
                 .pickerStyle(.menu)
@@ -153,7 +158,7 @@ struct ShowSetupView: View {
                     .font(ConsoleStyle.label(12))
                 Text(slot == .a ? "Program at Start" : "Preview at Start")
                     .font(.system(size: 11))
-                    .foregroundStyle(.white.opacity(0.5))
+                    .foregroundStyle(AlfieColor.ink.opacity(0.5))
                 Spacer()
                 devicePicker(slot)
             }
@@ -164,7 +169,7 @@ struct ShowSetupView: View {
                     // channels (Settings → Framing); no per-slot choice yet.
                     Text("Capture profile · \(model.captureProfile)")
                     Text(model.deliveryTitle)
-                        .foregroundStyle(.white.opacity(0.6))
+                        .foregroundStyle(AlfieColor.ink.opacity(0.6))
                     Spacer(minLength: 0)
                 }
                 .font(.system(size: 11))
@@ -178,7 +183,7 @@ struct ShowSetupView: View {
         }
         .padding(12)
         .frame(maxWidth: .infinity, alignment: .topLeading)
-        .background(Color.white.opacity(0.055), in: RoundedRectangle(cornerRadius: 10))
+        .background(AlfieColor.ink.opacity(0.055), in: RoundedRectangle(cornerRadius: 10))
         .overlay {
             RoundedRectangle(cornerRadius: 10)
                 .strokeBorder(device == nil ? ConsoleStyle.amber.opacity(0.45) : ConsoleStyle.neutralBorder, lineWidth: 1)
@@ -213,18 +218,18 @@ struct ShowSetupView: View {
     private func thumbnail(_ device: ShowSetupModel.Device?) -> some View {
         ZStack {
             RoundedRectangle(cornerRadius: 8)
-                .fill(Color.black.opacity(0.55))
+                .fill(AlfieColor.controlFill)
             VStack(spacing: 8) {
                 Image(systemName: device == nil ? "video.slash" : "video")
                     .font(.system(size: 26, weight: .light))
-                    .foregroundStyle(.white.opacity(0.35))
+                    .foregroundStyle(AlfieColor.ink.opacity(0.35))
                 Text(device?.name ?? "No camera")
                     .font(.system(size: 14, weight: .semibold))
-                    .foregroundStyle(.white.opacity(device == nil ? 0.4 : 0.8))
+                    .foregroundStyle(AlfieColor.ink.opacity(device == nil ? 0.4 : 0.8))
                     .lineLimit(1)
                 Text("The camera opens when the show starts")
                     .font(.system(size: 11))
-                    .foregroundStyle(.white.opacity(0.4))
+                    .foregroundStyle(AlfieColor.ink.opacity(0.4))
             }
             .padding(.horizontal, 16)
         }
@@ -237,17 +242,17 @@ struct ShowSetupView: View {
         HStack(spacing: 10) {
             Text("CAM \(slot.letter)")
                 .font(ConsoleStyle.label(12))
-                .foregroundStyle(.white.opacity(0.45))
+                .foregroundStyle(AlfieColor.ink.opacity(0.45))
             Text("not assigned")
                 .font(.system(size: 12))
-                .foregroundStyle(.white.opacity(0.45))
+                .foregroundStyle(AlfieColor.ink.opacity(0.45))
             Spacer()
         }
         .padding(.horizontal, 12)
         .frame(height: 36)
         .overlay {
             RoundedRectangle(cornerRadius: 10)
-                .strokeBorder(Color.white.opacity(0.2), style: StrokeStyle(lineWidth: 1, dash: [5, 4]))
+                .strokeBorder(AlfieColor.ink.opacity(0.2), style: StrokeStyle(lineWidth: 1, dash: [5, 4]))
         }
         .accessibilityElement(children: .combine)
     }
@@ -261,7 +266,7 @@ private struct SetupButtonStyle: ButtonStyle {
     func makeBody(configuration: Configuration) -> some View {
         configuration.label
             .font(.system(size: 13, weight: .semibold))
-            .foregroundStyle(.white.opacity(isEnabled ? 1 : 0.4))
+            .foregroundStyle(isPrimary && isEnabled ? Color.white : AlfieColor.ink.opacity(isEnabled ? 1 : 0.4))
             .padding(.horizontal, 18)
             .padding(.vertical, 10)
             .background {
@@ -270,12 +275,12 @@ private struct SetupButtonStyle: ButtonStyle {
             }
             .overlay {
                 RoundedRectangle(cornerRadius: 10, style: .continuous)
-                    .strokeBorder(Color.white.opacity(isPrimary ? 0.18 : 0.2), lineWidth: 1)
+                    .strokeBorder(AlfieColor.ink.opacity(isPrimary ? 0.18 : 0.2), lineWidth: 1)
             }
     }
 
     private var fill: Color {
         guard isEnabled else { return ConsoleStyle.disabledFill }
-        return isPrimary ? Color(red: 0.04, green: 0.52, blue: 1.0) : Color.white.opacity(0.08)
+        return isPrimary ? AlfieColor.accent : AlfieColor.ink.opacity(0.08)
     }
 }

@@ -374,7 +374,9 @@ struct LiveMultiviewConsole: View {
             let pillTarget: ControlTarget = snapshot.previewChannel == nil
                 ? .singleCamera
                 : (target.role == .program ? .editingLive(channel: target.channel) : .preview(channel: target.channel))
+            // The transport pill keeps its dark glass in every appearance.
             OperatorPill(cameraManager: channel, controlTarget: pillTarget, show: model.show)
+                .environment(\.colorScheme, .dark)
                 .id(target.channel)
         }
     }
@@ -482,7 +484,7 @@ struct LiveConsoleHeader: View {
             if let text = model.pairCheckText ?? model.admissionTitle {
                 Text(text)
                     .font(ConsoleStyle.label(10))
-                    .foregroundStyle(.white.opacity(0.6))
+                    .foregroundStyle(AlfieColor.ink.opacity(0.6))
                     .lineLimit(1)
             }
             if model.hasSecondInput {

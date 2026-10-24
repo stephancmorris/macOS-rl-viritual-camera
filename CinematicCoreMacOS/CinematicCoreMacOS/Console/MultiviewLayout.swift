@@ -85,16 +85,18 @@ nonisolated struct MultiviewLayout: Equatable, Sendable {
 
 /// Console colours shared by panes, bars, tiles and the pill.
 enum ConsoleStyle {
-    /// Program / Take / Edit Live red (#ff453a).
-    static let programRed = Color(red: 1.0, green: 0x45 / 255.0, blue: 0x3a / 255.0)
-    /// Preview green (#30d158).
-    static let previewGreen = Color(red: 0x30 / 255.0, green: 0xd1 / 255.0, blue: 0x58 / 255.0)
-    /// Warning amber (#ff9f0a).
-    static let amber = Color(red: 1.0, green: 0x9f / 255.0, blue: 0x0a / 255.0)
-    static let background = Color(red: 0.055, green: 0.06, blue: 0.07)
-    static let neutralFill = Color.white.opacity(0.04)
-    static let neutralBorder = Color.white.opacity(0.12)
-    static let disabledFill = Color(white: 0.16)
+    // Each follows the app's appearance (`AlfieColor`). Video panes force
+    // Dark, so tallies drawn on footage keep the dark values.
+    /// Program / Take / Edit Live red (#ff453a dark, #d70015 light).
+    static let programRed = AlfieColor.danger
+    /// Preview green (#30d158 dark, #157a34 light).
+    static let previewGreen = AlfieColor.live
+    /// Warning amber (#ff9f0a dark, #b25000 light).
+    static let amber = AlfieColor.warning
+    static let background = AlfieColor.background
+    static let neutralFill = AlfieColor.ink.opacity(0.04)
+    static let neutralBorder = AlfieColor.ink.opacity(0.12)
+    static let disabledFill = AlfieColor.controlFill
 
     static func label(_ size: CGFloat = 11) -> Font {
         .system(size: size, weight: .semibold, design: .monospaced)

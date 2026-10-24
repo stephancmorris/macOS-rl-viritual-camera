@@ -337,7 +337,7 @@ struct InspectorShowSection: View {
         Text(text.uppercased())
             .font(.system(size: 9, weight: .semibold, design: .monospaced))
             .tracking(1.6)
-            .foregroundStyle(.white.opacity(0.32))
+            .foregroundStyle(AlfieColor.ink.opacity(0.32))
             .padding(.top, 14)
             .padding(.bottom, 2)
     }
@@ -347,7 +347,7 @@ struct InspectorShowSection: View {
         case .running: return ConsoleStyle.previewGreen
         case .unsupported: return ConsoleStyle.amber
         case .sourceMissing: return ConsoleStyle.programRed
-        case .notRunning: return Color.white.opacity(0.4)
+        case .notRunning: return AlfieColor.ink.opacity(0.4)
         }
     }
 
@@ -357,11 +357,11 @@ struct InspectorShowSection: View {
                 Circle().fill(healthColor(row.health)).frame(width: 8, height: 8)
                 Text(row.channel.cameraLabel)
                     .font(.system(size: 13, weight: .semibold))
-                    .foregroundStyle(.white.opacity(0.92))
+                    .foregroundStyle(AlfieColor.ink.opacity(0.92))
                 Text(row.role.rawValue.uppercased())
                     .font(.system(size: 9, weight: .semibold, design: .monospaced))
                     .tracking(1.2)
-                    .foregroundStyle(.white.opacity(0.5))
+                    .foregroundStyle(AlfieColor.ink.opacity(0.5))
                 Spacer(minLength: 8)
                 if row.canReconnect {
                     InspectorShowSectionStyle.button("Reconnect", systemImage: "arrow.clockwise") {
@@ -371,14 +371,14 @@ struct InspectorShowSection: View {
             }
             Text(row.device)
                 .font(.system(size: 11.5, weight: .medium))
-                .foregroundStyle(.white.opacity(0.7))
+                .foregroundStyle(AlfieColor.ink.opacity(0.7))
                 .lineLimit(1).truncationMode(.middle)
             Text(row.healthText)
                 .font(.system(size: 11.5, weight: .medium))
                 .foregroundStyle(healthColor(row.health))
             Text("\(row.shot) · \(row.revisionText)")
                 .font(.system(size: 11, design: .monospaced))
-                .foregroundStyle(.white.opacity(0.5))
+                .foregroundStyle(AlfieColor.ink.opacity(0.5))
                 .lineLimit(1)
         }
         .padding(.vertical, 8)
@@ -399,7 +399,7 @@ struct InspectorShowSection: View {
             if !next.failedChecks.isEmpty {
                 Text("Failing: " + next.failedChecks.joined(separator: ", "))
                     .font(.system(size: 11))
-                    .foregroundStyle(.white.opacity(0.55))
+                    .foregroundStyle(AlfieColor.ink.opacity(0.55))
                     .fixedSize(horizontal: false, vertical: true)
                     .padding(.bottom, 4)
             }
@@ -431,11 +431,11 @@ struct InspectorShowSection: View {
                         Text(reason.bottleneck.uppercased())
                             .font(.system(size: 9, weight: .semibold, design: .monospaced))
                             .tracking(1.2)
-                            .foregroundStyle(.white.opacity(0.5))
+                            .foregroundStyle(AlfieColor.ink.opacity(0.5))
                     }
                     Text(reason.message)
                         .font(.system(size: 11.5))
-                        .foregroundStyle(.white.opacity(0.8))
+                        .foregroundStyle(AlfieColor.ink.opacity(0.8))
                         .fixedSize(horizontal: false, vertical: true)
                 }
                 .padding(.vertical, 6)
@@ -463,18 +463,18 @@ private enum InspectorShowSectionStyle {
         Text(text.uppercased())
             .font(.system(size: 9, weight: .semibold, design: .monospaced))
             .tracking(1.6)
-            .foregroundStyle(.white.opacity(0.42))
+            .foregroundStyle(AlfieColor.ink.opacity(0.42))
     }
 
     static var rule: some View {
-        Rectangle().fill(Color.white.opacity(0.06)).frame(height: 0.5)
+        Rectangle().fill(AlfieColor.ink.opacity(0.06)).frame(height: 0.5)
     }
 
     static func row<Right: View>(_ label: String, @ViewBuilder right: () -> Right) -> some View {
         HStack(alignment: .center) {
             Text(label)
                 .font(.system(size: 12.5, weight: .medium))
-                .foregroundStyle(.white.opacity(0.7))
+                .foregroundStyle(AlfieColor.ink.opacity(0.7))
             Spacer(minLength: 12)
             right()
         }
@@ -485,7 +485,7 @@ private enum InspectorShowSectionStyle {
     static func value(_ text: String, monospaced: Bool = false) -> Text {
         Text(text)
             .font(.system(size: 12.5, weight: .medium, design: monospaced ? .monospaced : .default))
-            .foregroundStyle(.white.opacity(0.92))
+            .foregroundStyle(AlfieColor.ink.opacity(0.92))
     }
 
     static func pill(_ text: String, color: Color) -> some View {
@@ -507,12 +507,12 @@ private enum InspectorShowSectionStyle {
                     .lineLimit(1)
                     .fixedSize(horizontal: true, vertical: false)
             }
-            .foregroundStyle(.white.opacity(0.88))
+            .foregroundStyle(AlfieColor.ink.opacity(0.88))
             .padding(.horizontal, 12)
             .padding(.vertical, 7)
-            .background(RoundedRectangle(cornerRadius: 9, style: .continuous).fill(Color.white.opacity(0.08)))
+            .background(RoundedRectangle(cornerRadius: 9, style: .continuous).fill(AlfieColor.ink.opacity(0.08)))
             .overlay(RoundedRectangle(cornerRadius: 9, style: .continuous)
-                .strokeBorder(Color.white.opacity(0.12), lineWidth: 0.5))
+                .strokeBorder(AlfieColor.ink.opacity(0.12), lineWidth: 0.5))
         }
         .buttonStyle(.plain)
     }

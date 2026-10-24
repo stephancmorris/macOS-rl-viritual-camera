@@ -204,7 +204,10 @@ struct OperatorModeSwitchTests {
 
     @Test func stoppedScreenWithThePickerFits1280By800() throws {
         let store = OperatorModeStore(defaults: defaults(mode: .singleCam), multiviewEnabled: true)
-        let screen = StoppedScreen(operatorModes: store, lastSessionEndedAt: nil, onStart: {})
+        // Widest picker: all three segments, each with its note.
+        let screen = StoppedScreen(operatorModes: store,
+                                   cameras: OperatorModeChoice.Cameras(count: 2, hasBuiltIn: true),
+                                   lastSessionEndedAt: nil, onStart: {})
             .background(Color.black)
         let size = try fittingSize(screen, file: "mode-stopped-single-cam.png")
         #expect(size.width <= 1280 && size.height <= 800, "StoppedScreen \(size)")

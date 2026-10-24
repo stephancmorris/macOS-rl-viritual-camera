@@ -4,67 +4,101 @@
 //
 //  Created by Codex on 4/27/2026.
 //
+//  Settings are grouped by what the operator is doing (Show, Framing,
+//  Advanced) rather than by engine module. Read-only numbers live on the
+//  Diagnostics page, so every other page holds only things you can change.
+//
 
 import Combine
 import SwiftUI
 
 enum SettingsTab: String, CaseIterable, Identifiable {
-    case composer
-    case detection
-    case crop
+    case general
+    case show
     case output
+    case framing
     case director
+    case engine
+    case diagnostics
 
     var id: String { rawValue }
 
+    enum Group: String, CaseIterable, Identifiable {
+        case show = "Show"
+        case framing = "Framing"
+        case advanced = "Advanced"
+
+        var id: String { rawValue }
+
+        var tabs: [SettingsTab] {
+            SettingsTab.allCases.filter { $0.group == self }
+        }
+    }
+
+    var group: Group {
+        switch self {
+        case .general, .show, .output: return .show
+        case .framing, .director: return .framing
+        case .engine, .diagnostics: return .advanced
+        }
+    }
+
     var title: String {
         switch self {
-        case .composer:
-            return "Composer"
-        case .detection:
-            return "Detection"
-        case .crop:
-            return "Crop"
-        case .output:
-            return "Output"
-        case .director:
-            return "Director"
+        case .general: return "General"
+        case .show: return "Show & cameras"
+        case .output: return "Output"
+        case .framing: return "Auto-framing"
+        case .director: return "Director"
+        case .engine: return "Detection & render"
+        case .diagnostics: return "Diagnostics"
         }
     }
 
     var systemImage: String {
         switch self {
-        case .composer:
-            return "film"
-        case .detection:
-            return "person.crop.rectangle"
-        case .crop:
-            return "crop.rotate"
-        case .output:
-            return "video.badge.waveform"
-        case .director:
-            return "film.stack"
+        case .general: return "slider.horizontal.3"
+        case .show: return "video"
+        case .output: return "dot.radiowaves.left.and.right"
+        case .framing: return "person.crop.rectangle"
+        case .director: return "film.stack"
+        case .engine: return "cpu"
+        case .diagnostics: return "waveform.path.ecg"
         }
     }
 
-    var summary: String {
+    /// Words a search in the sidebar matches, beyond the title.
+    var keywords: [String] {
         switch self {
-        case .composer:
-            return "Shot logic, framing style, deadzone, smoothing, and target hold behavior."
-        case .detection:
-            return "Person detection accuracy, confidence, and live statistics. Detection runs in short bursts, triggered by the Detect button."
-        case .crop:
-            return "Crop engine quality, output profile, render smoothing, and GPU performance."
+        case .general:
+            return ["appearance", "theme", "light", "dark", "system", "build", "version", "gpu", "extension"]
+        case .show:
+            return ["mode", "single cam", "multi cam", "webcam", "show standard", "1080p50", "atem", "built-in camera", "testing"]
         case .output:
-            return "Program route health, dropped frames, reconnect controls, and live latency."
+            return ["route", "port", "hdmi", "usb-c", "display", "virtual camera", "reconnect", "focus", "extension"]
+        case .framing:
+            return ["composer", "feel", "preset", "steady", "band", "balanced", "slow pan", "fast follow", "locked down",
+                    "frame profile", "portrait", "livestream", "headroom", "smoothing", "responsiveness", "spring",
+                    "hold", "auto pan", "margin", "deadzone"]
         case .director:
-            return "Pace and framing for each kind of segment. Live event is required. The level is never saved."
+            return ["style", "segment", "shot length", "cadence", "repetition", "movement", "settle", "cut"]
+        case .engine:
+            return ["detection", "accuracy", "confidence", "max persons", "people", "quality", "resolution", "crop", "render"]
+        case .diagnostics:
+            return ["stats", "statistics", "frames", "dropped", "latency", "logs", "thermal", "checklist", "sink",
+                    "shadow", "export", "metadata", "reset to full frame", "jump to target"]
         }
+    }
+
+    func matches(_ query: String) -> Bool {
+        let query = query.trimmingCharacters(in: .whitespaces).lowercased()
+        guard !query.isEmpty else { return true }
+        return title.lowercased().contains(query) || keywords.contains { $0.contains(query) }
     }
 }
 
 final class SettingsWindowController: ObservableObject {
-    @Published var selectedTab: SettingsTab = .composer
+    @Published var selectedTab: SettingsTab = .framing
 
     func open(_ tab: SettingsTab) {
         selectedTab = tab
@@ -73,166 +107,94 @@ final class SettingsWindowController: ObservableObject {
 
 struct SettingsWindow: View {
     @ObservedObject var cameraManager: CameraManager
-    /// The show's operator mode (Composer tab › Mode).
-    let operatorModes: OperatorModeStore
+    /// Owns the operator mode and built-in camera testing.
+    @ObservedObject var show: ShowCoordinator
     @ObservedObject var systemExtensionManager: SystemExtensionActivationManager
     @ObservedObject var controller: SettingsWindowController
     var onDirectorPreferencesChanged: (DirectorPreferences) -> Void = { _ in }
     var shadowLogProvider: () -> DirectorShadowLog? = { nil }
     @StateObject private var shadowExportModel = DirectorShadowExportModel()
     @StateObject private var directorEditor = DirectorStyleEditor.makeForSettings()
+    @State private var searchText = ""
 
     var body: some View {
-        VStack(spacing: 0) {
-            header
-
-            Divider()
-
-            TabView(selection: $controller.selectedTab) {
-                ComposerTab(shotComposer: cameraManager.shotComposer, operatorModes: operatorModes)
-                    .tabItem {
-                        Label(SettingsTab.composer.title, systemImage: SettingsTab.composer.systemImage)
+        NavigationSplitView {
+            List(selection: selection) {
+                ForEach(SettingsTab.Group.allCases) { group in
+                    let tabs = group.tabs.filter { $0.matches(searchText) }
+                    if !tabs.isEmpty {
+                        Section {
+                            ForEach(tabs) { tab in
+                                Label(tab.title, systemImage: tab.systemImage)
+                                    .tag(tab)
+                            }
+                        } header: {
+                            Text(group.rawValue.uppercased())
+                                .font(.system(size: 10.5, weight: .semibold, design: .monospaced))
+                                .tracking(1.5)
+                                .foregroundStyle(AlfieColor.tertiaryText)
+                        }
                     }
-                    .tag(SettingsTab.composer)
-
-                DetectionSettingsView(personDetector: cameraManager.personDetector)
-                    .tabItem {
-                        Label(SettingsTab.detection.title, systemImage: SettingsTab.detection.systemImage)
-                    }
-                    .tag(SettingsTab.detection)
-
-                cropTab
-                    .tabItem {
-                        Label(SettingsTab.crop.title, systemImage: SettingsTab.crop.systemImage)
-                    }
-                    .tag(SettingsTab.crop)
-
-                ProgramOutputSettingsView(
-                    programOutput: cameraManager.programOutput,
-                    systemExtensionManager: systemExtensionManager
-                )
-                    .tabItem {
-                        Label(SettingsTab.output.title, systemImage: SettingsTab.output.systemImage)
-                    }
-                    .tag(SettingsTab.output)
-
-                VStack(spacing: 16) {
-                    DirectorStyleSettingsView(editor: directorEditor)
-                    Divider()
-                    ScrollView {
-                        DirectorShadowExportView(model: shadowExportModel)
-                            .padding(.horizontal, 24)
-                            .padding(.bottom, 16)
-                    }
-                    .frame(minHeight: 120, maxHeight: 280)
                 }
-                    .tabItem {
-                        Label(SettingsTab.director.title, systemImage: SettingsTab.director.systemImage)
-                    }
-                    .tag(SettingsTab.director)
             }
-            .onAppear {
-                directorEditor.onPreferencesChanged = onDirectorPreferencesChanged
-                shadowExportModel.logProvider = shadowLogProvider
-            }
+            .listStyle(.sidebar)
+            .searchable(text: $searchText, placement: .sidebar, prompt: "Search settings")
+            .navigationSplitViewColumnWidth(min: 200, ideal: 220, max: 260)
+        } detail: {
+            page(controller.selectedTab)
+                .navigationTitle(controller.selectedTab.title)
         }
-        .frame(minWidth: 760, idealWidth: 860, minHeight: 640, idealHeight: 720)
+        .frame(minWidth: 820, idealWidth: 960, minHeight: 600, idealHeight: 720)
+        .onAppear {
+            directorEditor.onPreferencesChanged = onDirectorPreferencesChanged
+            shadowExportModel.logProvider = shadowLogProvider
+        }
     }
 
-    private var header: some View {
-        VStack(alignment: .leading, spacing: 6) {
-            Text("Alfie Settings")
-                .font(.system(size: 24, weight: .semibold, design: .rounded))
-
-            Text(controller.selectedTab.summary)
-                .font(.system(size: 13, weight: .medium, design: .rounded))
-                .foregroundStyle(.secondary)
-                .fixedSize(horizontal: false, vertical: true)
-        }
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .padding(.horizontal, 20)
-        .padding(.vertical, 16)
-        .background(Color(nsColor: .windowBackgroundColor))
+    /// The sidebar can report no selection; the window always shows a page.
+    private var selection: Binding<SettingsTab?> {
+        Binding(
+            get: { controller.selectedTab },
+            set: { if let tab = $0 { controller.selectedTab = tab } }
+        )
     }
 
     @ViewBuilder
-    private var cropTab: some View {
-        if let cropEngine = cameraManager.cropEngine {
-            CropSettingsView(
-                cropEngine: cropEngine,
-                cameraManager: cameraManager
+    private func page(_ tab: SettingsTab) -> some View {
+        switch tab {
+        case .general:
+            GeneralSettingsPage(systemExtensionManager: systemExtensionManager)
+        case .show:
+            ShowSettingsPage(cameraManager: cameraManager, show: show)
+        case .output:
+            OutputSettingsPage(
+                programOutput: cameraManager.programOutput,
+                systemExtensionManager: systemExtensionManager
             )
-        } else {
-            SettingsUnavailableView(
-                title: "Crop Engine Unavailable",
-                systemImage: "exclamationmark.triangle",
-                message: "Metal crop controls are unavailable on this Mac or failed to initialize in the current session."
+        case .framing:
+            FramingSettingsPage(shotComposer: cameraManager.shotComposer, cropEngine: cameraManager.cropEngine)
+        case .director:
+            DirectorSettingsPage(editor: directorEditor)
+        case .engine:
+            EngineSettingsPage(cameraManager: cameraManager, personDetector: cameraManager.personDetector)
+        case .diagnostics:
+            DiagnosticsSettingsPage(
+                cameraManager: cameraManager,
+                programOutput: cameraManager.programOutput,
+                personDetector: cameraManager.personDetector,
+                shotComposer: cameraManager.shotComposer,
+                systemExtensionManager: systemExtensionManager,
+                shadowExportModel: shadowExportModel
             )
         }
-    }
-}
-
-// MARK: - Composer tab with Basic / Advanced toggle
-
-private struct ComposerTab: View {
-    @ObservedObject var shotComposer: ShotComposer
-    @ObservedObject var operatorModes: OperatorModeStore
-    @State private var showAdvanced = false
-
-    var body: some View {
-        VStack(spacing: 0) {
-            Picker("", selection: $showAdvanced) {
-                Text("Basic").tag(false)
-                Text("Advanced").tag(true)
-            }
-            .pickerStyle(.segmented)
-            .labelsHidden()
-            .padding(.horizontal, 16)
-            .padding(.top, 14)
-            .padding(.bottom, 6)
-
-            Form {
-                let view = ShotComposerSettingsView(shotComposer: shotComposer, operatorModes: operatorModes)
-                view.basicSection
-                if showAdvanced {
-                    view.advancedSection
-                }
-                view.statusSection
-            }
-            .formStyle(.grouped)
-        }
-    }
-}
-
-private struct SettingsUnavailableView: View {
-    let title: String
-    let systemImage: String
-    let message: String
-
-    var body: some View {
-        VStack(spacing: 14) {
-            Image(systemName: systemImage)
-                .font(.system(size: 30))
-                .foregroundStyle(.secondary)
-
-            Text(title)
-                .font(.headline)
-
-            Text(message)
-                .font(.caption)
-                .foregroundStyle(.secondary)
-                .multilineTextAlignment(.center)
-                .frame(maxWidth: 320)
-        }
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .padding(32)
     }
 }
 
 #Preview {
+    let show = ShowCoordinator()
     SettingsWindow(
-        cameraManager: CameraManager(),
-        operatorModes: OperatorModeStore(defaults: UserDefaults(suiteName: "com.alfie.preview") ?? .standard),
+        cameraManager: show.channelA,
+        show: show,
         systemExtensionManager: SystemExtensionActivationManager(),
         controller: SettingsWindowController()
     )

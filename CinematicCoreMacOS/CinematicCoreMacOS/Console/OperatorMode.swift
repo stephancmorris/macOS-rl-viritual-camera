@@ -72,6 +72,70 @@ nonisolated enum OperatorMode: String, CaseIterable, Identifiable, Sendable {
     }
 }
 
+/// One segment of the mode picker. Single Cam is the default and always
+/// offered. Multi Cam unlocks once a second camera is connected; Webcam is
+/// shown only when this Mac has a built-in camera. The current mode is always
+/// offered and enabled, so a saved choice is never hidden from the operator.
+/// Alfie suggests by unlocking a segment; it never changes the mode itself.
+nonisolated struct OperatorModeChoice: Identifiable, Equatable, Sendable {
+    let mode: OperatorMode
+    let isEnabled: Bool
+    /// Why the segment is in this state, shown under its title.
+    let note: String
+
+    var id: OperatorMode { mode }
+
+    /// What discovery found, minus Alfie's own virtual camera.
+    struct Cameras: Equatable, Sendable {
+        var count: Int
+        var hasBuiltIn: Bool
+
+        /// The virtual camera's `AVCaptureDevice.uniqueID`, which is the
+        /// extension's CMIO device ID (`ExtensionStableIDs.device`). It is
+        /// Alfie's output, never a source, so it is not counted.
+        static let alfieVirtualCameraID = "6089D528-8D1B-45C5-8D24-E76CD0E2C3BF"
+
+        init(count: Int, hasBuiltIn: Bool) {
+            self.count = count
+            self.hasBuiltIn = hasBuiltIn
+        }
+
+        /// `devices` are (uniqueID, isBuiltIn) pairs; duplicates count once.
+        init<Devices: Sequence>(devices: Devices) where Devices.Element == (uniqueID: String, isBuiltIn: Bool) {
+            var seen = Set<String>()
+            var hasBuiltIn = false
+            for device in devices where device.uniqueID.caseInsensitiveCompare(Self.alfieVirtualCameraID) != .orderedSame {
+                seen.insert(device.uniqueID)
+                hasBuiltIn = hasBuiltIn || device.isBuiltIn
+            }
+            self.init(count: seen.count, hasBuiltIn: hasBuiltIn)
+        }
+    }
+
+    /// The picker's segments, in display order.
+    static func choices(available: [OperatorMode], current: OperatorMode,
+                        cameras: Cameras) -> [OperatorModeChoice] {
+        available.compactMap { mode in
+            switch mode {
+            case .singleCam:
+                return OperatorModeChoice(mode: mode, isEnabled: true, note: "Default")
+            case .multiCam:
+                if cameras.count >= 2 {
+                    return OperatorModeChoice(mode: mode, isEnabled: true, note: "\(cameras.count) cameras found")
+                }
+                return OperatorModeChoice(mode: mode, isEnabled: current == .multiCam,
+                                          note: "Connect a 2nd camera")
+            case .webcam:
+                if cameras.hasBuiltIn {
+                    return OperatorModeChoice(mode: mode, isEnabled: true, note: "Built-in camera found")
+                }
+                guard current == .webcam else { return nil }
+                return OperatorModeChoice(mode: mode, isEnabled: true, note: "No built-in camera")
+            }
+        }
+    }
+}
+
 /// Whether the operator may change mode now (MODE-SWITCH). Stopped, any
 /// change is allowed. While the show is live, leaving Multi Cam needs A to be
 /// Program with no other channel, so a console swap never hides a live input

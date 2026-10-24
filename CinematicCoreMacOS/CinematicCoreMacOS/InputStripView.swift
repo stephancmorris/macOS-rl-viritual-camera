@@ -59,12 +59,12 @@ struct InputStripView: View {
                     Text("INPUTS · \(tiles.filter(\.isAssigned).count) OF 4")
                         .font(.system(size: 11, weight: .semibold, design: .monospaced))
                         .tracking(1)
-                        .foregroundStyle(.white.opacity(0.65))
+                        .foregroundStyle(AlfieColor.ink.opacity(0.65))
                     Spacer(minLength: 12)
                     if let text = hint ?? note {
                         Text(text)
                             .font(.system(size: 11, design: .monospaced))
-                            .foregroundStyle(.white.opacity(hint == nil ? 0.45 : 0.8))
+                            .foregroundStyle(AlfieColor.ink.opacity(hint == nil ? 0.45 : 0.8))
                             .lineLimit(1)
                             .truncationMode(.tail)
                     }
