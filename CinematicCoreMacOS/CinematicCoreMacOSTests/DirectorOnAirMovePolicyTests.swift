@@ -12,7 +12,7 @@ nonisolated struct DirectorOnAirMovePolicyTests {
               outputHealthy: true, admissionCurrent: true, qualifiedLevels: [.auto, .backup])
     }
     private func authority(_ level: DirectorAuthority.Level = .auto) -> DirectorAuthority {
-        var a = DirectorAuthority(reviewPolicy: .conservative)
+        var a = DirectorAuthority()
         a.apply(.enable(level), prerequisites: prerequisites)
         return a
     }

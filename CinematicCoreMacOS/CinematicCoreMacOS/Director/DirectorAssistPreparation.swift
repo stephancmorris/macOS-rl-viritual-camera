@@ -147,7 +147,7 @@ final class DirectorAssistPreparation {
         #if DEBUG
         if let override = readinessForTesting { ready = override; evidence = override.isReady; measuredReadiness = nil }
         #endif
-        return (.init(authority: controller?.authority ?? DirectorAuthority(reviewPolicy: .conservative),
+        return (.init(authority: controller?.authority ?? DirectorAuthority(),
             program: show?.programChannel ?? .a, preview: preview, revisions: channel?.revisions,
             routeGeneration: show?.router.routeGeneration ?? 0, sourceMissing: channel?.sourceMissing ?? true,
             policyRevision: controller?.policyRevision ?? 0, nominationRevision: controller?.nominationRevision ?? 0,

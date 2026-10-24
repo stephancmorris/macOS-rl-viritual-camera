@@ -5,7 +5,7 @@ import Testing
     let good = DirectorAuthority.Prerequisites(nominationsCurrent: true, previewAvailable: true,
         sourcesHealthy: true, outputHealthy: true, admissionCurrent: true, qualifiedLevels: [.assist])
     @Test func levelsAndGate() {
-        var state = DirectorAuthority(reviewPolicy: .conservative)
+        var state = DirectorAuthority()
         #expect(!state.mayPropose)
         #expect(state.apply(.enable(.suggest), prerequisites: .init(nominationsCurrent: true, previewAvailable: true, sourcesHealthy: true, outputHealthy: true, admissionCurrent: true, qualifiedLevels: [.assist])).state.mayPropose)
         #expect(!state.mayPrepare)
@@ -17,7 +17,7 @@ import Testing
     }
 
     @Test func manualWinsPendingWork() {
-        var state = DirectorAuthority(reviewPolicy: .conservative)
+        var state = DirectorAuthority()
         state.apply(.enable(.assist), prerequisites: .init(nominationsCurrent: true, previewAvailable: true, sourcesHealthy: true, outputHealthy: true, admissionCurrent: true, qualifiedLevels: [.assist]))
         let old = state.epoch
         let result = state.apply(.manualCommand)
@@ -32,7 +32,7 @@ import Testing
     }
 
     @Test func pausePinEditLiveAndLoss() {
-        var state = DirectorAuthority(reviewPolicy: .conservative)
+        var state = DirectorAuthority()
         state.apply(.enable(.assist), prerequisites: .init(nominationsCurrent: true, previewAvailable: true, sourcesHealthy: true, outputHealthy: true, admissionCurrent: true, qualifiedLevels: [.assist]))
         #expect(!state.apply(.pause).state.mayPrepare)
         #expect(state.apply(.resume, prerequisites: .init(nominationsCurrent: true, previewAvailable: true, sourcesHealthy: true, outputHealthy: true, admissionCurrent: true, qualifiedLevels: [.assist])).state.mayPrepare)
@@ -50,7 +50,7 @@ import Testing
     @Test func pauseWithdrawsProposalAndPreparation() {
         // Replaces the retired section() projection (A-04): status now comes
         // from the controller; the authority only answers what is allowed.
-        var state = DirectorAuthority(reviewPolicy: .conservative)
+        var state = DirectorAuthority()
         state.apply(.enable(.assist), prerequisites: good)
         #expect(state.mayPropose && state.mayPrepare)
         state.apply(.pause)
@@ -61,7 +61,7 @@ import Testing
 
 extension DirectorAuthorityTests {
     @Test func actionSpecificAndSupersedingGrants() {
-        var state = DirectorAuthority(reviewPolicy: .conservative)
+        var state = DirectorAuthority()
         #expect(state.apply(.enable(.assist)).refusal == .prerequisites)
         state.apply(.enable(.suggest), prerequisites: good)
         let suggest = state.epoch
@@ -97,7 +97,7 @@ extension DirectorAuthorityTests {
         .identityLost(.b), .sourceLoss(.b), .sourceRebound(.b), .outputFault, .admissionLost,
         .policyChanged, .nominationChanged, .pin(.a)])
     func interventionsLatchPause(event: DirectorAuthority.Event) {
-        var state = DirectorAuthority(reviewPolicy: .conservative)
+        var state = DirectorAuthority()
         state.apply(.enable(.assist), prerequisites: good)
         let old = state.epoch
         #expect(state.apply(event).cancellations == [.proposal, .prepare, .take])
@@ -112,7 +112,7 @@ extension DirectorAuthorityTests {
     }
 
     @Test func temporaryGapAndNonInterventions() {
-        var state = DirectorAuthority(reviewPolicy: .conservative)
+        var state = DirectorAuthority()
         state.apply(.enable(.assist), prerequisites: good)
         let old = state.epoch
         state.apply(.navigation); state.apply(.cosmeticEdit)
@@ -123,7 +123,7 @@ extension DirectorAuthorityTests {
     }
 
     @Test func generationExhaustionIsTerminal() {
-        var state = DirectorAuthority(reviewPolicy: .conservative, initialEpoch: UInt64.max - 1)
+        var state = DirectorAuthority(initialEpoch: UInt64.max - 1)
         state.apply(.enable(.assist), prerequisites: good)
         let old = state.epoch
         #expect(state.mayPrepare)
@@ -147,7 +147,7 @@ extension DirectorAuthorityTests {
 
     @Test(arguments: [DirectorAuthority.Level.assist, .auto, .backup])
     func unqualifiedLevelsAreRefusedWithoutSubstitution(level: DirectorAuthority.Level) {
-        var state = DirectorAuthority(reviewPolicy: .conservative)
+        var state = DirectorAuthority()
         state.apply(.enable(.suggest), prerequisites: prerequisites(qualified: []))
         let epoch = state.epoch
         #expect(state.apply(.enable(level), prerequisites: prerequisites(qualified: [])).refusal == .notQualified)
@@ -157,14 +157,14 @@ extension DirectorAuthorityTests {
     }
 
     @Test func suggestNeedsNoQualificationAndNeverPrepares() {
-        var state = DirectorAuthority(reviewPolicy: .conservative)
+        var state = DirectorAuthority()
         #expect(state.apply(.enable(.suggest), prerequisites: prerequisites(qualified: [])).refusal == nil)
         #expect(state.mayPropose && !state.mayPrepare && !state.mayTake)
     }
 
     @Test(arguments: [DirectorAuthority.Level.suggest, .assist])
     func operatorTakeInShadowOrAssistRetiresWithoutPausing(level: DirectorAuthority.Level) {
-        var state = DirectorAuthority(reviewPolicy: .conservative)
+        var state = DirectorAuthority()
         state.apply(.enable(level), prerequisites: prerequisites(qualified: [.assist]))
         let old = state.epoch
         let transition = state.apply(.operatorTake)
@@ -176,7 +176,7 @@ extension DirectorAuthorityTests {
 
     @Test func operatorTakeWithoutTimingFailsClosedWithoutPausing() {
         // Missing integration timing inhibits cuts; it never blocks the operator.
-        var state = DirectorAuthority(reviewPolicy: .conservative)
+        var state = DirectorAuthority()
         state.apply(.enable(.auto), prerequisites: prerequisites(qualified: [.auto]))
         state.apply(.operatorTake)
         #expect(!state.paused && state.mayPrepare && !state.mayIssueTake(at: 10))
@@ -185,7 +185,7 @@ extension DirectorAuthorityTests {
     @Test(arguments: [DirectorAuthority.Event.manualCommand, .editLive(true)])
     func manualActionIsATakeoverAtEveryLevel(event: DirectorAuthority.Event) {
         for level in [DirectorAuthority.Level.suggest, .assist, .auto, .backup] {
-            var state = DirectorAuthority(reviewPolicy: .conservative)
+            var state = DirectorAuthority()
             state.apply(.enable(level), prerequisites: prerequisites(qualified: [.assist, .auto, .backup]))
             state.apply(event)
             #expect(state.paused && !state.mayPropose, "level \(level)")
@@ -193,7 +193,7 @@ extension DirectorAuthorityTests {
     }
 
     @Test func handToAlfieResumesWithCurrentPrerequisitesOnly() {
-        var state = DirectorAuthority(reviewPolicy: .conservative)
+        var state = DirectorAuthority()
         state.apply(.enable(.assist), prerequisites: prerequisites(qualified: [.assist]))
         state.apply(.manualCommand)
         let paused = state.epoch
@@ -205,7 +205,7 @@ extension DirectorAuthorityTests {
     }
 
     @Test func resumeRefusedWhenQualificationLapsed() {
-        var state = DirectorAuthority(reviewPolicy: .conservative)
+        var state = DirectorAuthority()
         state.apply(.enable(.assist), prerequisites: prerequisites(qualified: [.assist]))
         state.apply(.pause)
         #expect(state.apply(.resume, prerequisites: prerequisites(qualified: [])).refusal == .notQualified)
@@ -214,7 +214,7 @@ extension DirectorAuthorityTests {
 
     @Test func bareEpochNeverAuthorizesTake() {
         for level in [DirectorAuthority.Level.suggest, .assist, .auto, .backup] {
-            var state = DirectorAuthority(reviewPolicy: .conservative)
+            var state = DirectorAuthority()
             state.apply(.enable(level), prerequisites: prerequisites(qualified: [.assist, .auto, .backup]))
             #expect(!state.authorizes(state.epoch, action: .take))
         }
