@@ -235,5 +235,12 @@
     "pushedBranch": "codex/next-ticket-batches-2026-10-24",
     "pullRequest": "not created: integration 403; gh not logged in",
     "merged": false
-  }
+  },
+  "fingerprintedRelease": {
+    "result": "passed",
+    "releaseLog": "/private/tmp/alfie-batches-20261024/release-fingerprinted.log",
+    "identity": "candidate-identity.json",
+    "copiedExecutableAndEmbeddedFingerprintVerified": true
+  },
+  "environment": "environment.json"
 }

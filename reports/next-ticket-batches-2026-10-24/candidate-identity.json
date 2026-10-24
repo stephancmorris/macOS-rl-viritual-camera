@@ -1,0 +1,10 @@
+{
+  "sourceFingerprint": "71ff75c4e3973b1866be4e99842715113198c4f97e727673d68b367d3f1ca721",
+  "version": "1.0",
+  "build": "4",
+  "executableSHA256": "a90ecae7da930836a80a01e5bdb07b043ecdfccdd9502b37fa3fcb0908ae47d9",
+  "infoPlistSHA256": "d18a19cebe0db13c283b72b9d371aa000c3f4a1ea860866a83d4d67281e48eef",
+  "signing": "CODE_SIGNING_ALLOWED=NO",
+  "qualification": false,
+  "codeRevision": "2d1b4ea9358e091add5a9035518b783147bc0406"
+}
