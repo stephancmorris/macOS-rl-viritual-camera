@@ -134,6 +134,40 @@ import Testing
         #expect(channel.zoomMoveDirection == .pullOut && channel.operatorGestureInProgress)
     }
 
+    @Test func capturedMoveCannotCrossDetachAndFreshDetachedRequestsRefuse() throws {
+        let r = try rig(), controller = r.show.director, channel = r.show.channelA
+        let captured = try request(r), before = channel.revisions
+        controller.detach()
+        #expect(r.execution.commit(captured) == .rejected)
+        #expect(channel.revisions == before && !channel.hasDirectorShotMove(id: captured.id))
+        #expect(controller.handToAlfie() == .accepted)
+        #expect(r.execution.enqueue(.init(preset: .stage(.fullBody)), programStartedAt: 90,
+            configuration: configuration) == nil)
+        controller.attach()
+        #expect(controller.authority.paused)
+        #expect(r.execution.commit(captured) == .rejected)
+        #expect(controller.handToAlfie() == .accepted)
+        let fresh = try request(r)
+        #expect(r.execution.commit(captured) == .rejected)
+        #expect(r.execution.commit(fresh) == .started(fresh.id))
+    }
+
+    @Test func detachedMoveOwnerStopsBeforeItsNextFrameEvenOutsideTheControllerAdapter() throws {
+        let r = try rig(), channel = r.show.channelA, engine = try #require(channel.cropEngine)
+        let plan = try request(r)
+        #expect(r.execution.commit(plan) == .started(plan.id))
+        channel.advanceShotMove(now: 100)
+        r.clock.now = 100.1; channel.advanceShotMove(now: 100.1)
+        let held = engine.currentCrop
+        r.show.director.detach()
+        // This independently retained adapter is not the controller-owned
+        // adapter retired by detach; its frame owner must reject detached use.
+        #expect(r.show.director.handToAlfie() == .accepted)
+        r.clock.now = 100.2; channel.advanceShotMove(now: 100.2)
+        #expect(engine.currentCrop == held && !channel.hasDirectorShotMove(id: plan.id))
+        #expect(channel.directorShot == plan.from)
+    }
+
     @Test func actualControllerManualReversalKeepsTheInterruptedRungGeometry() throws {
         let r = try rig(), controller = r.show.director, channel = r.show.channelA
         controller.onAirMoves.programReadinessForTesting = .init(reasons: [])

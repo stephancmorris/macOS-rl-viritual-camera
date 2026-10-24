@@ -3,34 +3,50 @@
 //  CinematicCoreMacOS
 //
 //  Which main view the operator gets. The Multiview console (and everything
-//  multi-camera: Preview, Take, a second input) exists only in Stage format.
-//  Webcam format keeps the traditional single-camera view — wide source plus
-//  crop and the existing pill — exactly as today. ContentView resolves this
-//  from the capture profile; see docs/ALFIE_MULTICAMERA_SPEC.md "Format scope".
+//  multi-camera: Preview, Take, a second input) exists only in Multi Cam.
+//  Single Cam and Webcam keep the traditional single-camera view — wide
+//  source plus crop and the existing pill. ContentView resolves this from the
+//  operator mode; see docs/ALFIE_MULTICAMERA_SPEC.md "Operator modes".
 //
 
 import Foundation
 
 nonisolated enum ConsolePresentation: Equatable, Sendable {
-    /// Webcam format: the existing single-camera console.
+    /// Single Cam and Webcam: the single-camera console.
     case traditional
-    /// Stage format: the Multiview console (Preview / Program / Take).
+    /// Multi Cam: the Multiview console (Preview / Program / Take).
     case multiview
 
-    static func resolve(for profile: CaptureProfilePolicy.Profile) -> ConsolePresentation {
-        switch profile {
-        case .stage: return .multiview
-        case .webcam: return .traditional
+    /// The single mapping from operator mode to view.
+    static func resolve(for mode: OperatorMode) -> ConsolePresentation {
+        switch mode {
+        case .multiCam: return .multiview
+        case .singleCam, .webcam: return .traditional
         }
     }
 
-    /// Multi-camera (a Preview input, Take, cueing) is Stage-only.
+    /// Multi-camera (a Preview input, Take, cueing) is Multi Cam only.
     var allowsMultipleInputs: Bool { self == .multiview }
 
-    /// Changing format swaps the whole console, so it is refused while a
-    /// multi-camera show runs; the operator stops the show first. A
-    /// single-camera session can switch as it does today.
-    static func canSwitchFormat(isShowRunning: Bool, runningInputs: Int) -> Bool {
-        !(isShowRunning && runningInputs > 1)
+    /// What fills ContentView's main layer.
+    enum Screen: Equatable, Sendable {
+        /// Multi Cam while capture runs.
+        case multiviewConsole
+        /// Multi Cam while stopped (SHOW-SETUP).
+        case showSetup
+        /// Single Cam or Webcam while capture runs: wide source + crop, the
+        /// overlays and the operator pill.
+        case singleCameraLive
+        /// Single Cam or Webcam while stopped.
+        case stopped
+    }
+
+    /// The single mapping from mode and capture state to the main screen.
+    /// Without a show (previews) there is no Multiview console.
+    static func screen(for mode: OperatorMode, isCaptureRunning: Bool, hasShow: Bool) -> Screen {
+        if resolve(for: mode) == .multiview, hasShow {
+            return isCaptureRunning ? .multiviewConsole : .showSetup
+        }
+        return isCaptureRunning ? .singleCameraLive : .stopped
     }
 }

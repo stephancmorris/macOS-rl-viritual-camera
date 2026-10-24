@@ -16,6 +16,7 @@
 //
 
 import AppKit
+import Darwin
 import Foundation
 import OSLog
 
@@ -168,6 +169,9 @@ nonisolated struct DiagnosticsSessionIdentity: Codable, Equatable, Sendable {
         var deviceModelID: String?
         /// "stage" or "webcam" (CaptureProfilePolicy profile).
         var captureProfile: String?
+        /// "single_cam", "multi_cam" or "webcam" (OperatorMode). Absent in
+        /// manifests written before the three modes.
+        var operatorMode: String?
         var requestedWidth: Int?
         var requestedHeight: Int?
         /// Capture rate Alfie configured on the device.
@@ -227,56 +231,83 @@ nonisolated struct DiagnosticsManifest: Codable, Equatable, Sendable {
 
 /// Serial, off-MainActor file appender.
 ///
-/// `@unchecked Sendable` is sound because `handle` is only ever read or written
-/// inside `queue`, which is serial. Every closure is explicitly `@Sendable`:
+/// `@unchecked Sendable` is sound because file handles and the owned manifest
+/// URL are only accessed inside the serial queue. Every closure is `@Sendable`:
 /// with `NonisolatedNonsendingByDefault` a bare `DispatchQueue.async` closure
 /// is `nonisolated nonsending`, which resolves to the wrong overload.
 private final class DiagnosticsFileWriter: @unchecked Sendable {
     private let queue = DispatchQueue(label: "com.alfie.diagnostics.write", qos: .utility)
     private var handle: FileHandle?
+    private var memoryHandle: FileHandle?
+    private var manifestURL: URL?
 
-    /// Create the file (writing `header` if it is new) and seek to the end.
-    func open(url: URL, header: String) {
+    /// Reserve the entire session before admitting rows. A collision at any
+    /// member refuses the attempt and preserves every pre-existing artifact.
+    /// Both CSVs and the manifest share this queue, including close/restart.
+    func open(url: URL, memoryURL: URL, manifestURL: URL?, header: String,
+              memoryHeader: String, manifestData: Data?) {
         queue.async { @Sendable in
+            guard self.handle == nil, self.memoryHandle == nil, self.manifestURL == nil else { return }
             let fileManager = FileManager.default
+            var allocated: [(URL, FileHandle)] = []
             do {
-                try fileManager.createDirectory(
-                    at: url.deletingLastPathComponent(),
-                    withIntermediateDirectories: true
-                )
+                try fileManager.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
+                func reserve(_ destination: URL) throws -> FileHandle {
+                    // Match ordinary file creation permissions, filtered by umask.
+                    // O_EXCL also refuses existing files and dangling symlinks.
+                    let descriptor = Darwin.open(destination.path, O_WRONLY | O_CREAT | O_EXCL | O_NOFOLLOW | O_CLOEXEC, mode_t(0o666))
+                    guard descriptor >= 0 else { throw CocoaError(.fileWriteFileExists) }
+                    let file = FileHandle(fileDescriptor: descriptor, closeOnDealloc: true)
+                    allocated.append((destination, file))
+                    return file
+                }
+                let soak = try reserve(url)
+                let memory = try reserve(memoryURL)
+                let manifest = try manifestURL.map { try reserve($0) }
+                try soak.write(contentsOf: Data(header.utf8))
+                try memory.write(contentsOf: Data(memoryHeader.utf8))
+                if let manifest {
+                    guard let manifestData else { throw CocoaError(.fileWriteUnknown) }
+                    try manifest.write(contentsOf: manifestData)
+                    try manifest.close()
+                }
+                self.handle = soak
+                self.memoryHandle = memory
+                self.manifestURL = manifestURL
             } catch {
-                return
+                for (destination, file) in allocated {
+                    try? file.close()
+                    try? fileManager.removeItem(at: destination)
+                }
             }
-            if !fileManager.fileExists(atPath: url.path) {
-                fileManager.createFile(atPath: url.path, contents: Data(header.utf8))
-            }
-            self.handle = try? FileHandle(forWritingTo: url)
-            _ = try? self.handle?.seekToEnd()
         }
     }
 
-    func append(_ line: String) {
+    func append(_ line: String, memory: Bool = false) {
         queue.async { @Sendable in
-            guard let handle = self.handle else { return }
+            guard let handle = memory ? self.memoryHandle : self.handle else { return }
             try? handle.write(contentsOf: Data(line.utf8))
         }
     }
 
-    /// Write a whole small file (the session manifest), replacing any previous
-    /// version. Same serial queue, so it never races the CSV appends.
+    /// Only update the manifest successfully reserved by this session. Keep
+    /// the existing atomic replacement behavior for its closing metadata.
     func replace(url: URL, data: Data) {
         queue.async { @Sendable in
-            try? FileManager.default.createDirectory(
-                at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
+            guard self.manifestURL == url else { return }
             try? data.write(to: url, options: .atomic)
         }
     }
 
     func close() {
         queue.async { @Sendable in
-            try? self.handle?.synchronize()
-            try? self.handle?.close()
+            for handle in [self.handle, self.memoryHandle].compactMap({ $0 }) {
+                try? handle.synchronize()
+                try? handle.close()
+            }
             self.handle = nil
+            self.memoryHandle = nil
+            self.manifestURL = nil
         }
     }
 
@@ -443,27 +474,28 @@ final class DiagnosticsLog {
 
         """
 
+    /// One queue owns the throughput CSV, memory CSV and optional manifest.
     private let writer = DiagnosticsFileWriter()
-
-    /// Second file, same folder and same 5 s cadence, dedicated to the memory
-    /// growth investigation. Kept separate from the throughput CSV so neither
-    /// chart has to carry the other's columns.
-    private let memoryWriter = DiagnosticsFileWriter()
     private let directoryOverride: URL?
     private let cleanupClock: @Sendable () -> Date
+    private let wallClock: @Sendable () -> Date
+    private let sessionID: @Sendable () -> UUID
     private var storageDirectory: URL { directoryOverride ?? Self.directory }
 
     /// Default paths and the off-main cleanup clock are unchanged in production.
     /// Isolated audits can supply a temporary directory and a fixed wall clock.
-    init(directory: URL? = nil, cleanupClock: @escaping @Sendable () -> Date = { Date() }) {
+    init(directory: URL? = nil, cleanupClock: @escaping @Sendable () -> Date = { Date() },
+         wallClock: @escaping @Sendable () -> Date = { Date() },
+         sessionID: @escaping @Sendable () -> UUID = { UUID() }) {
         directoryOverride = directory
         self.cleanupClock = cleanupClock
+        self.wallClock = wallClock
+        self.sessionID = sessionID
     }
 
     /// An audit/read barrier, not a frame-path flush or a new cleanup trigger.
     func waitForPendingFileOperations() async {
         await writer.drain()
-        await memoryWriter.drain()
     }
 
     private var sessionStart: TimeInterval = 0
@@ -494,6 +526,7 @@ final class DiagnosticsLog {
 
     private static let fileStampFormatter: DateFormatter = {
         let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "en_US_POSIX")
         formatter.dateFormat = "yyyy-MM-dd_HHmmss"
         return formatter
     }()
@@ -511,16 +544,14 @@ final class DiagnosticsLog {
 
     func beginSession(note: String, identity: DiagnosticsSessionIdentity? = nil) {
         guard !isOpen else { return }
-        let stamp = Self.fileStampFormatter.string(from: Date())
+        let now = wallClock()
+        let stamp = Self.fileStampFormatter.string(from: now) + "_" + sessionID().uuidString
         let name = "alfie_soak_\(stamp).csv"
         let url = storageDirectory.appendingPathComponent(name)
-        // Same folder, same timestamp, so the set from one run is obvious.
+        // Preserve legacy local-time ordering; UUID distinguishes same-second sessions.
+        // All members share the full timestamp/UUID session token.
         let memoryName = "alfie_memory_\(stamp).csv"
         let memoryURL = storageDirectory.appendingPathComponent(memoryName)
-
-        writer.open(url: url, header: Self.header)
-        memoryWriter.open(url: memoryURL, header: Self.memoryHeader)
-        writer.prune(directory: storageDirectory, olderThan: 30, clock: cleanupClock)
 
         sessionStart = CACurrentMediaTime()
         lastCPUSeconds = Self.processCPUSeconds()
@@ -538,18 +569,29 @@ final class DiagnosticsLog {
             let manifest = DiagnosticsManifest(
                 csvFile: name,
                 memoryFile: memoryName,
-                startedAt: Self.isoFormatter.string(from: Date()),
+                startedAt: Self.isoFormatter.string(from: now),
                 identity: identity,
                 columns: Self.columns,
                 unobservable: Self.alwaysUnobservable + [identity.output.presentation])
             let manifestURL = storageDirectory.appendingPathComponent("alfie_session_\(stamp).json")
             self.manifest = manifest
             self.manifestURL = manifestURL
-            writeManifest()
         } else {
             manifest = nil
             manifestURL = nil
         }
+
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
+        let manifestData = manifest.flatMap { try? encoder.encode($0) }
+        guard manifest == nil || manifestData != nil else {
+            isOpen = false
+            currentFileName = nil
+            return
+        }
+        writer.open(url: url, memoryURL: memoryURL, manifestURL: manifestURL, header: Self.header,
+                    memoryHeader: Self.memoryHeader, manifestData: manifestData)
+        writer.prune(directory: storageDirectory, olderThan: 30, clock: cleanupClock)
 
         // Marker row up front so the file is never empty and never undated,
         // even if the session dies before the first 5 s window closes.
@@ -581,7 +623,6 @@ final class DiagnosticsLog {
         manifest = nil
         manifestURL = nil
         writer.close()
-        memoryWriter.close()
     }
 
     private func writeManifest() {
@@ -757,7 +798,7 @@ final class DiagnosticsLog {
             detectedPersons, framesTotal,
             Self.csvEscaped(noteField)
         )
-        memoryWriter.append(row)
+        writer.append(row, memory: true)
     }
 
     /// Memory split the same way Activity Monitor splits it.

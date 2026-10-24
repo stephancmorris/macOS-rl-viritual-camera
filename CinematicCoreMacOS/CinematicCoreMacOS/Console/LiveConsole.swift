@@ -3,8 +3,8 @@
 //  CinematicCoreMacOS
 //
 //  Wires the Multiview console to the live engine (CONSOLE / TAKE-BAR /
-//  NEXT-PANEL / INPUT-STRIP / PILL-TARGET integration). Shown in Stage format
-//  while capture runs when DeveloperFlags.useMultiviewConsole is on.
+//  NEXT-PANEL / INPUT-STRIP / PILL-TARGET integration). Shown in Multi Cam
+//  while capture runs (see OperatorMode).
 //
 //  - The console reads one ConsoleSnapshot, rebuilt from ShowCoordinator at
 //    ≤15 Hz by a timer — never per frame.
@@ -279,8 +279,8 @@ final class LiveConsoleModel: ObservableObject, ConsoleActions {
 
     func measurePair() {
         guard let preview = show.previewChannel else { return }
-        pairCheck.start(show: show, preview: preview) { [weak self] result in
-            self?.show.recordAdmission(result)
+        pairCheck.start(show: show, preview: preview) { [weak self] result, binding in
+            self?.show.recordAdmission(result, for: binding)
             self?.refresh()
         }
     }

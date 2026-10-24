@@ -410,6 +410,42 @@ def stratum(r):
     return (r['sessionID'], r['evidenceClass'], c['segmentType'], c.get('segmentToken'), p.get('parametersVersion'), p.get('preferencesVersion'), c['policyRevision'], c['routeGeneration'])
 
 
+def action_pair_scope_matches(attempt, result):
+    """Allow only the scope transitions committed by the named synchronous action.
+
+    Predictions still use the attempt's original stratum. These exceptions do
+    not join independent source, parameter, model or policy observations.
+    """
+    ac, bc = attempt['context'], result['context']
+    ap, bp = attempt['parameters'], result['parameters']
+    ae, be = attempt['event'], result['event']
+    models = lambda row: [(j['judgeKind'], j.get('modelVersion')) for j in row['judgements']]
+    if (attempt['sessionID'] != result['sessionID'] or attempt['evidenceClass'] != result['evidenceClass']
+            or ac['inputs'] != bc['inputs'] or ac['nominationRevision'] != bc['nominationRevision']
+            or models(attempt) != models(result)):
+        return False
+    if be['action'] == 'take' and be['outcome'] == 'completed':
+        return (stratum(attempt)[:-1] == stratum(result)[:-1] and ap == bp
+                and int(bc['routeGeneration']) == int(ac['routeGeneration']) + 1
+                and be.get('programAfter') == ac.get('preview')
+                and bc['program'] == be['programAfter']
+                and bc.get('preview') == ac['program'] and be.get('previewAfter') == ac['program'])
+    if be['action'] == 'advanceSegment' and be['outcome'] == 'accepted':
+        # Only explicit advance can change segment/style and increment the
+        # policy once. Readiness, adapter, judge settings and preference version
+        # cannot change under cover of this action.
+        stable_parameters = lambda p: {k: v for k, v in p.items() if k not in ('parametersVersion', 'resolvedStyle')}
+        parameter_versions_match = ((ap.get('parametersVersion') is None and bp.get('parametersVersion') is None)
+            or (ap.get('parametersVersion') == ac['policyRevision'] and bp.get('parametersVersion') == bc['policyRevision']))
+        return (ac['program'] == bc['program'] and ac.get('preview') == bc.get('preview')
+                and ac['routeGeneration'] == bc['routeGeneration']
+                and int(bc['policyRevision']) == int(ac['policyRevision']) + 1
+                and ac.get('segmentToken') is not None and bc.get('segmentToken') is not None
+                and ac['segmentToken'] != bc['segmentToken']
+                and stable_parameters(ap) == stable_parameters(bp) and parameter_versions_match)
+    return stratum(attempt) == stratum(result) and ap == bp
+
+
 def analyze(records, window, issues=None, source=None):
     require(math.isfinite(window) and window >= 0)
     issues = Counter(issues or {})
@@ -458,7 +494,12 @@ def analyze(records, window, issues=None, source=None):
         if len(a) != 1 or len(b) != 1:
             issues['incomplete_or_duplicate_action_pairs'] += 1; blocked.add(session); continue
         a, b = a[0], b[0]; ae, be = a['event'], b['event']
-        if (a['eventTime'] > b['eventTime'] or stratum(a) != stratum(b) or
+        intervening = [r for r in sessions[session] if int(a['sequence']) < int(r['sequence']) < int(b['sequence'])]
+        raced = any(r['event']['kind'] == 'operatorAction' or stratum(r) != stratum(a)
+                    or r['evidenceClass'] != a['evidenceClass'] or r['context']['inputs'] != a['context']['inputs']
+                    for r in intervening)
+        if (a['eventTime'] > b['eventTime'] or int(a['sequence']) >= int(b['sequence']) or raced
+                or not action_pair_scope_matches(a, b) or
                 any(ae.get(k) != be.get(k) for k in ('action', 'target', 'shot', 'targetScope'))):
             issues['inconsistent_action_pairs'] += 1; blocked.add(session); continue
         if be['outcome'] != 'completed':

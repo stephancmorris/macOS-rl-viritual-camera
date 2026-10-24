@@ -63,21 +63,34 @@ class Session:
 
 # ---------------------------------------------------------------- loading
 
-STAMP = re.compile(r"alfie_(?:soak|memory|session)_(\d{4}-\d{2}-\d{2}_\d{6})")
+SESSION_TOKEN = (r"\d{4}-\d{2}-\d{2}_\d{6}"
+                 r"(?:_[0-9A-Fa-f]{8}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{12})?")
+STAMP = re.compile(r"alfie_(?P<kind>soak|memory|session)_(?P<token>" + SESSION_TOKEN + r")\.(?P<extension>csv|json)")
+
+
+def session_token(path: Path) -> str | None:
+    match = STAMP.fullmatch(path.name)
+    if match and match['extension'] == ('json' if match['kind'] == 'session' else 'csv'):
+        return match['token']
+    return None
 
 
 def locate(target: Path) -> Session:
-    """Find the session files for a CSV, manifest or folder (newest session)."""
+    """Find exact-token companions; folder discovery refuses tied latest seconds."""
     if target.is_dir():
-        stamps = sorted({m.group(1) for p in target.iterdir() if (m := STAMP.search(p.name))})
+        stamps = {token for p in target.iterdir() if (token := session_token(p)) is not None}
         if not stamps:
             raise SystemExit(f"No Alfie diagnostics files in {target}")
-        folder, stamp = target, stamps[-1]
+        latest_second = max(token[:17] for token in stamps)
+        newest = {token for token in stamps if token[:17] == latest_second}
+        if len(newest) != 1:
+            raise SystemExit("Multiple diagnostic sessions share the latest timestamp; select an explicit CSV or manifest.")
+        folder, stamp = target, newest.pop()
     else:
-        match = STAMP.search(target.name)
-        if not match:
+        stamp = session_token(target)
+        if stamp is None:
             raise SystemExit(f"Not an Alfie diagnostics file: {target}")
-        folder, stamp = target.parent, match.group(1)
+        folder = target.parent
 
     session = Session(stamp=stamp)
     for kind, attr in (("soak", "soak_path"), ("memory", "memory_path")):
@@ -235,7 +248,8 @@ def build_report(session: Session, expected_override: float | None = None, caden
             f"source fingerprint `{build.get('sourceFingerprint', 'unrecorded')}`",
             f"- Host: {build.get('machineModel', '?')}, {build.get('osVersion', '?')}",
             f"- Source: {source.get('inputKind', '?')} · {source.get('deviceName') or '–'}"
-            f" · profile {source.get('captureProfile') or '–'}",
+            f" · profile {source.get('captureProfile') or '–'}"
+            f" · mode {source.get('operatorMode') or '–'}",
             f"- Requested {source.get('requestedWidth', '–')}×{source.get('requestedHeight', '–')} at "
             f"{fmt(source.get('configuredCaptureFPS'), 2)} fps; delivered "
             f"{source.get('deliveredWidth', '–')}×{source.get('deliveredHeight', '–')}"

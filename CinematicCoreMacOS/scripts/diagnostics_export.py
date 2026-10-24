@@ -64,8 +64,14 @@ ENUMS = {
 }
 
 
+# Legacy stamps remain readable. New files add the complete UUID token so
+# same-second sessions cannot be paired by their wall-clock prefix alone.
+SESSION_TOKEN = (r"\d{4}-\d{2}-\d{2}_\d{6}"
+                 r"(?:_[0-9A-Fa-f]{8}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{12})?")
+
+
 def _selected_file(path: Path, kind: str) -> tuple[Path, str]:
-    match = re.fullmatch(r"alfie_" + kind + r"_(\d{4}-\d{2}-\d{2}_\d{6})\.csv", path.name)
+    match = re.fullmatch(r"alfie_" + kind + "_(" + SESSION_TOKEN + r")\.csv", path.name)
     if not match or path.is_symlink() or not path.is_file():
         raise ExportError("Select a regular Alfie diagnostics CSV of the requested kind.")
     return path.resolve(), match.group(1)

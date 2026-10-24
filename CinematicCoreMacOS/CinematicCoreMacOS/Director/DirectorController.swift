@@ -127,6 +127,10 @@ final class DirectorController: ObservableObject, DirectorConsoleControlling {
     /// Install every ingress hook and start ticking. Idempotent.
     func attach() {
         guard let show else { return }
+        if !isAttached, !authority.paused {
+            forward(.pause, pause: .setupChanged, note: "controller attaching")
+        }
+        assistPreparation.retire()
         retireAutomaticCuts()
         backupExecution.retire()
         onAirMoves.retire()
@@ -156,11 +160,16 @@ final class DirectorController: ObservableObject, DirectorConsoleControlling {
     }
 
     func detach() {
+        let wasAttached = isAttached
         isAttached = false
+        assistPreparation.retire()
         retireSubjectDiscovery()
         backupExecution.retire()
         onAirMoves.retire()
         retireAutomaticCuts()
+        // No automatic grant crosses a gap in the manual/fault ingress hooks.
+        // Reattaching restores observation; explicit handback restores control.
+        if wasAttached { forward(.pause, pause: .setupChanged, note: "controller detached") }
         refreshSection()
         ticker.stop()
         detachHooks()
@@ -210,8 +219,12 @@ final class DirectorController: ObservableObject, DirectorConsoleControlling {
             if command.origin == .operatorUI { emitShadow(DirectorShadowRecorder.command(command), authority: authority) }
             forward(.manualCommand, pause: .operatorTookOver, note: "manual \(command.action.logName) on \(channel.cameraLabel)")
         case .settingsChanged:
-            emitShadow(DirectorShadowRecorder.action(.settingsChanged), authority: authority)
+            let actionID = UUID()
+            emitShadow(DirectorShadowRecorder.action(.settingsChanged, id: actionID), authority: authority)
             forward(.manualCommand, pause: .operatorTookOver, note: "settings changed on \(channel.cameraLabel)")
+            // The current settings notification runs before @Published commits
+            // the new value. Its completion is not observed at this boundary.
+            emitShadow(DirectorShadowRecorder.action(.settingsChanged, id: actionID, outcome: .unobserved), authority: authority)
         }
     }
 
@@ -429,9 +442,12 @@ final class DirectorController: ObservableObject, DirectorConsoleControlling {
     @discardableResult
     func setLevel(_ level: Section.Level) -> DirectorControlResult {
         let requested = Self.authorityLevel(level)
-        let before = authority
+        let actionID = UUID()
+        emitShadow(DirectorShadowRecorder.action(.setLevel, id: actionID), authority: authority)
         let transition = authority.apply(.enable(requested), prerequisites: prerequisites())
-        record(.enable(requested), transition: transition, note: "set level \(level.title)", before: before)
+        record(.enable(requested), transition: transition, note: "set level \(level.title)")
+        emitShadow(DirectorShadowRecorder.action(.setLevel, id: actionID,
+            outcome: transition.refusal == nil ? .accepted : .refused), authority: authority)
         if transition.refusal == nil { pauseReason = nil }
         refreshSection()
         return result(transition.refusal)
@@ -439,9 +455,12 @@ final class DirectorController: ObservableObject, DirectorConsoleControlling {
 
     @discardableResult
     func handToAlfie() -> DirectorControlResult {
-        let before = authority
+        let actionID = UUID()
+        emitShadow(DirectorShadowRecorder.action(.handToAlfie, id: actionID), authority: authority)
         let transition = authority.apply(.handToAlfie, prerequisites: prerequisites())
-        record(.handToAlfie, transition: transition, note: "hand to Alfie", before: before)
+        record(.handToAlfie, transition: transition, note: "hand to Alfie")
+        emitShadow(DirectorShadowRecorder.action(.handToAlfie, id: actionID,
+            outcome: transition.refusal == nil ? .accepted : .refused), authority: authority)
         if transition.refusal == nil { pauseReason = nil }
         refreshSection()
         return result(transition.refusal)
@@ -449,8 +468,10 @@ final class DirectorController: ObservableObject, DirectorConsoleControlling {
 
     func takeOver() {
         guard isDirecting else { return }
-        emitShadow(DirectorShadowRecorder.action(.takeOver, outcome: .accepted), authority: authority)
+        let actionID = UUID()
+        emitShadow(DirectorShadowRecorder.action(.takeOver, id: actionID), authority: authority)
         apply(.pause, pause: .operatorTookOver, note: "operator took over")
+        emitShadow(DirectorShadowRecorder.action(.takeOver, id: actionID, outcome: .accepted), authority: authority)
     }
 
     /// The console reads the current token at the action boundary.
@@ -537,10 +558,15 @@ final class DirectorController: ObservableObject, DirectorConsoleControlling {
 
     /// Operator advancement is style-scoped. It cannot grant or pause authority.
     func advanceSegment() {
-        guard var next = runSheet, next.advance(), policyRevision < UInt64.max else { return }
+        let actionID = UUID()
+        emitShadow(DirectorShadowRecorder.action(.advanceSegment, id: actionID), authority: authority)
+        guard var next = runSheet, next.advance(), policyRevision < UInt64.max else {
+            emitShadow(DirectorShadowRecorder.action(.advanceSegment, id: actionID, outcome: .refused), authority: authority)
+            return
+        }
         runSheet = next
         styleContextChanged()
-        emitShadow(DirectorShadowRecorder.action(.advanceSegment, outcome: .accepted), authority: authority)
+        emitShadow(DirectorShadowRecorder.action(.advanceSegment, id: actionID, outcome: .accepted), authority: authority)
     }
 
     var effectiveStyle: DirectorStyle? {
@@ -649,15 +675,14 @@ final class DirectorController: ObservableObject, DirectorConsoleControlling {
     private func apply(_ event: DirectorAuthority.Event, pause reason: Section.PauseReason?, note: String?,
                        takeTiming: DirectorAuthority.TakeTiming? = nil) {
         let wasPaused = authority.paused
-        let before = authority
         let transition = authority.apply(event, takeTiming: takeTiming)
-        record(event, transition: transition, note: note, before: before)
+        record(event, transition: transition, note: note)
         if authority.paused, !wasPaused, let reason { pauseReason = reason }
         if !authority.paused { pauseReason = nil }
         refreshSection()
     }
 
-    private func record(_ event: DirectorAuthority.Event, transition: DirectorAuthority.Transition, note: String?, before: DirectorAuthority) {
+    private func record(_ event: DirectorAuthority.Event, transition: DirectorAuthority.Transition, note: String?) {
         if transition.cancellations.contains(.take) {
             retireAutomaticCuts()
             backupExecution.retire(for: event)
@@ -666,16 +691,6 @@ final class DirectorController: ObservableObject, DirectorConsoleControlling {
         if transition.cancellations.contains(.prepare) { assistPreparation.retire(); retireSubjectDiscovery() }
         if event == .policyChanged { policyRevision &+= 1 }
         if event == .nominationChanged { nominationRevision &+= 1 }
-        switch event {
-        case .operatorTake: break // Attempt is logged even in Manual, before forward().
-        case .enable:
-            emitShadow(DirectorShadowRecorder.action(.setLevel, outcome: transition.refusal == nil ? .accepted : .refused), authority: before)
-        case .handToAlfie, .resume:
-            emitShadow(DirectorShadowRecorder.action(.handToAlfie, outcome: transition.refusal == nil ? .accepted : .refused), authority: before)
-        case .pause: break // Only the explicit operator control logs a takeover.
-        case .manualCommand: break // The addressed command hook records its actual typed action.
-        default: break
-        }
         if event == .restart { shadowRecorder?.restart() }
         appliedEvents.append(event)
         if appliedEvents.count > Self.eventHistoryLimit { appliedEvents.removeFirst(appliedEvents.count - Self.eventHistoryLimit) }

@@ -84,11 +84,11 @@ enum DeveloperFlags {
     /// effect in Release; it never touches the live pipeline.
     nonisolated static let exposeMultiviewGallery = true
 
-    /// Shows the Multiview console (Preview / Program / Take / inputs) in
-    /// Stage format, driven by the live ShowCoordinator, instead of the
-    /// single-camera wide + program layout. On for R2 builds; set false to
-    /// get the R1 single-camera Stage view back. Webcam format always keeps
-    /// the single-camera view.
+    /// Kill switch for Multi Cam, the operator mode that shows the Multiview
+    /// console (Preview / Program / Take / inputs) driven by the live
+    /// ShowCoordinator. On for R2 builds. Off removes Multi Cam from the mode
+    /// choices and opens a saved Multi Cam as Single Cam, the single-camera
+    /// view with Stage shots (see OperatorModeStore).
     nonisolated static let useMultiviewConsole = true
 
     /// DEVELOPMENT ONLY — on in Debug builds, always off in Release. Lets

@@ -1,0 +1,60 @@
+Window: "Composer", App: Alfie.
+0 standard window Composer, ID: com_apple_SwiftUI_Settings_window, Secondary Actions: Raise
+	1 container
+		2 text Alfie Settings Shot logic, framing style, deadzone, smoothing, and target hold behavior.
+		3 radio button Description: Basic, Value: 1
+		4 radio button Description: Advanced, Value: 0
+		5 scroll area Secondary Actions: Scroll Up, Scroll Down
+			6 heading Shot Composer
+			7 container
+				8 switch Enable Composer, Value: on
+				9 text Aims for a stable speaker shot when pose keypoints are available.
+			10 heading Mode
+			11 container
+				12 Mode, Help: Close-range framing for a video call or webcam.
+					13 radio button Description: Single Cam, Value: 0
+					14 radio button Description: Multi Cam, Value: 0
+					15 radio button Description: Webcam, Value: 1
+				16 text Close-range framing for a video call or webcam.
+			17 heading Framing Style
+			18 container
+				19 pop up button Frame Profile, Value: Livestream Rectangle
+				20 text Use Livestream Rectangle for normal YouTube or switcher feeds. Portrait Profile is a secondary vertical option.
+			21 heading Auto-Framing Feel
+			22 container
+				23 button Steady Follow
+				24 button Balanced
+				25 button Slow Pan
+				26 button Fast Follow
+				27 button Locked Down
+				28 text Holds the shot while the speaker stays inside the yellow band; re-centers when they cross it. Steady Band Width 10%
+				29 slider Secondary Actions: Increment, Decrement
+				30 text Width as a percentage of the program shot. The speaker can move within this band before the camera re-centers. Yellow guides show its boundaries.
+			31 heading Status
+			32 container
+				33 text Active Target, Value: No None Auto Steady Follow 16:9 Stream Webcam Wide L/R 8%  T/B 4%
+			34 scroll bar (settable, float) 0
+				35 value indicator (settable, float) 0
+				36 increment arrow button
+				37 decrement arrow button
+				38 increment page button
+				39 decrement page button
+	40 toolbar
+		41 button Composer, Secondary Actions: Move next, Remove from toolbar
+		42 button Detection, Secondary Actions: Move previous, Move next, Remove from toolbar
+		43 button Crop, Secondary Actions: Move previous, Move next, Remove from toolbar
+		44 button Output, Secondary Actions: Move previous, Move next, Remove from toolbar
+		45 button Director, Secondary Actions: Move previous, Remove from toolbar
+	46 close button
+	47 zoom button (disabled)
+	48 text Composer
+49 menu bar
+	50 Alfie
+	51 File
+	52 Edit
+	53 View
+	54 Session
+	55 Window
+	56 Help
+
+The focused UI element is 0 standard window Composer, ID: com_apple_SwiftUI_Settings_window, Secondary Actions: Raise

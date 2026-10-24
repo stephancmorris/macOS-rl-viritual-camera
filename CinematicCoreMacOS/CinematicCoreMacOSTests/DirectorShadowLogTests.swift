@@ -177,7 +177,9 @@ nonisolated private final class ShadowUTCClock: @unchecked Sendable {
         await log.flush()
         #expect(try records(file(log)).allSatisfy { $0.event.action != .takeOver })
         show.director.takeOver(); await log.flush()
-        #expect(try records(file(log)).filter { $0.event.action == .takeOver }.count == 1)
+        let takeover = try records(file(log)).filter { $0.event.action == .takeOver }
+        #expect(takeover.count == 2 && takeover[0].event.phase == .attempt && takeover[1].event.outcome == .accepted)
+        #expect(takeover[0].event.actionID == takeover[1].event.actionID)
     }
 
     private final class AcceptedSink: ProgramOutputSink {
@@ -192,6 +194,70 @@ nonisolated private final class ShadowUTCClock: @unchecked Sendable {
         func updateCaptureStatus(isRunning: Bool) {}
         func sendFrame(pixelBuffer: CVPixelBuffer, timestamp: Double) -> Bool { true }
     }
+
+    @Test func controlActionsRecordCorrelatedAttemptsAndHonestTerminalResults() async throws {
+        let base = root(); defer { try? FileManager.default.removeItem(at: base) }
+        let utc = date, log = try DirectorShadowLog(directory: base,
+            limits: .init(maximumRecordBytes: 8192, maximumQueuedBytes: 262144,
+                maximumFileBytes: 262144, maximumStoreBytes: 524288), utcClock: { utc })
+        let show = ShowCoordinator(programOutput: ProgramOutputManager(sinks: [AcceptedSink()]),
+            qualificationRecords: DirectorQualificationStore(storage: nil, acceptsInjectedRecords: false), directorShadowLog: log)
+        show.clock = { 100 }; show.router.clock = { 100 }
+        let b = show.addChannel(.b)
+        show.channelA.setRunningForTesting(true); b.setRunningForTesting(true)
+        b.shotComposer.lockTarget(UUID()); b.setOperationMode(.autoTracking)
+        show.channelA.outputPort.start(); show.channelA.outputPort.updateCaptureStatus(isRunning: true)
+        let controller = show.director
+        controller.shadowRecorder?.provenanceForTesting = [.synthetic, .synthetic]
+        controller.prerequisitesOverride = {
+            .init(nominationsCurrent: true, previewAvailable: true, sourcesHealthy: true,
+                outputHealthy: true, admissionCurrent: true, qualifiedLevels: [.assist])
+        }
+        #expect(controller.setRunSheet(try RunSheet(segments: [.init(type: .presenter), .init(type: .panel)])))
+        controller.attach()
+        #expect(controller.setLevel(.assist) == .accepted)
+        controller.takeOver()
+        #expect(controller.handToAlfie() == .accepted)
+        #expect(controller.setLevel(.auto) == .refused(NextShotStatus.DirectorSection.notQualifiedCaption))
+        b.shotComposer.config.steadyFollowingEnabled.toggle()
+        controller.advanceSegment(); controller.advanceSegment()
+
+        var buffer: CVPixelBuffer?
+        CVPixelBufferCreate(kCFAllocatorDefault, 64, 36, kCVPixelFormatType_32BGRA,
+            [kCVPixelBufferIOSurfacePropertiesKey: [:]] as CFDictionary, &buffer)
+        let pixels = try #require(buffer), route = show.router.routeGeneration
+        b.setLatestRenderedFrameForTesting(.init(channelID: .b, revisions: b.revisions, sourceTimestamp: 1,
+            processingStartedAt: 100, renderedAt: 100, crop: .fullFrame,
+            outputSize: .init(width: 1920, height: 1080), isRepeat: false, pixelBuffer: pixels))
+        #expect(show.take() == .committed(newProgram: .b))
+        controller.detach(); await log.flush()
+        let rows = try records(file(log))
+        #expect(log.metrics.dropped == 0 && rows.count == 16)
+        let groups = Dictionary(grouping: rows, by: { $0.event.actionID?.value })
+        #expect(groups.count == 8 && groups.values.allSatisfy { $0.count == 2 })
+        for pair in groups.values {
+            #expect(pair[0].event.phase == .attempt && pair[0].event.outcome == nil)
+            #expect(pair[1].event.phase == .result && pair[1].event.outcome != nil)
+            #expect(pair[0].event.action == pair[1].event.action)
+        }
+        #expect(rows[0].context.level == .off && rows[1].context.level == .assist)
+        #expect(!rows[2].context.paused && rows[3].context.paused)
+        #expect(rows[4].context.paused && !rows[5].context.paused)
+        #expect(rows[7].event.outcome == .refused && rows[9].event.outcome == .unobserved)
+        #expect(rows[10].context.policyRevision.value + 1 == rows[11].context.policyRevision.value)
+        #expect(rows[10].context.segmentToken != rows[11].context.segmentToken)
+        #expect(rows[13].event.outcome == .refused)
+        #expect(rows[14].context.routeGeneration.value == route && rows[15].context.routeGeneration.value == route + 1)
+        #expect(rows[15].event.outcome == .completed && rows[15].event.programAfter == "input-2")
+
+        if let requested = ProcessInfo.processInfo.environment["ALFIE_DIRECTOR_CONTROL_EXPORT"] {
+            let destination = URL(fileURLWithPath: requested).standardizedFileURL
+            let temporaryRoots = ["/private/tmp/", "/tmp/", FileManager.default.temporaryDirectory.standardizedFileURL.path + "/"]
+            try #require(requested.hasPrefix("/") && temporaryRoots.contains(where: { destination.path.hasPrefix($0) }))
+            _ = try await log.export(selection: .init(sessionIDs: [log.sessionID], fromUTC: utc, throughUTC: utc), toNewBundle: destination)
+        }
+    }
+
     @Test func completedTakeRecordsActualRoleSwapWithoutCallingAnAttemptACompletedCut() async throws {
         let base = root(); defer { try? FileManager.default.removeItem(at: base) }
         let utc = date, log = try DirectorShadowLog(directory: base, limits: limits, utcClock: { utc })

@@ -18,6 +18,12 @@
 
 The app resolves Documents/Library through FileManager's app-domain locations in the sandbox. The inspected app entitlements contain sandbox, camera, app group, IOSurface and system-extension installation capabilities, with no microphone or network entitlement. A source search found no `URLSession`, `NWConnection`, audio-capture or speech-recognizer path in the app/shared/extension Swift folders. Neither observation proves zero OS/service traffic or third-party/receiving-client behavior. Dependency and actual signed-bundle review remain necessary.
 
+### Diagnostic session ownership
+
+Each new diagnostics session preserves the legacy local timestamp convention and adds a UUID token shared by its soak CSV, memory CSV and optional session manifest. One off-main writer queue exclusively creates the set before appending rows; an existing member refuses the attempt without appending to it or replacing it, and removes only members allocated by that failed attempt. Rapid Stop/restart and separate recorder instances cannot merge their sessions merely because they start in the same second. Closing metadata atomically updates the successfully reserved manifest. Existing thirty-day modification-time cleanup and its session-start trigger remain unchanged.
+
+The detailed report and explicit metrics exporter accept both legacy timestamp-only filenames and the new full tokens. Companion matching uses the full token. If a folder contains multiple latest sessions in the same second, the detailed report requires an explicit CSV or manifest instead of choosing by UUID order. This is session-integrity behavior, not an additional consent or retention policy. Synthetic temporary-root regressions cover queued close/restart, multiple instances, pre-existing member preservation and partial-allocation cleanup; current candidate build evidence belongs to its batch report.
+
 ## Explicit metrics export
 
 For a local support summary, select the exact session CSV yourself and choose a **new** JSON file in an existing folder outside the selected input folders:

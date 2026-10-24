@@ -301,6 +301,9 @@ final class CameraManager: NSObject, ObservableObject {
     /// port is `programOutput` itself; any other channel's port is unrouted and
     /// cannot touch the output (see CameraChannel.swift).
     let channelID: ChannelID
+    /// The operator mode this channel runs in. Set with the composer format by
+    /// `OperatorModeStore.apply(to:)`; read for diagnostics.
+    var operatorMode: OperatorMode = .singleCam
     let outputPort: any ChannelOutputPort
 
     /// Discrete shot-intent revision (see ChannelFrame.swift). Increments on
@@ -338,7 +341,7 @@ final class CameraManager: NSObject, ObservableObject {
             deliveredWidth: sourcePixelWidth > 0 ? sourcePixelWidth : nil,
             deliveredHeight: sourcePixelHeight > 0 ? sourcePixelHeight : nil,
             captureFPS: configuredCaptureFPS,
-            captureProfile: shotComposer.config.cinematicFormat == .webcam ? "webcam" : "stage",
+            captureProfile: CaptureProfilePolicy.Profile(shotComposer.config.cinematicFormat).identifier,
             mode: mode)
     }
     private(set) var repeatedFrameCount: UInt64 = 0
@@ -890,12 +893,8 @@ final class CameraManager: NSObject, ObservableObject {
             Self.logger.notice("CropEngine initialized successfully")
         }
 
-        // Restore the persisted cinematic format (Stage/Webcam) before wiring
-        // bindings so the initial state matches the operator's last choice.
-        if let raw = UserDefaults.standard.string(forKey: "cinematicFormat"),
-           let fmt = ShotComposer.Config.CinematicFormat(rawValue: raw) {
-            shotComposer.config.cinematicFormat = fmt
-        }
+        // The cinematic format comes from the operator mode: the show applies
+        // it (OperatorModeStore.apply) as soon as it creates this channel.
         shotComposer.config.restoreStageHeadroom()
 
         configureFramingBindings()
@@ -1314,6 +1313,8 @@ final class CameraManager: NSObject, ObservableObject {
     var directorPerceptionForTesting: DirectorPerceptionForTesting?
     /// Synthetic pending UI gesture, independent of lock/gallery acquisition.
     func setOperatorGestureForTesting(_ pending: Bool) { tapPending = pending }
+    /// Test seam: a session that is still starting.
+    func setStartingForTesting(_ starting: Bool) { isStartingSession = starting }
     /// Test seam: a rendered frame as if processFrame had produced it.
     func setLatestRenderedFrameForTesting(_ frame: RenderedChannelFrame?) { latestRenderedFrame = frame }
     /// Test seam: a detection observation as if the frame path consumed it.
@@ -2048,7 +2049,7 @@ final class CameraManager: NSObject, ObservableObject {
             .sink { [weak self] format in
                 guard let self else { return }
                 if self.isRunning && self.activeInputSource == .liveCamera {
-                    self.captureProfileStatus = "\(format == .webcam ? "Webcam" : "Stage") capture profile applies on the next session start."
+                    self.captureProfileStatus = "\(CaptureProfilePolicy.Profile(format).title) capture profile applies on the next session start."
                 }
                 if format == .webcam,
                    self.activeMode == .manualCrop || self.activeMode == .autoPan {
@@ -2082,6 +2083,7 @@ final class CameraManager: NSObject, ObservableObject {
         recordSourceIdentity(DiagnosticsSessionIdentity.Source(
             inputKind: "Validation clip",
             deviceName: validationClipURL.lastPathComponent,
+            operatorMode: operatorMode.diagnosticsName,
             belowShowRate: false))
         activeInputSource = .validationClip
         activeMode = .wide
@@ -2907,7 +2909,7 @@ final class CameraManager: NSObject, ObservableObject {
         try device.lockForConfiguration()
         defer { device.unlockForConfiguration() }
         
-        let profile: CaptureProfilePolicy.Profile = shotComposer.config.cinematicFormat == .webcam ? .webcam : .stage
+        let profile = CaptureProfilePolicy.Profile(shotComposer.config.cinematicFormat)
         let candidates = device.formats.map { format in
             let dims = CMVideoFormatDescriptionGetDimensions(format.formatDescription)
             return CaptureProfilePolicy.Candidate(
@@ -2947,7 +2949,8 @@ final class CameraManager: NSObject, ObservableObject {
             inputKind: "Live camera",
             deviceName: device.localizedName,
             deviceModelID: device.modelID,
-            captureProfile: profile == .webcam ? "webcam" : "stage",
+            captureProfile: profile.identifier,
+            operatorMode: operatorMode.diagnosticsName,
             requestedWidth: Int(dims.width),
             requestedHeight: Int(dims.height),
             configuredCaptureFPS: selection.frameRate,

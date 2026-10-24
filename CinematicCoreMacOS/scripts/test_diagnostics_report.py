@@ -25,8 +25,7 @@ HEADER = ("elapsed_s,clock,window_kind,thermal,low_power,cpu_cores,cpu_pct,threa
 
 
 def write_session(folder: Path, *, admitted=250, short_window_at=None, refused_at=None, closing=True,
-                  thermal_at=None, windows=12):
-    stamp = "2026-09-28_120000"
+                  thermal_at=None, windows=12, stamp="2026-09-28_120000"):
     rows, total = [], 0
     marker = {k: "" for k in HEADER}
     marker.update(elapsed_s="0.0", clock="12:00:00", window_kind="marker", thermal="nominal", low_power="no",
@@ -59,7 +58,7 @@ def write_session(folder: Path, *, admitted=250, short_window_at=None, refused_a
             "build": {"appVersion": "1.0", "buildNumber": "4", "sourceFingerprint": "abc123",
                       "osVersion": "26.0", "machineModel": "Mac16,1"},
             "source": {"inputKind": "Live camera", "deviceName": "Elgato 4K X", "captureProfile": "stage",
-                       "requestedWidth": 3840, "requestedHeight": 2160, "configuredCaptureFPS": 50,
+                       "operatorMode": "single_cam", "requestedWidth": 3840, "requestedHeight": 2160, "configuredCaptureFPS": 50,
                        "captureSelectionReason": "preferred format", "belowShowRate": False,
                        "deliveredWidth": 3840, "deliveredHeight": 2160},
             "output": {"route": "Program Display", "showStandard": "1080p50", "showFPS": 50,
@@ -84,6 +83,7 @@ class ReportTests(unittest.TestCase):
         self.assertIn("Schema 2", text)
         self.assertIn("Expected rate: 50.00 fps (manifest configured capture rate)", text)
         self.assertIn("Elgato 4K X", text)
+        self.assertIn("profile stage · mode single_cam", text)
         self.assertIn("| Delivered to Alfie | 3000 | 50.0 |", text)
         self.assertIn("| Presented downstream | unknown | unknown |", text)
         self.assertIn("**Cadence:** 0 of 12 full windows", text)
@@ -108,6 +108,53 @@ class ReportTests(unittest.TestCase):
             (folder / "alfie_soak_2026-01-01_000000.csv").write_text(",".join(HEADER) + "\n")
             session = report.locate(folder)
         self.assertEqual(session.stamp, "2026-09-28_120000")
+
+    def test_uuid_session_token_selects_only_its_own_exact_companions(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            folder = Path(tmp)
+            first = "2026-09-28_120000_00000000-0000-0000-0000-000000000001"
+            second = "2026-09-28_120000_00000000-0000-0000-0000-000000000002"
+            write_session(folder, admitted=250, stamp=first)
+            write_session(folder, admitted=100, stamp=second)
+            (folder / f"alfie_memory_{first}.csv").write_text("elapsed_s,heap_blocks\n5,100\n")
+            (folder / f"alfie_memory_{second}.csv").write_text("elapsed_s,heap_blocks\n5,999\n")
+            for kind, extension in (("soak", "csv"), ("memory", "csv"), ("session", "json")):
+                with self.subTest(kind=kind):
+                    selected = report.load(report.locate(folder / f"alfie_{kind}_{first}.{extension}"))
+                    self.assertEqual(selected.stamp, first)
+                    self.assertEqual(selected.soak_path.name, f"alfie_soak_{first}.csv")
+                    self.assertEqual(selected.memory_path.name, f"alfie_memory_{first}.csv")
+                    self.assertEqual(selected.manifest_path.name, f"alfie_session_{first}.json")
+                    self.assertEqual(selected.memory[0]["heap_blocks"], "100")
+                    self.assertIn("| Delivered to Alfie | 3000 |", report.build_report(selected))
+            with self.assertRaisesRegex(SystemExit, "select an explicit"):
+                report.locate(folder)
+
+    def test_mixed_legacy_and_uuid_names_keep_the_same_local_time_chronology(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            folder = Path(tmp)
+            legacy = "2026-10-21_105959"
+            newer = "2026-10-21_110000_00000000-0000-0000-0000-000000000001"
+            write_session(folder, admitted=100, stamp=legacy)
+            write_session(folder, admitted=250, stamp=newer)
+            selected = report.load(report.locate(folder))
+            self.assertEqual(selected.stamp, newer)
+            self.assertIn("| Delivered to Alfie | 3000 |", report.build_report(selected))
+            # A later legacy session remains selectable in a mixed archive too.
+            latest = "2026-10-21_110001"
+            write_session(folder, admitted=200, stamp=latest)
+            self.assertEqual(report.locate(folder).stamp, latest)
+
+    def test_folder_can_choose_a_unique_new_token_without_matching_filename_prefixes(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            folder = Path(tmp)
+            write_session(folder)
+            newest = "2026-09-29_120000_00000000-0000-0000-0000-000000000001"
+            write_session(folder, stamp=newest)
+            (folder / "backup_alfie_soak_2099-01-01_000000.csv").write_text("ignored")
+            (folder / "alfie_soak_2099-01-01_000000.csv.bak").write_text("ignored")
+            (folder / "alfie_session_2099-01-01_000000.csv").write_text("ignored")
+            self.assertEqual(report.locate(folder).stamp, newest)
 
     @unittest.skipUnless(LEGACY.exists(), "legacy fixture not present")
     def test_legacy_schema1_session_is_summarised_with_its_limits(self):

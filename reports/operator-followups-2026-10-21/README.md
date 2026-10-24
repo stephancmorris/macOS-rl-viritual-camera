@@ -1,0 +1,37 @@
+# Operator and evidence follow-ups — 21 October 2026
+
+This group fixes observed software gaps in **ADMISSION**, **SHOW-SETUP**, **PRIVACY**, **B-05/Director lifecycle**, and **B-04/C-05 correlation**. It also reconciles the existing operator modes from PR #66 into the Director candidate stack based on PR #72. These are reviewable software and stopped-UI results; physical acceptance and owner decisions remain open.
+
+## Result
+
+| Work item | Before | Result |
+|---|---|---|
+| ADMISSION | A long-running pair check could mix old sample windows with a new configuration, then save support under the final fingerprint. Missing or nonfinite evidence could avoid limits. | Each run pins its complete configuration, sources/generations/object identity, roles, operator mode and run token. Drift cancels the run; late callbacks cannot store support. Missing/invalid measurements and counter resets remain unknown/unverified. Existing numerical limits are unchanged. |
+| SHOW-SETUP | Partial model-level historical matches appeared certified for the exact current setup and marked unmeasured rows passed. | Labels describe prior certification/trials/failures; current rate, render and memory/heat stay unmeasured. The actual distinct-device check can pass. Existing conservative historical-failure Start behavior is retained. |
+| PRIVACY | Same-second diagnostics restarts could append to the same CSVs and overwrite the session manifest. | A shared local-time/UUID token identifies each triplet. One serial writer exclusively allocates its CSVs and optional manifest, owns later updates and preserves other sessions on collision. Both Python readers retain legacy names and whole-token matching; ambiguous same-second folder selection refuses. Thirty-day modification-time pruning is unchanged. |
+| Director lifecycle | Detached controllers could retain Assist requests and accept new Assist or on-air move work. | Detach retires requests and pauses/revokes authority; attachment gates both admission and final effects. Old requests cannot revive after reattach. |
+| B-04/C-05 | Controller controls emitted orphan actions; a valid Take's route increment made the analyzer reject its pair. | Controls emit pre-event attempts and honest terminal results. Settings remain unobserved where the current notification cannot prove completion. Analysis permits tightly checked Take/segment transitions while preserving prediction partitions and rejecting races. |
+
+**AdmissionPolicy.version is now 2.** Existing version-1 support/certification records do not establish support under the corrected evaluator; remeasurement is required. No new performance threshold or qualification was selected.
+
+## Evidence
+
+The complete Swift suite passed **988 definitions / 1,521 expanded executions**, zero failures and three explicitly configured fixture/hardware skips. The actual generated CoreML CPU interoperability test remained configured. All **90 Python tests** passed (76 script,14 training). A separate 54-test selection passed with the actual Swift-produced control export supplied. Release app/extension built with signing disabled. Exact source fingerprint and limits are in [validation.json](validation.json).
+
+The [actual synthetic control bundle](evidence/control-export/manifest.json) contains 16 records / eight correlated actions, including an actual synchronous synthetic Take. Its [analysis](evidence/control-report.md) preserves the lack of predictions and usable Program-shot/parameter evidence: zero choice comparisons, one unscored Take, no dwell distribution and no quality or qualification claim. This fixes correlation integrity; actual would-prepare/would-cut decision producers and evaluated-parameter logging remain separate work. Authored C-05 fixtures now use the actual 1→2→3 route-generation swaps; historical prior reports remain historical.
+
+The rebuilt **Release** application was manually switched through Single Cam → Multi Cam → Webcam → Single Cam while stopped. Each screen showed the correct selected mode and description, and capture stayed stopped. Multi Cam showed the current unknown pair state and disabled pair Start without B. The initial Single Cam selection was restored. Native accessibility text and original screenshots are retained: [Single Cam](manual/single-cam.jpg), [Multi Cam](manual/multi-cam.jpg), [Webcam](manual/webcam.jpg). They were visually inspected for visible labels and control overlap. Screenshot pixel dimensions are recorded; exact point geometry and spoken VoiceOver were not independently measured. This is partial MODE-QA/DOCS evidence, not a live rig walkthrough.
+
+## Review and remaining gates
+
+Independent cross-reviews checked admission binding/numeric guards, diagnostics ownership/queue ordering, and setup-history semantics. The diagnostics review caught UTC-versus-legacy-local filename ordering; filenames now preserve the legacy local-time convention. Integration also corrected the old segment-log assertion to verify both the pre-advance attempt and post-advance result, correlated IDs and policy transition. The first compile/test attempts are retained locally; the final full suite and Release above are green.
+
+The five PR #66 commits were reused, not reimplemented. Conflicts retained the newer Director/privacy disclosures, Director injection points and synthetic perception seams while adding the mode store and starting-session seam. This combined stack still needs owner review/merge order; no main merge is performed. No project settings, entitlements or Info.plist were edited. DiagnosticsLog remains extension-safe and introduces no Director type reference.
+
+Real-camera mode/refusal/recovery checks, delivered-rate and receiver-side output evidence, sustained-load matrix, signed install/upgrade, both legacy migrations, the live pill/VoiceOver walkthrough and per-level signatories remain open. Historical unsupported pairs continue to conservatively block pair Start even when unmeasured details differ; the existing tested policy was not silently relaxed. F3/G08, study budgets, media permissions and model promotion are not decided by this candidate. No live qualification or privacy-compliance approval is claimed.
+
+## Additional stopped UI checks
+
+Settings displayed Single Cam consistently with the main window. Selecting Webcam in Settings changed the main stopped screen to Webcam. The Release process was then quit and relaunched: its PID changed from48518 to49269, and Webcam remained selected with the session stopped. Single Cam was restored afterward. [Settings screenshot](manual/settings-single-cam.jpg), [Settings Webcam accessibility text](manual/settings-webcam.txt), and [fresh-launch accessibility text](manual/relaunched-webcam.txt) preserve the observations. This is persistence on this installed preference state, not either legacy-upgrade migration trial.
+
+The rebuilt Debug gallery's synthetic Certified scenario was manually inspected. Its [original screenshot](manual/synthetic-historical-certification.jpg) shows “Previous A + B certification”, the historical-scope explanation, a current distinct-device pass and three “Not measured yet” rows. This confirms the display correction with authored gallery data; it creates no real certification. The scrollable gallery screenshot includes only part of the setup container, so it does not establish the live screen's point geometry. Capture was never started during these checks.

@@ -34,7 +34,7 @@ final class DirectorAssistPreparation {
     func enqueue(_ shot: DirectorShot, configuration c: Configuration) -> DirectorPreparation.Request? {
         guard DeveloperFlags.allowDirectorAssist, c.readiness.isValid,
               c.maximumRequestAge.isFinite, c.maximumRequestAge >= 0,
-              let show, let controller, let preview = show.previewChannel,
+              let show, let controller, controller.isAttached, let preview = show.previewChannel,
               let channel = show.channel(preview), !show.editLive,
               channel.activeMode == .autoTracking, channel.manualLockedTargetID != nil,
               channel.recoveryState.trackingOwnsControl, !channel.operatorGestureInProgress,
@@ -64,7 +64,7 @@ final class DirectorAssistPreparation {
     /// one MainActor turn. Matching refusal is terminal; no deferred retry.
     func commit(_ request: DirectorPreparation.Request) -> DirectorPreparationEffect {
         guard preparation.request == request, let c = configuration else { return .rejected([.requestReplaced]) }
-        guard DeveloperFlags.allowDirectorAssist, let show, let controller else {
+        guard DeveloperFlags.allowDirectorAssist, let show, let controller, controller.isAttached else {
             preparation.discard(request); return .failed
         }
         let now = show.clock(), current = snapshot(configuration: c, now: now)

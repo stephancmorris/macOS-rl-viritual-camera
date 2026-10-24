@@ -3,6 +3,7 @@
 import copy
 import io
 import json
+import os
 from pathlib import Path
 import subprocess
 import sys
@@ -59,7 +60,7 @@ def action(phase, name='take-1', outcome='completed', kind='take', target=None, 
 
 
 def fixture():
-    return [
+    rows = [
         record(0, 9, prediction()),
         record(1, 10, action('attempt')),
         record(2, 10.1, action('result'), program='input-2', preview='input-1', preset='waistUp'),
@@ -68,6 +69,9 @@ def fixture():
         record(5, 20.1, action('result', name='take-2', after='input-1', preview='input-2')),
         record(6, 21, {'kind': 'abstention', 'decisionID': token('abstention'), 'stage': 'prepare', 'reasons': [{'domain': 'policy', 'code': 'minimumDuration'}]}),
     ]
+    for index, row in enumerate(rows):
+        row['context']['routeGeneration'] = str(1 + (index >= 2) + (index >= 5))
+    return rows
 
 
 def run(rows, window=2):
@@ -76,13 +80,95 @@ def run(rows, window=2):
 
 
 class ShadowReportTests(unittest.TestCase):
+    def test_completed_take_requires_exact_route_increment_and_preserves_attempt_partition(self):
+        data = run(fixture())
+        self.assertEqual(data['issues']['inconsistent_action_pairs'], 0)
+        self.assertEqual({key[7] for key, _, _ in data['groups']}, {'1', '2'})
+        for route in ('0', '1', '3', str(2**64 - 1)):
+            rows = fixture()[:3]; rows[2]['context']['routeGeneration'] = route
+            data = run(rows)
+            self.assertEqual(data['issues']['inconsistent_action_pairs'], 1)
+            self.assertEqual(sum(s['compared'] for _, s, _ in data['groups']), 0)
+
+    def test_take_pair_rejects_source_parameter_model_and_intervening_control_races(self):
+        mutations = [lambda r: r.update(evidenceClass='recorded'),
+                     lambda r: r['context'].update(nominationRevision='2'),
+                     lambda r: r['context'].update(policyRevision='2'),
+                     lambda r: r['parameters'].update(parametersVersion='2'),
+                     lambda r: r['parameters'].update(judgeMaximumAge=1),
+                     lambda r: r['event'].update(previewAfter='input-2')]
+        for mutate in mutations:
+            rows = fixture()[:3]; mutate(rows[2]); data = run(rows)
+            self.assertGreater(data['issues']['inconsistent_action_pairs'] + data['issues']['rejected_records'], 0)
+            self.assertEqual(sum(s['compared'] for _, s, _ in data['groups']), 0)
+        a, b = fixture()[1:3]
+        a['judgements'] = [{'judgeKind': 'learned', 'modelVersion': 'before'}]
+        b['judgements'] = [{'judgeKind': 'learned', 'modelVersion': 'after'}]
+        self.assertFalse(report.action_pair_scope_matches(a, b))
+        rows = fixture()[:3]
+        rows[2]['sequence'] = '4'
+        rows[2]['recordID'] = token('outer-result-after-control')
+        nested = [record(2, 10.01, action('attempt', name='takeover', kind='takeOver')),
+                  record(3, 10.02, action('result', name='takeover', kind='takeOver', outcome='accepted'))]
+        data = run(rows[:2] + nested + rows[2:])
+        self.assertGreater(data['issues']['inconsistent_action_pairs'], 0)
+        self.assertEqual(sum(s['compared'] for _, s, _ in data['groups']), 0)
+
+    def test_only_accepted_advance_can_change_one_policy_and_segment_binding(self):
+        rows = [record(0, 10, action('attempt', name='advance', kind='advanceSegment')),
+                record(1, 10, action('result', name='advance', kind='advanceSegment', outcome='accepted'))]
+        rows[0]['context']['segmentToken'] = token('first-segment')
+        rows[1]['context'].update(segmentType='panel', segmentToken=token('next-segment'), policyRevision='2')
+        rows[1]['parameters']['parametersVersion'] = '2'
+        rows[1]['parameters']['resolvedStyle']['minimumShotDuration'] = 9
+        self.assertEqual(run(rows)['issues']['inconsistent_action_pairs'], 0)
+        for change in ('refused', 'doublePolicy', 'sameSegment', 'judge', 'preferences', 'route', 'nomination'):
+            changed = copy.deepcopy(rows)
+            if change == 'refused': changed[1]['event']['outcome'] = 'refused'
+            elif change == 'doublePolicy': changed[1]['context']['policyRevision'] = '3'
+            elif change == 'sameSegment': changed[1]['context']['segmentToken'] = changed[0]['context']['segmentToken']
+            elif change == 'judge': changed[1]['parameters']['judgeMaximumAge'] = 1
+            elif change == 'preferences': changed[1]['parameters']['preferencesVersion'] = 3
+            elif change == 'route': changed[1]['context']['routeGeneration'] = '2'
+            else: changed[1]['context']['nominationRevision'] = '2'
+            issues = run(changed)['issues']
+            self.assertGreater(issues['inconsistent_action_pairs'] + issues['rejected_records'], 0)
+
+    def test_control_state_changes_and_unobserved_settings_are_complete_pairs_without_cut_credit(self):
+        for kind, outcome in [('setLevel', 'accepted'), ('setLevel', 'refused'), ('handToAlfie', 'accepted'),
+                              ('takeOver', 'accepted'), ('settingsChanged', 'unobserved')]:
+            rows = [record(0, 10, action('attempt', name=kind, kind=kind)),
+                    record(1, 10, action('result', name=kind, kind=kind, outcome=outcome))]
+            rows[1]['context']['authorityEpoch'] = '2'
+            data = run(rows)
+            self.assertEqual(data['issues']['incomplete_or_duplicate_action_pairs'], 0)
+            self.assertEqual(data['issues']['inconsistent_action_pairs'], 0)
+            self.assertEqual(data['groups'], [])
+
+    def test_actual_swift_control_bundle_when_explicitly_supplied(self):
+        requested = os.environ.get('ALFIE_DIRECTOR_CONTROL_EXPORT')
+        if not requested:
+            return
+        records, issues, source = report.load_input(Path(requested))
+        data = report.analyze(records, 2, issues, source)
+        self.assertFalse(report.blocking_input(data['issues']))
+        self.assertIsNotNone(source['manifest'])
+        self.assertEqual(len(records), 16)
+        self.assertEqual({r['evidenceClass'] for r in records}, {'synthetic'})
+        self.assertEqual(data['issues']['incomplete_or_duplicate_action_pairs'], 0)
+        self.assertEqual(data['issues']['inconsistent_action_pairs'], 0)
+        self.assertEqual(sum(s['completed_actions'] for _, s, _ in data['groups']), 1)
+        self.assertEqual(sum(s['compared'] for _, s, _ in data['groups']), 0)
+        self.assertEqual(sum(s['unscored_actions'] for _, s, _ in data['groups']), 1)
+
     def test_known_agreement_and_interior_dwell(self):
-        data = run(fixture()); s = data['groups'][0][1]
+        data = run(fixture()); s = sum((stats for _, stats, _ in data['groups']), report.Counter())
         self.assertEqual((s['predictions'], s['completed_actions'], s['compared'], s['exact']), (2, 2, 2, 2))
         self.assertEqual(len(data['dwell']), 1)
         self.assertAlmostEqual(next(iter(data['dwell'].values()))[0], 10.0)
         self.assertEqual(sum(data['abstentions'].values()), 1)
-        self.assertIn('2/2', report.markdown(data, 2))
+        self.assertEqual(len(data['groups']), 2)
+        self.assertIn('1/1', report.markdown(data, 2))
 
     def test_latest_prediction_is_used_once_and_mismatch_is_not_hidden(self):
         rows = fixture()[:3]
@@ -103,9 +189,10 @@ class ShadowReportTests(unittest.TestCase):
         s = data['groups'][0][1]
         self.assertEqual((s['predictions'], s['compared'], s['exact'], s['unmatched_predictions']), (2, 1, 0, 1))
         rows = fixture()[:3]
-        rows += [record(3, 10.2, action('attempt', name='duplicate-opportunity')),
-                 record(4, 10.3, action('result', name='duplicate-opportunity'), program='input-2', preview='input-1', preset='waistUp')]
-        s = run(rows)['groups'][0][1]
+        rows += [record(3, 10.2, action('attempt', name='duplicate-opportunity'), program='input-2', preview='input-1', preset='waistUp'),
+                 record(4, 10.3, action('result', name='duplicate-opportunity', after='input-1', preview='input-2'))]
+        rows[3]['context']['routeGeneration'] = '2'; rows[4]['context']['routeGeneration'] = '3'
+        s = sum((stats for _, stats, _ in run(rows)['groups']), report.Counter())
         self.assertEqual((s['compared'], s['unmatched_actions']), (1, 1))
 
     def test_loss_is_not_averaged_across_sessions(self):
@@ -118,12 +205,13 @@ class ShadowReportTests(unittest.TestCase):
         other[0]['droppedRecordsBefore'] = '1'
         data = run(clean + other)
         self.assertEqual(sum(s['compared'] for _, s, _ in data['groups']), 2)
-        self.assertEqual(sum(blocked for _, _, blocked in data['groups']), 1)
+        self.assertEqual(sum(blocked for _, _, blocked in data['groups']), 2)
 
     def test_refusal_and_acceptance_are_not_completed_cuts(self):
         for outcome in ('accepted', 'refused', 'unobserved'):
             rows = fixture()[:3]; rows[2]['event'] = action('result', outcome=outcome)
             rows[2]['context'].update(program='input-1', preview='input-2')
+            rows[2]['context']['routeGeneration'] = rows[1]['context']['routeGeneration']
             s = run(rows)['groups'][0][1]
             self.assertEqual(s['completed_actions'], 0)
             self.assertEqual(s['compared'], 0)
@@ -262,7 +350,7 @@ class ExportBundleTests(unittest.TestCase):
         data = report.analyze(records, 2, issues, source)
         self.assertFalse(report.blocking_input(issues))
         self.assertEqual(source['manifest'], manifest_for(records))
-        stats = data['groups'][0][1]
+        stats = sum((stats for _, stats, _ in data['groups']), report.Counter())
         self.assertEqual((stats['compared'], stats['exact']), (2, 2))
         self.assertAlmostEqual(next(iter(data['dwell'].values()))[0], 10)
         text = report.markdown(data, 2)

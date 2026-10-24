@@ -1,10 +1,10 @@
 # Alfie — operator-controlled live framing
 
-Alfie frames camera pictures into one Program feed. The operator chooses the subject and composition. Current Stage code provides Camera A/B Program/Preview, manual Take and deliberate Edit Live; Webcam uses the single-camera workflow.
+Alfie frames camera pictures into one Program feed. The operator chooses the subject and composition. Choose Single Cam for one stage camera and every Stage shot, Multi Cam for Camera A/B Program/Preview with manual Take and deliberate Edit Live, or Webcam for the close-range single-camera workflow.
 
 The Debug candidate also attaches Director status and controls. Preparation, automatic-cut, Backup, discovery and local-model study components require explicit settings and current prerequisites; ordinary app construction installs no execution-study settings, discovery budget or learned scorer. Every launch starts Manual. Release disables Director shadow, Assist and automatic effects. Active-speaker listening, microphone control and hardware motion remain deferred.
 
-See the [current candidate operator guide](docs/user-guide/README.md). The capability summary was source-reviewed on 21 October 2026 for the PR #71 candidate; the guide retains pending installation, 1280-point walkthrough, screenshots and real-camera/downstream-output checks. Verify the supplied build fingerprint before use. Source and synthetic evidence describe a software review candidate, not a certified rig or released build.
+See the [current candidate operator guide](docs/user-guide/README.md). The [combined candidate review](reports/operator-followups-2026-10-21/README.md) includes the PR #66 modes and stopped Release screenshots. Installation, live mode/refusal checks, exact point-size and VoiceOver acceptance, and real-camera/downstream-output checks remain open. Verify the supplied build fingerprint before use. Source and synthetic evidence describe a software review candidate, not a certified rig or released build.
 
 ## Inputs and framing
 

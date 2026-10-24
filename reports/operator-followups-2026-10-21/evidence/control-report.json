@@ -1,0 +1,37 @@
+{
+  "evidenceClass": "synthetic",
+  "records": 16,
+  "issues": {
+    "invalid_measurements": 0,
+    "sequence_gaps": 0,
+    "operator_accepted": 4,
+    "operator_refused": 2,
+    "operator_unobserved": 1
+  },
+  "groups": [
+    {
+      "stratum": [
+        "14EB93DE-C807-42A8-AEB5-53F5B601EFCC",
+        "synthetic",
+        "panel",
+        "BF175B8B-8758-474E-B02B-98863C5E8910",
+        null,
+        null,
+        "2",
+        "0",
+        "wouldCut"
+      ],
+      "counts": {
+        "predictions": 0,
+        "completed_actions": 1,
+        "unscored_actions": 1,
+        "unmatched_predictions": 0
+      },
+      "blocked": false
+    }
+  ],
+  "dwell": [],
+  "matchingWindowSeconds": 2,
+  "matchingWindowMeaning": "authored analysis fixture setting, not a production default",
+  "comparisonClaim": false
+}

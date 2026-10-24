@@ -39,6 +39,10 @@ final class ShowCoordinator: ObservableObject {
 
     var channelA: CameraManager { channels[.a]! }
 
+    /// Single Cam, Multi Cam or Webcam (MODES-SPEC). Every channel's composer
+    /// format follows it, including channels added later.
+    let operatorModes: OperatorModeStore
+
     // MARK: Control target (CHANNEL-CMD)
 
     /// The channel every console control acts on: Preview by default, Program
@@ -60,9 +64,12 @@ final class ShowCoordinator: ObservableObject {
 
     /// - Parameter programOutput: injected in tests; the app passes nil and
     ///   gets the real virtual-camera + Program Display output.
+    /// - Parameter operatorModes: injected in tests; the app passes nil and
+    ///   gets the mode saved in standard user defaults.
     init(programOutput: ProgramOutputManager? = nil, admissionRecords: AdmissionRecordStore? = nil,
          qualificationRecords: DirectorQualificationStore? = nil, directorShadowLog: DirectorShadowLog? = nil,
-         directorRunSheet: RunSheet? = nil) {
+         directorRunSheet: RunSheet? = nil, operatorModes: OperatorModeStore? = nil) {
+        self.operatorModes = operatorModes ?? OperatorModeStore()
         self.initialDirectorShadowLog = directorShadowLog
         self.initialDirectorRunSheet = directorRunSheet
         self.admissionRecords = admissionRecords ?? AdmissionRecordStore()
@@ -77,7 +84,43 @@ final class ShowCoordinator: ObservableObject {
         let a = CameraManager(channelID: .a, programOutput: output, outputPort: router.port(for: .a))
         a.deviceRegistry = deviceRegistry
         a.workScheduler = workScheduler
+        self.operatorModes.apply(to: a)
         channels[.a] = a
+        self.operatorModes.switchDecision = { [weak self] from, to in
+            guard let self else { return .allowed }
+            return OperatorModeSwitch.decide(from: from, to: to, state: self.modeSwitchState)
+        }
+        self.operatorModes.modeChanged = { [weak self] from, to in self?.operatorModeChanged(from: from, to: to) }
+    }
+
+    /// Any channel is running or starting.
+    var isAnyChannelLive: Bool {
+        channels.values.contains { $0.isRunning || $0.isStartingSession }
+    }
+
+    /// What the live-switch rule needs to know about the show.
+    var modeSwitchState: OperatorModeSwitch.ShowState {
+        .init(isLive: isAnyChannelLive, programChannel: programChannel,
+              otherChannels: ChannelID.allCases.filter { $0 != .a && channels[$0] != nil })
+    }
+
+    private func operatorModeChanged(from: OperatorMode, to: OperatorMode) {
+        if isAnyChannelLive {
+            programOutput.noteDiagnostics("mode \(from.diagnosticsName) -> \(to.diagnosticsName) while live")
+        }
+        applyOperatorMode()
+    }
+
+    /// Bring every channel in line with the operator mode. A single-input
+    /// mode (Single Cam, Webcam) leaves Edit Live, and while everything is
+    /// stopped also prepares a new show, so no other channel is kept from
+    /// Multi Cam and A is Program.
+    private func applyOperatorMode() {
+        for channel in channels.values { operatorModes.apply(to: channel) }
+        if !operatorModes.mode.allowsMultipleInputs {
+            setEditLive(false)
+            prepareForNewShow()
+        }
     }
 
     func channel(_ id: ChannelID) -> CameraManager? { channels[id] }
@@ -91,6 +134,7 @@ final class ShowCoordinator: ObservableObject {
         let channel = CameraManager(channelID: id, programOutput: programOutput, outputPort: router.port(for: id))
         channel.deviceRegistry = deviceRegistry
         channel.workScheduler = workScheduler
+        operatorModes.apply(to: channel)
         channels[id] = channel
         retarget()
         channelsChangedObserver?(.added(id))
@@ -214,8 +258,28 @@ final class ShowCoordinator: ObservableObject {
         AdmissionDecision.decide(admissionStatus)
     }
 
-    func recordAdmission(_ result: PairAdmissionResult) {
-        admissionRecords.record(result.status, for: admissionFingerprint())
+    func admissionCheckBinding(preview: ChannelID) -> PairAdmissionBinding? {
+        guard previewChannel == preview, let program = channels[programChannel],
+              let previewSource = channels[preview],
+              program.isRunning, !program.sourceMissing,
+              previewSource.isRunning, !previewSource.sourceMissing else { return nil }
+        return PairAdmissionBinding(
+            fingerprint: admissionFingerprint(), program: programChannel, preview: preview,
+            routeGeneration: router.routeGeneration,
+            operatorMode: operatorModes.mode, context: pairAdmissionContext(preview: preview),
+            sources: channels.mapValues {
+                .init(instance: ObjectIdentifier($0), generation: $0.revisions.sourceGeneration,
+                      deviceID: $0.selectedCamera?.uniqueID)
+            })
+    }
+
+    /// A delayed result cannot be attached to whichever setup happens to be
+    /// current at completion. Short checks remain provisional software evidence.
+    @discardableResult
+    func recordAdmission(_ result: PairAdmissionResult, for binding: PairAdmissionBinding) -> Bool {
+        guard admissionCheckBinding(preview: binding.preview) == binding else { return false }
+        admissionRecords.record(result.status, for: binding.fingerprint)
+        return true
     }
 
     // MARK: Director qualification (S3 B-06, C16)
