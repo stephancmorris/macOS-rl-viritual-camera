@@ -20,6 +20,7 @@ from stable_baselines3 import PPO
 from stable_baselines3.common.callbacks import CheckpointCallback
 
 from cinematic_env import CinematicFramingEnv
+from replay_timing import TimestampTiming
 
 
 def train_ppo(
@@ -34,9 +35,10 @@ def train_ppo(
     checkpoint_freq: int = 50_000,
     tb_log_dir: str = "models/tb_logs",
     verbose: int = 1,
+    timing: TimestampTiming | None = None,
 ) -> PPO:
     """Train PPO, optionally starting from BC-pretrained weights."""
-    env = CinematicFramingEnv(data_dirs=data_dirs)
+    env = CinematicFramingEnv(data_dirs=data_dirs, timing=timing)
 
     if bc_model_path and bc_model_path.exists():
         if verbose:

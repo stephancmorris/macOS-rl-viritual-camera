@@ -437,6 +437,23 @@ def action_pair_scope_matches(attempt, result):
                 and be.get('programAfter') == ac.get('preview')
                 and bc['program'] == be['programAfter']
                 and bc.get('preview') == ac['program'] and be.get('previewAfter') == ac['program'])
+    if be['action'] == 'stopSession' and (be.get('programAfter') is not None or be.get('previewAfter') is not None):
+        # Explicit Show Stop marks its logical all-input reset. Legacy camera
+        # Stop has no post-role marker and retains exact scope below.
+        inputs = ac['inputs']
+        preview = min((value for value in inputs if value != 'input-1'),
+                      key=lambda value: (len(value[6:]), value[6:]), default=None)
+        route = int(ac['routeGeneration']) + int(ac['program'] != 'input-1')
+        return (be['outcome'] == 'accepted' and ae['targetScope'] == be['targetScope'] == 'session'
+                and ae.get('target') is None and be.get('target') is None and 'input-1' in inputs
+                and stratum(attempt)[:-1] == stratum(result)[:-1] and ap == bp
+                and route <= 2**64 - 1 and int(bc['routeGeneration']) == route
+                and be.get('programAfter') == bc['program'] == 'input-1'
+                and be.get('previewAfter') == bc.get('preview') == preview
+                and bc['level'] == 'off' and result['executionMode'] == 'shadow'
+                and not bc['running'] and not bc['editLive'] and not bc['paused']
+                and bc.get('pinnedInput') is None
+                and not any(bc[key] for key in ('mayPropose', 'mayPrepare', 'mayTake')))
     if be['action'] == 'advanceSegment' and be['outcome'] == 'accepted':
         # Only explicit advance can change segment/style and increment the
         # policy once. Readiness, adapter, judge settings and preference version
@@ -460,18 +477,43 @@ def action_pair_scope_matches(attempt, result):
     return stratum(attempt) == stratum(result) and ap == bp
 
 
-def analyze(records, window, issues=None, source=None):
+def analyze(records, window, issues=None, source=None, phase_assignments=None):
+    """Analyze full sessions; optional record-ID phases only restrict scoring.
+
+    Completeness, parameter histories and action pairs always use the original
+    session rows and sequence values. A phase boundary cannot repair capture.
+    """
     require(math.isfinite(window) and window >= 0)
+    if phase_assignments is not None:
+        require(type(phase_assignments) is dict and
+                set(phase_assignments) == {r['recordID'] for r in records})
+        require(all(type(v) is str and re.fullmatch(r'[A-Za-z0-9][A-Za-z0-9._-]{0,95}', v)
+                    for v in phase_assignments.values()))
+
+    def phase(r):
+        return phase_assignments[r['recordID']] if phase_assignments is not None else None
+
+    def group(r):
+        return stratum(r) + (phase(r),) if phase_assignments is not None else stratum(r)
+
     issues = Counter(issues or {})
     pairs, sessions, groups, abstentions = defaultdict(list), defaultdict(list), defaultdict(list), Counter()
+    phase_regions, last_phases, regions = {}, {}, Counter()
     for r in records:
-        sessions[r['sessionID']].append(r); groups[stratum(r)].append(r)
+        if phase_assignments is not None:
+            session = r['sessionID']
+            if session in last_phases and last_phases[session] != phase(r):
+                regions[session] += 1
+            last_phases[session] = phase(r)
+            phase_regions[r['recordID']] = regions[session]
+        sessions[r['sessionID']].append(r); groups[group(r)].append(r)
         e = r['event']
         if e['kind'] == 'operatorAction':
             pairs[(r['sessionID'], e['actionID'])].append(r)
         if e['kind'] == 'abstention':
             for reason in e['reasons']:
-                abstentions[(r['evidenceClass'], r['context']['segmentType'], reason['domain'], reason['code'])] += 1
+                reason_scope = (r['evidenceClass'], r['context']['segmentType']) if phase_assignments is None else group(r)
+                abstentions[reason_scope + (reason['domain'], reason['code'])] += 1
     blocked, actions = set(), []
     for session, rows in sessions.items():
         previous = None
@@ -543,11 +585,19 @@ def analyze(records, window, issues=None, source=None):
     if blocking_input(issues):
         blocked.update(sessions)
     result, dwell = [], defaultdict(list)
+    boundary_actions = set()
+    if phase_assignments is not None:
+        for a, b, _, _, _ in actions:
+            interval = [r for r in sessions[a['sessionID']]
+                        if int(a['sequence']) <= int(r['sequence']) <= int(b['sequence'])]
+            if any(phase(r) != phase(a) for r in interval):
+                boundary_actions.add(a['recordID'])
+        issues['phase_boundary_actions'] += len(boundary_actions)
     for key, rows in sorted(groups.items(), key=lambda kv: repr(kv[0])):
         for kind in ('wouldPrepare', 'wouldCut'):
             predictions = [r for r in rows if r['event']['kind'] == kind]
             stats = Counter(predictions=len(predictions))
-            comparable = [x for x in actions if stratum(x[0]) == key and x[2] == kind]
+            comparable = [x for x in actions if group(x[0]) == key and x[2] == kind]
             if not predictions and not comparable:
                 continue
             stats['completed_actions'] = len(comparable)
@@ -556,11 +606,17 @@ def analyze(records, window, issues=None, source=None):
             cursor, pending = 0, deque()
             if key[0] not in blocked:
                 for a, b, action_kind, target, shot in sorted(comparable, key=lambda x: (x[0]['eventTime'], int(x[0]['sequence']))):
-                    if shot is None or a['parameters']['status'] != 'available':
+                    if (shot is None or a['parameters']['status'] != 'available'
+                            or a['recordID'] in boundary_actions):
                         stats['unscored_actions'] += 1; continue
-                    while cursor < len(ordered) and ordered[cursor]['eventTime'] <= a['eventTime']:
+                    # Equal clocks do not make a later row a preceding
+                    # prediction. Leave it queued for a subsequent attempt.
+                    while (cursor < len(ordered) and ordered[cursor]['eventTime'] <= a['eventTime']
+                           and int(ordered[cursor]['sequence']) < int(a['sequence'])):
                         pending.append(ordered[cursor]); cursor += 1
-                    while pending and pending[0]['eventTime'] < a['eventTime'] - window:
+                    while pending and (pending[0]['eventTime'] < a['eventTime'] - window or
+                            (phase_assignments is not None and
+                             phase_regions[pending[0]['recordID']] != phase_regions[a['recordID']])):
                         pending.popleft()
                     if not pending:
                         stats['unmatched_actions'] += 1; continue
@@ -587,10 +643,15 @@ def analyze(records, window, issues=None, source=None):
                 continue
             intervening = sessions[session][start + 1:end]
             disruption = any(stratum(r) != stratum(b) or (r['event']['kind'] == 'operatorAction' and r['event']['action'] not in ('take',)) or r['context']['program'] != b['context']['program'] for r in intervening)
-            if stratum(b) == stratum(next_a) and b['context']['program'] == next_a['context']['program'] and not disruption:
-                dwell[stratum(b)].append(next_b['eventTime'] - b['eventTime'])
-    return {'groups': result, 'issues': issues, 'abstentions': abstentions, 'dwell': dwell,
+            interval = sessions[session][positions[a['recordID']]:positions[next_b['recordID']] + 1]
+            same_phase = phase_assignments is None or all(phase(r) == phase(a) for r in interval)
+            if stratum(b) == stratum(next_a) and b['context']['program'] == next_a['context']['program'] and not disruption and same_phase:
+                dwell[group(b)].append(next_b['eventTime'] - b['eventTime'])
+    data = {'groups': result, 'issues': issues, 'abstentions': abstentions, 'dwell': dwell,
             'records': len(records), 'source': source or {'kind': 'unbundled'}}
+    if phase_assignments is not None:
+        data['blockedSessions'] = sorted(blocked)
+    return data
 
 
 def markdown(data, window):
@@ -618,18 +679,24 @@ def markdown(data, window):
              'Malformed input or export metadata suppresses all scoring; sequence loss, backward clocks or incomplete action pairs suppress their session.', '',
              '| Session | Evidence | Segment | Decision | Parameter version | Predictions | Completed actions | Compared | Exact | Agreement | Unmatched predictions | Unmatched actions | Unscored actions | Status |',
              '| --- | --- | --- | --- | --- | ---: | ---: | ---: | ---: | --- | ---: | ---: | ---: | --- |']
+    if 'blockedSessions' in data:
+        lines[-2:-2] = ['Explicit phases only restrict scoring. Original whole-session loss and action-pair checks remain active; predictions, completed pairs and dwell intervals cannot cross a phase boundary.', '']
     for key, s, blocked in data['groups']:
         agreement = f'{s["exact"]}/{s["compared"]}' if s['compared'] else 'unavailable'
         label = f'{key[2]}/{key[3] or "none"}; policy {key[6]}; route {key[7]}; prefs {key[5] or "unknown"}'
-        lines.append(f'| {key[0]} | {key[1]} | {label} | {key[8]} | {key[4] or "unknown"} | {s["predictions"]} | {s["completed_actions"]} | {s["compared"]} | {s["exact"]} | {agreement} | {s["unmatched_predictions"]} | {s["unmatched_actions"]} | {s["unscored_actions"]} | {"incomplete" if blocked else "observed"} |')
+        if len(key) == 10:
+            label += f'; phase {key[-2]}'
+        incomplete = blocked or (len(key) == 10 and s['unscored_actions'])
+        lines.append(f'| {key[0]} | {key[1]} | {label} | {key[-1]} | {key[4] or "unknown"} | {s["predictions"]} | {s["completed_actions"]} | {s["compared"]} | {s["exact"]} | {agreement} | {s["unmatched_predictions"]} | {s["unmatched_actions"]} | {s["unscored_actions"]} | {"incomplete" if incomplete else "observed"} |')
     lines += ['', '## Abstentions', '', 'Reason totals count reasons, not independent opportunities.', '']
-    for key, count in sorted(data['abstentions'].items()):
-        lines.append(f'- {" / ".join(key)}: {count}')
+    for key, count in sorted(data['abstentions'].items(), key=lambda item: repr(item[0]) if 'blockedSessions' in data else item[0]):
+        lines.append(f'- {" / ".join(str(x) for x in key)}: {count}')
     if not data['abstentions']:
         lines.append('No observed abstentions.')
     lines += ['', '## Interior Program dwell', '', 'Seconds between consecutive completed Takes with continuous roles and no observed disruption.', 'First/last censored holds and missing intervals are excluded; this is not downstream presentation.', '']
     for key, values in sorted(data['dwell'].items(), key=lambda kv: repr(kv[0])):
-        lines.append(f'- {key[0]} / {key[1]} / {key[2]} / parameters {key[4]}: n={len(values)}, min={min(values):g}, median={statistics.median(values):g}, max={max(values):g} s')
+        phase = f' / phase {key[-1]}' if len(key) == 9 else ''
+        lines.append(f'- {key[0]} / {key[1]} / {key[2]} / parameters {key[4]}{phase}: n={len(values)}, min={min(values):g}, median={statistics.median(values):g}, max={max(values):g} s')
     if not data['dwell']:
         lines.append('Unavailable: no complete continuous interior dwell intervals.')
     lines += ['', '## Completeness', '']
