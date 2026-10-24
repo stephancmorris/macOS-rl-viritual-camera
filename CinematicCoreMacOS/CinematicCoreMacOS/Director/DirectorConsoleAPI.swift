@@ -246,6 +246,9 @@ extension NextShotStatus {
         var handedToAlfie: Bool
         var runSheet: RunSheetLine?
         var backupAlert: BackupAlert? = nil
+        /// Source-bound selection facts, sampled with the existing console refresh.
+        /// Empty means the Director supplies no subject selection display.
+        var subjectPicks: [ChannelID: DirectorSubjectPick] = [:]
 
         /// Every launch: Manual, not handed to Alfie, nothing prepared or badged.
         static func atLaunch(qualified: Qualification) -> DirectorSection {
@@ -280,6 +283,103 @@ protocol DirectorConsoleControlling: AnyObject {
     func advanceSegment()
     /// One tap on an input: the operator nominates the subject there (E1).
     func overrideSubject(on channel: ChannelID, at point: CGPoint)
+    /// UI nomination bound to the source and route that were actually painted.
+    /// Implementations must revalidate every binding before dispatching.
+    @discardableResult
+    func overrideSubject(_ request: DirectorSubjectOverrideRequest) -> DirectorControlResult
+}
+
+extension DirectorConsoleControlling {
+    /// Old controllers must never silently downgrade a bound UI request.
+    @discardableResult
+    func overrideSubject(_ request: DirectorSubjectOverrideRequest) -> DirectorControlResult {
+        .refused("Subject selection is unavailable")
+    }
+}
+
+/// C-08 selection facts only. No pixels, identity probabilities or readiness
+/// thresholds. Rectangles use normalized Vision coordinates (bottom-left).
+nonisolated struct DirectorSubjectPick: Equatable, Sendable {
+    enum Phase: Equatable, Sendable {
+        case unavailable, ambiguous, suggested, acquiring, tracking, recovering, lost
+    }
+
+    enum Rule: Equatable, Sendable {
+        case positionHint, centralPresenter
+    }
+
+    enum Provenance: Equatable, Sendable {
+        case operatorNomination
+        case alfie(Rule)
+    }
+
+    struct Candidate: Equatable, Sendable, Identifiable {
+        let id: UUID
+        let bounds: CGRect
+
+        var isValid: Bool {
+            Self.validBounds(bounds)
+        }
+
+        static func validBounds(_ bounds: CGRect) -> Bool {
+            let values = [bounds.minX, bounds.minY, bounds.width, bounds.height,
+                          bounds.maxX, bounds.maxY]
+            return values.allSatisfy(\.isFinite) && bounds.minX >= 0 && bounds.minY >= 0 &&
+                bounds.width > 0 && bounds.height > 0 && bounds.maxX <= 1 && bounds.maxY <= 1
+        }
+    }
+
+    /// A defensive UI bound, not a detector workload or qualification budget.
+    static let maximumCandidates = 32
+
+    let channel: ChannelID
+    let sourceGeneration: UInt64
+    let selectionRevision: UInt64
+    let routeGeneration: UInt64
+    let phase: Phase
+    let selectedCandidateID: UUID?
+    let candidates: [Candidate]
+    let provenance: Provenance?
+    /// The controller's current permission to nominate; the effect rechecks it.
+    let canOverride: Bool
+
+    var isValid: Bool {
+        candidates.count <= Self.maximumCandidates && candidates.allSatisfy(\.isValid) &&
+            Set(candidates.map(\.id)).count == candidates.count &&
+            (selectedCandidateID == nil || candidates.contains { $0.id == selectedCandidateID }) &&
+            (!(phase == .ambiguous || phase == .unavailable || phase == .lost) || selectedCandidateID == nil)
+    }
+
+    var selectedCandidate: Candidate? {
+        guard isValid, let selectedCandidateID else { return nil }
+        return candidates.first { $0.id == selectedCandidateID }
+    }
+
+    func overrideRequest(at point: CGPoint) -> DirectorSubjectOverrideRequest? {
+        guard isValid, canOverride, DirectorSubjectOverrideRequest.isValid(point) else { return nil }
+        return .init(channel: channel, sourceGeneration: sourceGeneration,
+                     selectionRevision: selectionRevision, routeGeneration: routeGeneration, point: point)
+    }
+}
+
+nonisolated struct DirectorSubjectOverrideRequest: Equatable, Sendable {
+    let channel: ChannelID
+    let sourceGeneration: UInt64
+    let selectionRevision: UInt64
+    let routeGeneration: UInt64
+    let point: CGPoint
+
+    var isValid: Bool { Self.isValid(point) }
+
+    static func isValid(_ point: CGPoint) -> Bool {
+        point.x.isFinite && point.y.isFinite && (0...1).contains(point.x) && (0...1).contains(point.y)
+    }
+
+    func matches(_ pick: DirectorSubjectPick) -> Bool {
+        isValid && pick.isValid && pick.canOverride && channel == pick.channel &&
+            sourceGeneration == pick.sourceGeneration && selectionRevision == pick.selectionRevision &&
+            routeGeneration == pick.routeGeneration
+    }
 }
 
 nonisolated enum DirectorControlResult: Equatable, Sendable {

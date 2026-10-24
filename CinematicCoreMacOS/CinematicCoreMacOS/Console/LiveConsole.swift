@@ -359,7 +359,7 @@ struct LiveMultiviewConsole: View {
         } pill: {
             pill(for: snapshot)
         }
-        view.panePicture = { [model] pane in AnyView(LivePanePicture.make(pane: pane, show: model.show)) }
+        view.panePicture = { [model] pane in AnyView(LivePanePicture.make(pane: pane, show: model.show, subjectPick: model.directorSection?.subjectPicks[pane.channel ?? .a], controls: model.directorControls)) }
         view.headerTrailing = AnyView(LiveConsoleHeader(model: model))
         if model.directorSection != nil {
             view.directorControls = AnyView(LiveDirectorControlBar(controller: model.directorControls))
@@ -385,9 +385,12 @@ struct LivePanePicture: View {
     @ObservedObject var channel: CameraManager
     let pane: PaneModel
     let show: ShowCoordinator
+    var subjectPick: DirectorSubjectPick? = nil
+    var controls: (any DirectorConsoleControlling)? = nil
 
     @ViewBuilder
-    static func make(pane: PaneModel, show: ShowCoordinator) -> some View {
+    static func make(pane: PaneModel, show: ShowCoordinator, subjectPick: DirectorSubjectPick? = nil,
+                     controls: (any DirectorConsoleControlling)? = nil) -> some View {
         if pane.role == .program, let sent = heldProgramBuffer(show: show) {
             // Holding or standby: show exactly the frame downstream received.
             // It changes only on state changes, so the 15 Hz rebuild suffices.
@@ -395,7 +398,7 @@ struct LivePanePicture: View {
         } else if pane.role == .program, show.router.state == .standby {
             Color.black
         } else if let id = pane.channel, let channel = show.channel(id) {
-            LivePanePicture(channel: channel, pane: pane, show: show)
+            LivePanePicture(channel: channel, pane: pane, show: show, subjectPick: subjectPick, controls: controls)
         } else {
             Color.black
         }
@@ -428,7 +431,9 @@ struct LivePanePicture: View {
                 isRecovering: channel.recoveryState.isRecovering,
                 isZoomLimited: channel.isZoomLimited,
                 framingTitle: channel.framingTitle,
-                aspectFill: false)
+                aspectFill: false,
+                subjectPick: channel.activeMode != .manualCrop && channel.activeMode != .autoPan ? subjectPick : nil,
+                onSubjectOverride: { request in controls?.overrideSubject(request) ?? .refused("Subject selection is unavailable") })
         } else {
             // Rendered output only — never the raw capture buffer.
             PixelBufferPreviewView(pixelBuffer: channel.croppedFrameBuffer, aspectFill: true)

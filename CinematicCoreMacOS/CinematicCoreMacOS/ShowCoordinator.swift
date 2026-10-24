@@ -147,7 +147,7 @@ final class ShowCoordinator: ObservableObject {
     private weak var startedDirector: DirectorController?
     var directorSectionForConsole: NextShotStatus.DirectorSection? {
         guard DeveloperFlags.runDirectorShadow, let startedDirector, startedDirector.isAttached else { return nil }
-        return startedDirector.directorSection
+        return startedDirector.sampleSectionForConsole()
     }
     /// UI actions use the retained controller; reading status never starts it.
     var directorControlForConsole: (any DirectorConsoleControlling)? {
@@ -289,6 +289,9 @@ final class ShowCoordinator: ObservableObject {
     @discardableResult
     func take(_ request: TakeRequest? = nil, origin: TakeOrigin = .operatorUI,
               permit: TakePermit? = nil, fallbackPermit: BackupFallbackPolicy.Permit? = nil) -> TakeResult {
+        // Retire only discovery leases before every origin's Take boundary.
+        // Never drain Vision or invalidate ordinary tracking evidence here.
+        for channel in channels.values { channel.retireSubjectDiscovery() }
         takeAttemptObserver?(origin)
         let result = performTake(request, origin: origin, permit: permit, fallbackPermit: fallbackPermit)
         takeResultObserver?(origin, result)

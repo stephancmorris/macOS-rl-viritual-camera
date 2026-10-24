@@ -453,6 +453,162 @@ final class CameraManager: NSObject, ObservableObject {
     /// the composer) so ROI scanning stays tight throughout acquisition.
     private var lastSubjectROIBox: CGRect?
 
+    // MARK: - Explicit bounded Director discovery (B-10)
+
+    private var subjectDiscoveryConfiguration: DirectorSubjectDiscovery.Configuration?
+    private var subjectDiscoveryContext: (() -> DirectorSubjectDiscovery.Context?)?
+    private var subjectDiscoveryState = DirectorSubjectDiscovery.State()
+    private var subjectDiscoveryToken: DirectorSubjectDiscovery.WorkToken?
+    /// Plain metadata, sampled by the existing UI/controller refresh.
+    var subjectDiscoverySnapshot: DirectorSubjectDiscovery.Snapshot { subjectDiscoveryState.snapshot }
+    /// Controller/UI reads must supply their current monotonic clock so an
+    /// idle source cannot leave an old pick or ambiguous boxes visible.
+    func subjectDiscoverySnapshot(at now: TimeInterval) -> DirectorSubjectDiscovery.Snapshot {
+        let maximumAge = subjectDiscoveryConfiguration.map {
+            min($0.maximumResultAge, min($0.selectorParameters.maximumSampleAge, $0.selectorParameters.maximumObservationAge))
+        } ?? 0
+        subjectDiscoveryState.expireSnapshot(at: now, maximumAge: maximumAge)
+        return subjectDiscoveryState.snapshot
+    }
+    /// Successful acquisition origin survives Take and normal tracking. An
+    /// operator nomination/unlock or source/identity reset clears it.
+    private var discoveredSubjectOrigin: SubjectSelector.Selection?
+    var directorDiscoveredSubject: SubjectSelector.Selection? {
+        guard let origin = discoveredSubjectOrigin, origin.sourceGeneration == captureGeneration,
+              manualLockedTargetID == origin.subject else { return nil }
+        return origin
+    }
+
+    #if DEBUG
+    /// No normal app path installs this. Missing/invalid study settings fail
+    /// closed; scan permission and acquisition authority remain independent.
+    func configureSubjectDiscoveryForStudy(_ configuration: DirectorSubjectDiscovery.Configuration?,
+                                           eligibility: @escaping () -> DirectorSubjectDiscovery.Context?) {
+        retireSubjectDiscovery()
+        subjectDiscoveryConfiguration = configuration.flatMap { $0.isValid ? $0 : nil }
+        subjectDiscoveryContext = subjectDiscoveryConfiguration == nil ? nil : eligibility
+        subjectDiscoveryState.configure(subjectDiscoveryConfiguration)
+    }
+    #endif
+
+    /// Synchronous lifecycle retirement, including every Take origin. This
+    /// cancels a token that has not started, or rejects an already-running
+    /// result and counts its overlap truthfully. It never drains/waits for
+    /// Vision or invalidates ordinary tracking observations.
+    func retireSubjectDiscovery() {
+        if let token = subjectDiscoveryToken {
+            subjectDiscoveryState.recordRetirement(token.retire())
+            // detectionInFlight excludes a normal scheduled tracking waiter
+            // while this token is current. Cancel only our perception lane;
+            // render and the operator-tap path are left alone.
+            workScheduler?.cancelWaiting(.perception, for: channelID)
+        }
+        subjectDiscoveryState.retire()
+    }
+
+    private func subjectDiscoveryBinding() -> DirectorSubjectDiscovery.Binding? {
+        #if DEBUG
+        guard let configuration = subjectDiscoveryConfiguration, configuration.isValid,
+              let context = subjectDiscoveryContext?(), context.permitted,
+              context.program != channelID, isRunning, !sourceMissing,
+              workScheduler != nil, activeMode == .wide,
+              shotComposer.manualLockedTargetID == nil, !operatorGestureInProgress,
+              case .inactive = shotComposer.lockState else { return nil }
+        return .init(channel: channelID, sourceGeneration: captureGeneration,
+                     controlEpoch: commands.epoch, shotRevision: shotRevision,
+                     configurationRevision: configuration.revision, context: context)
+        #else
+        return nil
+        #endif
+    }
+
+    private func scheduleSubjectDiscoveryIfDue(pixelBuffer: CVPixelBuffer) {
+        guard let binding = subjectDiscoveryBinding(), let configuration = subjectDiscoveryConfiguration else {
+            retireSubjectDiscovery(); return
+        }
+        guard !detectionInFlight else { return }
+        let requestedAt = CACurrentMediaTime()
+        guard let token = subjectDiscoveryState.request(binding: binding, configuration: configuration, now: requestedAt) else { return }
+        detectionInFlight = true
+        subjectDiscoveryToken = token
+        let box = SendablePixelBufferBox(pixelBuffer)
+        Task { [weak self] in
+            guard let self else { return }
+            var permitAt: TimeInterval?
+            defer {
+                self.subjectDiscoveryState.completed(token, requestedAt: requestedAt, permitAt: permitAt)
+                self.detectionInFlight = false
+                if self.subjectDiscoveryToken === token { self.subjectDiscoveryToken = nil }
+            }
+            guard self.subjectDiscoveryBinding() == binding, let scheduler = self.workScheduler else {
+                self.subjectDiscoveryState.recordRetirement(token.retire()); return
+            }
+            guard let permit = await scheduler.acquire(.perception, for: self.channelID) else {
+                self.subjectDiscoveryState.recordRetirement(token.retire()); return
+            }
+            defer { scheduler.release(permit) }
+            permitAt = CACurrentMediaTime()
+            guard self.subjectDiscoveryBinding() == binding else {
+                self.subjectDiscoveryState.recordRetirement(token.retire()); return
+            }
+            let persons = await self.personDetector.processFrame(box.pixelBuffer,
+                plan: .init(mode: .discovery, roi: nil), discoveryToken: token)
+            // No suspension is permitted between these final checks and the
+            // acquisition effect below. A source/route/authority/gesture change
+            // cannot substitute a later person or a later input.
+            guard token.mayPublish, self.subjectDiscoveryBinding() == binding else {
+                self.subjectDiscoveryState.rejectResult(); return
+            }
+            _ = self.applySubjectDiscoveryResult(persons, capturedAt: requestedAt, now: CACurrentMediaTime(),
+                binding: binding, configuration: configuration)
+        }
+    }
+
+    @discardableResult
+    private func applySubjectDiscoveryResult(_ persons: [PersonDetector.DetectedPerson], capturedAt: TimeInterval,
+                                             now: TimeInterval, binding: DirectorSubjectDiscovery.Binding,
+                                             configuration: DirectorSubjectDiscovery.Configuration) -> Bool {
+        guard subjectDiscoveryBinding() == binding else { subjectDiscoveryState.rejectResult(); return false }
+        let candidates = persons.map { DirectorSubjectDiscovery.Candidate(id: $0.id, bounds: $0.boundingBox) }
+        guard let decision = subjectDiscoveryState.ingest(candidates, capturedAt: capturedAt,
+            now: now, binding: binding, configuration: configuration),
+              case .selected(let selection) = decision, binding.context.mayAcquire,
+              let person = persons.first(where: { $0.id == selection.subject }) else { return false }
+        return acquireDiscoveredSubject(selection, person: person, binding: binding)
+    }
+
+    #if DEBUG
+    /// Raw synthetic detector output for acquire-boundary tests. Production
+    /// scheduling and detector-token tests separately exercise actual starts.
+    @discardableResult
+    func acceptSubjectDiscoveryForTesting(_ persons: [PersonDetector.DetectedPerson],
+                                         capturedAt: TimeInterval, now: TimeInterval) -> Bool {
+        guard let binding = subjectDiscoveryBinding(), let configuration = subjectDiscoveryConfiguration,
+              subjectDiscoveryState.request(binding: binding, configuration: configuration, now: capturedAt) != nil else { return false }
+        return applySubjectDiscoveryResult(persons, capturedAt: capturedAt, now: now,
+            binding: binding, configuration: configuration)
+    }
+    #endif
+
+    /// Narrow automatic acquisition boundary. The general Director command
+    /// dispatcher remains shot-size-only. Discovery provides a local body
+    /// candidate; ordinary acquiring/face-gallery/lock readiness must follow.
+    private func acquireDiscoveredSubject(_ selection: SubjectSelector.Selection,
+                                           person: PersonDetector.DetectedPerson,
+                                           binding: DirectorSubjectDiscovery.Binding) -> Bool {
+        guard binding.context.mayAcquire, subjectDiscoveryBinding() == binding,
+              selection.channel == channelID, selection.sourceGeneration == captureGeneration,
+              selection.subject == person.id else { return false }
+        commands.setTrackingOwnership(true)
+        commands.invalidateMotion()
+        shotRevision &+= 1
+        lockTarget(personID: selection.subject)
+        lastSubjectROIBox = person.boundingBox
+        discoveredSubjectOrigin = selection
+        subjectDiscoveryState.acquired()
+        return true
+    }
+
     // MARK: - Off-critical-path detection
     //
     // Detection used to be awaited inline, so every frame waited for Vision
@@ -512,6 +668,8 @@ final class CameraManager: NSObject, ObservableObject {
     /// only re-checks and arms the work. Returns immediately either way — the
     /// caller never awaits.
     private func invalidateDetection(clearTracks: Bool = true) {
+        retireSubjectDiscovery()
+        if clearTracks { discoveredSubjectOrigin = nil }
         detectionFrames.invalidate()
         personDetector.invalidatePendingWork(clearTracks: clearTracks)
         detectionFrameCounter = 0
@@ -1034,7 +1192,10 @@ final class CameraManager: NSObject, ObservableObject {
         if command.origin != .director, case .beginZoom = command.action,
            shotMove?.commandOrigin == .director { interrupted = shotMove }
         else { interrupted = nil }
-        if command.origin != .director { manualActionObserver?(.command(command)) }
+        if command.origin != .director {
+            retireSubjectDiscovery()
+            manualActionObserver?(.command(command))
+        }
         let result = dispatchAdmittedCommand(command, interruptedDirectorMove: interrupted)
         if command.origin != .director { manualResultObserver?(command, result) }
         return result
@@ -1132,6 +1293,7 @@ final class CameraManager: NSObject, ObservableObject {
     /// waiting for its ROI scan). Called when the control target moves away
     /// from this channel. Already-admitted moves and running work continue.
     func cancelPendingOperatorGestures() {
+        retireSubjectDiscovery()
         detectionDiscoveryActive = false
         pendingTapPoint = nil
         pendingTapIsRetarget = false
@@ -1222,6 +1384,7 @@ final class CameraManager: NSObject, ObservableObject {
     }
 
     func cancelOperatorMotion() {
+        retireSubjectDiscovery()
         directorShotMoveID = nil
         directorShotMoveIsCurrent = nil
         commands.invalidateMotion()
@@ -1533,6 +1696,7 @@ final class CameraManager: NSObject, ObservableObject {
     }
 
     func lockTarget(personID: UUID) {
+        discoveredSubjectOrigin = nil
         cropEngine?.clearZoomAdjustment()
         lastTrackingCrop = nil
         invalidateDetection(clearTracks: false)
@@ -1553,6 +1717,7 @@ final class CameraManager: NSObject, ObservableObject {
     /// retarget on the preview instead, so an accidental click can't drop a
     /// healthy lock.
     func beginDetection() {
+        retireSubjectDiscovery()
         guard activeMode != .autoPan && activeMode != .manualCrop else { return }
         if case .tracking = shotComposer.lockState { return }
         if case .acquiring = shotComposer.lockState { return }
@@ -1630,6 +1795,8 @@ final class CameraManager: NSObject, ObservableObject {
     /// armed (Detect flow) or while directly re-acquiring from HOLD /
     /// WIDE-WAITING.
     func selectSubject(at point: CGPoint) {
+        retireSubjectDiscovery()
+        discoveredSubjectOrigin = nil
         guard activeMode != .autoPan && activeMode != .manualCrop else { return }
         guard detectionDiscoveryActive || canDirectlyReacquire else { return }
         commands.setTrackingOwnership(true)
@@ -1652,6 +1819,8 @@ final class CameraManager: NSObject, ObservableObject {
     /// pending tap priority over the lock state, so the next frame scans around
     /// the held point exactly as a first selection would.
     func retargetSubject(at point: CGPoint) {
+        retireSubjectDiscovery()
+        discoveredSubjectOrigin = nil
         guard activeMode != .autoPan && activeMode != .manualCrop else { return }
         guard shotComposer.manualLockedTargetID != nil else { return }
         commands.setTrackingOwnership(true)
@@ -1731,6 +1900,9 @@ final class CameraManager: NSObject, ObservableObject {
         case .hold, .wideWaiting:
             return PersonDetector.DetectionRequestPlan(mode: .reacquiring, roi: nil)
         case .inactive:
+            if !detectionDiscoveryActive, subjectDiscoveryBinding() != nil {
+                return .init(mode: .discovery, roi: nil)
+            }
             return detectionDiscoveryActive
                 ? PersonDetector.DetectionRequestPlan(mode: .awaitingTap, roi: nil)
                 : .off
@@ -2079,6 +2251,9 @@ final class CameraManager: NSObject, ObservableObject {
         // first with a relaxed threshold (PersonDetector.swift assignTracks).
         personDetector.lockedTargetID = shotComposer.manualLockedTargetID
 
+        if detectionPlan.mode != .discovery, subjectDiscoveryToken != nil {
+            retireSubjectDiscovery()
+        }
         if !detectionPlan.runsVision {
             // Release the retained source pixels immediately and reject any
             // scheduled detection that has not entered Vision yet. Without
@@ -2087,6 +2262,8 @@ final class CameraManager: NSObject, ObservableObject {
             // retained until the next explicit operator action.
             detectionFrames.invalidate()
             personDetector.clearForInactiveMode()
+        } else if detectionPlan.mode == .discovery {
+            scheduleSubjectDiscoveryIfDue(pixelBuffer: pixelBuffer)
         } else if pendingTapPoint != nil {
             let generation = detectionFrames.generation
             let id = detectionFrames.nextObservationID()
@@ -2109,7 +2286,8 @@ final class CameraManager: NSObject, ObservableObject {
             scheduleDetectionIfDue(pixelBuffer: pixelBuffer, sourceTimestamp: timestampSeconds,
                 plan: detectionPlan, due: detectionDue)
         }
-        let observation = detectionPlan.runsVision ? detectionFrames.consume(at: CACurrentMediaTime()) : (frame: nil, isFresh: false)
+        let observation = detectionPlan.runsVision && detectionPlan.mode != .discovery
+            ? detectionFrames.consume(at: CACurrentMediaTime()) : (frame: nil, isFresh: false)
         let detectedPersons = observation.frame?.persons ?? []
         let detectionIsFresh = observation.isFresh
 

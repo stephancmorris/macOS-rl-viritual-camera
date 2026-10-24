@@ -37,6 +37,10 @@ struct CameraPreviewView: View {
     var steadyBand: ShotComposer.SteadyBand? = nil
     var framingTitle: String = "Wide"
     var aspectFill: Bool = false
+    /// C-08 only: source-bound selection facts. Supplying these replaces the
+    /// legacy detection hit targets so one click produces one bound intent.
+    var subjectPick: DirectorSubjectPick? = nil
+    var onSubjectOverride: ((DirectorSubjectOverrideRequest) -> DirectorControlResult)? = nil
 
     /// How long a press must be held before it counts as a re-target.
     private static let retargetHoldDuration: TimeInterval = 0.4
@@ -60,7 +64,7 @@ struct CameraPreviewView: View {
                         .frame(width: geometry.size.width, height: geometry.size.height)
                         .clipped()
 
-                    if showDetections {
+                    if showDetections, subjectPick == nil {
                         DetectionOverlayView(
                             detectedPersons: detectedPersons,
                             imageSize: imageSize,
@@ -92,7 +96,10 @@ struct CameraPreviewView: View {
                     // `onTapPoint` is supplied while picking a subject, and
                     // `onHoldPoint` while one is already locked. Attaching only
                     // the relevant gesture avoids the two competing.
-                    if onTapPoint != nil {
+                    if let subjectPick {
+                        DirectorSubjectPickView(pick: subjectPick, imageSize: imageSize,
+                            aspectFill: aspectFill, onOverride: onSubjectOverride)
+                    } else if onTapPoint != nil {
                         Color.clear
                             .contentShape(Rectangle())
                             .onTapGesture { location in
@@ -150,19 +157,8 @@ struct CameraPreviewView: View {
         viewSize: CGSize,
         imageSize: CGSize
     ) -> CGPoint? {
-        guard imageSize.width > 0, imageSize.height > 0 else { return nil }
-        let scale = aspectFill
-            ? max(viewSize.width / imageSize.width, viewSize.height / imageSize.height)
-            : min(viewSize.width / imageSize.width, viewSize.height / imageSize.height)
-        let displayWidth = imageSize.width * scale
-        let displayHeight = imageSize.height * scale
-        let offsetX = (viewSize.width - displayWidth) / 2
-        let offsetY = (viewSize.height - displayHeight) / 2
-
-        let x = (location.x - offsetX) / displayWidth
-        let y = 1.0 - ((location.y - offsetY) / displayHeight)
-        guard x >= 0, x <= 1, y >= 0, y <= 1 else { return nil }
-        return CGPoint(x: x, y: y)
+        DirectorSourceCoordinates.normalizedPoint(location, viewSize: viewSize,
+                                                 imageSize: imageSize, aspectFill: aspectFill)
     }
 }
 

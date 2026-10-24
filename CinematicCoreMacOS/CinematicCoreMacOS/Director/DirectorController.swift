@@ -67,6 +67,8 @@ final class DirectorController: ObservableObject, DirectorConsoleControlling {
     private var takePermits = TakePermitIssuer()
     private(set) var shadowRecorder: DirectorShadowRecorder?
     private var shadowTakeID: UUID?
+    private lazy var subjectConsole = DirectorSubjectConsole(show: show)
+    private let judgeShadow = DirectorJudgeShadow()
     private(set) var evidenceRevision: UInt64 = 0
     private(set) lazy var assistPreparation = DirectorAssistPreparation(show: show, controller: self)
     private(set) lazy var cutExecution = DirectorCutExecution(show: show, controller: self)
@@ -155,6 +157,7 @@ final class DirectorController: ObservableObject, DirectorConsoleControlling {
 
     func detach() {
         isAttached = false
+        retireSubjectDiscovery()
         backupExecution.retire()
         onAirMoves.retire()
         retireAutomaticCuts()
@@ -201,6 +204,7 @@ final class DirectorController: ObservableObject, DirectorConsoleControlling {
     // MARK: Ingress (plan §5.3)
 
     private func manualAction(_ action: CameraManager.ManualCameraAction, on channel: ChannelID) {
+        retireSubjectDiscovery()
         switch action {
         case .command(let command):
             if command.origin == .operatorUI { emitShadow(DirectorShadowRecorder.command(command), authority: authority) }
@@ -286,7 +290,17 @@ final class DirectorController: ObservableObject, DirectorConsoleControlling {
         onAirMoves.validateRunning()
         cutExecution.evaluate(now: now)
         refreshSection()
-        if !cutExecution.isConfigured { emitShadow(DirectorShadowRecorder.noCutPolicy, authority: authority) }
+        let comparisonEpoch = authority.epoch, comparisonEvidence = evidenceRevision
+        let comparisonPolicy = policyRevision, comparisonNomination = nominationRevision
+        let comparison = judgeShadow.observe(show: show, now: now, evidenceRevision: evidenceRevision,
+            style: effectiveStyle, policyRevision: policyRevision)
+        if let comparison, comparisonEpoch == authority.epoch, comparisonEvidence == evidenceRevision,
+           comparisonPolicy == policyRevision, comparisonNomination == nominationRevision,
+           comparison.style == effectiveStyle {
+            emitShadow(DirectorShadowRecorder.judgeComparison, authority: authority, judgeObservation: comparison)
+        } else if !cutExecution.isConfigured {
+            emitShadow(DirectorShadowRecorder.noCutPolicy, authority: authority)
+        }
     }
 
     private func evidenceEvent(_ event: DirectorEvidenceAdapter.Event, preview: ChannelID?) {
@@ -319,10 +333,11 @@ final class DirectorController: ObservableObject, DirectorConsoleControlling {
         apply(.pause, pause: .setupChanged, note: "preparation failed")
     }
 
-    private func emitShadow(_ event: DirectorShadowRecord.Event, authority before: DirectorAuthority) {
+    private func emitShadow(_ event: DirectorShadowRecord.Event, authority before: DirectorAuthority,
+                            judgeObservation: DirectorJudgeShadow.Observation? = nil) {
         guard let show else { return }
         shadowRecorder?.emit(event, show: show, authority: before, policy: policyRevision,
-            nomination: nominationRevision, evidence: evidenceRevision, preferences: preferences, segment: runSheet?.current)
+            nomination: nominationRevision, evidence: evidenceRevision, preferences: preferences, segment: runSheet?.current, judgeObservation: judgeObservation)
     }
 
     private func takeFinished(origin: TakeOrigin, result: TakeResult) {
@@ -541,6 +556,7 @@ final class DirectorController: ObservableObject, DirectorConsoleControlling {
     }
 
     private func styleContextChanged() {
+        retireSubjectDiscovery()
         policyRevision += 1
         retireAutomaticCuts()
         assistPreparation.retire()
@@ -550,8 +566,71 @@ final class DirectorController: ObservableObject, DirectorConsoleControlling {
         refreshSection()
     }
 
-    /// Subject override arrives with B-10 (E1).
-    func overrideSubject(on channel: ChannelID, at point: CGPoint) {}
+    /// Optional local A/B observation only; never installs a judge in a Take
+    /// or preparation sink. Nil configuration/provider disables the trial.
+    func configureJudgeShadow(_ configuration: DirectorJudgeShadow.Configuration?,
+                              context: DirectorJudgeShadow.ContextProvider? = nil) {
+        judgeShadow.configure(configuration, context: context)
+    }
+
+    /// Sampled by the existing 15 Hz console refresh, never by frame writes.
+    func sampleSectionForConsole() -> Section { refreshSection(); return directorSection }
+
+    func overrideSubject(on channel: ChannelID, at point: CGPoint) {
+        guard let pick = subjectConsole.picks(now: clock())[channel],
+              let request = pick.overrideRequest(at: point) else { return }
+        _ = overrideSubject(request)
+    }
+
+    @discardableResult
+    func overrideSubject(_ request: DirectorSubjectOverrideRequest) -> DirectorControlResult {
+        guard isAttached, let show, let camera = show.channel(request.channel),
+              let pick = subjectConsole.picks(now: clock())[request.channel], request.matches(pick) else {
+            return .refused("The camera or subject view changed; select again")
+        }
+        // Match the ordinary show command boundary before doing either step.
+        guard show.controlTarget == request.channel,
+              request.channel != show.programChannel || show.previewChannel == nil || show.editLive else {
+            return .refused("Program changes need Edit Live")
+        }
+        let retarget = camera.manualLockedTargetID != nil
+        if !retarget && !camera.detectionDiscoveryActive && !camera.canDirectlyReacquire {
+            let armed = show.dispatch(show.makeCommand(.detect))
+            guard armed.wasAccepted else { return .refused("Subject selection is unavailable") }
+        }
+        let result = show.dispatch(show.makeCommand(.selectSubject(request.point, retarget: retarget)))
+        guard result.wasAccepted else { refreshSection(); return .refused("Subject selection is unavailable") }
+        // This records the accepted nomination intent. Acquisition still has
+        // to pass the existing ROI/gallery/identity path on a later frame.
+        apply(.nominationChanged, pause: .subjectChanged, note: "operator nominated a subject")
+        refreshSection()
+        return .accepted
+    }
+
+    /// Explicit Debug study setup. Scanning never implies acquisition or a
+    /// nomination, and cannot bootstrap missing authority prerequisites.
+    func configureSubjectDiscoveryForStudy(_ configuration: DirectorSubjectDiscovery.Configuration?, on id: ChannelID) {
+        #if DEBUG
+        guard let camera = show?.channel(id) else { return }
+        camera.configureSubjectDiscoveryForStudy(configuration) { [weak self] in
+            guard let self, let show = self.show else { return nil }
+            let pre = self.prerequisites()
+            let permitted = self.isAttached && self.authority.running && !self.authority.paused &&
+                self.authority.level != .off && self.authority.healthy && pre.sourcesHealthy &&
+                pre.outputHealthy && pre.admissionCurrent && !show.editLive &&
+                (self.authority.level == .suggest || pre.qualifiedLevels.contains(self.authority.level))
+            return .init(program: show.programChannel, routeGeneration: show.router.routeGeneration,
+                authorityEpoch: self.authority.epoch, policyRevision: self.policyRevision,
+                nominationRevision: self.nominationRevision, permitted: permitted,
+                mayAcquire: permitted && self.authority.mayPrepare && pre.nominationsCurrent)
+        }
+        #endif
+    }
+
+    private func retireSubjectDiscovery() {
+        guard let show else { return }
+        for id in ChannelID.allCases { show.channel(id)?.retireSubjectDiscovery() }
+    }
 
     // MARK: Authority
 
@@ -584,7 +663,7 @@ final class DirectorController: ObservableObject, DirectorConsoleControlling {
             backupExecution.retire(for: event)
             onAirMoves.retire()
         }
-        if transition.cancellations.contains(.prepare) { assistPreparation.retire() }
+        if transition.cancellations.contains(.prepare) { assistPreparation.retire(); retireSubjectDiscovery() }
         if event == .policyChanged { policyRevision &+= 1 }
         if event == .nominationChanged { nominationRevision &+= 1 }
         switch event {
@@ -649,6 +728,7 @@ final class DirectorController: ObservableObject, DirectorConsoleControlling {
         let qualified = Self.qualification(qualifiedLevels())
         var section = Section.atLaunch(qualified: qualified)
         section.backupAlert = backupExecution.alert
+        section.subjectPicks = subjectConsole.picks(now: clock())
         if let runSheet, let current = runSheet.current {
             section.runSheet = .init(current: RunSheetSegmentText.title(current),
                 next: runSheet.next.map(RunSheetSegmentText.title))
