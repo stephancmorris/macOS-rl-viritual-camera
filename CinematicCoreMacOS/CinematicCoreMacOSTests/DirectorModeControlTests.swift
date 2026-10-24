@@ -74,6 +74,31 @@ struct DirectorModeControlTests {
         #expect(resumed.directorSection.statusLine == "Watching · Alfie is not changing shots")
     }
 
+    @Test func syntheticScenariosResetToManualAndKeepHigherLevelsUnqualified() {
+        for scenario in DirectorControlScenario.allCases {
+            let controller = scenario.makeController()
+            #expect(controller.directorSection.level == .manual)
+            #expect(!controller.directorSection.handedToAlfie)
+            #expect(controller.handToAlfie() == .refused("Choose Assist, Auto or Backup"))
+            #expect(controller.setLevel(.auto) == .refused("Auto, not qualified"))
+            #expect(controller.setLevel(.backup) == .refused("Backup, not qualified"))
+            let result = controller.setLevel(.assist)
+            if scenario == .qualifiedAssist {
+                #expect(result == .accepted)
+                controller.takeOver()
+                #expect(controller.handToAlfie() == .accepted)
+                #expect(controller.directorSection.handedToAlfie)
+                #expect(controller.directorSection.statusLine == "Watching · Alfie is not changing shots")
+            } else {
+                #expect(result == .refused("Assist, not qualified"))
+                #expect(!controller.directorSection.handedToAlfie)
+            }
+            // A scenario reset creates fresh synthetic state; it cannot carry
+            // the previous fixture's handback or selection into the next run.
+            #expect(scenario.makeController().directorSection.level == .manual)
+        }
+    }
+
     /// A controller that is not the gallery fake: the view must work with any
     /// `DirectorConsoleControlling` (the live Director is B-03's).
     @MainActor private final class OtherController: ObservableObject, DirectorConsoleControlling {

@@ -16,10 +16,7 @@ struct DirectorStyleSettingsView: View {
             VStack(alignment: .leading, spacing: 16) {
                 Text(editor.message.isEmpty ? "Using the saved styles." : editor.message)
                     .font(.system(size: 13, weight: .semibold))
-                    .foregroundStyle(editor.message == DirectorPreferencesStore.unreadableMessage
-                                     || editor.message == DirectorStyleEditor.cannotSaveMessage
-                                     || editor.message == DirectorStyleEditor.noStorageMessage
-                                     ? ConsoleStyle.amber : .primary)
+                    .foregroundStyle(editor.hasError ? ConsoleStyle.amber : .primary)
                     .accessibilityLabel(editor.message.isEmpty ? "Using the saved styles." : editor.message)
 
                 Picker("Segment", selection: $editor.selected) {

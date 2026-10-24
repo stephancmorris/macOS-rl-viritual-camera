@@ -1,0 +1,28 @@
+{
+  "date": "2026-10-19",
+  "base": "39e05d201ab61dffe5332cfd6405bf8690118591",
+  "sourceFingerprint": "9948dab40a7eaee311ca050c8f157bda969b44eee309c2673fdbf4b06574a104",
+  "unit": {
+    "passedDefinitions": 689,
+    "passedExecutions": 975,
+    "failed": 0,
+    "skipped": 3,
+    "configuration": "unsigned Debug"
+  },
+  "releaseBuild": "passed, unsigned app and extension",
+  "manual": {
+    "keyboardManualRefusal": "pass",
+    "qualifiedAssistTakeover": "pass",
+    "qualifiedAssistHandback": "pass",
+    "scenarioReset": "pass",
+    "emptyProfileMessage": "pass",
+    "nonfiniteFieldMessage": "pass",
+    "durationOrderingMessage": "pass",
+    "validScratchSaveReload": "pass",
+    "invalidSavePreservesExistingScratchStyle": "pass"
+  },
+  "evidenceClass": "synthetic gallery and deterministic unit tests",
+  "liveQualification": false,
+  "spokenVoiceOver": "not run",
+  "realCamera": "not run"
+}
