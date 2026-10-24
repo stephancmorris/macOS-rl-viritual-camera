@@ -155,15 +155,22 @@ extension NextShotStatus {
                 var parts = ["Next: \(input.cameraLabel)"]
                 if let countdown, countdown.isFinite, countdown >= 0 {
                     parts.append(Self.seconds(countdown))
-                    if cancellable { parts.append("Esc to cancel") }
                 }
+                if cancellable { parts.append("Esc to cancel") }
                 return parts.joined(separator: " · ")
             }
 
             static func seconds(_ value: TimeInterval) -> String {
                 let whole = value.rounded()
-                if abs(value - whole) < 0.05 { return "\(Int(whole)) s" }
-                return "\((value * 10).rounded() / 10) s"
+                if abs(value - whole) < 0.05, let integer = Int(exactly: whole) {
+                    return "\(integer) s"
+                }
+                // Display rounding must not overflow either Int or Double.
+                // Extremely large finite supplied values remain representable
+                // as text; formatting never chooses a valid notice duration.
+                let tenths = value * 10
+                let display = tenths.isFinite ? tenths.rounded() / 10 : value
+                return "\(display) s"
             }
         }
 

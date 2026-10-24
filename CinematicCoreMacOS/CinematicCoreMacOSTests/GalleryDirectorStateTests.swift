@@ -90,7 +90,7 @@ struct GalleryDirectorStateTests {
         let cut = NextShotStatus.DirectorSection.NextCut.self
         #expect(cut.init(input: .b, countdown: 2, cancellable: true).line == "Next: Cam B · 2 s · Esc to cancel")
         #expect(cut.init(input: .b, countdown: 2, cancellable: false).line == "Next: Cam B · 2 s")
-        #expect(cut.init(input: .b, countdown: nil, cancellable: true).line == "Next: Cam B")
+        #expect(cut.init(input: .b, countdown: nil, cancellable: true).line == "Next: Cam B · Esc to cancel")
         #expect(cut.seconds(2.5) == "2.5 s")
     }
 

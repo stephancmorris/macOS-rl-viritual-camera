@@ -106,3 +106,7 @@ The gallery only shows `DirectorSection` reason text. These contract lines have 
 ## C-03 · Pass the director section into the live console (B-03)
 
 `MultiviewConsoleView` and `InputStripView` accept an optional director section and the channels whose shot Alfie set. The gallery uses them. `LiveConsole.swift` still builds the strip and the panel without that section, so the live AUTO badge and the third line stay off until the live console passes `DirectorConsoleControlling.directorSection` through. Please wire that in B-03. Group C does not edit `LiveConsole.swift`.
+
+## C-06 · Live Esc rehearsal (B-08)
+
+The reusable notice now accepts any observable `DirectorConsoleControlling`; its Cancel button and plain Esc re-read the current cancellable notice. Removed and Backup notices do not consume Esc. The gallery uses one synthetic shortcut owner. B-08 still owns the real notice/deadline identity and atomic cancellation/Take boundary, and its live Debug rehearsal remains pending. The notice length stays a parameter.

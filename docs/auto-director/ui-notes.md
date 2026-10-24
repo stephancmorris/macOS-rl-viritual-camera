@@ -18,7 +18,7 @@ Alfie uses the operator's app preset names (N3), shows which subject it selected
 
 `DirectorConsoleControlling` exposes `directorSection`, `setLevel`, `handToAlfie`, `takeOver`, `cancelNextCut`, `advanceSegment`, and `overrideSubject(on:at:)`. Views must send those intents through the owner; they do not dispatch camera commands or call the router. A fake gallery can demonstrate layout, never qualification or successful live wiring. A-07's optional Director section and value API do not implement the engine/UI connection.
 
-A-07 has a review finding in countdown formatting for huge finite values overflowing `Int`; display formatting must fail safely before it is relied on in a show. No countdown duration is prescribed here.
+The C-06 follow-up formats huge finite countdown values without overflowing `Int` or producing infinity during decimal rounding. Missing, negative or nonfinite countdowns omit the unusable duration while keeping the cancellation hint when the notice is cancellable. No countdown duration is prescribed here.
 
 ## UI choices — AWAITING OWNER
 
@@ -38,3 +38,12 @@ Mark synthetic gallery states, recorded evidence and live tests distinctly. No l
 In a Debug build, open Window → Multiview Gallery and find Director control · C-02. The Synthetic qualification picker offers Unqualified and Qualified Assist scenarios. Each starts in Manual; changing the scenario recreates the control and clears its refusal. Only this interactive control owns Command Shift H; the state cards below do not register shortcuts. In Manual, the shortcut refuses with “Choose Assist, Auto or Backup”. In Qualified Assist, select Assist, press Command Shift H to take over, then press it again to hand back. Auto and Backup remain unqualified. These are in-memory fake controllers, with no camera, saved qualification or live authority.
 
 The Director styles · C-04 section hosts the actual style editor against a unique temporary gallery file. Save the empty form to check the required Live event message; Load synthetic example supplies explicit fixture values for checking malformed fields, conflicting durations and correction/save/reload. Reload scratch styles reads only that scratch file. These fixture values are not product defaults and never reach the live preferences callback.
+
+
+## C-06 and C-07 component follow-up — 20 October 2026
+
+The reusable next-cut notice accepts any observable `DirectorConsoleControlling`. A cancellable notice provides an actual labelled Cancel button; plain Escape also cancels the current cancellable notice. Removed or noncancellable notices do not consume Escape. Only the interactive gallery notice owns the key; comparison cards opt out. The explicit synthetic controls restore Auto, replace it with Backup, or remove the notice. This does not establish B-08 deadline/permit cancellation or a real cut rehearsal.
+
+The Run sheet · C-07 gallery section hosts reusable authoring controls and a current/next strip with two isolated synthetic shows. Add and Apply are explicit actions; an unapplied segment edit must be applied or cancelled before editing another row or saving. Names and positions are optional, row identity survives reordering, and removing the current row chooses the following remaining row or the preceding last row. Empty sheets use Live event context. Advance never wraps; its shortcut is Command Shift Return, withdrawn while a name field is focused. Save and Reload address only the selected show's UUID in its supplied local store.
+
+Run-sheet storage contains only versioned segment metadata and current segment ID. Unknown/future/corrupt payloads and nonregular/symlink targets are not used or overwritten. The UI retains in-memory edits when saving fails. See [the component guide](run-sheet-ui.md) for the authoring flow and acceptance boundary. Production show identity, live console/controller wiring and style-policy change events remain B-11 work; F3's live integration review is not supplied by this gallery.
