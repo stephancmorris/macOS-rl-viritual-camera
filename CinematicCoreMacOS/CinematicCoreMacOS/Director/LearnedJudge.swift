@@ -97,6 +97,17 @@ nonisolated struct LearnedJudge: DirectorJudge {
 
     func judge(_ context: DirectorJudgeContext) -> DirectorJudgement { evaluate(context).judgement }
 
+    func judgeWithAttribution(_ context: DirectorJudgeContext) -> DirectorJudgeEvaluation {
+        let evaluation = evaluate(context)
+        let attribution: DirectorJudgeAttribution?
+        switch evaluation.source {
+        case .rules: attribution = .rules
+        case .learned: attribution = evaluation.modelVersion.map { .learned(modelVersion: $0) }
+        case .invalid: attribution = nil
+        }
+        return .init(judgement: evaluation.judgement, attribution: attribution)
+    }
+
     /// Both outputs use precisely the same evidence/timestamp. Failed prediction
     /// of any candidate discards the whole learned ranking, never a partial list.
     func evaluate(_ context: DirectorJudgeContext) -> Evaluation {

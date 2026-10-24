@@ -410,6 +410,13 @@ def stratum(r):
     return (r['sessionID'], r['evidenceClass'], c['segmentType'], c.get('segmentToken'), p.get('parametersVersion'), p.get('preferencesVersion'), c['policyRevision'], c['routeGeneration'])
 
 
+def complete_parameter_group(parameters):
+    """Explicit study captures materialize these groups; legacy rows may not."""
+    return (parameters['status'] == 'available'
+            and all(parameters.get(k) is not None for k in
+                    ('parametersVersion', 'preferencesVersion', 'resolvedStyle', 'readiness', 'adapter')))
+
+
 def action_pair_scope_matches(attempt, result):
     """Allow only the scope transitions committed by the named synchronous action.
 
@@ -435,8 +442,15 @@ def action_pair_scope_matches(attempt, result):
         # policy once. Readiness, adapter, judge settings and preference version
         # cannot change under cover of this action.
         stable_parameters = lambda p: {k: v for k, v in p.items() if k not in ('parametersVersion', 'resolvedStyle')}
-        parameter_versions_match = ((ap.get('parametersVersion') is None and bp.get('parametersVersion') is None)
-            or (ap.get('parametersVersion') == ac['policyRevision'] and bp.get('parametersVersion') == bc['policyRevision']))
+        if complete_parameter_group(ap) and complete_parameter_group(bp):
+            # The study owns versions; a style transition does not make a
+            # policy revision into a parameter version. Reuse needs one group.
+            before, after = int(ap['parametersVersion']), int(bp['parametersVersion'])
+            parameter_versions_match = after > before or (after == before and ap == bp)
+        else:
+            # Legacy absent/partial captures retain their original contract.
+            parameter_versions_match = ((ap.get('parametersVersion') is None and bp.get('parametersVersion') is None)
+                or (ap.get('parametersVersion') == ac['policyRevision'] and bp.get('parametersVersion') == bc['policyRevision']))
         return (ac['program'] == bc['program'] and ac.get('preview') == bc.get('preview')
                 and ac['routeGeneration'] == bc['routeGeneration']
                 and int(bc['policyRevision']) == int(ac['policyRevision']) + 1
@@ -475,12 +489,27 @@ def analyze(records, window, issues=None, source=None):
                         issues['backward_clocks'] += 1
             issues['invalid_measurements'] += len(r['invalidFields'])
             previous = r
-    snapshots = {}
+    snapshots, latest_complete_versions = {}, {}
     for r in records:
         p = r['parameters']
         if p['status'] != 'available':
             continue
-        key = (r['sessionID'], r['evidenceClass'], r['context']['segmentType'], p['parametersVersion'])
+        complete = complete_parameter_group(p)
+        key = (r['sessionID'], None if complete else r['evidenceClass'], None if complete else r['context']['segmentType'], p['parametersVersion'])
+        if complete:
+            version = int(p['parametersVersion'])
+            previous = latest_complete_versions.get(r['sessionID'], version)
+            if version < previous:
+                issues['parameter_version_rollback_records'] += 1; blocked.add(r['sessionID'])
+            latest_complete_versions[r['sessionID']] = max(previous, version)
+            # Full snapshots share one session version namespace even across
+            # segment types. Optional nil fields have one canonical meaning.
+            full = {k: p.get(k) for k in ('status', 'parametersVersion', 'preferencesVersion',
+                    'resolvedStyle', 'readiness', 'adapter', 'judgeMaximumAge', 'minimumProbability')}
+            if key in snapshots and snapshots[key] != full:
+                issues['inconsistent_parameters'] += 1; blocked.add(r['sessionID'])
+            snapshots[key] = full
+            continue
         prior = snapshots.setdefault(key, {})
         for name, value in p.items():
             if value is None:

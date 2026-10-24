@@ -36,12 +36,20 @@ nonisolated enum CutPolicy {
         }
     }
     enum Decision: Equatable, Sendable { case cut(Plan), abstain(Abstention) }
+    struct JudgeObservation: Sendable {
+        let context: DirectorJudgeContext
+        let judgement: DirectorJudgement
+        let attribution: DirectorJudgeAttribution?
+        /// nil when the existing invalid-timestamp guard skipped the gate.
+        let gate: DirectorJudgeGate.Result?
+    }
 
     /// Only the actual prepared Preview shot is a candidate for this cut.
     static func evaluate(live: DirectorTakeState, timeline: DirectorShotPolicy.Timeline,
                          prepared: DirectorShotPolicy.Candidate, programIdentity: IdentityEvidence,
                          style: DirectorStyle, evidenceRevision: UInt64, judge: any DirectorJudge,
-                         judgeMaximumAge: TimeInterval, minimumProbability: Double?) -> Decision {
+                         judgeMaximumAge: TimeInterval, minimumProbability: Double?,
+                         observeJudge: ((JudgeObservation) -> Void)? = nil) -> Decision {
         let now = timeline.now
         guard (try? style.validated()) != nil, now.isFinite, now >= 0,
               timeline.programStartedAt.isFinite, timeline.programStartedAt >= 0,
@@ -70,13 +78,25 @@ nonisolated enum CutPolicy {
             history: timeline.history, candidates: [prepared], now: now)
         let parameters = DirectorShotPolicy.Parameters(style)
         let allowed = DirectorShotPolicy.rank(filtered, preview: preview, parameters: parameters)
-        let judgement = judge.judge(.init(timeline: filtered, preview: preview, parameters: parameters,
-                                          evidenceRevision: evidenceRevision, now: now))
-        guard judgement.computedAt.isFinite, judgement.computedAt >= 0,
-              case .accepted(let selected) = DirectorJudgeGate.accept(judgement, allowed: allowed,
-                  evidenceRevision: evidenceRevision, now: now, maximumAge: judgeMaximumAge,
-                  minimumProbability: minimumProbability), selected.candidate == prepared else { return .abstain(.judge) }
-        return .cut(.init(candidate: prepared, reason: reason, live: live, now: now, preview: preview, revisions: revisions))
+        let context = DirectorJudgeContext(timeline: filtered, preview: preview, parameters: parameters,
+                                           evidenceRevision: evidenceRevision, now: now)
+        let evaluation = judge.judgeWithAttribution(context)
+        let judgement = evaluation.judgement
+        let gate: DirectorJudgeGate.Result?
+        if judgement.computedAt.isFinite, judgement.computedAt >= 0 {
+            gate = DirectorJudgeGate.accept(judgement, allowed: allowed, evidenceRevision: evidenceRevision,
+                now: now, maximumAge: judgeMaximumAge, minimumProbability: minimumProbability)
+        } else { gate = nil }
+        let decision: Decision
+        if let gate, case .accepted(let selected) = gate, selected.candidate == prepared {
+            decision = .cut(.init(candidate: prepared, reason: reason, live: live, now: now,
+                                 preview: preview, revisions: revisions))
+        } else { decision = .abstain(.judge) }
+        // Observe only the completed call and gate; logging cannot select a
+        // different judgement path or trigger another model invocation.
+        observeJudge?(.init(context: context, judgement: judgement,
+                            attribution: evaluation.attribution, gate: gate))
+        return decision
     }
 }
 

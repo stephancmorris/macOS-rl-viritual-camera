@@ -31,7 +31,94 @@ final class DirectorShadowRecorder {
         let prepareReadiness: DirectorReadiness?
         let cutReadiness: DirectorReadiness?
         let timeline: DirectorShotPolicy.Timeline?
+        var cutJudgeObservation: CutPolicy.JudgeObservation? = nil
     }
+    /// In-memory origin of one synchronous Stop attempt. It is never encoded
+    /// and cannot be reused as evidence that a retired source is still running.
+    struct StopActionCapture {
+        struct Input {
+            let channel: ChannelID
+            let camera: ObjectIdentifier
+            let source: DiagnosticsSessionIdentity.Source
+            let active: CameraManager.InputSource
+            let preferred: CameraManager.InputSource
+            let revisions: ChannelRevisions
+            let missing: Bool
+            let kind: R.EvidenceClass
+        }
+        let session: UUID
+        let resultSequence: UInt64
+        let action: UUID
+        let channel: ChannelID
+        let commandEpoch: UInt64
+        let inputs: [Input]
+        let program: ChannelID
+        let preview: ChannelID?
+        let controlTarget: ChannelID
+        let controlRevision: UInt64
+        let route: UInt64
+    }
+
+    private static func sourceKind(_ camera: CameraManager) -> R.EvidenceClass? {
+        guard camera.isRunning, let source = camera.sourceIdentity else { return nil }
+        switch camera.activeInputSource {
+        case .liveCamera: return source.inputKind == "Live camera" ? .live : nil
+        case .validationClip: return source.inputKind == "Validation clip" ? .recorded : nil
+        }
+    }
+
+    func captureStopAttempt(_ command: OperatorCommand, on channel: ChannelID,
+                            show: ShowCoordinator) -> StopActionCapture? {
+        guard command.origin == .operatorUI, command.target == .session,
+              case .stopSession = command.action, !exhausted, sequence < .max else { return nil }
+        #if DEBUG
+        guard provenanceForTesting == nil else { return nil }
+        #endif
+        let channels = ChannelID.allCases.compactMap { show.channel($0) }
+        let inputs = channels.compactMap { camera -> StopActionCapture.Input? in
+            guard let kind = Self.sourceKind(camera), let source = camera.sourceIdentity,
+                  !camera.isStartingSession else { return nil }
+            return .init(channel: camera.channelID, camera: ObjectIdentifier(camera), source: source,
+                         active: camera.activeInputSource, preferred: camera.preferredInputSource,
+                         revisions: camera.revisions, missing: camera.sourceMissing, kind: kind)
+        }
+        guard inputs.count == channels.count, let kind = inputs.first?.kind,
+              inputs.allSatisfy({ $0.kind == kind }), inputs.contains(where: { $0.channel == channel }) else { return nil }
+        return .init(session: log.sessionID, resultSequence: sequence + 1, action: command.id,
+            channel: channel, commandEpoch: command.epoch, inputs: inputs, program: show.programChannel,
+            preview: show.previewChannel, controlTarget: show.controlTarget,
+            controlRevision: show.controlTargetRevision, route: show.router.routeGeneration)
+    }
+
+    private func stopProvenance(_ capture: StopActionCapture?, event: R.Event,
+                                channel: ChannelID?, show: ShowCoordinator, sequence: UInt64) -> [R.EvidenceClass]? {
+        guard let capture, capture.session == log.sessionID, capture.resultSequence == sequence,
+              capture.action == event.actionID?.value, capture.channel == channel,
+              event.targetScope == .session, event.target == nil,
+              show.programChannel == capture.program, show.previewChannel == capture.preview,
+              show.controlTarget == capture.controlTarget, show.controlTargetRevision == capture.controlRevision,
+              show.router.routeGeneration == capture.route,
+              capture.inputs.map(\.channel) == ChannelID.allCases.filter({ show.channel($0) != nil }),
+              event.outcome == .accepted || event.outcome == .refused else { return nil }
+        for input in capture.inputs {
+            guard let camera = show.channel(input.channel), ObjectIdentifier(camera) == input.camera,
+                  camera.sourceIdentity == input.source, camera.preferredInputSource == input.preferred,
+                  !camera.isStartingSession else { return nil }
+            if input.channel == capture.channel, event.outcome == .accepted {
+                let generation = input.revisions.sourceGeneration.addingReportingOverflow(1)
+                let epoch = input.revisions.controlEpoch.addingReportingOverflow(2)
+                guard !generation.overflow, !epoch.overflow, capture.commandEpoch == input.revisions.controlEpoch,
+                      !camera.isRunning, !camera.sourceMissing, camera.activeInputSource == input.preferred,
+                      camera.revisions == ChannelRevisions(sourceGeneration: generation.partialValue,
+                          controlEpoch: epoch.partialValue, shotRevision: input.revisions.shotRevision) else { return nil }
+            } else {
+                guard camera.isRunning, camera.sourceMissing == input.missing,
+                      camera.activeInputSource == input.active, camera.revisions == input.revisions else { return nil }
+            }
+        }
+        return capture.inputs.map(\.kind)
+    }
+
     private(set) var log: DirectorShadowLog
     private var sequence: UInt64 = 0
     private var exhausted = false
@@ -47,24 +134,25 @@ final class DirectorShadowRecorder {
         catch { log.noteDropped() }
     }
 
-    func emit(_ event: R.Event, show: ShowCoordinator, authority a: DirectorAuthority,
+    @discardableResult func emit(_ event: R.Event, show: ShowCoordinator, authority a: DirectorAuthority,
               policy: UInt64, nomination: UInt64, evidence: UInt64, preferences: DirectorPreferences?, segment: RunSheet.Segment? = nil,
               judgeObservation: DirectorJudgeShadow.Observation? = nil, eventTime: TimeInterval? = nil,
-              studyParameters: Parameters? = nil, evaluation: Evaluation? = nil) {
-        guard !exhausted else { log.noteDropped(); return }
+              studyParameters: Parameters? = nil, evaluation: Evaluation? = nil,
+              stopActionCapture: StopActionCapture? = nil, stopActionChannel: ChannelID? = nil) -> Bool {
+        guard !exhausted else { log.noteDropped(); return false }
         let number = sequence
         if sequence == .max { exhausted = true } else { sequence += 1 }
         let channels = ChannelID.allCases.compactMap { show.channel($0) }
-        var provenance: [R.EvidenceClass] = channels.compactMap { camera in
-            guard camera.isRunning, let source = camera.sourceIdentity else { return nil }
-            switch camera.activeInputSource {
-            case .liveCamera: return source.inputKind == "Live camera" ? .live : nil
-            case .validationClip: return source.inputKind == "Validation clip" ? .recorded : nil
-            }
+        var provenance = channels.compactMap { Self.sourceKind($0) }
+        if event.action == .stopSession, event.phase == .result {
+            guard let origin = stopProvenance(stopActionCapture, event: event, channel: stopActionChannel,
+                                              show: show, sequence: number) else { log.noteDropped(); return false }
+            provenance = origin
+        } else {
+            #if DEBUG
+            if let override = provenanceForTesting { provenance = override }
+            #endif
         }
-        #if DEBUG
-        if let override = provenanceForTesting { provenance = override }
-        #endif
         let now = evaluation?.now ?? eventTime ?? show.clock()
         let supplied = evaluation?.parameters ?? studyParameters
         guard provenance.count == channels.count, let kind = provenance.first,
@@ -74,7 +162,7 @@ final class DirectorShadowRecorder {
               evaluation.map({ $0.sample.map { $0.sampledAt == now } ?? true }) ?? true,
               evaluation?.timeline.map({ $0.now == now }) ?? true,
               now.isFinite, now >= 0 else {
-            log.noteDropped(); return
+            log.noteDropped(); return false
         }
         func alias(_ id: ChannelID) -> String { "input-\((ChannelID.allCases.firstIndex(of: id) ?? 0) + 1)" }
         let level: R.Level
@@ -98,7 +186,9 @@ final class DirectorShadowRecorder {
         let parameters: R.ParameterContext
         if let supplied {
             guard let validPreferences, (try? supplied.style.validated()) != nil,
-                  supplied.readiness.isValid, supplied.adapter.isValid else { log.noteDropped(); return }
+                  supplied.readiness.isValid, supplied.adapter.isValid,
+                  judgeObservation.map({ supplied.style == $0.style && supplied.judgeMaximumAge == $0.maximumAge
+                      && supplied.minimumProbability == $0.minimumProbability }) ?? true else { log.noteDropped(); return false }
             parameters = .init(status: .available, parametersVersion: .init(supplied.binding.parametersVersion),
                 preferencesVersion: validPreferences.version, resolvedStyle: .init(supplied.style),
                 readiness: .init(supplied.readiness), adapter: .init(supplied.adapter),
@@ -113,7 +203,7 @@ final class DirectorShadowRecorder {
         if parameters.status == .available, let version = parameters.parametersVersion?.value {
             if let latest = latestParameters, let previous = latest.parametersVersion?.value {
                 guard version > previous || (version == previous && parameters == latest) else {
-                    log.noteDropped(); return
+                    log.noteDropped(); return false
                 }
             }
             latestParameters = parameters
@@ -145,21 +235,54 @@ final class DirectorShadowRecorder {
                     var inputs: [R.ScorerInput] = []
                     for (rank, item) in ranked.enumerated() {
                         guard let features = DirectorJudgeFeatures.extract(item.candidate, context: comparison.context) else {
-                            log.noteDropped(); return
+                            log.noteDropped(); return false
                         }
                         inputs.append(.init(featureSchemaVersion: DirectorJudgeFeatures.schemaVersion,
                             judgementIndex: 0, candidateRank: rank, features: features.values.map(Double.init)))
                     }
                     scorerInputs = inputs
                 }
-            } catch { log.noteDropped(); return }
+            } catch { log.noteDropped(); return false }
         }
+        // Only explicit identity from this exact invocation is attributable.
+        // Missing/invalid model identity does not invent a rules/learned label.
+        if judgeObservation == nil, let evaluation, let observed = evaluation.cutJudgeObservation,
+           observed.context.now == now, observed.context.evidenceRevision == evidence,
+           observed.context.preview == show.previewChannel,
+           observed.context.parameters == DirectorShotPolicy.Parameters(evaluation.parameters.style),
+           let identity = observed.attribution {
+            let kind: R.JudgeKind
+            let model: String?
+            switch identity {
+            case .rules: kind = .rules; model = nil
+            case .recorded: kind = .recorded; model = nil
+            case .learned(let version): kind = .learned; model = version
+            }
+            let validIdentity = model.map {
+                LearnedJudge.validModelVersion($0)
+            } ?? true
+            if validIdentity {
+                let aliases = Dictionary(uniqueKeysWithValues: channels.map { ($0.channelID, alias($0.channelID)) })
+                do {
+                    judgements.append(try .init(observed.judgement, kind: kind, modelVersion: model,
+                        aliases: aliases, path: "judgements[0]", gate: observed.gate, measurements: &measurements))
+                } catch { log.noteDropped(); return false }
+            }
+        }
+        let capturedEvent: R.Event
+        if evaluation?.cutJudgeObservation != nil, !judgements.isEmpty {
+            capturedEvent = .init(kind: event.kind, decisionID: event.decisionID, target: event.target,
+                shot: event.shot, reason: event.reason, proposalID: event.proposalID, requestID: event.requestID,
+                proposalCreatedAt: event.proposalCreatedAt, judgementIndex: 0, stage: event.stage, reasons: event.reasons,
+                actionID: event.actionID, action: event.action, phase: event.phase, targetScope: event.targetScope,
+                outcome: event.outcome, programAfter: event.programAfter, previewAfter: event.previewAfter)
+        } else { capturedEvent = event }
         let record = R(schemaVersion: R.currentSchemaVersion, recordID: .init(UUID()), sessionID: .init(log.sessionID),
             sequence: .init(number), recordedAtUTC: log.recordingUTC(), eventTime: now, evidenceClass: kind,
             executionMode: a.level == .off || a.level == .suggest ? .shadow : .observing, context: context,
-            parameters: parameters, evidence: evidenceSummaries, judgements: judgements, event: event,
+            parameters: parameters, evidence: evidenceSummaries, judgements: judgements, event: capturedEvent,
             invalidFields: measurements.invalidFields, droppedRecordsBefore: .init(0), scorerInputs: scorerInputs)
-        log.append(record, provenance: provenance)
+        return log.append(record, provenance: provenance)
     }
 
     static func action(_ action: R.OperatorAction, id: UUID = UUID(), outcome: R.ActionOutcome? = nil,

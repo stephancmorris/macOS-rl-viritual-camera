@@ -67,8 +67,12 @@ final class DirectorController: ObservableObject, DirectorConsoleControlling {
     private var takePermits = TakePermitIssuer()
     private(set) var shadowRecorder: DirectorShadowRecorder?
     private var shadowTakeID: UUID?
+    private var shadowStopCapture: DirectorShadowRecorder.StopActionCapture?
     private lazy var subjectConsole = DirectorSubjectConsole(show: show)
     private let judgeShadow = DirectorJudgeShadow()
+    private var captureBindingProvider: DirectorShadowRecorder.CaptureBindingProvider?
+    private var captureSettingsGeneration = UUID()
+    private var resolvingCaptureBinding = false
     private(set) var evidenceRevision: UInt64 = 0
     private(set) lazy var assistPreparation = DirectorAssistPreparation(show: show, controller: self)
     private(set) lazy var cutExecution = DirectorCutExecution(show: show, controller: self)
@@ -160,6 +164,7 @@ final class DirectorController: ObservableObject, DirectorConsoleControlling {
     }
 
     func detach() {
+        shadowStopCapture = nil
         let wasAttached = isAttached
         isAttached = false
         assistPreparation.retire()
@@ -190,8 +195,11 @@ final class DirectorController: ObservableObject, DirectorConsoleControlling {
         channel.manualActionObserver = { [weak self] action in self?.manualAction(action, on: id) }
         channel.manualResultObserver = { [weak self] command, result in
             guard let self else { return }
+            let stopCapture = self.shadowStopCapture
+            self.shadowStopCapture = nil
             guard command.origin == .operatorUI else { return }
-            self.emitShadow(DirectorShadowRecorder.command(command, outcome: result.wasAccepted ? .accepted : .refused), authority: self.authority)
+            self.emitShadow(DirectorShadowRecorder.command(command, outcome: result.wasAccepted ? .accepted : .refused),
+                authority: self.authority, stopActionCapture: stopCapture, stopActionChannel: id)
         }
         var bag: Set<AnyCancellable> = []
         channel.$sourceMissing.removeDuplicates().dropFirst()
@@ -205,6 +213,7 @@ final class DirectorController: ObservableObject, DirectorConsoleControlling {
     }
 
     private func removeChannelHooks(_ id: ChannelID) {
+        shadowStopCapture = nil
         show?.channel(id)?.manualActionObserver = nil
         show?.channel(id)?.manualResultObserver = nil
         channelCancellables[id] = nil
@@ -213,10 +222,14 @@ final class DirectorController: ObservableObject, DirectorConsoleControlling {
     // MARK: Ingress (plan §5.3)
 
     private func manualAction(_ action: CameraManager.ManualCameraAction, on channel: ChannelID) {
+        shadowStopCapture = nil
         retireSubjectDiscovery()
         switch action {
         case .command(let command):
-            if command.origin == .operatorUI { emitShadow(DirectorShadowRecorder.command(command), authority: authority) }
+            if command.origin == .operatorUI {
+                let stopCapture = show.flatMap { shadowRecorder?.captureStopAttempt(command, on: channel, show: $0) }
+                if emitShadow(DirectorShadowRecorder.command(command), authority: authority) { shadowStopCapture = stopCapture }
+            }
             forward(.manualCommand, pause: .operatorTookOver, note: "manual \(command.action.logName) on \(channel.cameraLabel)")
         case .settingsChanged:
             let actionID = UUID()
@@ -305,12 +318,26 @@ final class DirectorController: ObservableObject, DirectorConsoleControlling {
         refreshSection()
         let comparisonEpoch = authority.epoch, comparisonEvidence = evidenceRevision
         let comparisonPolicy = policyRevision, comparisonNomination = nominationRevision
+        let comparisonSettings = captureSettingsGeneration
         let comparison = judgeShadow.observe(show: show, now: now, evidenceRevision: evidenceRevision,
             style: effectiveStyle, policyRevision: policyRevision)
         if let comparison, comparisonEpoch == authority.epoch, comparisonEvidence == evidenceRevision,
            comparisonPolicy == policyRevision, comparisonNomination == nominationRevision,
-           comparison.style == effectiveStyle {
-            emitShadow(DirectorShadowRecorder.judgeComparison, authority: authority, judgeObservation: comparison)
+           comparisonSettings == captureSettingsGeneration, comparison.style == effectiveStyle {
+            if hasCaptureBindingProvider {
+                guard let readiness = cutReadinessParameters,
+                      let parameters = captureParameters(nil, readiness: readiness,
+                          judgeMaximumAge: comparison.maximumAge, minimumProbability: comparison.minimumProbability),
+                      comparisonEpoch == authority.epoch, comparisonEvidence == evidenceRevision,
+                      comparisonPolicy == policyRevision, comparisonNomination == nominationRevision,
+                      comparisonSettings == captureSettingsGeneration else {
+                    shadowRecorder?.log.noteDropped(); return
+                }
+                emitShadow(DirectorShadowRecorder.judgeComparison, authority: authority,
+                    judgeObservation: comparison, studyParameters: parameters)
+            } else {
+                emitShadow(DirectorShadowRecorder.judgeComparison, authority: authority, judgeObservation: comparison)
+            }
         } else if !cutExecution.isConfigured {
             emitShadow(DirectorShadowRecorder.noCutPolicy, authority: authority)
         }
@@ -346,24 +373,89 @@ final class DirectorController: ObservableObject, DirectorConsoleControlling {
         apply(.pause, pause: .setupChanged, note: "preparation failed")
     }
 
-    private func emitShadow(_ event: DirectorShadowRecord.Event, authority before: DirectorAuthority,
+    @discardableResult private func emitShadow(_ event: DirectorShadowRecord.Event, authority before: DirectorAuthority,
                             judgeObservation: DirectorJudgeShadow.Observation? = nil,
-                            evaluation: DirectorShadowRecorder.Evaluation? = nil) {
-        guard let show else { return }
-        shadowRecorder?.emit(event, show: show, authority: before, policy: policyRevision,
+                            evaluation: DirectorShadowRecorder.Evaluation? = nil,
+                            studyParameters: DirectorShadowRecorder.Parameters? = nil,
+                            stopActionCapture: DirectorShadowRecorder.StopActionCapture? = nil,
+                            stopActionChannel: ChannelID? = nil) -> Bool {
+        if event.kind == .operatorAction { shadowStopCapture = nil }
+        guard let show else { return false }
+        let requiresBinding = hasCaptureBindingProvider
+        let parameters = studyParameters ?? (judgeObservation == nil && evaluation == nil ? cutExecution.captureParameters : nil)
+        if requiresBinding, evaluation == nil, parameters == nil {
+            shadowRecorder?.log.noteDropped(); return false
+        }
+        return shadowRecorder?.emit(event, show: show, authority: before, policy: policyRevision,
             nomination: nominationRevision, evidence: evidenceRevision, preferences: preferences, segment: runSheet?.current,
             judgeObservation: judgeObservation, eventTime: clock(),
-            studyParameters: judgeObservation == nil && evaluation == nil ? cutExecution.captureParameters : nil,
-            evaluation: evaluation)
+            studyParameters: parameters,
+            evaluation: evaluation, stopActionCapture: stopActionCapture, stopActionChannel: stopActionChannel) ?? false
     }
 
-    func captureParameters(_ binding: DirectorShadowRecorder.CaptureBinding,
+    /// Explicit study naming only. A configured provider owns every capture
+    /// producer in this session; nil declines that group without legacy fallback.
+    func configureCaptureForStudy(_ provider: DirectorShadowRecorder.CaptureBindingProvider?) {
+        captureSettingsGeneration = UUID()
+        captureBindingProvider = provider
+    }
+
+    var hasCaptureBindingProvider: Bool { captureBindingProvider != nil }
+    var captureConfigurationRevision: UUID { captureSettingsGeneration }
+
+    private struct CaptureWorld: Equatable {
+        struct Input: Equatable {
+            let id: ChannelID
+            let object: ObjectIdentifier
+            let source: DiagnosticsSessionIdentity.Source?
+            let revisions: ChannelRevisions
+            let running: Bool
+            let missing: Bool
+        }
+        let program: ChannelID
+        let preview: ChannelID?
+        let route: UInt64
+        let inputs: [Input]
+    }
+    private func captureWorld() -> CaptureWorld? {
+        guard let show else { return nil }
+        return .init(program: show.programChannel, preview: show.previewChannel,
+            route: show.router.routeGeneration, inputs: ChannelID.allCases.compactMap { id in
+                guard let channel = show.channel(id) else { return nil }
+                return .init(id: id, object: ObjectIdentifier(channel), source: channel.sourceIdentity,
+                    revisions: channel.revisions, running: channel.isRunning, missing: channel.sourceMissing)
+            })
+    }
+
+    func captureParameters(_ fallback: DirectorShadowRecorder.CaptureBinding?,
                            readiness: DirectorReadiness.Parameters, judgeMaximumAge: Double? = nil,
                            minimumProbability: Double? = nil) -> DirectorShadowRecorder.Parameters? {
-        guard let style = effectiveStyle, let adapter, let preferences,
-              (try? preferences.validated()) != nil, readiness.isValid, adapter.parameters.isValid else { return nil }
-        return .init(binding: binding, style: style, readiness: readiness, adapter: adapter.parameters,
-                     judgeMaximumAge: judgeMaximumAge, minimumProbability: minimumProbability)
+        func actualKey() -> DirectorShadowRecorder.CaptureKey? {
+            guard let style = effectiveStyle, let adapter, let preferences,
+                  (try? preferences.validated()) != nil, readiness.isValid, adapter.parameters.isValid,
+                  judgeMaximumAge.map({ $0.isFinite && $0 >= 0 }) ?? true,
+                  minimumProbability.map({ $0.isFinite && (0...1).contains($0) }) ?? true else { return nil }
+            return .init(policyRevision: policyRevision, preferencesVersion: preferences.version,
+                style: style, readiness: readiness, adapter: adapter.parameters,
+                judgeMaximumAge: judgeMaximumAge, minimumProbability: minimumProbability)
+        }
+        guard let key = actualKey() else { return nil }
+        let binding: DirectorShadowRecorder.CaptureBinding
+        if let provider = captureBindingProvider {
+            guard !resolvingCaptureBinding else { return nil }
+            let generation = captureSettingsGeneration
+            let world = captureWorld()
+            resolvingCaptureBinding = true
+            defer { resolvingCaptureBinding = false }
+            guard let supplied = provider(key), generation == captureSettingsGeneration,
+                  actualKey() == key, world == captureWorld() else { return nil }
+            binding = supplied
+        } else {
+            guard let fallback else { return nil }
+            binding = fallback
+        }
+        return .init(binding: binding, style: key.style, readiness: key.readiness, adapter: key.adapter,
+                     judgeMaximumAge: key.judgeMaximumAge, minimumProbability: key.minimumProbability)
     }
 
     var captureCutReadinessParameters: DirectorReadiness.Parameters? { cutReadinessParameters }
@@ -519,6 +611,7 @@ final class DirectorController: ObservableObject, DirectorConsoleControlling {
     func configureAutomaticCuts(_ configuration: DirectorCutExecution.Configuration?,
                                 context: DirectorCutExecution.ContextProvider? = nil,
                                 scheduler: (any DirectorCutDeadlineScheduling)? = nil) {
+        captureSettingsGeneration = UUID()
         retireAutomaticCuts()
         cutExecution.configure(configuration, context: context, scheduler: scheduler)
         refreshSection()
@@ -631,6 +724,7 @@ final class DirectorController: ObservableObject, DirectorConsoleControlling {
     /// or preparation sink. Nil configuration/provider disables the trial.
     func configureJudgeShadow(_ configuration: DirectorJudgeShadow.Configuration?,
                               context: DirectorJudgeShadow.ContextProvider? = nil) {
+        captureSettingsGeneration = UUID()
         judgeShadow.configure(configuration, context: context)
     }
 
@@ -726,7 +820,7 @@ final class DirectorController: ObservableObject, DirectorConsoleControlling {
         if transition.cancellations.contains(.prepare) { assistPreparation.retire(); retireSubjectDiscovery() }
         if event == .policyChanged { policyRevision &+= 1 }
         if event == .nominationChanged { nominationRevision &+= 1 }
-        if event == .restart { shadowRecorder?.restart() }
+        if event == .restart { shadowStopCapture = nil; shadowRecorder?.restart() }
         appliedEvents.append(event)
         if appliedEvents.count > Self.eventHistoryLimit { appliedEvents.removeFirst(appliedEvents.count - Self.eventHistoryLimit) }
         if let refusal = transition.refusal { log("\(note ?? "event") refused: \(refusal)") }
