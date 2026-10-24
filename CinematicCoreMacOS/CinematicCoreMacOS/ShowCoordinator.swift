@@ -149,6 +149,11 @@ final class ShowCoordinator: ObservableObject {
         guard DeveloperFlags.runDirectorShadow, let startedDirector, startedDirector.isAttached else { return nil }
         return startedDirector.directorSection
     }
+    /// UI actions use the retained controller; reading status never starts it.
+    var directorControlForConsole: (any DirectorConsoleControlling)? {
+        guard DeveloperFlags.runDirectorShadow, let startedDirector, startedDirector.isAttached else { return nil }
+        return startedDirector
+    }
     /// The show owns authority and the configured Debug-only effect boundaries.
     private(set) lazy var director = DirectorController(
         show: self, clock: { [weak self] in self?.clock() ?? CACurrentMediaTime() },
@@ -283,22 +288,32 @@ final class ShowCoordinator: ObservableObject {
 
     @discardableResult
     func take(_ request: TakeRequest? = nil, origin: TakeOrigin = .operatorUI,
-              permit: TakePermit? = nil) -> TakeResult {
+              permit: TakePermit? = nil, fallbackPermit: BackupFallbackPolicy.Permit? = nil) -> TakeResult {
         takeAttemptObserver?(origin)
-        let result = performTake(request, origin: origin, permit: permit)
+        let result = performTake(request, origin: origin, permit: permit, fallbackPermit: fallbackPermit)
         takeResultObserver?(origin, result)
         return result
     }
 
-    private func performTake(_ request: TakeRequest?, origin: TakeOrigin, permit: TakePermit?) -> TakeResult {
-        // B-07: consume before every technical check, including missing Preview
-        // and stale requests. No await or retry between authorization and effect.
-        if origin != .operatorUI {
-            guard let permit, director.consumeTakePermit(permit, now: clock()) else {
+    private func performTake(_ request: TakeRequest?, origin: TakeOrigin, permit: TakePermit?,
+                             fallbackPermit: BackupFallbackPolicy.Permit?) -> TakeResult {
+        // Every matching attempt is consumed before technical checks. The
+        // fault grant is a distinct type and never borrows a normal permit.
+        var fallbackWindow: ProgramRouter.HoldWindow?
+        switch origin {
+        case .operatorUI: break
+        case .director:
+            guard let permit, director.consumeTakePermit(permit, now: clock()), fallbackPermit == nil else {
                 return .rejected(.directorNotAuthorized)
             }
-            // Fault fallback needs B-12's distinct, source-loss-scoped permit.
-            guard origin == .director else { return .rejected(.directorNotAuthorized) }
+        case .fallback:
+            // Preserve the old rejection's terminal normal-lease behavior.
+            if let permit { _ = director.consumeTakePermit(permit, now: clock()) }
+            guard let fallbackPermit,
+                  let window = director.backupExecution.consume(fallbackPermit, now: clock()), permit == nil else {
+                return .rejected(.directorNotAuthorized)
+            }
+            fallbackWindow = window
         }
         guard let request = request ?? makeTakeRequest(), let preview = previewChannel,
               let channel = channels[preview] else {
@@ -318,7 +333,8 @@ final class ShowCoordinator: ObservableObject {
         guard availability.isEligible, let frame = channel.latestRenderedFrame else {
             return .rejected(.notEligible(availability.reason))
         }
-        guard router.commitTake(frame, to: preview, expectedRouteGeneration: request.routeGeneration) else {
+        guard router.commitTake(frame, to: preview, expectedRouteGeneration: request.routeGeneration,
+                                fallbackWindow: fallbackWindow) else {
             return .rejected(.outputRefused)
         }
         lastTakeAt = now

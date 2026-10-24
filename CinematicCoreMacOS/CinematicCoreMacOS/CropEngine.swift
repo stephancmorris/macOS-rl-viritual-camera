@@ -133,12 +133,14 @@ final class CropEngine: ObservableObject {
     private var zoomLastTick: TimeInterval?
     private var zoomAspect: CGFloat = 1
     private var zoomAnchorCrop: CropRect?
+    private var directorZoom: (trajectory: DirectorShotMoveTrajectory, elapsed: TimeInterval, aspect: CGFloat, floor: CGFloat)?
     private var deterministicPan = false
     var zoomUsesTopAnchor = false
     var adjustedHeight: CGFloat? { zoomHeight }
     var zoomHasLanded: Bool { zoomHeight != nil && zoomDirection == nil && !hasZoomAdjustment }
 
     func adoptVisibleSize(from visible: CropRect? = nil) {
+        directorZoom = nil
         if let visible { currentCrop = visible }
         zoomHeight = currentCrop.size.height
         zoomDestination = currentCrop.size.height
@@ -161,8 +163,32 @@ final class CropEngine: ObservableObject {
         isZoomLimited = height < lower || (direction == .pushIn && zoomDestination <= lower)
     }
 
+    /// A separate explicit Director path: one adjacent rung, paced in ladder
+    /// steps per second over its actual visible/clamped log-height distance.
+    /// Operator zoom retains its existing velocity and acceleration limits.
+    @discardableResult
+    func beginDirectorZoom(_ direction: OperatorCommand.ZoomDirection, to height: CGFloat,
+                           maximumRate: Double, visibleCrop: CropRect) -> Bool {
+        let aspect = visibleCrop.size.width / visibleCrop.size.height
+        guard aspect.isFinite, aspect > 0, height.isFinite else { return false }
+        let upper = min(1, 1 / aspect)
+        let lower = min(upper, max(0.001, qualityFloor.minCropHeightFraction))
+        let destination = min(upper, max(lower, height))
+        guard visibleCrop.size.height >= lower, visibleCrop.size.height <= upper,
+              let trajectory = DirectorShotMoveTrajectory(originHeight: Double(visibleCrop.size.height),
+                  destinationHeight: Double(destination), maximumRate: maximumRate),
+              (direction == .pushIn ? destination < visibleCrop.size.height : destination > visibleCrop.size.height) else { return false }
+        adoptVisibleSize(from: visibleCrop)
+        zoomDirection = direction
+        zoomDestination = destination
+        directorZoom = (trajectory, 0, aspect, qualityFloor.minCropHeightFraction)
+        isZoomLimited = height < lower
+        return true
+    }
+
     /// Stop at the visible size; a later push/pull starts a fresh shot move.
     func endZoom() {
+        directorZoom = nil
         guard zoomDirection != nil else { return }
         zoomDirection = nil
         zoomDestination = zoomHeight ?? currentCrop.size.height
@@ -170,6 +196,7 @@ final class CropEngine: ObservableObject {
     }
 
     func clearZoomAdjustment() {
+        directorZoom = nil
         zoomHeight = nil
         zoomDirection = nil
         zoomVelocity = 0
@@ -188,6 +215,26 @@ final class CropEngine: ObservableObject {
 
     func advanceZoom(now: TimeInterval, aspect: CGFloat) {
         deterministicPan = false
+        if var move = directorZoom {
+            // A geometry change retires this trajectory at its visible size.
+            // It cannot silently turn a quality-floor update into a fast move.
+            guard now.isFinite, now >= 0, aspect == move.aspect,
+                  qualityFloor.minCropHeightFraction == move.floor,
+                  zoomLastTick.map({ now >= $0 }) ?? true else { endZoom(); return }
+            let delta = min(0.1, max(0, now - (zoomLastTick ?? now)))
+            zoomLastTick = now
+            move.elapsed += delta
+            let height = CGFloat(move.trajectory.height(at: move.elapsed))
+            zoomHeight = height
+            currentCrop = resized(currentCrop, height: height)
+            targetCrop = resized(zoomAnchorCrop ?? targetCrop, height: height)
+            if move.elapsed >= move.trajectory.duration {
+                directorZoom = nil
+                zoomDirection = nil
+                hasZoomAdjustment = false
+            } else { directorZoom = move }
+            return
+        }
         zoomAspect = max(0.001, aspect)
         guard var height = zoomHeight else { return }
         let upper = min(1, 1 / zoomAspect)

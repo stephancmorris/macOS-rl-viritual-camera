@@ -69,6 +69,9 @@ final class DirectorController: ObservableObject, DirectorConsoleControlling {
     private var shadowTakeID: UUID?
     private(set) var evidenceRevision: UInt64 = 0
     private(set) lazy var assistPreparation = DirectorAssistPreparation(show: show, controller: self)
+    private(set) lazy var cutExecution = DirectorCutExecution(show: show, controller: self)
+    private(set) lazy var backupExecution = DirectorBackupExecution(show: show, controller: self)
+    private(set) lazy var onAirMoves = DirectorOnAirMoveExecution(show: show, controller: self)
     private let cutReadinessParameters: DirectorReadiness.Parameters?
     private(set) var policyRevision: UInt64 = 0
     private(set) var nominationRevision: UInt64 = 0
@@ -122,11 +125,19 @@ final class DirectorController: ObservableObject, DirectorConsoleControlling {
     /// Install every ingress hook and start ticking. Idempotent.
     func attach() {
         guard let show else { return }
+        retireAutomaticCuts()
+        backupExecution.retire()
+        onAirMoves.retire()
         detachHooks()
         show.takeAttemptObserver = { [weak self] origin in self?.takeAttempted(origin: origin) }
         show.takeResultObserver = { [weak self] origin, result in self?.takeFinished(origin: origin, result: result) }
         show.channelsChangedObserver = { [weak self] change in self?.channelsChanged(change) }
         show.router.stateObserver = { [weak self] state in self?.routerStateChanged(state) }
+        show.programOutput.$activeRoute.removeDuplicates().dropFirst()
+            .sink { [weak self] route in
+                if route == nil { self?.forward(.outputFault, pause: .outputProblem) }
+            }
+            .store(in: &showCancellables)
         show.$editLive.removeDuplicates().dropFirst()
             .sink { [weak self] live in self?.forward(.editLive(live), pause: live ? .editLive : nil) }
             .store(in: &showCancellables)
@@ -144,6 +155,10 @@ final class DirectorController: ObservableObject, DirectorConsoleControlling {
 
     func detach() {
         isAttached = false
+        backupExecution.retire()
+        onAirMoves.retire()
+        retireAutomaticCuts()
+        refreshSection()
         ticker.stop()
         detachHooks()
     }
@@ -169,8 +184,9 @@ final class DirectorController: ObservableObject, DirectorConsoleControlling {
         var bag: Set<AnyCancellable> = []
         channel.$sourceMissing.removeDuplicates().dropFirst()
             .sink { [weak self] missing in
-                if missing { self?.forward(.sourceLoss(id), pause: .sourceLost(id)) }
-                else { self?.forward(.sourceRebound(id), pause: .setupChanged) }
+                if missing {
+                    if self?.backupExecution.sourceLoss(id) != true { self?.forward(.sourceLoss(id), pause: .sourceLost(id)) }
+                } else { self?.forward(.sourceRebound(id), pause: .setupChanged) }
             }
             .store(in: &bag)
         channelCancellables[id] = bag
@@ -225,6 +241,7 @@ final class DirectorController: ObservableObject, DirectorConsoleControlling {
     }
 
     private func routerStateChanged(_ state: ProgramRouter.State) {
+        if backupExecution.routerStateChanged(state) { return }
         switch state {
         case .holding, .standby:
             // Backup's own fallback (B-12) will claim the source-loss hold first.
@@ -266,8 +283,10 @@ final class DirectorController: ObservableObject, DirectorConsoleControlling {
         if isDirecting, !authority.healthy, prerequisites().sourcesHealthy, prerequisites().outputHealthy {
             apply(.healthRestored, pause: nil, note: "health restored")
         }
+        onAirMoves.validateRunning()
+        cutExecution.evaluate(now: now)
         refreshSection()
-        emitShadow(DirectorShadowRecorder.noCutPolicy, authority: authority)
+        if !cutExecution.isConfigured { emitShadow(DirectorShadowRecorder.noCutPolicy, authority: authority) }
     }
 
     private func evidenceEvent(_ event: DirectorEvidenceAdapter.Event, preview: ChannelID?) {
@@ -332,13 +351,13 @@ final class DirectorController: ObservableObject, DirectorConsoleControlling {
     /// defaults: the caller supplies the permit lease from approved parameters.
     func issueTakePermit(now: TimeInterval, validity: TimeInterval) -> TakePermit? {
         guard DeveloperFlags.allowDirectorAuto else { return nil }
-        return takePermits.issue(live: takeState(now: now), now: now, validity: validity)
+        return takePermits.issue(live: currentTakeState(now: now), now: now, validity: validity)
     }
 
     func consumeTakePermit(_ permit: TakePermit, now: TimeInterval) -> Bool {
         // Even a disabled path consumes/discards its own matching attempt.
         guard DeveloperFlags.allowDirectorAuto else { takePermits.discard(permit); return false }
-        if case .admitted = takePermits.consume(permit, live: takeState(now: now), now: now) { return true }
+        if case .admitted = takePermits.consume(permit, live: currentTakeState(now: now), now: now) { return true }
         return false
     }
 
@@ -363,7 +382,7 @@ final class DirectorController: ObservableObject, DirectorConsoleControlling {
             motion: sample.subjectSpeed, cropConverged: sample.cropConverged)
     }
 
-    private func takeState(now: TimeInterval) -> DirectorTakeState {
+    func currentTakeState(now: TimeInterval) -> DirectorTakeState {
         let preview = show?.previewChannel
         let channel = preview.flatMap { show?.channel($0) }
         var ready = DirectorReadiness(reasons: [.evidenceUnavailable])
@@ -419,8 +438,77 @@ final class DirectorController: ObservableObject, DirectorConsoleControlling {
         apply(.pause, pause: .operatorTookOver, note: "operator took over")
     }
 
-    /// Cuts arrive in B-08; there is never a next cut to cancel in shadow.
-    func cancelNextCut() {}
+    /// The console reads the current token at the action boundary.
+    func cancelNextCut() { _ = cutExecution.cancel(now: clock()) }
+
+    var currentTime: TimeInterval { clock() }
+
+    /// Explicit trial setup only. Missing settings/provider/scheduler disables
+    /// effects; a normal show continues to observe with no cut scheduling.
+    func configureAutomaticCuts(_ configuration: DirectorCutExecution.Configuration?,
+                                context: DirectorCutExecution.ContextProvider? = nil,
+                                scheduler: (any DirectorCutDeadlineScheduling)? = nil) {
+        retireAutomaticCuts()
+        cutExecution.configure(configuration, context: context, scheduler: scheduler)
+        refreshSection()
+    }
+
+    /// An explicit rehearsal entry point using the same path as the 4 Hz tick.
+    func evaluateAutomaticCuts() {
+        cutExecution.evaluate(now: clock())
+        refreshSection()
+    }
+
+    func retireAutomaticCuts() {
+        cutExecution.retire()
+        takePermits.retire()
+    }
+
+    func automaticCutStatusChanged() { refreshSection() }
+
+    /// B-12 claims source loss before ordinary fault handling, then reserves
+    /// against the resulting paused epoch. Recovery never grants handback.
+    func applyBackupSourceLoss(_ channel: ChannelID) {
+        apply(.sourceLoss(channel), pause: .sourceLost(channel), note: nil)
+    }
+
+    func backupFallbackFinished(_ result: TakeResult) {
+        if case .committed = result { pauseReason = .afterFallback }
+        refreshSection()
+    }
+
+    /// B-09 remains an explicit request with supplied timing/readiness. No
+    /// automatic target selection or production motion settings are installed.
+    func moveProgram(_ target: DirectorShot, programStartedAt: TimeInterval,
+                     configuration: DirectorOnAirMoveExecution.Configuration) -> DirectorOnAirMoveExecution.Effect {
+        guard let plan = onAirMoves.enqueue(target, programStartedAt: programStartedAt,
+                                            configuration: configuration) else { return .rejected }
+        let effect = onAirMoves.commit(plan)
+        refreshSection()
+        return effect
+    }
+
+    /// Pure notice validation and issuance finish before calling the real Take,
+    /// so reentrant Take observers never access an inout notice value.
+    func issueNoticePermit(_ token: CutNotice.Token, notice: inout CutNotice,
+                           decision: CutPolicy.Decision, now: TimeInterval,
+                           validity: TimeInterval) -> TakePermit? {
+        guard DeveloperFlags.allowDirectorAuto else { notice.retire(); return nil }
+        return notice.fire(token, decision: decision, live: currentTakeState(now: now), now: now,
+                           permitValidity: validity, issuer: &takePermits)
+    }
+
+    func cancelAutomaticCut(_ token: CutNotice.Token, notice: inout CutNotice,
+                            now: TimeInterval, minimumShotDuration: TimeInterval) -> Bool {
+        guard notice.cancel(token, authority: &authority, now: now,
+                            minimumShotDuration: minimumShotDuration) else { return false }
+        takePermits.retire()
+        assistPreparation.retire()
+        backupExecution.retire()
+        onAirMoves.retire()
+        log("next cut cancelled · minimum-shot hold")
+        return true
+    }
 
     /// Explicitly supplied show context only; no authority or show identity is restored.
     @discardableResult
@@ -454,8 +542,10 @@ final class DirectorController: ObservableObject, DirectorConsoleControlling {
 
     private func styleContextChanged() {
         policyRevision += 1
-        takePermits.retire()
+        retireAutomaticCuts()
         assistPreparation.retire()
+        backupExecution.retire()
+        onAirMoves.retire()
         lastStyleEvent = .policyChanged(segmentID: runSheet?.currentSegmentID)
         refreshSection()
     }
@@ -489,7 +579,11 @@ final class DirectorController: ObservableObject, DirectorConsoleControlling {
     }
 
     private func record(_ event: DirectorAuthority.Event, transition: DirectorAuthority.Transition, note: String?, before: DirectorAuthority) {
-        if transition.cancellations.contains(.take) { takePermits.retire() }
+        if transition.cancellations.contains(.take) {
+            retireAutomaticCuts()
+            backupExecution.retire(for: event)
+            onAirMoves.retire()
+        }
         if transition.cancellations.contains(.prepare) { assistPreparation.retire() }
         if event == .policyChanged { policyRevision &+= 1 }
         if event == .nominationChanged { nominationRevision &+= 1 }
@@ -554,6 +648,7 @@ final class DirectorController: ObservableObject, DirectorConsoleControlling {
     private func makeSection() -> Section {
         let qualified = Self.qualification(qualifiedLevels())
         var section = Section.atLaunch(qualified: qualified)
+        section.backupAlert = backupExecution.alert
         if let runSheet, let current = runSheet.current {
             section.runSheet = .init(current: RunSheetSegmentText.title(current),
                 next: runSheet.next.map(RunSheetSegmentText.title))
@@ -567,6 +662,7 @@ final class DirectorController: ObservableObject, DirectorConsoleControlling {
         section.activity = activity()
         section.alfieSetShot = assistPreparation.alfieSetShots
         section.prepared = assistPreparation.preparedShot
+        section.nextCut = cutExecution.nextCut(now: clock())
         if let prepared = section.prepared, section.activity.kind == .active {
             section.activity = .active(.preparing(input: prepared.input, shot: prepared.shot, settled: false))
         }

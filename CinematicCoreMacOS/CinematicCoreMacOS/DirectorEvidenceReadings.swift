@@ -39,6 +39,14 @@ nonisolated struct ChannelEvidenceReadings: Equatable, Sendable {
 extension CameraManager {
     func evidenceReadings(now: TimeInterval = CACurrentMediaTime()) -> ChannelEvidenceReadings {
         let recovery = recoveryState
+        var phase = recovery.phase, galleryReady = recovery.galleryReady
+        var speed = shotComposer.subjectSpeed, steady = shotComposer.isHoldingSteady
+        #if DEBUG
+        if let synthetic = directorPerceptionForTesting {
+            phase = synthetic.phase; galleryReady = synthetic.galleryReady
+            speed = synthetic.subjectSpeed; steady = synthetic.holdingSteady
+        }
+        #endif
         return ChannelEvidenceReadings(
             channel: channelID,
             sampledAt: now,
@@ -46,12 +54,12 @@ extension CameraManager {
             sourceMissing: sourceMissing,
             mode: activeMode,
             revisions: revisions,
-            lockPhase: recovery.phase,
-            galleryReady: recovery.galleryReady,
+            lockPhase: phase,
+            galleryReady: galleryReady,
             trackingOwnsControl: recovery.trackingOwnsControl,
             lockedTargetID: manualLockedTargetID,
-            subjectSpeed: shotComposer.subjectSpeed,
-            holdingSteady: shotComposer.isHoldingSteady,
+            subjectSpeed: speed,
+            holdingSteady: steady,
             cropConverged: cropConverged,
             observationAge: observationAge(now: now),
             observedPersonCount: lastObservationPersonCount,
