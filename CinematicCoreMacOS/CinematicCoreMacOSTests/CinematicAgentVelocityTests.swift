@@ -2,7 +2,7 @@
 //  CinematicAgentVelocityTests.swift
 //  CinematicCoreMacOSTests
 //
-//  CR-038: the live observation scales speaker motion by the show rate, as
+//  the live observation scales speaker motion by the show rate, as
 //  the training env scales by the session frame rate.
 //
 

@@ -1,0 +1,293 @@
+Window: "Multiview Gallery", App: Alfie.
+0 standard window Multiview Gallery, ID: multiview-gallery, Secondary Actions: Raise
+	1 container
+		2 pop up button Scenario, Value: Ready
+		3 pop up button Show standard, Value: 1080p50
+		4 text No actions yet
+		5 scroll area Secondary Actions: Scroll Up, Scroll Down (showing 4-104 of 104 items)
+			6 container Program, Cam A, Stage wide, Waist Up, Routed
+			7 unknown Next: Cam B, Band side, Waist Up. Ready · Take sends exactly this shot
+			8 button Description: Take Cam B to Program, Value: Ready
+			9 button Description: Edit Program Cam A live, Value: Off
+			10 text INPUTS · 2 OF 4 Locked · Band side
+			11 button Description: Cam A, Stage wide, Program, Waist Up, 50 frames per second, Help: Program camera. Use Edit Live to change it.
+			12 button Description: Cam B, Band side, Preview, Waist Up, 50 frames per second, Help: Cue this camera for Preview. Does not Take.
+			13 button Description: Input C, not assigned, Help: Add a camera in Setup.
+			14 button Description: Input D, not assigned, Help: Add a camera in Setup.
+			15 text OPERATOR PILL · PILL-TARGET TAKE BAR · TAKE-BAR
+			16 button Description: Take Cam B to Program, Value: Ready
+			17 button Description: Edit Program Cam A live, Value: Off
+			18 text NEXT-SHOT PANEL · NEXT-PANEL
+			19 unknown Next: Cam B, Band side, Waist Up. Ready · Take sends exactly this shot
+			20 text DIRECTOR · C-01 Recommended layout. Live placement, notice length and run-sheet format are still open. Controls are shown, not wired.
+			21 container
+				22 text LAUNCH · MANUAL
+				23 unknown (selected) Manual, selected
+				24 unknown Assist, not qualified
+				25 unknown Auto, not qualified
+				26 unknown Backup, not qualified
+				27 unknown Manual, selected
+				28 text NEXT, No shot prepared, Manual · Alfie is not directing
+			29 container
+				30 text QUALIFIED RIG · STILL MANUAL
+				31 unknown (selected) Manual, selected
+				32 unknown Assist
+				33 unknown Auto
+				34 unknown Backup
+				35 unknown Manual, selected
+				36 text NEXT, No shot prepared, Manual · Alfie is not directing
+			37 container
+				38 text ASSIST · PREPARING
+				39 unknown Manual
+				40 unknown (selected) Assist, selected
+				41 unknown Auto, not qualified
+				42 unknown Backup, not qualified
+				43 unknown Hand to Alfie, selected
+				44 text NEXT, Cam B · Waist Up, Preparing Cam B Waist Up · subject settled
+				45 button Description: Cam B, Band side, Preview, Waist Up, 50 frames per second. AUTO, Alfie set this shot, Help: Cue this camera for Preview. Does not Take.
+			46 container
+				47 text ASSIST · NOTHING TO PREPARE
+				48 unknown Manual
+				49 unknown (selected) Assist, selected
+				50 unknown Auto, not qualified
+				51 unknown Backup, not qualified
+				52 unknown Hand to Alfie, selected
+				53 text NEXT, No shot prepared, Preview is the wide camera · nothing to prepare
+			54 container
+				55 text PAUSED · YOU TOOK OVER
+				56 unknown Manual
+				57 unknown (selected) Assist, selected
+				58 unknown Auto, not qualified
+				59 unknown Backup, not qualified
+				60 unknown Manual, selected
+				61 text NEXT, No shot prepared, Paused: you took over
+			62 container
+				63 text INHIBITED · YOU'RE ADJUSTING THE SHOT
+				64 unknown Manual
+				65 unknown (selected) Assist, selected
+				66 unknown Auto, not qualified
+				67 unknown Backup, not qualified
+				68 unknown Hand to Alfie, selected
+				69 text NEXT, Cam B · Waist Up, Waiting: you're adjusting Cam B
+			70 container
+				71 text ABSTAINING · NOTHING BETTER READY
+				72 unknown Manual
+				73 unknown Assist
+				74 unknown (selected) Auto, selected
+				75 unknown Backup, not qualified
+				76 unknown Hand to Alfie, selected
+				77 text NEXT, No shot prepared, Nothing better ready
+			78 container
+				79 text AUTO · NEXT CUT NOTICE
+				80 unknown Manual
+				81 unknown Assist
+				82 unknown (selected) Auto, selected
+				83 unknown Backup, not qualified
+				84 unknown Hand to Alfie, selected
+				85 text NEXT, Cam B · Waist Up, Preparing Cam B Waist Up · subject settled, Next: Cam B · 2 s · Esc to cancel
+				86 button Description: Cam B, Band side, Preview, Waist Up, 50 frames per second. AUTO, Alfie set this shot, Help: Cue this camera for Preview. Does not Take.
+			87 container
+				88 text AUTO · HOLDING YOUR CUT
+				89 unknown Manual
+				90 unknown Assist
+				91 unknown (selected) Auto, selected
+				92 unknown Backup, not qualified
+				93 unknown Hand to Alfie, selected
+				94 text NEXT, No shot prepared, Holding your shot on Cam A
+			95 container
+				96 text BACKUP · NEXT CUT, NO COUNTDOWN
+				97 unknown Manual
+				98 unknown Assist
+				99 unknown Auto
+				100 unknown (selected) Backup, selected
+				101 unknown Hand to Alfie, selected
+				102 text NEXT, Cam B · Waist Up, Ready · Cam B Waist Up, Next: Cam B
+				103 button Description: Cam B, Band side, Preview, Waist Up, 50 frames per second. AUTO, Alfie set this shot, Help: Cue this camera for Preview. Does not Take.
+			104 container
+				105 text BACKUP · PAUSED AFTER FALLBACK
+				106 unknown Manual
+				107 unknown Assist
+				108 unknown Auto
+				109 unknown (selected) Backup, selected
+				110 unknown Manual, selected
+				111 text NEXT, No shot prepared, Paused after fallback · Hand to Alfie when ready
+				112 button Description: Cam A, Stage wide, Program, Wide, 50 frames per second. AUTO, Alfie set this shot, Help: Program camera. Use Edit Live to change it.
+			113 container
+				114 text PAUSED · CAMERA LOST
+				115 unknown Manual
+				116 unknown Assist
+				117 unknown (selected) Auto, selected
+				118 unknown Backup, not qualified
+				119 unknown Manual, selected
+				120 text NEXT, No shot prepared, Paused: Cam B lost
+			121 container
+				122 text PAUSED · EDITING PROGRAM LIVE
+				123 unknown Manual
+				124 unknown (selected) Assist, selected
+				125 unknown Auto, not qualified
+				126 unknown Backup, not qualified
+				127 unknown Manual, selected
+				128 text NEXT, No shot prepared, Paused: editing Program live
+			129 container
+				130 text RUN SHEET · PANEL
+				131 unknown Manual
+				132 unknown (selected) Assist, selected
+				133 unknown Auto, not qualified
+				134 unknown Backup, not qualified
+				135 unknown Hand to Alfie, selected
+				136 text NEXT, Cam B · Wide, Preparing Cam B Wide · subject settled
+				137 button Description: Cam B, Band side, Preview, Wide, 50 frames per second. AUTO, Alfie set this shot, Help: Cue this camera for Preview. Does not Take.
+				138 unknown Run sheet. Now Q&A · Panel. Next Performance. Advance.
+			139 text DIRECTOR CONTROL · C-02 Shortcut Command Shift H hands control to Alfie, or takes over. Esc is reserved for the next-cut notice.
+			140 Synthetic qualification, Help: Resets the gallery control to Manual. This does not qualify a real rig.
+				141 radio button Description: Unqualified (synthetic), Value: 1
+				142 radio button Description: Qualified Assist (synthetic), Value: 0
+			143 text Synthetic controls only. No camera, live authority or saved qualification is used. Changing the scenario resets to Manual.
+			144 container
+				145 button (selected) Manual, selected
+				146 button (disabled) Assist, not qualified
+				147 button (disabled) Auto, not qualified
+				148 button (disabled) Backup, not qualified
+				149 container Manual, selected
+					150 button Manual, selected
+					151 button Hand to Alfie
+				152 text Choose Assist, Auto or Backup Manual · Alfie is not directing
+			153 text LAUNCH · MANUAL
+			154 container
+				155 button (selected) Manual, selected
+				156 button (disabled) Assist, not qualified
+				157 button (disabled) Auto, not qualified
+				158 button (disabled) Backup, not qualified
+				159 container Manual, selected
+					160 button Manual, selected
+					161 button Hand to Alfie
+				162 text Manual · Alfie is not directing
+			163 text QUALIFIED RIG · STILL MANUAL
+			164 container
+				165 button (selected) Manual, selected
+				166 button Assist
+				167 button Auto
+				168 button Backup
+				169 container Manual, selected
+					170 button Manual, selected
+					171 button Hand to Alfie
+				172 text Manual · Alfie is not directing
+			173 text ASSIST · HAND TO ALFIE
+			174 container
+				175 button Manual
+				176 button (selected) Assist, selected
+				177 button (disabled) Auto, not qualified
+				178 button (disabled) Backup, not qualified
+				179 container Hand to Alfie, selected
+					180 button Manual
+					181 button Hand to Alfie, selected
+				182 text Watching · Alfie is not changing shots
+			183 text AUTO · NOT QUALIFIED
+			184 container
+				185 button (selected) Manual, selected
+				186 button Assist
+				187 button (disabled) Auto, not qualified
+				188 button (disabled) Backup, not qualified
+				189 container Manual, selected
+					190 button Manual, selected
+					191 button Hand to Alfie
+				192 text Auto, not qualified Manual · Alfie is not directing
+			193 text PAUSED · YOU TOOK OVER
+			194 container
+				195 button Manual
+				196 button (selected) Assist, selected
+				197 button Auto
+				198 button (disabled) Backup, not qualified
+				199 container Manual, selected
+					200 button Manual, selected
+					201 button Hand to Alfie
+				202 text Paused: you took over
+			203 text DIRECTOR NEXT SHOT · C-03 PREPARED SHOT
+			204 unknown Next: Cam B, Band side, Waist Up. Ready · Take sends exactly this shot. Preparing Cam B Waist Up · subject settled
+			205 text NO SHOT PREPARED
+			206 unknown Next: Cam B, Band side, Waist Up. Ready · Take sends exactly this shot. No shot prepared · Preview is the wide camera · nothing to prepare
+			207 text ALFIE SET THIS SHOT OPERATOR SET THIS SHOT
+			208 button Description: Cam B, Band side, Preview, Waist Up, 50 frames per second. AUTO, Alfie set this shot, Help: Cue this camera for Preview. Does not Take.
+			209 button Description: Cam B, Band side, Preview, Waist Up, 50 frames per second, Help: Cue this camera for Preview. Does not Take.
+			210 text DIRECTOR STYLES · C-04 Synthetic style editor. Saves use a unique temporary gallery file. Live preferences and rig qualification are unchanged.
+			211 button Load synthetic example
+			212 button Reload scratch styles
+			213 scroll area
+				214 text Using the saved styles.
+				215 pop up button Segment, Value: Live event
+				216 text Minimum shot length
+				217 text field (settable) Description: Minimum shot length, Value: 8
+				218 text Preferred shot length
+				219 text field (settable) Description: Preferred shot length, Value: 20
+				220 text Soft maximum shot length
+				221 text field (settable) Description: Soft maximum shot length, Value: 40
+				222 text Wide cadence
+				223 text field (settable) Description: Wide cadence, Value: 90
+				224 text Repetition window
+				225 text field (settable) Description: Repetition window, Value: 10
+				226 text Maximum movement
+				227 text field (settable) Description: Maximum movement, Value: 0.2
+				228 text Settle time
+				229 text field (settable) Description: Settle time, Value: 1
+				230 text On-air move rate
+				231 text field (settable) Description: On-air move rate, Value: 0.1
+				232 pop up button Cut while moving, Value: No
+				233 button Save styles
+			234 text INPUT STRIP · INPUT-STRIP
+			235 pop up button Input scenario, Value: Ready
+			236 text INPUTS · 2 OF 4 Locked · Band side
+			237 button Description: Cam A, Stage wide, Program, Waist Up, 50 frames per second, Help: Program camera. Use Edit Live to change it.
+			238 button Description: Cam B, Band side, Preview, Waist Up, 50 frames per second, Help: Cue this camera for Preview. Does not Take.
+			239 button Description: Input C, not assigned, Help: Add a camera in Setup.
+			240 button Description: Input D, not assigned, Help: Add a camera in Setup.
+			241 text Tap a tile to cue Preview SHOW SETUP · SHOW-SETUP
+			242 Pair-check scenario
+				243 radio button Description: Not run, Value: 1
+				244 radio button Description: Checking, Value: 0
+				245 radio button Description: Pass · trial, Value: 0
+				246 radio button Description: Certified, Value: 0
+				247 radio button Description: Unsupported, Value: 0
+				248 radio button Description: Saved B missing, Value: 0
+			249 text SESSION STOPPED Show standard Program output Show setup
+			250 pop up button Description: Show standard, Value: 1080p50
+			251 pop up button Description: Program output, Value: Direct output (HDMI / USB-C)
+			252 container Pair check
+				253 button Description: PAIR CHECK, A + B at 1080p50: unknown on this Mac, Check pair, Secondary Actions: Check pair
+				254 text Alfie measures A + B together right after Start and shows the result in the console header. It will not lower the output rate to make them fit.
+				255 unknown Two distinct devices: passed
+				256 unknown Both at the show rate: Not measured yet
+				257 unknown Render headroom: Not measured yet
+				258 unknown Memory and heat: Not measured yet
+			259 button Start with Camera A only
+			260 button Start show · A Program, B Preview
+			261 text Nothing goes to the ATEM until you press Start. Alfie never restores a Program/Preview state from the last show. OPERATOR PILL · PILL-TARGET CAM B · PREVIEW
+			262 button (disabled) Pick subject, Cam B, Preview
+			263 button (disabled) Description: Detect, Cam B, Preview, Help: Detect: tap, then click the subject you want Alfie to follow.
+			264 button Wide, Cam B, Preview
+			265 button Full Body, Cam B, Preview
+			266 button Waist Up, Cam B, Preview
+			267 button (disabled) Description: Crop, Cam B, Preview, Help: Tap a person in the preview to lock a subject first.
+			268 button (disabled) Manual, Cam B, Preview
+			269 button (disabled) Description: Auto Pan, Cam B, Preview, Help: Sweep the program crop across the stage
+			270 button (disabled) Description: Pull out, Cam B, Preview, Help: Slow zoom to the next shot size.
+			271 collection Secondary Actions: AXScrollToTop, AXScrollToBottom
+			272 scroll bar (settable, float) 0.8297770890451782
+				273 value indicator (settable, float) 0.8297770890451782
+				274 increment arrow button
+				275 decrement arrow button
+				276 increment page button
+				277 decrement page button
+	278 close button
+	279 zoom button
+	280 minimize button
+	281 text Multiview Gallery
+282 menu bar
+	283 Alfie
+	284 File
+	285 Edit
+	286 View
+	287 Session
+	288 Window
+	289 Help
+
+The focused UI element is 227 text field (settable) Description: Maximum movement, Value: 0.2

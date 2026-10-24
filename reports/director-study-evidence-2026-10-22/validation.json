@@ -1,0 +1,95 @@
+{
+  "date": "2026-10-22",
+  "basePR": 75,
+  "branch": "codex/director-study-evidence",
+  "sourceFingerprint": "a8ed233e30be8d4d3789e4105e8388ddd16b8a1edeeca2b02a6ab5fa9ffdfdc9",
+  "sourceFingerprintScope": "App build inputs; offline source hashes recorded separately",
+  "offlineSHA256": {
+    "CinematicCoreMacOS/scripts/director_evaluation_report.py": "9a86beaf54b0993b102912be3a01fd8edb1b2704347e775b1d06cd8ef4b51d91",
+    "CinematicCoreMacOS/scripts/director_evaluation_schema.json": "31c1b6ad4c44a46633785409ab21506a91659301843a45ac32d46a43da01e64b",
+    "CinematicCoreMacOS/scripts/director_shadow_report.py": "4aafb6bea917a01d8ee051832d923a455f1c9481a0156628d65f89466859430e",
+    "training/replay_timing.py": "02c729fa7e1d617acac6e8f151da5faba6bedfec2f2db05853744b51b91a18fb",
+    "training/framing_samples.py": "a8ca254143475e97f8e98d5a0832e0218ff01dd4a2043d8cf2e406842b12cfdf",
+    "training/cinematic_env.py": "0f0c572089ddef377ba3b12a8e5ca996c74ad762ed64a504704c52bb96dd0aeb",
+    "training/bc_dataset.py": "42e8e2aa83da7c5a1428ccad213345db2a750a21dc6560d68ce96d03c771fafc",
+    "training/bc_validation.py": "b34656cf623af006e8efa0b1e851f0ca30f4121e169ae29d3270c6e021805a5a",
+    "training/train_bc.py": "54c4a4c65357e961e3306f245cc2436889d46f0e27ef9be1fc24666aa93eeaa8",
+    "training/train_ppo.py": "a444264313bf233a077c4435b65aa91cc1d61a529b60aab33aa22b65e5157553",
+    "training/export_coreml.py": "0172767ca27dcd512c28f18374453951d594dfca9488ab28def436d1fc6825e2"
+  },
+  "evidenceClass": "synthetic-harness",
+  "swift": {
+    "passedDefinitions": 1038,
+    "passedExpanded": 1625,
+    "failed": 0,
+    "skipped": 3,
+    "focusedDefinitions": 16,
+    "focusedExpanded": 49,
+    "coreMLCpuInterop": "configured-passed",
+    "skips": [
+      "RealCameraTests/twoWebcamsRenderPicturesAndBJoinsWithoutCrashing",
+      "ReadinessEvaluationTests/replayConsentedFolderWhenConfigured",
+      "InstrumentationInvestigationTests/compareAcceleratedWallClockAndSourceClockWindows"
+    ]
+  },
+  "python": {
+    "scriptsWithActualBundles": 106,
+    "trainingSelected": 78,
+    "totalPassed": 184,
+    "failed": 0,
+    "skipped": 0,
+    "environmentChecks": "six existing checks including actual SB3 check_env passed",
+    "runtime": {
+      "Python": "3.13.2",
+      "NumPy": "2.4.2",
+      "Gymnasium": "1.4.0",
+      "Torch": "2.14.1",
+      "StableBaselines3": "2.9.0"
+    }
+  },
+  "release": {
+    "result": "passed",
+    "codeSigningAllowed": false
+  },
+  "manualUI": {
+    "candidate": "/private/tmp/alfie-human-review-20261018/baseline-dd/Build/Products/Release/Alfie.app",
+    "method": "native accessibility via CUA",
+    "state": "SINGLE CAM SESSION STOPPED; Session menu Stop Session disabled",
+    "captureStarted": false,
+    "screenshot": "unavailable"
+  },
+  "bindingBundle": {
+    "records": 6,
+    "phases": 2,
+    "agreementOpportunities": 0,
+    "qualification": false
+  },
+  "decisionBundle": {
+    "records": 10,
+    "phases": 6,
+    "unmatchedPreparePredictions": 1,
+    "exactManualCutComparisons": 1,
+    "interiorDwell": "unavailable",
+    "automaticDeadlineFired": false,
+    "qualification": false
+  },
+  "reviewFixes": [
+    "reject running-and-starting source provenance consistently",
+    "prediction sequence must precede operator attempt even at equal clocks",
+    "accepted explicit ShowStop logical role reset remains a valid C05 pair",
+    "numeric alias ordering avoids unbounded integer parsing"
+  ],
+  "physicalCameraOrReceiver": false,
+  "framingTrainingOrCoreMLConversion": false,
+  "qualification": false,
+  "localArtifacts": "/private/tmp/alfie-study-evidence-20261022",
+  "showStopBundle": {
+    "records": 2,
+    "wireEvidenceClass": "live",
+    "actualInput": "injected live-source identity; no physical capture",
+    "acceptedPairs": 1,
+    "inconsistentPairs": 0,
+    "blockedSessions": [],
+    "comparisonOrDwellCredit": false
+  }
+}

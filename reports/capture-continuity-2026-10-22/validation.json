@@ -1,0 +1,60 @@
+{
+  "date": "2026-10-22",
+  "basePR": 74,
+  "branch": "codex/director-capture-continuity",
+  "sourceFingerprint": "adb82df4d5deb350562341469f282a662f3dd04e44211efefbecb2c8d639c841",
+  "evidenceClass": "synthetic-harness",
+  "swift": {
+    "passedDefinitions": 1028,
+    "passedExpanded": 1592,
+    "failed": 0,
+    "skipped": 3,
+    "focusedDefinitions": 25,
+    "focusedExpanded": 55,
+    "coreMLCpuInterop": "configured-passed"
+  },
+  "python": {
+    "scriptsWithActualBundles": 83,
+    "directorTraining": 14,
+    "loader": 12,
+    "writerSessions": 5,
+    "checkpointTrust": 4,
+    "totalPassed": 118,
+    "failed": 0
+  },
+  "release": {
+    "result": "passed",
+    "codeSigningAllowed": false
+  },
+  "bindingBundle": {
+    "records": 6,
+    "versions": [
+      "10",
+      "11"
+    ],
+    "advancePairs": 1,
+    "comparisonRows": 2,
+    "cutRows": "authority-abstentions-at-off",
+    "noDrops": true
+  },
+  "decisionBundle": {
+    "records": 10,
+    "cutPredictions": 1,
+    "manualTakes": 1,
+    "exactComparisons": 1,
+    "actualCutJudge": "rules",
+    "actualGate": "accepted",
+    "automaticDeadlineFired": false
+  },
+  "physicalCameraOrReceiver": false,
+  "qualification": false,
+  "remaining": [
+    "direct-show-stop-and-termination-action-hooks",
+    "per-level-study-bindings-and-independent-opportunities",
+    "real-rig-permission-output-load-and-signoff",
+    "framing-training-timing-gaps"
+  ],
+  "localArtifacts": "/private/tmp/alfie-capture-continuity-20261022",
+  "shadowReportScriptSha256": "8e126feefaee4546c018e53b9684a4fe4e450a8b0db15a9b05a3a7a142abf2f2",
+  "sourceFingerprintScope": "App build inputs; final offline report script separately hashed"
+}

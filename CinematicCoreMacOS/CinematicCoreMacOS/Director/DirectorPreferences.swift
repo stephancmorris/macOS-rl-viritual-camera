@@ -92,13 +92,16 @@ nonisolated struct DirectorPreferences: Codable, Equatable, Sendable {
         return try decoder.decode(Self.self, from: data).validated()
     }
 
-    /// Conservative merge per segment. A segment styled on only one side keeps
-    /// that style; one styled on both resolves to the stricter values.
+    /// Conservative merge of effective profiles, including the other input's
+    /// Live-event fallback for a segment styled on only one side.
     static func resolve(_ a: Self, _ b: Self) throws -> Self {
         let a = try a.validated(), b = try b.validated()
-        var merged = a.styles
-        for (segment, style) in b.styles {
-            merged[segment] = try merged[segment].map { try DirectorStyle.resolve($0, style) } ?? style
+        var merged: [SegmentType: DirectorStyle] = [:]
+        for segment in SegmentType.allCases where a.styles[segment] != nil || b.styles[segment] != nil {
+            guard let left = a.style(for: segment), let right = b.style(for: segment) else {
+                throw ValidationError.missingLiveEventStyle
+            }
+            merged[segment] = try DirectorStyle.resolve(left, right)
         }
         return try Self(styles: merged).validated()
     }

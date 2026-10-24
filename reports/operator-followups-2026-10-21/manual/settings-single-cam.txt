@@ -1,0 +1,68 @@
+Window: "Composer", App: Alfie.
+0 standard window Composer, ID: com_apple_SwiftUI_Settings_window, Secondary Actions: Raise
+	1 container
+		2 text Alfie Settings Shot logic, framing style, deadzone, smoothing, and target hold behavior.
+		3 radio button Description: Basic, Value: 1
+		4 radio button Description: Advanced, Value: 0
+		5 scroll area Secondary Actions: Scroll Up, Scroll Down
+			6 heading Shot Composer
+			7 container
+				8 switch Enable Composer, Value: on
+				9 text Aims for a stable speaker shot when pose keypoints are available.
+			10 heading Mode
+			11 container
+				12 Mode, Help: One stage camera: wide source, crop and every Stage shot.
+					13 radio button Description: Single Cam, Value: 1
+					14 radio button Description: Multi Cam, Value: 0
+					15 radio button Description: Webcam, Value: 0
+				16 text One stage camera: wide source, crop and every Stage shot.
+			17 heading Framing Style
+			18 container
+				19 pop up button Frame Profile, Value: Livestream Rectangle
+				20 text Use Livestream Rectangle for normal YouTube or switcher feeds. Portrait Profile is a secondary vertical option.
+			21 heading Stage Headroom
+			22 container
+				23 text Full Body 7%
+				24 slider (settable, float) 0.07000000000000001
+				25 text Waist Up 6%
+				26 slider (settable, float) 0.06
+				27 text Clear space above the head, as a percentage of the output shot. The camera's quality limit can still make a distant person look small.
+				28 button Reset Headroom to Defaults
+			29 heading Auto-Framing Feel
+			30 container
+				31 button Steady Follow
+				32 button Balanced
+				33 button Slow Pan
+				34 button Fast Follow
+				35 button Locked Down
+				36 text Holds the shot while the speaker stays inside the yellow band; re-centers when they cross it. Steady Band Width 10%
+				37 slider Secondary Actions: Increment, Decrement
+				38 text Width as a percentage of the program shot. The speaker can move within this band before the camera re-centers. Yellow guides show its boundaries.
+			39 heading Status
+			40 container
+				41 text Active Target, Value: No None Auto Steady Follow 16:9 Stream Single Cam Wide L/R 8%  T/B 4%
+			42 scroll bar (settable, float) 0
+				43 value indicator (settable, float) 0
+				44 increment arrow button
+				45 decrement arrow button
+				46 increment page button
+				47 decrement page button
+	48 toolbar
+		49 button Composer, Secondary Actions: Move next, Remove from toolbar
+		50 button Detection, Secondary Actions: Move previous, Move next, Remove from toolbar
+		51 button Crop, Secondary Actions: Move previous, Move next, Remove from toolbar
+		52 button Output, Secondary Actions: Move previous, Move next, Remove from toolbar
+		53 button Director, Secondary Actions: Move previous, Remove from toolbar
+	54 close button
+	55 zoom button (disabled)
+	56 text Composer
+57 menu bar
+	58 Alfie
+	59 File
+	60 Edit
+	61 View
+	62 Session
+	63 Window
+	64 Help
+
+The focused UI element is 0 standard window Composer, ID: com_apple_SwiftUI_Settings_window, Secondary Actions: Raise

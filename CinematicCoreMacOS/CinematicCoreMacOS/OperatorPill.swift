@@ -63,6 +63,48 @@ struct OperatorPill: View {
         cameraManager.shotComposer.config.cinematicFormat == .webcam
     }
 
+    /// One control group on the pill.
+    nonisolated enum Section: Hashable, Sendable {
+        case targetChip, lockState, detect, stageShots, webcamShots, crop, manual, autoPan, zoom, returnToWide, stopSession
+    }
+
+    /// The pill's controls, left to right. Stage format (Single Cam and
+    /// Multi Cam) gets the three Stage shots, Manual and Auto Pan; Webcam gets
+    /// Wide / Tight and neither mode. In the Multiview console Stop is
+    /// show-level and lives in the header ("Stop session"); a channel's pill
+    /// never stops the show.
+    nonisolated static func sections(isWebcam: Bool, showsTargetChip: Bool, showsStopSession: Bool) -> [Section] {
+        var sections: [Section] = showsTargetChip ? [.targetChip] : []
+        sections += [.lockState, .detect]
+        sections += isWebcam ? [.webcamShots, .crop] : [.stageShots, .crop, .manual, .autoPan]
+        sections += [.zoom, .returnToWide]
+        if showsStopSession { sections.append(.stopSession) }
+        return sections
+    }
+
+    /// This pill's controls, from its channel's format and target.
+    var sections: [Section] {
+        Self.sections(isWebcam: isWebcam, showsTargetChip: controlTarget != .singleCamera,
+                      showsStopSession: showsStopSession)
+    }
+
+    @ViewBuilder
+    private func control(for section: Section) -> some View {
+        switch section {
+        case .targetChip: targetChip
+        case .lockState: lockStateSection
+        case .detect: detectButton
+        case .stageShots: shotPresetSegmentedSection
+        case .webcamShots: webcamPresetSegmentedSection
+        case .crop: cropToggleButton
+        case .manual: manualCropButton
+        case .autoPan: autoPanButton
+        case .zoom: zoomButtons
+        case .returnToWide: returnToWideButton
+        case .stopSession: stopSessionButton
+        }
+    }
+
     private var operatorFeedback: String? {
         if cameraManager.isProgramHolding { return "Holding last good program" }
         if let status = cameraManager.controlStatus { return status }
@@ -83,36 +125,14 @@ struct OperatorPill: View {
 
     var body: some View {
         HStack(spacing: 0) {
-            if controlTarget != .singleCamera {
-                targetChip
-            }
-            lockStateSection
-            divider
-            detectButton
-            divider
-            if isWebcam {
-                webcamPresetSegmentedSection
-                divider
-                cropToggleButton
-                divider
-            } else {
-                shotPresetSegmentedSection
-                divider
-                cropToggleButton
-                divider
-                manualCropButton
-                divider
-                autoPanButton
-                divider
-            }
-            zoomButtons
-            divider
-            returnToWideButton
-            // In the Multiview console Stop is show-level and lives in the
-            // header ("Stop session"); a channel's pill never stops the show.
-            if showsStopSession {
-                divider
-                stopSessionButton
+            let sections = self.sections
+            ForEach(Array(sections.enumerated()), id: \.element) { index, section in
+                // Every control is divided from the last, except the target
+                // chip, which sits directly against the lock state.
+                if index > 0, sections[index - 1] != .targetChip {
+                    divider
+                }
+                control(for: section)
             }
         }
         .padding(.horizontal, 6)
@@ -364,7 +384,7 @@ struct OperatorPill: View {
         let preset = cameraManager.shotComposer.config.shotPreset
         return HStack(spacing: 2) {
             ForEach(ShotComposer.Config.ShotPreset.allCases) { option in
-                shotPresetSegment(option: option, isOn: preset == option) {
+                presetSegment(title: option.operatorTitle, isOn: preset == option) {
                     sink.send(.selectPreset(.stage(option)))
                 }
             }
@@ -377,13 +397,13 @@ struct OperatorPill: View {
         .padding(.horizontal, 4)
     }
 
-    private func shotPresetSegment(
-        option: ShotComposer.Config.ShotPreset,
+    private func presetSegment(
+        title: String,
         isOn: Bool,
         action: @escaping () -> Void
     ) -> some View {
         Button(action: action) {
-            Text(option.operatorTitle)
+            Text(title)
                 .font(.system(size: 12, weight: isOn ? .semibold : .medium))
                 .foregroundStyle(.white.opacity(isOn ? 1.0 : 0.62))
                 .padding(.horizontal, 12)
@@ -394,7 +414,7 @@ struct OperatorPill: View {
                 )
         }
         .buttonStyle(.plain)
-        .targetLabel(controlTarget, option.operatorTitle)
+        .targetLabel(controlTarget, title)
     }
 
     // MARK: - Webcam preset segmented
@@ -403,7 +423,7 @@ struct OperatorPill: View {
         let preset = cameraManager.shotComposer.config.webcamPreset
         return HStack(spacing: 2) {
             ForEach(ShotComposer.Config.WebcamPreset.allCases) { option in
-                webcamPresetSegment(option: option, isOn: preset == option) {
+                presetSegment(title: option.operatorTitle, isOn: preset == option) {
                     sink.send(.selectPreset(.webcam(option)))
                 }
             }
@@ -414,26 +434,6 @@ struct OperatorPill: View {
                 .fill(Color.white.opacity(0.05))
         )
         .padding(.horizontal, 4)
-    }
-
-    private func webcamPresetSegment(
-        option: ShotComposer.Config.WebcamPreset,
-        isOn: Bool,
-        action: @escaping () -> Void
-    ) -> some View {
-        Button(action: action) {
-            Text(option.operatorTitle)
-                .font(.system(size: 12, weight: isOn ? .semibold : .medium))
-                .foregroundStyle(.white.opacity(isOn ? 1.0 : 0.62))
-                .padding(.horizontal, 12)
-                .padding(.vertical, 6)
-                .background(
-                    RoundedRectangle(cornerRadius: 11, style: .continuous)
-                        .fill(Color.white.opacity(isOn ? 0.14 : 0.0))
-                )
-        }
-        .buttonStyle(.plain)
-        .targetLabel(controlTarget, option.operatorTitle)
     }
 
     // MARK: - Return to Wide
@@ -464,6 +464,26 @@ struct OperatorPill: View {
         controlTarget.camera.map { "Return \($0) to Wide" } ?? "Return to Wide"
     }
 
+    private func modeFace(title: String, isOn: Bool, enabled: Bool) -> some View {
+        HStack(spacing: 7) {
+            Circle()
+                .fill(isOn
+                      ? Color(red: 0.31, green: 0.93, blue: 0.78)
+                      : Color.white.opacity(0.3))
+                .frame(width: 6, height: 6)
+            Text(title)
+                .font(.system(size: 12, weight: isOn ? .semibold : .medium))
+                .foregroundStyle(.white.opacity(isOn ? 1.0 : (enabled ? 0.86 : 0.32)))
+        }
+        .padding(.horizontal, 10)
+        .padding(.vertical, 9)
+        .background(
+            RoundedRectangle(cornerRadius: 11, style: .continuous)
+                .fill(Color.white.opacity(isOn ? 0.14 : 0.0))
+        )
+        .contentShape(Rectangle())
+    }
+
     // MARK: - Crop toggle
 
     private var cropToggleButton: some View {
@@ -473,23 +493,7 @@ struct OperatorPill: View {
         return Button {
             sink.send(.setMode(.autoTracking))
         } label: {
-            HStack(spacing: 7) {
-                Circle()
-                    .fill(isOn
-                          ? Color(red: 0.31, green: 0.93, blue: 0.78)
-                          : Color.white.opacity(0.3))
-                    .frame(width: 6, height: 6)
-                Text("Crop")
-                    .font(.system(size: 12, weight: isOn ? .semibold : .medium))
-                    .foregroundStyle(.white.opacity(isOn ? 1.0 : (enabled ? 0.86 : 0.32)))
-            }
-            .padding(.horizontal, 10)
-            .padding(.vertical, 9)
-            .background(
-                RoundedRectangle(cornerRadius: 11, style: .continuous)
-                    .fill(Color.white.opacity(isOn ? 0.14 : 0.0))
-            )
-            .contentShape(Rectangle())
+            modeFace(title: "Crop", isOn: isOn, enabled: enabled)
         }
         .buttonStyle(.plain)
         .targetLabel(controlTarget, "Crop")
@@ -505,23 +509,7 @@ struct OperatorPill: View {
         return Button {
             sink.send(.setMode(.manualCrop))
         } label: {
-            HStack(spacing: 7) {
-                Circle()
-                    .fill(isOn
-                          ? Color(red: 0.31, green: 0.93, blue: 0.78)
-                          : Color.white.opacity(0.3))
-                    .frame(width: 6, height: 6)
-                Text("Manual")
-                    .font(.system(size: 12, weight: isOn ? .semibold : .medium))
-                    .foregroundStyle(.white.opacity(isOn ? 1.0 : (enabled ? 0.86 : 0.32)))
-            }
-            .padding(.horizontal, 10)
-            .padding(.vertical, 9)
-            .background(
-                RoundedRectangle(cornerRadius: 11, style: .continuous)
-                    .fill(Color.white.opacity(isOn ? 0.14 : 0.0))
-            )
-            .contentShape(Rectangle())
+            modeFace(title: "Manual", isOn: isOn, enabled: enabled)
         }
         .buttonStyle(.plain)
         .targetLabel(controlTarget, "Manual")
@@ -537,23 +525,7 @@ struct OperatorPill: View {
         return Button {
             sink.send(.setMode(.autoPan))
         } label: {
-            HStack(spacing: 7) {
-                Circle()
-                    .fill(isOn
-                          ? Color(red: 0.31, green: 0.93, blue: 0.78)
-                          : Color.white.opacity(0.3))
-                    .frame(width: 6, height: 6)
-                Text("Auto Pan")
-                    .font(.system(size: 12, weight: isOn ? .semibold : .medium))
-                    .foregroundStyle(.white.opacity(isOn ? 1.0 : (enabled ? 0.86 : 0.32)))
-            }
-            .padding(.horizontal, 10)
-            .padding(.vertical, 9)
-            .background(
-                RoundedRectangle(cornerRadius: 11, style: .continuous)
-                    .fill(Color.white.opacity(isOn ? 0.14 : 0.0))
-            )
-            .contentShape(Rectangle())
+            modeFace(title: "Auto Pan", isOn: isOn, enabled: enabled)
             .help("Sweep the program crop across the stage")
         }
         .buttonStyle(.plain)

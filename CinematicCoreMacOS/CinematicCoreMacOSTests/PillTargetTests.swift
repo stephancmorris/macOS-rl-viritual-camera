@@ -211,7 +211,6 @@ struct PillTargetTests {
             for format in [ShotComposer.Config.CinematicFormat.stage, .webcam] {
                 let compact = pillWidth(target, .compact, format: format)
                 let full = pillWidth(target, .full, format: format)
-                print("PILLWIDTH \(target) \(format) compact=\(compact) full=\(full)")
                 #expect(compact <= availableWidth, "Compact \(target) pill width \(compact)")
                 #expect(full <= availableWidth, "Full \(target) pill width \(full)")
             }

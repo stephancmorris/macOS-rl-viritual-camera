@@ -1,11 +1,12 @@
 // Capture selection is a pure policy so advertised formats can be tested without
 // opening a camera. The chosen format is applied only during session setup.
 //
-// Stage never substitutes a slower rate: every Stage camera must deliver the
-// show standard's exact rate. Webcam mode (video calls through the virtual
-// camera) prefers the show rate too, but when the webcam has no format at that
+// Stage cameras normally deliver the show standard's exact rate. An explicit
+// built-in-camera testing option can use that camera's own HD rate instead;
+// this exception is labelled and never changes the output standard.
+// Webcam mode (video calls through the virtual camera) prefers the show rate too, but when the webcam has no format at that
 // rate it falls back to its fastest HD (1080p/720p-class) format and says so,
-// rather than refusing the camera. The virtual camera then runs at that rate.
+// rather than refusing the camera. The output keeps the show standard.
 // Development builds can give Stage the same fallback
 // (`DeveloperFlags.allowStageBelowShowRate`) so ordinary webcams can stand in
 // for show cameras.
@@ -15,6 +16,23 @@ nonisolated enum CaptureProfilePolicy {
     enum Profile: Sendable, Equatable {
         case stage
         case webcam
+
+        init(_ format: ShotComposer.Config.CinematicFormat) {
+            self = format == .webcam ? .webcam : .stage
+        }
+
+        var title: String { self == .stage ? "Stage" : "Webcam" }
+
+        /// Stable lowercase name stored in admission fingerprints and
+        /// diagnostics manifests. Never change it: stored records match on it.
+        var identifier: String { self == .stage ? "stage" : "webcam" }
+
+        /// An actual built-in test fallback is a distinct measured setup.
+        /// Merely enabling the option does not relabel a native-rate capture.
+        func identifier(for selectionReason: Reason?) -> String {
+            self == .stage && selectionReason == .builtInCameraTestBelowShowRate
+                ? "stage-built-in-test" : identifier
+        }
 
         var preferredSize: (width: Int, height: Int) {
             switch self {
@@ -55,9 +73,15 @@ nonisolated enum CaptureProfilePolicy {
         case webcamBelowShowRate
         /// Development only: the same fallback for a Stage camera.
         case stageBelowShowRate
+        /// Explicit opt-in for a system-identified built-in camera used in tests.
+        case builtInCameraTestBelowShowRate
 
-        /// The capture runs slower than the show standard.
-        var isBelowShowRate: Bool { self == .webcamBelowShowRate || self == .stageBelowShowRate }
+        /// Legacy fallback category. For the actual rate relationship, use
+        /// Selection.isBelowShowRate(_:) after selection.
+        var isBelowShowRate: Bool {
+            self == .webcamBelowShowRate || self == .stageBelowShowRate
+                || self == .builtInCameraTestBelowShowRate
+        }
 
         var description: String {
             switch self {
@@ -66,6 +90,8 @@ nonisolated enum CaptureProfilePolicy {
             case .closestAspect: return "16:9 unavailable at show rate; using closest compatible format"
             case .webcamBelowShowRate: return "webcam has no format at the show rate; using its fastest HD format"
             case .stageBelowShowRate: return "camera has no format at the show rate; development build is using its fastest HD format"
+            case .builtInCameraTestBelowShowRate:
+                return "built-in camera testing: using its fastest HD format instead of the show rate; output repeats frames when capture runs slower"
             }
         }
     }
@@ -76,10 +102,21 @@ nonisolated enum CaptureProfilePolicy {
         /// Capture rate to configure. Equals the show rate except for
         /// a below-show-rate fallback.
         let frameRate: Double
+
+        /// A fallback can also be a fixed rate above the show rate (for
+        /// example, 60-only capture against 50). Report the actual comparison.
+        func isBelowShowRate(_ showRate: Double) -> Bool { frameRate < showRate }
+
+        func rateLabel(showRate: Double, showStandardTitle: String) -> String {
+            frameRate == showRate ? showStandardTitle
+                : String(format: "%g fps (show standard %@)", frameRate, showStandardTitle)
+        }
     }
 
     static func select(_ candidates: [Candidate], profile: Profile, showRate: Double,
-                       allowStageBelowShowRate: Bool = false) -> Selection? {
+                       allowStageBelowShowRate: Bool = false,
+                       builtInCameraTestEnabled: Bool = false,
+                       isBuiltInCamera: Bool = false) -> Selection? {
         guard showRate.isFinite, showRate > 0 else { return nil }
         if let selection = selectAtShowRate(candidates, profile: profile, showRate: showRate) {
             return selection
@@ -88,6 +125,9 @@ nonisolated enum CaptureProfilePolicy {
         case .webcam:
             return selectFastestHD(candidates, reason: .webcamBelowShowRate)
         case .stage:
+            if builtInCameraTestEnabled && isBuiltInCamera {
+                return selectFastestHD(candidates, reason: .builtInCameraTestBelowShowRate)
+            }
             return allowStageBelowShowRate ? selectFastestHD(candidates, reason: .stageBelowShowRate) : nil
         }
     }

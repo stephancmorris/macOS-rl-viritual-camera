@@ -16,8 +16,6 @@ _SUPPORTED_EXTENSIONS = {".mp4", ".mov", ".avi", ".mkv", ".webm"}
 class VideoInfo:
     path: Path
     title: str
-    duration: float  # seconds (0 if unknown)
-    is_downloaded: bool
 
 
 def acquire_video(
@@ -56,13 +54,11 @@ def _download_video(
 
     # Get video metadata first
     title = "unknown"
-    duration = 0.0
     try:
         meta_result = subprocess.run(
             [
                 "yt-dlp",
                 "--print", "title",
-                "--print", "duration",
                 "--no-download",
                 url,
             ],
@@ -74,11 +70,6 @@ def _download_video(
             lines = meta_result.stdout.strip().split("\n")
             if len(lines) >= 1:
                 title = lines[0].strip()
-            if len(lines) >= 2:
-                try:
-                    duration = float(lines[1].strip())
-                except ValueError:
-                    pass
     except (subprocess.TimeoutExpired, FileNotFoundError):
         pass
 
@@ -119,8 +110,6 @@ def _download_video(
     return VideoInfo(
         path=output_path,
         title=title,
-        duration=duration,
-        is_downloaded=True,
     )
 
 
@@ -140,6 +129,4 @@ def _validate_local(source: str) -> VideoInfo:
     return VideoInfo(
         path=path,
         title=path.stem,
-        duration=0.0,  # will be read from OpenCV
-        is_downloaded=False,
     )

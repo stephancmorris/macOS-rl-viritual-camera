@@ -73,9 +73,13 @@ final class SettingsWindowController: ObservableObject {
 
 struct SettingsWindow: View {
     @ObservedObject var cameraManager: CameraManager
+    /// The show's operator mode (Composer tab › Mode).
+    let operatorModes: OperatorModeStore
     @ObservedObject var systemExtensionManager: SystemExtensionActivationManager
     @ObservedObject var controller: SettingsWindowController
     var onDirectorPreferencesChanged: (DirectorPreferences) -> Void = { _ in }
+    var shadowLogProvider: () -> DirectorShadowLog? = { nil }
+    @StateObject private var shadowExportModel = DirectorShadowExportModel()
     @StateObject private var directorEditor = DirectorStyleEditor.makeForSettings()
 
     var body: some View {
@@ -85,7 +89,7 @@ struct SettingsWindow: View {
             Divider()
 
             TabView(selection: $controller.selectedTab) {
-                ComposerTab(shotComposer: cameraManager.shotComposer)
+                ComposerTab(shotComposer: cameraManager.shotComposer, operatorModes: operatorModes)
                     .tabItem {
                         Label(SettingsTab.composer.title, systemImage: SettingsTab.composer.systemImage)
                     }
@@ -112,7 +116,16 @@ struct SettingsWindow: View {
                     }
                     .tag(SettingsTab.output)
 
-                DirectorStyleSettingsView(editor: directorEditor)
+                VStack(spacing: 16) {
+                    DirectorStyleSettingsView(editor: directorEditor)
+                    Divider()
+                    ScrollView {
+                        DirectorShadowExportView(model: shadowExportModel)
+                            .padding(.horizontal, 24)
+                            .padding(.bottom, 16)
+                    }
+                    .frame(minHeight: 120, maxHeight: 280)
+                }
                     .tabItem {
                         Label(SettingsTab.director.title, systemImage: SettingsTab.director.systemImage)
                     }
@@ -120,6 +133,7 @@ struct SettingsWindow: View {
             }
             .onAppear {
                 directorEditor.onPreferencesChanged = onDirectorPreferencesChanged
+                shadowExportModel.logProvider = shadowLogProvider
             }
         }
         .frame(minWidth: 760, idealWidth: 860, minHeight: 640, idealHeight: 720)
@@ -162,6 +176,7 @@ struct SettingsWindow: View {
 
 private struct ComposerTab: View {
     @ObservedObject var shotComposer: ShotComposer
+    @ObservedObject var operatorModes: OperatorModeStore
     @State private var showAdvanced = false
 
     var body: some View {
@@ -177,7 +192,7 @@ private struct ComposerTab: View {
             .padding(.bottom, 6)
 
             Form {
-                let view = ShotComposerSettingsView(shotComposer: shotComposer)
+                let view = ShotComposerSettingsView(shotComposer: shotComposer, operatorModes: operatorModes)
                 view.basicSection
                 if showAdvanced {
                     view.advancedSection
@@ -217,6 +232,7 @@ private struct SettingsUnavailableView: View {
 #Preview {
     SettingsWindow(
         cameraManager: CameraManager(),
+        operatorModes: OperatorModeStore(defaults: UserDefaults(suiteName: "com.alfie.preview") ?? .standard),
         systemExtensionManager: SystemExtensionActivationManager(),
         controller: SettingsWindowController()
     )

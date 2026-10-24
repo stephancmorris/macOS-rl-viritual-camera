@@ -2,8 +2,8 @@
 """
 CoreML export: converts a trained SB3 PPO policy to .mlpackage.
 
-Extracts the actor-only network (no critic/value head), wraps it with
-explicit tanh for bounded [-1, 1] output, and exports via coremltools.
+Extracts the actor-only network (no critic/value head), preserves deterministic
+SB3 clipping for the supported framing policy, and exports via coremltools.
 
 Usage:
     python export_coreml.py --model models/ppo_final.zip --output models/CinematicFraming.mlpackage
@@ -23,11 +23,32 @@ import torch.nn as nn
 class ActorModule(nn.Module):
     """Standalone actor network extracted from SB3 policy.
 
-    Chains: features_extractor → mlp_extractor.policy_net → action_net → tanh
+    Supports the standard SB3 ActorCriticPolicy with unsquashed diagonal
+    Gaussian actions, float32 Box observations of shape (18,), and float32 Box
+    actions of shape (3,) bounded by [-1, 1]. Other configurations are refused.
+    Deterministic SB3 prediction clips the actor mean to the action bounds.
     """
 
     def __init__(self, policy):
         super().__init__()
+        from gymnasium.spaces import Box
+        from stable_baselines3.common.distributions import DiagGaussianDistribution
+        from stable_baselines3.common.policies import ActorCriticPolicy
+
+        if type(policy) is not ActorCriticPolicy:
+            raise ValueError("ActorModule supports the standard SB3 ActorCriticPolicy only")
+        if policy.squash_output or type(policy.action_dist) is not DiagGaussianDistribution:
+            raise ValueError("ActorModule requires unsquashed diagonal Gaussian actions")
+        observations = policy.observation_space
+        if (not isinstance(observations, Box) or observations.shape != (18,)
+                or observations.dtype != np.dtype(np.float32)):
+            raise ValueError("ActorModule requires a float32 Box observation space of shape (18,)")
+        actions = policy.action_space
+        if (not isinstance(actions, Box) or actions.shape != (3,)
+                or actions.dtype != np.dtype(np.float32)
+                or not np.all(actions.low == -1.0) or not np.all(actions.high == 1.0)):
+            raise ValueError("ActorModule requires a float32 Box action space of shape (3,) with [-1, 1] bounds")
+
         self.features_extractor = policy.pi_features_extractor
         self.policy_net = policy.mlp_extractor.policy_net
         self.action_net = policy.action_net
@@ -36,7 +57,7 @@ class ActorModule(nn.Module):
         features = self.features_extractor(x)
         latent = self.policy_net(features)
         raw_action = self.action_net(latent)
-        return torch.tanh(raw_action)
+        return torch.clamp(raw_action, min=-1.0, max=1.0)
 
 
 def export_coreml(

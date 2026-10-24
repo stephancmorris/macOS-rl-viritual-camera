@@ -1,8 +1,10 @@
-# Alfie — Engineering specification (current tree)
+# Alfie — Current capability contract and engineering notes
 
-**Audience:** an engineer onboarding onto Alfie.  
-**Authority:** the Swift sources in `CinematicCoreMacOS/`. If this file and `ALFIE_SPEC.md` disagree, **this file and the code win**.  
-**Date:** 19 September 2026. Re-verify constants in the cited files before changing behavior.
+**Audience:** an engineer onboarding onto Alfie.
+
+**Authority:** current Swift sources, the [multicamera contract](ALFIE_MULTICAMERA_SPEC.md) and [recorded Director decisions](handoff/stage3-4/DECISIONS.md). Historical implementation notes do not override them.
+
+**Date:** capability summary refreshed 21 October 2026 for PR #71; the detailed single-camera notes retain their 19 September origin and §2.2 explicitly pins its A-07 API snapshot. Re-verify constants and old gap lists in current code before implementing work. Source/test evidence does not establish a released build or rig qualification.
 
 Related:
 
@@ -14,13 +16,21 @@ Related:
 
 ## 1. What Alfie is
 
-Alfie (Autonomous Live Framing Intelligence Engine) is a **macOS church-booth camera operator**. It ingests one wide stage camera, lets a volunteer lock a speaker, digitally crops/pans/zooms that shot, and publishes a 1080p program feed.
+Alfie (Autonomous Live Framing Intelligence Engine) is a **macOS operator-controlled live-framing application**. The operator chooses Single Cam, Multi Cam or Webcam on either stopped screen or in Settings → Composer. Single Cam provides the traditional source-and-crop view with every Stage shot; Multi Cam provides independent Camera A/B framing, Preview preparation, explicit Take and deliberate Edit Live into one 1080p Program feed. Webcam uses the traditional view with close-range framing. The mode also selects the capture profile; see [Operator modes](ALFIE_MULTICAMERA_SPEC.md#operator-modes-single-cam-multi-cam-webcam) for migration and live-switch rules.
 
-It is **not** a switcher, NDI router, PTZ controller, or editor. Perception uses Apple Vision (ML). Framing and motion are **deterministic heuristics**. An RL `CinematicAgent` exists behind a developer flag and is not the shipping controller.
+Vision supplies observations; ShotComposer and CropEngine provide deterministic framing and motion. The legacy RL `CinematicAgent` remains developer scaffolding. The optional local Director scorer is a separate study component with rule fallback, not a bundled winning model. No microphone, active-speaker recognizer, physical-motion transport, NDI or direct Blackmagic SDI integration is installed by this candidate.
 
-**Primary user:** a volunteer under time pressure. Recovery is always one action: Return to Wide, tap another subject from HOLD, or Stop session.
+**Primary user:** a present volunteer operator. Return to Wide acts on the current control target; with two inputs, widening Preview does not widen Program. Reconnect, a deliberate Take/Edit Live and show-level Stop remain explicit operator actions.
 
-**Current shipping shape:** one camera, one program, four crop modes, tap-to-rung zoom, command dispatcher, Program Display + virtual camera.
+| Capability | Current source behavior | Evidence / remaining boundary |
+| --- | --- | --- |
+| A/B framing and one output | `ShowCoordinator` owns channel state, fair scheduling and `ProgramRouter`; controls normally target Preview, and Take uses the current eligible rendered frame. | Multicamera/source tests exist; named-rig sustained load, faults and physical receiving output remain release gates. |
+| Direct / virtual output | One selected route: Direct output or local CoreMediaIO virtual camera. | Host handoff is observable; physical presentation/ATEM tally and glass-to-glass latency are not inferred. |
+| Director console and effects | Debug attaches actual status/control bindings and starts Manual. Explicit study adapters exist for preparation, cuts, motion, fallback, discovery and passive comparison. | Ordinary app construction supplies no execution-study settings, discovery budget or learned scorer. Release disables shadow, Assist and automatic effects; qualification and current prerequisites remain mandatory. |
+| Optional observations | Training recording needs persisted consent; revocation closes new admission and shares ordered Stop/close, retaining existing files and normal bounded-drop accounting. | Temporary writer/consent tests; live permission and retained-file acceptance remain pending. |
+| Diagnostic metrics export | Explicit selected CSVs become a new allowlisted local JSON projection; raw diagnostics and detailed reports retain more context. | Synthetic exporter tests; review recipient/artifact separately. No anonymity, signed sandbox-export or Store approval is inferred. |
+
+See the [subject-tools report](../reports/auto-director/subject-tools-2026-10-21/README.md), [execution-boundary report](../reports/auto-director/execution-sinks-2026-10-21/README.md), [privacy inventory](privacy/current-source-audit.md) and [R1 evidence](../reports/release-1/README.md). These sources preserve software/live/qualification distinctions; the PR #71 refresh remains for human review.
 
 ---
 
@@ -35,7 +45,7 @@ It is **not** a switcher, NDI router, PTZ controller, or editor. Perception uses
 | `docs/astra-sessions/` | S2–S7 implementation briefs |
 | `training/` | RL training (not Sunday-critical) |
 
-**Open:** `CinematicCoreMacOS.xcodeproj`, scheme Alfie. Deployment target in the project is **macOS 26.2**. Product copy still says 14+.
+**Open:** `CinematicCoreMacOS/CinematicCoreMacOS.xcodeproj`, scheme `CinematicCoreMacOS`, product Alfie. The checked-in deployment target is **macOS 26.2**; compatibility evidence must name the actual build and Mac.
 
 **Entitlements (checked-in plist):** sandbox, camera, IOSurface, app group, system-extension install. Audio-input is a *build setting*, not in the plist. No serial entitlement yet.
 
@@ -43,7 +53,8 @@ It is **not** a switcher, NDI router, PTZ controller, or editor. Perception uses
 
 | Type | File | Owns |
 | --- | --- | --- |
-| `CameraManager` | `CameraManager.swift` | Capture session, detection plan, compose switch, zoom rungs, Program Output |
+| `CameraManager` | `CameraManager.swift` | Per-channel capture, detection, composition, zoom, lock and rendered frame state |
+| `ShowCoordinator` / `ProgramRouter` | `ShowCoordinator.swift` / `ProgramRouter.swift` | Channel ownership, control target, serialized Take, routed Program and one output |
 | `PersonDetector` | `PersonDetector.swift` | Vision requests, track UUIDs, locked Pass A matcher |
 | `DetectionFrame` / `DetectionFrameStore` | `DetectionFrame.swift` | Latest Vision observation + the exact pixels analyzed |
 | `FaceSignatureExtractor` / `LandmarkRatios` | `FaceSignatureExtractor.swift` | Feature-print crop + bone-structure veto |
@@ -62,6 +73,8 @@ It is **not** a switcher, NDI router, PTZ controller, or editor. Perception uses
 Added 10 Oct 2026 for D-01. This section describes actual types on the open A-07 stack at [`ecbf8814b7c77c64edfd2cc4a92ff6c80d892e42`](https://github.com/stephancmorris/macOS-rl-viritual-camera/tree/ecbf8814b7c77c64edfd2cc4a92ff6c80d892e42/CinematicCoreMacOS/CinematicCoreMacOS/Director), not the older single-camera snapshot elsewhere in this file, merged main code, completed integration or qualified live behavior. The [recorded decisions](handoff/stage3-4/DECISIONS.md) govern product authority; code documents implementation status and does not override them. See the [product contract](auto-director/product-contract.md) and [event contract](auto-director/event-authority-contract.md).
 
 Alfie is a live-event backup producer with static cameras and a present operator. Each input has one shot; preparation targets Preview, and any future qualified automatic cut uses the existing `ShowCoordinator.take` / `ProgramRouter` path. No parallel output, audio input or show-time network is added by the Director API.
+
+For the later main/PR boundary and outstanding integration work, see the [18 October documentation review](../reports/auto-director/d01-d04-review-2026-10-18.md). The table below retains its explicitly pinned A-07 snapshot.
 
 Files below are under `CinematicCoreMacOS/CinematicCoreMacOS/Director/` on that stack:
 
@@ -86,7 +99,9 @@ Evidence must be labelled synthetic, recorded or live. Test success does not con
 
 ---
 
-## 3. Process architecture
+## 3. Historical single-camera process architecture
+
+The diagram and detailed notes through §9 retain the earlier single-camera implementation context. The current show-level owner is `ShowCoordinator`; §1 and the multicamera contract supersede old ownership and missing-channel statements.
 
 ```
 Camera / UVC capture card
@@ -118,7 +133,7 @@ Mach service (app-group prefixed): `EPZDEPSV69.Morris.CinematicCoreMacOS.extensi
 
 Install: app must live in `/Applications` or `~/Applications`. Xcode/DerivedData builds are refused (`SystemExtensionActivationManager`).
 
-`CameraManager` currently **owns** capture, detection, composition, crop, **and** `ProgramOutputManager`. That is the main reason S2 exists.
+This historical diagram predates show-level ownership. Current `ShowCoordinator` creates one `ProgramOutputManager` and `ProgramRouter`; channel managers retain independent capture/detection/composition/crop state and emit through that show boundary.
 
 ---
 
@@ -424,11 +439,13 @@ Rules:
 - Manual / Pan / Return to Wide revoke tracking ownership so a late re-acquire cannot steal the mode.
 - Session start/stop must target `.session`.
 
-**There is no `cameraB`, voice origin, Take, Arm, or EmergencyStop yet.** Those are S2 / S4 / S7.
+The preceding dispatcher notes describe the original single-camera path. Current channel commands bind a ChannelID/control-target revision and the show implements manual Take. Speech adapters and hardware simulators remain isolated from microphone/physical effects; do not treat this historical gap list as a new implementation assignment.
 
 ---
 
 ## 10. Operator console
+
+Stage currently uses `Console/LiveConsole.swift` and its Preview/Program roles, targeted pill, Take and Edit Live; Webcam retains the traditional single-camera layout described below. Debug Director status/controls are bound to the attached controller. See §1 for the Release boundary and the current operator guide for the workflow.
 
 **Files:** `ContentView.swift`, `OperatorPill.swift`, `CropPreviewView.swift`, `InspectorDrawer.swift`
 
@@ -438,7 +455,7 @@ Rules:
 - Inspector (right drawer): camera, format, composition, output route, modules, diagnostics + Reveal Logs.
 - Tap on wide: Detect pick, manual reposition, or HOLD/WAITING re-acquire.
 - Press-and-hold: retarget while locked.
-- Program Display badge is **On Air** for the pixels Alfie submitted — not ATEM tally.
+- The Stage Program pane reports routed/holding/standby status; none establishes downstream ATEM tally. The traditional view has its separate Program badge.
 
 Developer-only (flags off for church): ML agent, training recorder. Clip playback flag is currently **on**.
 
@@ -450,10 +467,10 @@ Developer-only (flags off for church): ML agent, training recorder. Clip playbac
 
 | Route | Role |
 | --- | --- |
-| **Program Display (default)** | Borderless fullscreen on a chosen display. Free-runs at compositor refresh. HDMI → converter → ATEM. No genlock. |
-| **Virtual camera (fallback)** | XPC IOSurface IDs. Extension queue max **5**, drain newest. Host retains last **10** sent buffers. Playout clock matches `ShowStandard`. |
+| **Direct output (HDMI / USB-C)** | One selected display port; explicitly chosen ports reserve black before Start. Start requests the show format; verify actual receiver behavior. No genlock guarantee. |
+| **Virtual Camera** | Local XPC/IOSurface handoff to the CoreMediaIO extension. Playout follows `ShowStandard`; accepted handoffs do not prove receiving-client presentation. |
 
-One route is active. One persisted Program Display ID (`ProgramDisplaySelection`).
+One route is active. Preferred route/display choices are proposals; exact endpoint availability and format checks still govern use. A development rehearsal sink does not represent an external receiver.
 
 Latency stages recorded: detection, compose, cropRender, xpcSend, total, mainActor. Rolling 5 s window, published every 0.5 s.
 
@@ -464,6 +481,8 @@ Latency stages recorded: detection, compose, cropRender, xpcSend, total, mainAct
 ## 12. Diagnostics and tests
 
 Diagnostics (sandbox `Documents/CinematicCore/Diagnostics/`, METRICS schema 2): per capture, a manifest `alfie_session_<stamp>.json` (build and source fingerprint, OS, machine, source device/profile/requested and delivered size, configured capture rate and selection reason, route, show standard, what each route's handoff means, the column definitions and what is not observable), a soak CSV with one row per ~5 s window, and a memory CSV for the same windows. Every CSV column is defined in `DiagnosticsLog.columns` with its stage (capture upstream → delivered → admitted → detection → render → routed → handoff → repeated → presented), unit, window and provenance. Losses are counted per stage (AVCapture drop, gate skip, render failure, route refusal, no route) and HOLD repeats separately from new frames. `presented_fps` is always `unknown`: neither the Program Display compositor nor the virtual-camera client reports presentation. Recording starts on the capture's first processed frame (a `detection start` note marks Vision load), windows close on time even during a stall, and Stop flushes the last window as `partial`. `CinematicCoreMacOS/scripts/diagnostics_report.py` summarises a session as Markdown; release evidence runbooks live in `reports/release-1/`.
+
+For explicit local metrics export, `scripts/diagnostics_export.py` requires the selected soak CSV, optional matching memory CSV and a new destination outside input folders. Its fixed numeric/enum schema excludes names, wall-clock identifiers, notes, arbitrary manifest text and picture/person geometry; unknown downstream presentation remains unknown. The detailed report is unchanged. See the [privacy inventory](privacy/current-source-audit.md#explicit-metrics-export) for usage and remaining runtime checks.
 
 `imageCacheFlushInterval = 0` (off). Autorelease is drained per work item.
 
@@ -495,7 +514,9 @@ Diagnostics (sandbox `Documents/CinematicCore/Diagnostics/`, METRICS schema 2): 
 
 ---
 
-## 14. Roadmap gaps — what must be built
+## 14. Historical roadmap notes and remaining validation
+
+These implementation lists originated before channel/Take/Director integration. Current §1, the multicamera contract and the linked candidate reports supersede completed software items; hardware/operator gates remain open. Do not recreate a feature solely because it appears in this historical list.
 
 Session briefs (implementation prompts) live in `docs/astra-sessions/`. This section is the **engineering gap analysis**: current vs desired, and the concrete work.
 
@@ -523,7 +544,7 @@ Session briefs (implementation prompts) live in `docs/astra-sessions/`. This sec
 
 **25 September 2026 design authority:** [ALFIE_MULTICAMERA_SPEC.md](ALFIE_MULTICAMERA_SPEC.md) defines the current work-unit sequence, frame contracts and gates. The historical S2 scope below is an architectural overview, not a single implementation assignment.
 
-**Missing today:** second session, second detector/composer/engine, channel-addressed commands, output moved out of `CameraManager`, fair render scheduler.
+**Current status:** these software seams now exist in `ShowCoordinator`, per-channel `CameraManager`, `FrameWorkScheduler` and `ProgramRouter`. The following original extraction plan is retained as design history; equivalence and real-device qualification remain separate checks.
 
 **Must implement:**
 
@@ -542,7 +563,7 @@ Session briefs (implementation prompts) live in `docs/astra-sessions/`. This sec
 
 ### 14.4 S3 — Program / Preview (supersedes dual-output design)
 
-**Design authority:** [ALFIE_MULTICAMERA_SPEC.md](ALFIE_MULTICAMERA_SPEC.md). The single-camera application has not yet implemented these R2 contracts.
+**Design authority:** [ALFIE_MULTICAMERA_SPEC.md](ALFIE_MULTICAMERA_SPEC.md). The current candidate implements the core A/B Program/Preview/Take/control-target software below; real-camera, sustained-load and downstream qualification remain pending.
 
 **Must implement:**
 

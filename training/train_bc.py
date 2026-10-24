@@ -17,12 +17,13 @@ import argparse
 import sys
 from pathlib import Path
 
-import numpy as np
 import torch
 from torch.utils.data import DataLoader
 
 from bc_dataset import ExpertDataset
+from bc_validation import split_counts
 from cinematic_env import CinematicFramingEnv
+from replay_timing import TimestampTiming
 
 
 def train_bc(
@@ -33,6 +34,7 @@ def train_bc(
     batch_size: int = 256,
     val_split: float = 0.1,
     verbose: bool = True,
+    timing: TimestampTiming | None = None,
 ) -> dict:
     """Train behavioral cloning and save SB3-compatible model.
 
@@ -41,13 +43,12 @@ def train_bc(
     from stable_baselines3 import PPO
 
     # Load expert dataset
-    dataset = ExpertDataset(data_dirs=data_dirs)
+    dataset = ExpertDataset(data_dirs=data_dirs, timing=timing)
     if verbose:
         print(f"Expert dataset: {len(dataset)} samples")
 
     # Train/val split
-    n_val = max(1, int(len(dataset) * val_split))
-    n_train = len(dataset) - n_val
+    n_train, n_val = split_counts(len(dataset), val_split)
     train_set, val_set = torch.utils.data.random_split(
         dataset, [n_train, n_val],
         generator=torch.Generator().manual_seed(42),
@@ -60,7 +61,7 @@ def train_bc(
         print(f"Train: {n_train}, Val: {n_val}")
 
     # Create SB3 PPO model to get the policy architecture
-    env = CinematicFramingEnv(data_dirs=data_dirs)
+    env = CinematicFramingEnv(data_dirs=data_dirs, timing=timing)
     model = PPO("MlpPolicy", env, verbose=0)
     env.close()
 

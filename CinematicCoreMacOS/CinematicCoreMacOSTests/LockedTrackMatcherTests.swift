@@ -308,35 +308,30 @@ struct LockedTrackMatcherTests {
     // MARK: - 8. Adaptive radius grows with motion
 
     @Test func adaptiveRadiusGrowsWithVelocityAndTime() {
-        // radius = min(0.35, 0.12 + 1.0*0.2) = min(0.35, 0.32) = 0.32
-        let velocity: CGFloat = 1.0
-        let timeSinceLockSeen: TimeInterval = 0.2
-        let expectedRadius = min(0.35, 0.12 + velocity * CGFloat(timeSinceLockSeen))
-        #expect(expectedRadius == 0.32)
-
-        // A candidate 0.25 away is inside the adaptive 0.32 radius but well
-        // outside the stationary 0.12 base radius. Same size as the
-        // reference (via `box(offsetFromReferenceBy:)`) so the area-ratio
-        // guard in `lockedMatchScore` (areaRatio > 0.33) isn't what's under
-        // test here — only the distance gate is.
+        // The displaced candidate is plausible after motion and a gap, but
+        // lacks the overlap needed for an immediate assignment.
         let candidate = Self.box(offsetFromReferenceBy: 0.25, 0)
-
-        let movingScore = PersonDetector.lockedMatchScore(
-            detection: candidate,
-            reference: Self.referenceBox,
-            allowedDistance: expectedRadius
+        let moving = PersonDetector.resolveLockedAssignment(
+            detections: [candidate],
+            referenceBox: Self.referenceBox,
+            lockVelocityMagnitude: 1,
+            timeSinceLockSeen: 0.2,
+            otherTrackBoxes: [],
+            probation: nil
         )
-        #expect(movingScore > 0, "candidate at 0.25 should score positively under the widened adaptive radius")
+        #expect(moving.assignedIndex == nil)
+        #expect(moving.probation?.framesAgreed == 1)
 
-        // The same candidate must be hard-rejected under the stationary
-        // (velocity == 0) base radius of 0.12.
-        let stationaryRadius = min(CGFloat(0.35), 0.12 + 0 * CGFloat(0))
-        let stationaryScore = PersonDetector.lockedMatchScore(
-            detection: candidate,
-            reference: Self.referenceBox,
-            allowedDistance: stationaryRadius
+        let stationary = PersonDetector.resolveLockedAssignment(
+            detections: [candidate],
+            referenceBox: Self.referenceBox,
+            lockVelocityMagnitude: 0,
+            timeSinceLockSeen: 0,
+            otherTrackBoxes: [],
+            probation: nil
         )
-        #expect(stationaryScore == 0, "the same candidate must be rejected when the subject is stationary")
+        #expect(stationary.assignedIndex == nil)
+        #expect(stationary.probation == nil)
     }
 
     // MARK: - 9. Micro-benchmark

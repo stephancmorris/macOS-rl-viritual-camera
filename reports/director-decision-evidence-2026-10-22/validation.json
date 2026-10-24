@@ -1,0 +1,75 @@
+{
+  "date": "2026-10-22",
+  "basePR": 73,
+  "branch": "codex/director-decision-evidence",
+  "sourceFingerprint": "c4f2f2d717d2d958df0a92e890bd9a0d7ecabce930bda4c2f24f3603c0798340",
+  "evidenceClass": "synthetic",
+  "swift": {
+    "passedDefinitions": 1012,
+    "passedExpanded": 1550,
+    "failed": 0,
+    "skipped": 3,
+    "coreMLCpuInterop": "configured-passed"
+  },
+  "python": {
+    "scripts": 78,
+    "training": 14,
+    "failed": 0,
+    "actualDecisionBundleChecks": true,
+    "loaderValidation": 12,
+    "checkpointTrust": 4,
+    "totalPassed": 113,
+    "writerSessions": 5
+  },
+  "release": {
+    "result": "passed",
+    "codeSigningAllowed": false
+  },
+  "skips": [
+    "RealCameraTests.twoWebcamsRenderPicturesAndBJoinsWithoutCrashing",
+    "ReadinessEvaluationTests.replayConsentedFolderWhenConfigured",
+    "InstrumentationInvestigationTests.compareAcceleratedWallClockAndSourceClockWindows"
+  ],
+  "capture": {
+    "records": 10,
+    "wouldPrepare": 1,
+    "wouldCut": 1,
+    "manualTakes": 1,
+    "comparedCuts": 1,
+    "exactCuts": 1,
+    "unmatchedPreparations": 1,
+    "unscoredTakes": 0,
+    "automaticDeadlineFired": false,
+    "independentOpportunities": null,
+    "perLevelBinding": "missing",
+    "perLevelEvaluation": "incomplete"
+  },
+  "qualification": false,
+  "signedInstall": false,
+  "realCameraOrReceiver": false,
+  "localArtifacts": "/private/tmp/alfie-decision-evidence-20261022",
+  "remainingCaptureGaps": [
+    "legacyComparisonRequiresSeparateRenewedSession",
+    "segmentStyleChangeRequiresNewSuppliedVersion",
+    "stopTerminalSourceProvenanceUnavailable"
+  ],
+  "sourceFingerprintScope": "App build inputs per source_fingerprint.py; Python loader hash below",
+  "loaderSha256": "0a3fd67c60d9ab936030ee32deb0b1b86933b187c12baee632d5a580bc48b7d4",
+  "loaderValidation": {
+    "result": "passed",
+    "review": "independent-no-blocker",
+    "malformedShortSessions": "raise-before-minimum-length-filter",
+    "temporalAdjacency": "not-validated",
+    "geometryRanges": "not-validated",
+    "float32ArithmeticSafety": "not-validated",
+    "fullGymTorchSmoke": "not-run-dependencies-unavailable"
+  },
+  "writerSha256": "7284a3669c1bf8261be84d4541c417cf5e50fa610282efd610989fb196d0750a",
+  "writerSessionValidation": {
+    "result": "passed",
+    "review": "independent-no-blocker",
+    "sameSecondSequentialAndConcurrent": "preserved",
+    "directoryFrameMetadataCollisions": "exclusive-refusal",
+    "incompleteArtifactsOnFailure": "possible-no-durability-claim"
+  }
+}

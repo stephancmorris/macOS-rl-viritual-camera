@@ -73,13 +73,25 @@ nonisolated struct DirectorReplay {
 
     static func run(_ fixture: Fixture, parameters: DirectorShotPolicy.Parameters,
                     maximumProposalAge: TimeInterval, maximumEvidenceAge: TimeInterval, readinessParameters: DirectorReadiness.Parameters) -> Report {
+        run(fixture, parameters: parameters, maximumProposalAge: maximumProposalAge,
+            maximumEvidenceAge: maximumEvidenceAge, readinessParameters: readinessParameters,
+            sinkFactory: { SimulatedDirectorEffectSink(succeeds: $0) })
+    }
+
+    /// Injectable synthetic boundary for contract tests. The factory is called
+    /// at effect time, after the current world has been sampled, never at enqueue.
+    static func run(_ fixture: Fixture, parameters: DirectorShotPolicy.Parameters,
+                    maximumProposalAge: TimeInterval, maximumEvidenceAge: TimeInterval,
+                    readinessParameters: DirectorReadiness.Parameters,
+                    sinkFactory: (Bool) -> any DirectorEffectSink,
+                    judge: any DirectorJudge = RuleJudge()) -> Report {
         // Invalid clocks are counted and skipped rather than crashing a replay.
         var authority = DirectorAuthority(reviewPolicy: .conservative)
         _ = authority.apply(.enable(.assist), prerequisites: .init(nominationsCurrent: true, previewAvailable: true, sourcesHealthy: true, outputHealthy: true, admissionCurrent: true, qualifiedLevels: [.assist]))
         var channels: [ChannelID: Channel] = [.a: Channel(), .b: Channel()]
         var program: ChannelID = .a
         var route: UInt64 = 0
-        var policyRevision: UInt64 = 0, nominationRevision: UInt64 = 0
+        var policyRevision: UInt64 = 0, nominationRevision: UInt64 = 0, evidenceRevision: UInt64 = 0
         var preparation = DirectorPreparation()
         var activeRequest: DirectorPreparation.Request?
         var acknowledgements: [(id: String, due: TimeInterval, receipt: DirectorPreparation.Receipt)] = []
@@ -131,33 +143,38 @@ nonisolated struct DirectorReplay {
                     channels[target]?.lastEvidenceAt.map { now >= $0 && now - $0 <= maximumEvidenceAge } == true &&
                     channels[target]?.movement.isFinite == true && (channels[target]?.movement ?? -1) >= 0 &&
                     channels[target]?.identity == .confirmed && readinessParameters.isValid)
-            let validation = preparation.validate(effect.request, live: live, now: now)
-            if case .stale(let reasons) = validation {
-                recordStale(effect.proposalID, reasons); rejectedAttempts += 1
-                preparation.discard(effect.request)
-            } else if !effect.succeeds {
-                failedEffects += 1; preparation.discard(effect.request)
+            var sink = sinkFactory(effect.succeeds)
+            switch sink.prepare(effect.request, preparation: &preparation, live: live, now: now) {
+            case .rejected(let reasons):
+                recordStale(effect.proposalID, reasons)
+                rejectedAttempts += 1
+            case .failed:
+                failedEffects += 1
+            case .committed(let receipt):
+                // Audit raw pre-effect facts independently of the sink's
+                // validator. A deliberately faulty sink cannot hide a stale
+                // mutation behind its reported success.
+                let audit = Self.audit(CommittedEffect(
+                    proposal: effect.request.intent, requestIssuedAt: effect.request.issuedAt,
+                    requestMaximumAge: effect.request.maximumAge, appliedAt: now,
+                    program: program, preview: program == .a ? .b : .a, routeGeneration: route,
+                    revisionsBefore: channels[target]?.revisions,
+                    sourceMissing: channels[target]?.missing ?? true,
+                    authorityEpoch: authority.epoch, authorityMayPrepare: authority.mayPrepare,
+                    policyRevision: policyRevision, nominationRevision: nominationRevision))
+                channels[target]?.revisions = receipt.postRevisions
+                preparationsCommitted += 1
+                let before = live.revisions
+                let receiptMatches = receipt.requestID == effect.request.id &&
+                    receipt.intent == effect.request.intent &&
+                    before.map { receipt.postRevisions.sourceGeneration == $0.sourceGeneration &&
+                        receipt.postRevisions.controlEpoch > $0.controlEpoch &&
+                        receipt.postRevisions.shotRevision > $0.shotRevision } == true
+                if !audit.isEmpty || !receiptMatches || !live.evidenceAvailable {
+                    staleEffectsCommitted += 1
+                }
+                acknowledgements.append((effect.id, now + effect.acknowledgementDelay, receipt))
             }
-            else if var revisions = channels[target]?.revisions,
-                    revisions.controlEpoch < UInt64.max, revisions.shotRevision < UInt64.max {
-                revisions.controlEpoch += 1; revisions.shotRevision += 1
-                if let receipt = preparation.commit(effect.request, live: live, now: now, postRevisions: revisions) {
-                    // Audit the raw world at the sink mutation, independently
-                    // of the validator that guarded the commit above.
-                    let audit = Self.audit(CommittedEffect(
-                        proposal: effect.request.intent, requestIssuedAt: effect.request.issuedAt,
-                        requestMaximumAge: effect.request.maximumAge, appliedAt: now,
-                        program: program, preview: program == .a ? .b : .a, routeGeneration: route,
-                        revisionsBefore: channels[target]?.revisions,
-                        sourceMissing: channels[target]?.missing ?? true,
-                        authorityEpoch: authority.epoch, authorityMayPrepare: authority.mayPrepare,
-                        policyRevision: policyRevision, nominationRevision: nominationRevision))
-                    channels[target]?.revisions = revisions
-                    preparationsCommitted += 1
-                    if !audit.isEmpty { staleEffectsCommitted += 1 }
-                    acknowledgements.append((effect.id, now + effect.acknowledgementDelay, receipt))
-                } else { rejectedAttempts += 1 }
-            } else { rejectedAttempts += 1 }
         }
         func completeAcknowledgement(_ ack: (id: String, due: TimeInterval, receipt: DirectorPreparation.Receipt)) {
             let target = ack.receipt.intent.target
@@ -293,6 +310,8 @@ nonisolated struct DirectorReplay {
             case .policyChange: policyRevision += 1; authority.apply(.policyChanged)
             case .nominationChange: nominationRevision += 1; authority.apply(.nominationChanged)
             case .subject(let id, let present, let identity, let intended, let ready, let movement):
+                guard evidenceRevision < UInt64.max else { clockAnomalies += 1; authority.apply(.pause); break }
+                evidenceRevision += 1
                 channels[id, default: Channel()].lastEvidenceAt = now
                 channels[id, default: Channel()].present = present
                 channels[id, default: Channel()].identity = identity
@@ -327,8 +346,13 @@ nonisolated struct DirectorReplay {
                 let timeline = DirectorShotPolicy.Timeline(programShot: program == .a ? shotA : shotB,
                     programStartedAt: programStartedAt, lastWideAt: lastWideAt,
                     history: history, candidates: [candidate], now: now)
-                if case .chosen(let choice, let reason) = DirectorShotPolicy.choosePreparation(timeline,
-                    preview: preview, parameters: parameters) {
+                let judgement = judge.judge(.init(timeline: timeline, preview: preview, parameters: parameters,
+                    evidenceRevision: evidenceRevision, now: now))
+                if judgement.computedAt.isFinite, judgement.computedAt >= 0,
+                   case .accepted(let accepted) = DirectorJudgeGate.accept(judgement,
+                    allowed: DirectorShotPolicy.rank(timeline, preview: preview, parameters: parameters),
+                    evidenceRevision: evidenceRevision, now: now, maximumAge: maximumProposalAge) {
+                    let choice = accepted.candidate, reason = accepted.reason
                     if let proposal = DirectorProposal(target: preview, preview: preview, shot: choice.shot,
                         reason: reason, authorityEpoch: authority.epoch,
                         revisions: channel.revisions, routeGeneration: route, createdAt: now, policyRevision: policyRevision, nominationRevision: nominationRevision) {
@@ -350,7 +374,7 @@ nonisolated struct DirectorReplay {
                 readyEvaluations += 1
             }
             if authority.paused && pending != nil { pausedProposals += 1 }
-            // There is deliberately no director route mutation: qualification is false.
+            // The A-08 sink has no Take entry point; only an operator can change Program.
             if program != priorProgram && !operatorAuthorizedChange { unauthorized += 1 }
             let nextTime = position + 1 < ordered.count ? ordered[position + 1].element.at : fixture.duration
             if nextTime > now { flushEffects(before: nextTime) }

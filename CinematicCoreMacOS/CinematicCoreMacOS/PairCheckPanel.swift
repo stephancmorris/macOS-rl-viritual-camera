@@ -109,7 +109,7 @@ struct PairCheckPanel: View {
         switch model.pairCheck {
         case .notRun: return .white.opacity(0.85)
         case .checking: return ConsoleStyle.amber
-        case .pass: return ConsoleStyle.previewGreen
+        case .pass: return .white.opacity(0.85)
         case .unsupported: return ConsoleStyle.amber
         }
     }
@@ -117,7 +117,7 @@ struct PairCheckPanel: View {
     private var borderColor: Color {
         switch model.pairCheck {
         case .unsupported: return ConsoleStyle.amber.opacity(0.5)
-        case .pass: return ConsoleStyle.previewGreen.opacity(0.35)
+        case .pass: return ConsoleStyle.neutralBorder
         default: return ConsoleStyle.neutralBorder
         }
     }

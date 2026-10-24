@@ -3,8 +3,8 @@
 //  CinematicCoreMacOS
 //
 //  Wires the Multiview console to the live engine (CONSOLE / TAKE-BAR /
-//  NEXT-PANEL / INPUT-STRIP / PILL-TARGET integration). Shown in Stage format
-//  while capture runs when DeveloperFlags.useMultiviewConsole is on.
+//  NEXT-PANEL / INPUT-STRIP / PILL-TARGET integration). Shown in Multi Cam
+//  while capture runs (see OperatorMode).
 //
 //  - The console reads one ConsoleSnapshot, rebuilt from ShowCoordinator at
 //    ≤15 Hz by a timer — never per frame.
@@ -89,8 +89,12 @@ enum LiveConsoleSnapshot {
 
 final class LiveConsoleModel: ObservableObject, ConsoleActions {
     let show: ShowCoordinator
+    let directorControls: LiveDirectorConsoleProxy
 
     @Published private(set) var snapshot: ConsoleSnapshot
+    /// The started Director's actual status, sampled with the console refresh.
+    /// Nil when shadow is disabled or no controller is attached.
+    @Published private(set) var directorSection: NextShotStatus.DirectorSection?
     /// Latest operator-facing feedback (a refused Take, a failed start).
     @Published private(set) var message: String?
     @Published private(set) var pairCheckText: String?
@@ -100,6 +104,8 @@ final class LiveConsoleModel: ObservableObject, ConsoleActions {
     private var lastCounts: [ChannelID: (count: UInt64, at: TimeInterval)] = [:]
     private var rates: [ChannelID: Double] = [:]
     private let pairCheck: MultiInputCheck
+    private let readDirectorSection: () -> NextShotStatus.DirectorSection?
+    private let directorStatusEnabled: Bool
     private var pairCheckSubscription: AnyCancellable?
     /// Fingerprint key of the last configuration measured automatically, so
     /// a finished or cancelled check is not restarted for the same setup.
@@ -107,10 +113,22 @@ final class LiveConsoleModel: ObservableObject, ConsoleActions {
 
     static let refreshInterval: TimeInterval = 1.0 / 15.0
 
-    init(show: ShowCoordinator, pairCheck: MultiInputCheck? = nil) {
+    /// The reader is injectable for software projection tests. Production
+    /// reads the show's noncreating accessor; it never accesses lazy director.
+    init(show: ShowCoordinator, pairCheck: MultiInputCheck? = nil,
+         directorStatusEnabled: Bool = DeveloperFlags.runDirectorShadow,
+         directorStatus: (() -> NextShotStatus.DirectorSection?)? = nil,
+         directorControlProvider: (() -> (any DirectorConsoleControlling)?)? = nil) {
         self.show = show
+        self.directorControls = LiveDirectorConsoleProxy(enabled: directorStatusEnabled,
+            controller: directorControlProvider ?? { [weak show] in show?.directorControlForConsole })
         self.pairCheck = pairCheck ?? MultiInputCheck()
+        self.directorStatusEnabled = directorStatusEnabled
+        let reader = directorStatus ?? { [weak show] in show?.directorSectionForConsole }
+        self.readDirectorSection = reader
+        self.directorSection = directorStatusEnabled ? reader() : nil
         self.snapshot = LiveConsoleSnapshot.make(show: show, paneView: .shot, rates: [:], note: nil)
+        self.directorControls.sample(self.directorSection)
         pairCheckSubscription = self.pairCheck.$phase.sink { [weak self] phase in
             self?.pairCheckText = Self.describe(phase)
         }
@@ -143,7 +161,16 @@ final class LiveConsoleModel: ObservableObject, ConsoleActions {
             show: show, paneView: paneView, rates: rates,
             note: message ?? target?.controlStatus ?? failure)
         if next != snapshot { snapshot = next }
+        // A Director-only change must repaint even when camera/Take state did
+        // not change. Coalesce equal values rather than observing frame writes.
+        let nextDirector = directorStatusEnabled ? readDirectorSection() : nil
+        if nextDirector != directorSection { directorSection = nextDirector }
+        directorControls.sample(nextDirector)
     }
+
+    /// Badges reflect accepted current preparation; status and level alone
+    /// never imply that Alfie set a camera's shot.
+    var autoBadgeChannels: Set<ChannelID> { directorSection?.alfieSetShot ?? [] }
 
     private static let logger = Logger(subsystem: "com.alfie", category: "Console")
     private var refreshCount = 0
@@ -215,11 +242,17 @@ final class LiveConsoleModel: ObservableObject, ConsoleActions {
         refresh()
     }
 
+    /// Uses the already attached Director; a status panel never creates one.
+    func advanceDirectorSegment() {
+        show.advanceDirectorSegment()
+        refresh()
+    }
+
     // MARK: Show-level
 
     func stopShow() {
         pairCheck.cancel()
-        show.stopShow()
+        show.stopShow(origin: .operatorUI)
     }
 
     /// Cameras that could become input B (not already used by A).
@@ -246,8 +279,8 @@ final class LiveConsoleModel: ObservableObject, ConsoleActions {
 
     func measurePair() {
         guard let preview = show.previewChannel else { return }
-        pairCheck.start(show: show, preview: preview) { [weak self] result in
-            self?.show.recordAdmission(result)
+        pairCheck.start(show: show, preview: preview) { [weak self] result, binding in
+            self?.show.recordAdmission(result, for: binding)
             self?.refresh()
         }
     }
@@ -274,6 +307,7 @@ final class LiveConsoleModel: ObservableObject, ConsoleActions {
     static func describe(_ rejection: TakeRejection, show: ShowCoordinator) -> String {
         switch rejection {
         case .noPreview: return "No Preview camera"
+        case .directorNotAuthorized: return "Alfie Take refused: authorization is no longer current"
         case .superseded: return "Take ignored: roles changed since the click"
         case .tooSoon: return "Take ignored: too soon after the last Take"
         case .outputRefused:
@@ -318,14 +352,18 @@ struct LiveMultiviewConsole: View {
 
     private var console: some View {
         let snapshot = model.snapshot
-        var view = MultiviewConsoleView(snapshot: snapshot, actions: model) {
+        var view = MultiviewConsoleView(snapshot: snapshot, actions: model, director: model.directorSection) {
             InputStripView(snapshot: snapshot, actions: model,
-                           tilePicture: { [model] id in LiveTilePicture.make(id: id, show: model.show) })
+                           tilePicture: { [model] id in LiveTilePicture.make(id: id, show: model.show) },
+                           autoBadgeChannels: model.autoBadgeChannels)
         } pill: {
             pill(for: snapshot)
         }
-        view.panePicture = { [model] pane in AnyView(LivePanePicture.make(pane: pane, show: model.show)) }
+        view.panePicture = { [model] pane in AnyView(LivePanePicture.make(pane: pane, show: model.show, subjectPick: model.directorSection?.subjectPicks[pane.channel ?? .a], controls: model.directorControls)) }
         view.headerTrailing = AnyView(LiveConsoleHeader(model: model))
+        if model.directorSection != nil {
+            view.directorControls = AnyView(LiveDirectorControlBar(controller: model.directorControls))
+        }
         return view
     }
 
@@ -347,9 +385,12 @@ struct LivePanePicture: View {
     @ObservedObject var channel: CameraManager
     let pane: PaneModel
     let show: ShowCoordinator
+    var subjectPick: DirectorSubjectPick? = nil
+    var controls: (any DirectorConsoleControlling)? = nil
 
     @ViewBuilder
-    static func make(pane: PaneModel, show: ShowCoordinator) -> some View {
+    static func make(pane: PaneModel, show: ShowCoordinator, subjectPick: DirectorSubjectPick? = nil,
+                     controls: (any DirectorConsoleControlling)? = nil) -> some View {
         if pane.role == .program, let sent = heldProgramBuffer(show: show) {
             // Holding or standby: show exactly the frame downstream received.
             // It changes only on state changes, so the 15 Hz rebuild suffices.
@@ -357,7 +398,7 @@ struct LivePanePicture: View {
         } else if pane.role == .program, show.router.state == .standby {
             Color.black
         } else if let id = pane.channel, let channel = show.channel(id) {
-            LivePanePicture(channel: channel, pane: pane, show: show)
+            LivePanePicture(channel: channel, pane: pane, show: show, subjectPick: subjectPick, controls: controls)
         } else {
             Color.black
         }
@@ -390,7 +431,9 @@ struct LivePanePicture: View {
                 isRecovering: channel.recoveryState.isRecovering,
                 isZoomLimited: channel.isZoomLimited,
                 framingTitle: channel.framingTitle,
-                aspectFill: false)
+                aspectFill: false,
+                subjectPick: channel.activeMode != .manualCrop && channel.activeMode != .autoPan ? subjectPick : nil,
+                onSubjectOverride: { request in controls?.overrideSubject(request) ?? .refused("Subject selection is unavailable") })
         } else {
             // Rendered output only — never the raw capture buffer.
             PixelBufferPreviewView(pixelBuffer: channel.croppedFrameBuffer, aspectFill: true)
@@ -424,6 +467,18 @@ struct LiveConsoleHeader: View {
 
     var body: some View {
         HStack(spacing: 12) {
+            if let sheet = model.directorSection?.runSheet {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("Current: \(sheet.current)").font(ConsoleStyle.label(10)).lineLimit(1)
+                    Text(sheet.next.map { "Next: \($0)" } ?? "End of run sheet")
+                        .font(ConsoleStyle.label(10)).foregroundStyle(.secondary).lineLimit(1)
+                }
+                Button("Advance") { model.advanceDirectorSegment() }
+                    .controlSize(.small)
+                    .disabled(sheet.next == nil)
+                    .accessibilityLabel("Advance run sheet")
+                    .accessibilityHint("Changes segment style only. Never advances automatically or wraps.")
+            }
             if let text = model.pairCheckText ?? model.admissionTitle {
                 Text(text)
                     .font(ConsoleStyle.label(10))

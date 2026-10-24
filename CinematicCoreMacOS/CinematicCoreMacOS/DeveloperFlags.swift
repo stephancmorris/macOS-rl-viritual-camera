@@ -37,8 +37,7 @@ enum DeveloperFlags {
 
     /// Emits one structured `[LATENCY]` line per processed frame summarising
     /// total, detection, crop, and compose timings plus accumulated gate-drop
-    /// counts. Use this when diagnosing choppy output — see the
-    /// "as-a-senior-software-stateful-penguin" plan for expected baselines.
+    /// counts.
     ///
     /// MUST stay `false` in operator builds. This emits an `os_log` `.notice`
     /// with a `.public` string on **every processed frame** — 50 persisted log
@@ -74,12 +73,9 @@ enum DeveloperFlags {
     /// 20-minute intervals; each restored 50 fps instantly. Left to itself that
     /// is a choppy patch of unpredictable length arriving mid-show.
     ///
-    /// **Now 0 (off), deliberately.** This was a stop-gap that swept up the mess
-    /// periodically. The real cause turned out to be autorelease pools that were
-    /// never draining per work item — fixed at source in `PersonDetector`,
-    /// `CameraManager` and `FaceSignatureExtractor`. Leaving both in place would
-    /// mask whether that fix actually worked, so the flush stays off while the
-    /// before/after soak is run. Set to 30 only to A/B it back.
+    /// Off, so a periodic cache flush cannot mask the per-work-item autorelease
+    /// drain in `PersonDetector`, `CameraManager`, and `FaceSignatureExtractor`.
+    /// Set to 30 only to A/B the flush back on.
     nonisolated static let imageCacheFlushInterval: TimeInterval = 0
 
     /// Exposes the Multiview component gallery window (scenario picker plus
@@ -88,11 +84,11 @@ enum DeveloperFlags {
     /// effect in Release; it never touches the live pipeline.
     nonisolated static let exposeMultiviewGallery = true
 
-    /// Shows the Multiview console (Preview / Program / Take / inputs) in
-    /// Stage format, driven by the live ShowCoordinator, instead of the
-    /// single-camera wide + program layout. On for R2 builds; set false to
-    /// get the R1 single-camera Stage view back. Webcam format always keeps
-    /// the single-camera view.
+    /// Kill switch for Multi Cam, the operator mode that shows the Multiview
+    /// console (Preview / Program / Take / inputs) driven by the live
+    /// ShowCoordinator. On for R2 builds. Off removes Multi Cam from the mode
+    /// choices and opens a saved Multi Cam as Single Cam, the single-camera
+    /// view with Stage shots (see OperatorModeStore).
     nonisolated static let useMultiviewConsole = true
 
     /// DEVELOPMENT ONLY — on in Debug builds, always off in Release. Lets
@@ -141,4 +137,20 @@ enum DeveloperFlags {
     #else
     nonisolated static let runDirectorShadow = false
     #endif
+    /// B-07/B-08: automatic Take is a Debug-only capability. Qualification,
+    /// current readiness and a one-shot permit remain mandatory.
+    #if DEBUG
+    nonisolated static let allowDirectorAuto = true
+    #else
+    nonisolated static let allowDirectorAuto = false
+    #endif
+
+    /// B-05: effect adapter only; current qualification/readiness and explicit
+    /// study settings are still mandatory. Never available in Release.
+    #if DEBUG
+    nonisolated static let allowDirectorAssist = true
+    #else
+    nonisolated static let allowDirectorAssist = false
+    #endif
+
 }

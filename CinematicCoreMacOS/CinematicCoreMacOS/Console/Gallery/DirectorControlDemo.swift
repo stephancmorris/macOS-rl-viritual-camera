@@ -10,7 +10,7 @@
 import SwiftUI
 
 struct DirectorControlDemo: View {
-    @StateObject private var live = FakeDirectorConsole()
+    @State private var scenario: DirectorControlScenario = .unqualified
 
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
@@ -18,7 +18,19 @@ struct DirectorControlDemo: View {
                 .font(.system(size: 12))
                 .foregroundStyle(.white.opacity(0.55))
                 .fixedSize(horizontal: false, vertical: true)
-            DirectorModeControl(controller: live)
+            Picker("Synthetic qualification", selection: $scenario) {
+                ForEach(DirectorControlScenario.allCases) { scenario in
+                    Text(scenario.title).tag(scenario)
+                }
+            }
+            .pickerStyle(.segmented)
+            .accessibilityHint("Resets the gallery control to Manual. This does not qualify a real rig.")
+            Text("Synthetic controls only. No camera, live authority or saved qualification is used. Changing the scenario resets to Manual.")
+                .font(.system(size: 12))
+                .foregroundStyle(.white.opacity(0.55))
+                .fixedSize(horizontal: false, vertical: true)
+            DirectorInteractiveControl(scenario: scenario)
+                .id(scenario)
             ForEach(DirectorControlGallery.cards) { card in
                 VStack(alignment: .leading, spacing: 8) {
                     Text(card.title.uppercased())
@@ -29,6 +41,35 @@ struct DirectorControlDemo: View {
             }
         }
         .frame(maxWidth: 760, alignment: .leading)
+    }
+}
+
+/// Recreate just this control when a scenario changes, leaving one shortcut
+/// owner in the window. Every scenario starts in Manual without authority.
+private struct DirectorInteractiveControl: View {
+    @StateObject private var live: FakeDirectorConsole
+
+    init(scenario: DirectorControlScenario) {
+        _live = StateObject(wrappedValue: scenario.makeController())
+    }
+
+    var body: some View { DirectorModeControl(controller: live) }
+}
+
+nonisolated enum DirectorControlScenario: String, CaseIterable, Identifiable {
+    case unqualified, qualifiedAssist
+
+    var id: String { rawValue }
+    var title: String {
+        switch self {
+        case .unqualified: return "Unqualified (synthetic)"
+        case .qualifiedAssist: return "Qualified Assist (synthetic)"
+        }
+    }
+
+    @MainActor func makeController() -> FakeDirectorConsole {
+        FakeDirectorConsole(section: .atLaunch(qualified: .init(
+            assist: self == .qualifiedAssist, auto: false, backup: false)))
     }
 }
 

@@ -76,6 +76,13 @@ nonisolated struct CapabilityThresholds: Equatable, Sendable {
     var thermalLimit = ThermalLevel.serious
 
     static let provisional = CapabilityThresholds()
+
+    var isValid: Bool {
+        minimumWindows > 0 && deliveredRatioFloor.isFinite && deliveredRatioFloor > 0 && deliveredRatioFloor <= 1
+            && gateSkipRatioCeiling.isFinite && (0...1).contains(gateSkipRatioCeiling)
+            && frameWallBudgetFraction.isFinite && frameWallBudgetFraction > 0 && frameWallBudgetFraction <= 1
+            && memoryGrowthCeilingMBPerMinute.isFinite && memoryGrowthCeilingMBPerMinute >= 0
+    }
 }
 
 /// One measured window plus the thermal state when it closed.
@@ -122,12 +129,9 @@ nonisolated struct CapabilityMeasurements: Equatable, Sendable {
     var windows = 0
     var seconds: Double = 0
     var deliveredFPS: Double = 0
-    var admittedFPS: Double = 0
     var handoffFPS: Double = 0
     var gateSkipRatio: Double = 0
     var frameWallMeanMS: Double = 0
-    var frameWallMaxMS: Double = 0
-    var visionMeanMS: Double = 0
     var observationAgeMeanMS: Double = 0
     var detections = 0
     var memoryGrowthMBPerMinute: Double = 0
@@ -148,8 +152,27 @@ nonisolated struct CapabilityReport: Equatable, Sendable {
         context: CapabilityContext,
         thresholds: CapabilityThresholds = .provisional
     ) -> CapabilityReport {
+        guard thresholds.isValid else {
+            return CapabilityReport(verdict: .unverified,
+                reasons: [.init(code: "threshold.invalid", kind: .unknown,
+                                message: "The setup-check thresholds are invalid.")], measured: .init(), context: context)
+        }
+        guard samplesAreUsable(samples), context.showFPS.isFinite, context.showFPS > 0 else {
+            return CapabilityReport(verdict: .unverified,
+                reasons: [.init(code: "sample.invalid", kind: .unknown,
+                                message: "The sample contains invalid or inconsistent measurements. Run the check again.")],
+                measured: .init(), context: context)
+        }
         let measured = aggregate(samples)
         var reasons: [CapabilityReason] = []
+        guard [measured.seconds, measured.deliveredFPS, measured.handoffFPS, measured.gateSkipRatio,
+               measured.frameWallMeanMS, measured.observationAgeMeanMS,
+               measured.memoryGrowthMBPerMinute].allSatisfy(\.isFinite) else {
+            return CapabilityReport(verdict: .unverified,
+                reasons: [.init(code: "sample.invalid", kind: .unknown,
+                                message: "The sample could not be aggregated into finite measurements. Run the check again.")],
+                measured: .init(), context: context)
+        }
 
         // Unknowns first: without them the limits below mean nothing.
         if measured.windows < thresholds.minimumWindows {
@@ -164,7 +187,7 @@ nonisolated struct CapabilityReport: Equatable, Sendable {
             reasons.append(.init(code: "sample.noDetection", kind: .unknown,
                 message: "Detection did not run during the sample, so its load was not measured. Run the check while tracking or detecting."))
         }
-        guard let captureFPS = context.captureFPS, captureFPS > 0 else {
+        guard let captureFPS = context.captureFPS, captureFPS.isFinite, captureFPS > 0 else {
             reasons.append(.init(code: "source.rateUnknown", kind: .unknown,
                 message: "The source did not report a configured capture rate."))
             return CapabilityReport(verdict: .unverified, reasons: reasons, measured: measured, context: context)
@@ -172,7 +195,7 @@ nonisolated struct CapabilityReport: Equatable, Sendable {
 
         if context.belowShowRate {
             reasons.append(.init(code: "source.belowShowRate", kind: .note,
-                message: String(format: "Webcam runs at %@ fps, below the %@ show standard; the output repeats frames. Judged against %@ fps.",
+                message: String(format: "Source runs at %@ fps, below the %@ show standard; the output repeats frames. Judged against %@ fps.",
                                 Self.rate(captureFPS), context.showStandard, Self.rate(captureFPS))))
         }
 
@@ -233,12 +256,37 @@ nonisolated struct CapabilityReport: Equatable, Sendable {
         return CapabilityReport(verdict: verdict, reasons: reasons, measured: measured, context: context)
     }
 
+    /// Validate only the evidence used by this evaluator, before converting
+    /// signed counts or adding them. Invalid evidence cannot become support.
+    private static func samplesAreUsable(_ samples: [CapabilitySample]) -> Bool {
+        var totals = Array(repeating: 0, count: 9)
+        var gateTotal: UInt64 = 0
+        for sample in samples {
+            let w = sample.window
+            guard w.kind == .full, w.windowSeconds.isFinite, w.windowSeconds > 0,
+                  [w.footprintMB, w.frameMeanMS, w.mainMeanMS, w.observationMeanMS]
+                    .allSatisfy({ $0.isFinite && $0 >= 0 }) else { return false }
+            let c = w.window
+            let counts = [c.admitted, c.captureDropped, c.renderFailed, c.routed, c.noRoute,
+                          c.handoffAccepted, c.handoffRefused, c.repeated, w.detections]
+            for index in counts.indices {
+                guard counts[index] >= 0 else { return false }
+                let sum = totals[index].addingReportingOverflow(counts[index])
+                guard !sum.overflow else { return false }
+                totals[index] = sum.partialValue
+            }
+            let gates = gateTotal.addingReportingOverflow(c.gateSkipped)
+            guard !gates.overflow else { return false }
+            gateTotal = gates.partialValue
+        }
+        return !UInt64(totals[0]).addingReportingOverflow(gateTotal).overflow
+    }
+
     static func aggregate(_ samples: [CapabilitySample]) -> CapabilityMeasurements {
         var result = CapabilityMeasurements()
         guard !samples.isEmpty else { return result }
         var counts = PipelineCounters()
         var frameWallWeighted = 0.0
-        var visionWeighted = 0.0
         var observationWeighted = 0.0
         for sample in samples {
             let w = sample.window
@@ -255,16 +303,13 @@ nonisolated struct CapabilityReport: Equatable, Sendable {
             counts.repeated += c.repeated
             result.detections += w.detections
             frameWallWeighted += w.frameMeanMS * Double(c.admitted)
-            visionWeighted += w.visionMeanMS * Double(w.detections)
             observationWeighted += w.observationMeanMS * Double(w.detections)
-            result.frameWallMaxMS = max(result.frameWallMaxMS, w.frameMaxMS)
             result.worstThermal = max(result.worstThermal, sample.thermal)
         }
         result.windows = samples.count
         result.counts = counts
         if result.seconds > 0 {
             result.deliveredFPS = Double(counts.delivered) / result.seconds
-            result.admittedFPS = Double(counts.admitted) / result.seconds
             result.handoffFPS = Double(counts.handoffAccepted) / result.seconds
         }
         if counts.delivered > 0 {
@@ -272,7 +317,6 @@ nonisolated struct CapabilityReport: Equatable, Sendable {
         }
         if counts.admitted > 0 { result.frameWallMeanMS = frameWallWeighted / Double(counts.admitted) }
         if result.detections > 0 {
-            result.visionMeanMS = visionWeighted / Double(result.detections)
             result.observationAgeMeanMS = observationWeighted / Double(result.detections)
         }
         // Footprint trend: first window to last, over the time between them.
@@ -288,6 +332,6 @@ nonisolated struct CapabilityReport: Equatable, Sendable {
 
     /// "50", "59.94", "30".
     static func rate(_ fps: Double) -> String {
-        fps.rounded() == fps ? String(Int(fps)) : String(format: "%.2f", fps)
+        fps.rounded() == fps ? String(format: "%.0f", fps) : String(format: "%.2f", fps)
     }
 }

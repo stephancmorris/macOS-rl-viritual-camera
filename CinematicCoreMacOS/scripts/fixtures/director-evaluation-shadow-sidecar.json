@@ -1,0 +1,16 @@
+{
+  "evaluationSchemaVersion": 1,
+  "shadowBindings": [
+    {
+      "sessionID": "73CA8376-001F-5EB7-B23C-AD2FA2F82A33",
+      "evidenceClass": "synthetic",
+      "level": "suggest",
+      "executionMode": "shadow",
+      "route": "none",
+      "configurationID": "authored-shadow-fixture-1",
+      "parameterVersion": "1",
+      "judgeKind": "unobserved",
+      "modelVersion": null
+    }
+  ]
+}

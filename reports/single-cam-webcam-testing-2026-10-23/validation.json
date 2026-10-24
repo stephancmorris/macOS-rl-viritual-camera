@@ -1,0 +1,102 @@
+{
+  "date": "2026-10-23",
+  "basePR": 76,
+  "branch": "codex/single-cam-webcam-testing",
+  "sourceFingerprint": "54192c24b953f946830fb19475ebc166b7949ac779a0c62dfe3bc4b3f4a65d57",
+  "sourceFingerprintScope": "App build inputs",
+  "swift": {
+    "passedDefinitions": 1064,
+    "passedExpanded": 1657,
+    "failed": 0,
+    "skipped": 3,
+    "focusedDefinitionsBeforeFinalOwnershipFix": 80,
+    "focusedExpandedBeforeFinalOwnershipFix": 93,
+    "coreMLCpuInterop": "configured-passed"
+  },
+  "python": {
+    "scripts": 111,
+    "failed": 0,
+    "diagnosticsReportSHA256": "79d069eeb098a542b09128d1306df5954f1a6c6bd3fdc28d28ec44671abbfe61"
+  },
+  "release": {
+    "result": "passed",
+    "codeSigningAllowed": false
+  },
+  "manual": {
+    "candidateConfiguration": "Debug",
+    "route": "Rehearsal: no external output",
+    "physicalCamerasOpened": 2,
+    "singleCam": {
+      "source": "MacBook Pro built-in",
+      "delivered": "1920x1080",
+      "configuredFPS": 30,
+      "observedFPS": "about29.5-30",
+      "showStandard": "1080p50",
+      "elapsedObservedSeconds": 61,
+      "controlsObserved": [
+        "Wide",
+        "Full Body",
+        "Waist Up",
+        "Manual",
+        "Auto Pan",
+        "zoom in/out",
+        "Return to Wide",
+        "Stop"
+      ],
+      "actionsObserved": [
+        "Start",
+        "Full Body selection",
+        "Manual",
+        "Auto Pan",
+        "Return to Wide",
+        "zoom to Waist Up",
+        "Stop",
+        "Detect",
+        "tap subject",
+        "Locked confirmation",
+        "Waist Up program crop visual verification"
+      ],
+      "testingToggleLockedWhileLive": true,
+      "testingToggleUnlockedAfterStop": true,
+      "sourceIdentityProfile": "stage-built-in-test",
+      "nativePreviewVisuallyVerified": true,
+      "subjectLockAcquired": true,
+      "subjectCropRendered": true,
+      "longRunSubjectCorrectnessVerified": false,
+      "finalSessionStopped": true
+    },
+    "multiCam": {
+      "A": "MacBook built-in",
+      "B": "second external camera",
+      "bothRendering": true,
+      "observedFPS": "about30 each",
+      "automaticPairCheck": "unsupported",
+      "reasons": [
+        "preview.render: about29.7fps against configured50",
+        "program.system.memoryGrowth: about98MB/min in short sample"
+      ],
+      "manualTakeCompleted": false,
+      "bothStopped": true
+    },
+    "nativeReceiverPresentationVerified": false,
+    "signedInstallVerified": false,
+    "qualification": false,
+    "rawAXEvidence": "/private/tmp/alfie-singlecam-webcam-20261023",
+    "cameraImagesCommitted": false
+  },
+  "preserved": [
+    "show/output standard",
+    "actual capture FPS and delivered geometry",
+    "pixel/crop limits",
+    "frame freshness",
+    "live pair memory/render/capture gates",
+    "qualification gates",
+    "external Release capture strictness",
+    "Debug generic camera fallback"
+  ],
+  "localBuilds": {
+    "Debug": "/Users/stephanmorris/Documents/macOS-rl-viritual-camera/build/camera-testing-2026-10-23/Debug/Alfie.app",
+    "Release": "/Users/stephanmorris/Documents/macOS-rl-viritual-camera/build/camera-testing-2026-10-23/Release/Alfie.app"
+  },
+  "localArtifacts": "/private/tmp/alfie-singlecam-webcam-20261023"
+}

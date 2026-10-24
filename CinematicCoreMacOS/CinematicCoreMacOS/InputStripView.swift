@@ -33,11 +33,6 @@ struct InputStripView: View {
         self.autoBadgeChannels = autoBadgeChannels
     }
 
-    init(tiles: [InputTileModel], onCue: @escaping (InputTileModel.Slot) -> Void) {
-        self.tiles = tiles
-        self.onCue = onCue
-    }
-
     static func programHint(for slot: InputTileModel.Slot) -> String {
         "Cam \(slot.rawValue) is Program · use Edit Live to change it"
     }

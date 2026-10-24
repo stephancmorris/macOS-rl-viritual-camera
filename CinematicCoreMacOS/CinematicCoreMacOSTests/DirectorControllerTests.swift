@@ -165,12 +165,17 @@ import Testing
         #expect(rig.controller.setLevel(.assist) == .accepted)
     }
 
-    @Test func refusedOperatorTakeInAutoPauses() {
+    @Test func refusedOperatorTakeInAutoRetiresWithoutPausing() {
         let rig = directing(.auto)
+        let epoch = rig.controller.authority.epoch
         // No rendered Preview frame: the Take is refused, but the operator acted.
         guard case .rejected = rig.show.take() else { Issue.record("Take unexpectedly committed"); return }
         #expect(rig.controller.appliedEvents.last == .operatorTake)
-        #expect(rig.controller.directorSection.activity == .paused(.operatorTookOver))
+        #expect(rig.controller.authority.epoch == epoch + 1)
+        #expect(!rig.controller.authority.paused)
+        #expect(rig.controller.directorSection.handedToAlfie)
+        #expect(rig.controller.authority.nudgeHold == .unavailable)
+        #expect(!rig.controller.authority.mayIssueTake(at: 100))
     }
 
     @Test func operatorTakeInAssistRetiresWithoutPausing() {

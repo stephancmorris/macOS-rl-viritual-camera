@@ -1,0 +1,1379 @@
+{
+  "evaluationSchemaVersion": 2,
+  "inputSHA256": "27f07553f1cc287888c5ca64e93cf7c6cc949f1608aa3280ebd9d35079585aad",
+  "levels": [
+    {
+      "directLiveRoute": "notRun",
+      "level": "assist",
+      "status": "incomplete",
+      "syntheticScenarios": 5,
+      "virtualCameraLiveRoute": "notRun"
+    },
+    {
+      "directLiveRoute": "notRun",
+      "level": "auto",
+      "status": "notRun",
+      "syntheticScenarios": 0,
+      "virtualCameraLiveRoute": "notRun"
+    },
+    {
+      "directLiveRoute": "notRun",
+      "level": "backup",
+      "status": "notRun",
+      "syntheticScenarios": 0,
+      "virtualCameraLiveRoute": "notRun"
+    }
+  ],
+  "missingEvidence": [
+    "ownerFrozenPlanAndBudgets",
+    "independentEligibleOpportunityLabels",
+    "labelledCommittedPreparationOutcomes",
+    "recordedValidation",
+    "r2RigEvidence",
+    "bothObservedLiveOutputRoutes",
+    "perLevelSignatories"
+  ],
+  "qualificationStatus": "incomplete",
+  "qualified": false,
+  "runs": [
+    {
+      "configurationID": "replay-study-1",
+      "durationSeconds": 60,
+      "evidenceClass": "synthetic",
+      "executionMode": "observing",
+      "judgeKind": "rules",
+      "level": "assist",
+      "metrics": {
+        "acknowledgementsAccepted": 1,
+        "acknowledgementsRejected": 0,
+        "clockAnomalies": 0,
+        "cutsPerMinute": 0,
+        "directorAttemptCount": 1,
+        "directorCuts": 0,
+        "duplicateCallbacks": 0,
+        "failedEffects": 0,
+        "finalLevel": "assist",
+        "finalPaused": false,
+        "labelledSubjectAttempts": 1,
+        "labelledSubjectProposals": 1,
+        "manualOverrideLatencies": [],
+        "manualOverridesHonoured": 0,
+        "minimumDurationViolations": 0,
+        "operatorCuts": 0,
+        "operatorTakeAttempts": 0,
+        "oscillations": 0,
+        "preparationsCommitted": 1,
+        "programChangesWithoutAuthority": 0,
+        "proposalCount": 1,
+        "proposalsMadeWhilePaused": 0,
+        "readyEvaluations": 0,
+        "rejectedAttempts": 0,
+        "staleEffectsCommitted": 0,
+        "staleProposalsRejected": {},
+        "unqualifiedRefusals": 0,
+        "wrongSubjectAttempts": 0,
+        "wrongSubjectProposals": 0
+      },
+      "modelVersion": null,
+      "opportunities": {
+        "eligible": null,
+        "unverified": null,
+        "useful": null
+      },
+      "parameterVersion": "1",
+      "parameters": {
+        "readiness": {
+          "cutOnMotionAllowed": false,
+          "maximumCutMotion": 0.1,
+          "maximumMotion": 0.1,
+          "minimumCutSettledTime": 0.2,
+          "minimumSettledTime": 0.2
+        },
+        "replay": {
+          "maximumEvidenceAge": 5,
+          "maximumProposalAge": 5
+        },
+        "shotPolicy": {
+          "cutOnMotionAllowed": false,
+          "maximumMovement": 0.1,
+          "maximumShotDuration": 35,
+          "minimumShotDuration": 8,
+          "repetitionWindow": 20,
+          "wideCadence": 90
+        }
+      },
+      "partition": [
+        "8DF5EB60-C30D-4E04-B93A-BF92D0BF50FF",
+        "synthetic",
+        "assist",
+        "observing",
+        "none",
+        "replay-study-1",
+        "1",
+        "rules",
+        null
+      ],
+      "qualificationStatus": "incomplete",
+      "route": "none",
+      "scenarioID": "calm-presenter",
+      "sessionID": "8DF5EB60-C30D-4E04-B93A-BF92D0BF50FF",
+      "softwareStatus": "observed",
+      "usefulPreparationCoverage": null,
+      "warnings": [],
+      "wrongCommittedPreparationRate": null
+    },
+    {
+      "configurationID": "replay-study-1",
+      "durationSeconds": 60,
+      "evidenceClass": "synthetic",
+      "executionMode": "observing",
+      "judgeKind": "rules",
+      "level": "assist",
+      "metrics": {
+        "acknowledgementsAccepted": 1,
+        "acknowledgementsRejected": 0,
+        "clockAnomalies": 0,
+        "cutsPerMinute": 0,
+        "directorAttemptCount": 1,
+        "directorCuts": 0,
+        "duplicateCallbacks": 0,
+        "failedEffects": 0,
+        "finalLevel": "assist",
+        "finalPaused": false,
+        "labelledSubjectAttempts": 1,
+        "labelledSubjectProposals": 1,
+        "manualOverrideLatencies": [],
+        "manualOverridesHonoured": 0,
+        "minimumDurationViolations": 0,
+        "operatorCuts": 0,
+        "operatorTakeAttempts": 0,
+        "oscillations": 0,
+        "preparationsCommitted": 1,
+        "programChangesWithoutAuthority": 0,
+        "proposalCount": 1,
+        "proposalsMadeWhilePaused": 0,
+        "readyEvaluations": 1,
+        "rejectedAttempts": 0,
+        "staleEffectsCommitted": 0,
+        "staleProposalsRejected": {},
+        "unqualifiedRefusals": 0,
+        "wrongSubjectAttempts": 0,
+        "wrongSubjectProposals": 0
+      },
+      "modelVersion": null,
+      "opportunities": {
+        "eligible": null,
+        "unverified": null,
+        "useful": null
+      },
+      "parameterVersion": "1",
+      "parameters": {
+        "readiness": {
+          "cutOnMotionAllowed": false,
+          "maximumCutMotion": 0.1,
+          "maximumMotion": 0.1,
+          "minimumCutSettledTime": 0.2,
+          "minimumSettledTime": 0.2
+        },
+        "replay": {
+          "maximumEvidenceAge": 5,
+          "maximumProposalAge": 5
+        },
+        "shotPolicy": {
+          "cutOnMotionAllowed": false,
+          "maximumMovement": 0.1,
+          "maximumShotDuration": 35,
+          "minimumShotDuration": 8,
+          "repetitionWindow": 20,
+          "wideCadence": 90
+        }
+      },
+      "partition": [
+        "E93664CF-A73D-4D5D-BF5A-0E0FFE4AAA74",
+        "synthetic",
+        "assist",
+        "observing",
+        "none",
+        "replay-study-1",
+        "1",
+        "rules",
+        null
+      ],
+      "qualificationStatus": "incomplete",
+      "route": "none",
+      "scenarioID": "walking-presenter",
+      "sessionID": "E93664CF-A73D-4D5D-BF5A-0E0FFE4AAA74",
+      "softwareStatus": "observed",
+      "usefulPreparationCoverage": null,
+      "warnings": [],
+      "wrongCommittedPreparationRate": null
+    },
+    {
+      "configurationID": "replay-study-1",
+      "durationSeconds": 60,
+      "evidenceClass": "synthetic",
+      "executionMode": "observing",
+      "judgeKind": "rules",
+      "level": "assist",
+      "metrics": {
+        "acknowledgementsAccepted": 1,
+        "acknowledgementsRejected": 0,
+        "clockAnomalies": 0,
+        "cutsPerMinute": 0,
+        "directorAttemptCount": 1,
+        "directorCuts": 0,
+        "duplicateCallbacks": 0,
+        "failedEffects": 0,
+        "finalLevel": "assist",
+        "finalPaused": false,
+        "labelledSubjectAttempts": 1,
+        "labelledSubjectProposals": 1,
+        "manualOverrideLatencies": [],
+        "manualOverridesHonoured": 0,
+        "minimumDurationViolations": 0,
+        "operatorCuts": 0,
+        "operatorTakeAttempts": 0,
+        "oscillations": 0,
+        "preparationsCommitted": 1,
+        "programChangesWithoutAuthority": 0,
+        "proposalCount": 1,
+        "proposalsMadeWhilePaused": 0,
+        "readyEvaluations": 2,
+        "rejectedAttempts": 0,
+        "staleEffectsCommitted": 0,
+        "staleProposalsRejected": {},
+        "unqualifiedRefusals": 0,
+        "wrongSubjectAttempts": 1,
+        "wrongSubjectProposals": 1
+      },
+      "modelVersion": null,
+      "opportunities": {
+        "eligible": null,
+        "unverified": null,
+        "useful": null
+      },
+      "parameterVersion": "1",
+      "parameters": {
+        "readiness": {
+          "cutOnMotionAllowed": false,
+          "maximumCutMotion": 0.1,
+          "maximumMotion": 0.1,
+          "minimumCutSettledTime": 0.2,
+          "minimumSettledTime": 0.2
+        },
+        "replay": {
+          "maximumEvidenceAge": 5,
+          "maximumProposalAge": 5
+        },
+        "shotPolicy": {
+          "cutOnMotionAllowed": false,
+          "maximumMovement": 0.1,
+          "maximumShotDuration": 35,
+          "minimumShotDuration": 8,
+          "repetitionWindow": 20,
+          "wideCadence": 90
+        }
+      },
+      "partition": [
+        "FB8B8CAC-7646-46B5-A4C1-C6F5A1E1B8AF",
+        "synthetic",
+        "assist",
+        "observing",
+        "none",
+        "replay-study-1",
+        "1",
+        "rules",
+        null
+      ],
+      "qualificationStatus": "incomplete",
+      "route": "none",
+      "scenarioID": "panel-of-three",
+      "sessionID": "FB8B8CAC-7646-46B5-A4C1-C6F5A1E1B8AF",
+      "softwareStatus": "observed",
+      "usefulPreparationCoverage": null,
+      "warnings": [
+        "wrongSubjectProposalObserved",
+        "wrongSubjectAttemptObserved"
+      ],
+      "wrongCommittedPreparationRate": null
+    },
+    {
+      "configurationID": "replay-study-1",
+      "durationSeconds": 60,
+      "evidenceClass": "synthetic",
+      "executionMode": "observing",
+      "judgeKind": "rules",
+      "level": "assist",
+      "metrics": {
+        "acknowledgementsAccepted": 1,
+        "acknowledgementsRejected": 0,
+        "clockAnomalies": 0,
+        "cutsPerMinute": 0,
+        "directorAttemptCount": 1,
+        "directorCuts": 0,
+        "duplicateCallbacks": 0,
+        "failedEffects": 0,
+        "finalLevel": "assist",
+        "finalPaused": true,
+        "labelledSubjectAttempts": 1,
+        "labelledSubjectProposals": 1,
+        "manualOverrideLatencies": [],
+        "manualOverridesHonoured": 0,
+        "minimumDurationViolations": 0,
+        "operatorCuts": 0,
+        "operatorTakeAttempts": 0,
+        "oscillations": 0,
+        "preparationsCommitted": 1,
+        "programChangesWithoutAuthority": 0,
+        "proposalCount": 1,
+        "proposalsMadeWhilePaused": 0,
+        "readyEvaluations": 0,
+        "rejectedAttempts": 0,
+        "staleEffectsCommitted": 0,
+        "staleProposalsRejected": {
+          "authorityRevoked": 1,
+          "shotChangedByOperator": 1,
+          "sourceMissing": 1,
+          "sourceRestarted": 1
+        },
+        "unqualifiedRefusals": 0,
+        "wrongSubjectAttempts": 0,
+        "wrongSubjectProposals": 0
+      },
+      "modelVersion": null,
+      "opportunities": {
+        "eligible": null,
+        "unverified": null,
+        "useful": null
+      },
+      "parameterVersion": "1",
+      "parameters": {
+        "readiness": {
+          "cutOnMotionAllowed": false,
+          "maximumCutMotion": 0.1,
+          "maximumMotion": 0.1,
+          "minimumCutSettledTime": 0.2,
+          "minimumSettledTime": 0.2
+        },
+        "replay": {
+          "maximumEvidenceAge": 5,
+          "maximumProposalAge": 5
+        },
+        "shotPolicy": {
+          "cutOnMotionAllowed": false,
+          "maximumMovement": 0.1,
+          "maximumShotDuration": 35,
+          "minimumShotDuration": 8,
+          "repetitionWindow": 20,
+          "wideCadence": 90
+        }
+      },
+      "partition": [
+        "E3E189F2-A3E5-47F3-A3EB-E8D15F1B7AB5",
+        "synthetic",
+        "assist",
+        "observing",
+        "none",
+        "replay-study-1",
+        "1",
+        "rules",
+        null
+      ],
+      "qualificationStatus": "incomplete",
+      "route": "none",
+      "scenarioID": "camera-b-drops",
+      "sessionID": "E3E189F2-A3E5-47F3-A3EB-E8D15F1B7AB5",
+      "softwareStatus": "observed",
+      "usefulPreparationCoverage": null,
+      "warnings": [],
+      "wrongCommittedPreparationRate": null
+    },
+    {
+      "configurationID": "replay-study-1",
+      "durationSeconds": 60,
+      "evidenceClass": "synthetic",
+      "executionMode": "observing",
+      "judgeKind": "rules",
+      "level": "assist",
+      "metrics": {
+        "acknowledgementsAccepted": 1,
+        "acknowledgementsRejected": 0,
+        "clockAnomalies": 0,
+        "cutsPerMinute": 1,
+        "directorAttemptCount": 1,
+        "directorCuts": 0,
+        "duplicateCallbacks": 0,
+        "failedEffects": 0,
+        "finalLevel": "assist",
+        "finalPaused": false,
+        "labelledSubjectAttempts": 1,
+        "labelledSubjectProposals": 1,
+        "manualOverrideLatencies": [
+          null
+        ],
+        "manualOverridesHonoured": 1,
+        "minimumDurationViolations": 0,
+        "operatorCuts": 1,
+        "operatorTakeAttempts": 1,
+        "oscillations": 0,
+        "preparationsCommitted": 1,
+        "programChangesWithoutAuthority": 0,
+        "proposalCount": 1,
+        "proposalsMadeWhilePaused": 0,
+        "readyEvaluations": 0,
+        "rejectedAttempts": 0,
+        "staleEffectsCommitted": 0,
+        "staleProposalsRejected": {
+          "authorityRevoked": 1,
+          "shotChangedByOperator": 1
+        },
+        "unqualifiedRefusals": 0,
+        "wrongSubjectAttempts": 0,
+        "wrongSubjectProposals": 0
+      },
+      "modelVersion": null,
+      "opportunities": {
+        "eligible": null,
+        "unverified": null,
+        "useful": null
+      },
+      "parameterVersion": "1",
+      "parameters": {
+        "readiness": {
+          "cutOnMotionAllowed": false,
+          "maximumCutMotion": 0.1,
+          "maximumMotion": 0.1,
+          "minimumCutSettledTime": 0.2,
+          "minimumSettledTime": 0.2
+        },
+        "replay": {
+          "maximumEvidenceAge": 5,
+          "maximumProposalAge": 5
+        },
+        "shotPolicy": {
+          "cutOnMotionAllowed": false,
+          "maximumMovement": 0.1,
+          "maximumShotDuration": 35,
+          "minimumShotDuration": 8,
+          "repetitionWindow": 20,
+          "wideCadence": 90
+        }
+      },
+      "partition": [
+        "19997F24-2BB4-47A0-8524-0F22F4E09A45",
+        "synthetic",
+        "assist",
+        "observing",
+        "none",
+        "replay-study-1",
+        "1",
+        "rules",
+        null
+      ],
+      "qualificationStatus": "incomplete",
+      "route": "none",
+      "scenarioID": "operator-intervention",
+      "sessionID": "19997F24-2BB4-47A0-8524-0F22F4E09A45",
+      "softwareStatus": "observed",
+      "usefulPreparationCoverage": null,
+      "warnings": [],
+      "wrongCommittedPreparationRate": null
+    }
+  ],
+  "shadow": {
+    "abstentions": [
+      {
+        "count": 1,
+        "phaseID": "capture-decision-1",
+        "stratum": [
+          "7FB628A4-40A4-41F0-8374-EF784F8337B8",
+          "synthetic",
+          "liveEvent",
+          null,
+          null,
+          2,
+          "0",
+          "0",
+          "capture-decision-1",
+          "observation",
+          "cutPolicyUnavailable"
+        ]
+      },
+      {
+        "count": 1,
+        "phaseID": "capture-decision-4",
+        "stratum": [
+          "7FB628A4-40A4-41F0-8374-EF784F8337B8",
+          "synthetic",
+          "liveEvent",
+          null,
+          null,
+          2,
+          "0",
+          "0",
+          "capture-decision-4",
+          "observation",
+          "cutPolicyUnavailable"
+        ]
+      }
+    ],
+    "bindingMode": "explicitPhases",
+    "dwell": [],
+    "exportValidated": true,
+    "gaps": [],
+    "issues": {
+      "operator_accepted": 2
+    },
+    "parameterEvidence": [
+      {
+        "phaseID": "capture-decision-1",
+        "scope": {
+          "configurationID": "capture-decision-1-config",
+          "evidenceClass": "synthetic",
+          "executionMode": "shadow",
+          "judgeKind": "unobserved",
+          "judgeModels": [],
+          "level": "off",
+          "modelVersion": null,
+          "parameterVersion": null,
+          "phaseID": "capture-decision-1",
+          "route": "none",
+          "routeGenerations": [
+            "0"
+          ]
+        },
+        "sessionID": "7FB628A4-40A4-41F0-8374-EF784F8337B8",
+        "snapshots": [
+          {
+            "configurationID": "capture-decision-1-config",
+            "evidenceClass": "synthetic",
+            "executionMode": "shadow",
+            "judgeKind": "unobserved",
+            "judgeModels": [],
+            "level": "off",
+            "modelVersion": null,
+            "parameterVersion": null,
+            "parameters": {
+              "preferencesVersion": 2,
+              "status": "unavailable"
+            },
+            "phaseID": "capture-decision-1",
+            "route": "none",
+            "routeGenerations": [
+              "0"
+            ],
+            "segmentType": "liveEvent"
+          }
+        ],
+        "subjectSpeed": {
+          "distributionStatus": "unavailableNoSamples",
+          "invalidSamples": 0,
+          "maximum": null,
+          "median": null,
+          "minimum": null,
+          "reportedSamples": 0,
+          "unavailableSamples": 0,
+          "unit": "normalizedFrameUnitsPerSecond"
+        }
+      },
+      {
+        "phaseID": "capture-decision-2",
+        "scope": {
+          "configurationID": "capture-decision-2-config",
+          "evidenceClass": "synthetic",
+          "executionMode": "observing",
+          "judgeKind": "unobserved",
+          "judgeModels": [],
+          "level": "assist",
+          "modelVersion": null,
+          "parameterVersion": null,
+          "phaseID": "capture-decision-2",
+          "route": "none",
+          "routeGenerations": [
+            "0"
+          ]
+        },
+        "sessionID": "7FB628A4-40A4-41F0-8374-EF784F8337B8",
+        "snapshots": [
+          {
+            "configurationID": "capture-decision-2-config",
+            "evidenceClass": "synthetic",
+            "executionMode": "observing",
+            "judgeKind": "unobserved",
+            "judgeModels": [],
+            "level": "assist",
+            "modelVersion": null,
+            "parameterVersion": null,
+            "parameters": {
+              "preferencesVersion": 2,
+              "status": "unavailable"
+            },
+            "phaseID": "capture-decision-2",
+            "route": "none",
+            "routeGenerations": [
+              "0"
+            ],
+            "segmentType": "liveEvent"
+          }
+        ],
+        "subjectSpeed": {
+          "distributionStatus": "unavailableNoSamples",
+          "invalidSamples": 0,
+          "maximum": null,
+          "median": null,
+          "minimum": null,
+          "reportedSamples": 0,
+          "unavailableSamples": 0,
+          "unit": "normalizedFrameUnitsPerSecond"
+        }
+      },
+      {
+        "phaseID": "capture-decision-3",
+        "scope": {
+          "configurationID": "capture-decision-3-config",
+          "evidenceClass": "synthetic",
+          "executionMode": "observing",
+          "judgeKind": "unobserved",
+          "judgeModels": [],
+          "level": "assist",
+          "modelVersion": null,
+          "parameterVersion": "10",
+          "phaseID": "capture-decision-3",
+          "route": "none",
+          "routeGenerations": [
+            "0"
+          ]
+        },
+        "sessionID": "7FB628A4-40A4-41F0-8374-EF784F8337B8",
+        "snapshots": [
+          {
+            "configurationID": "capture-decision-3-config",
+            "evidenceClass": "synthetic",
+            "executionMode": "observing",
+            "judgeKind": "unobserved",
+            "judgeModels": [],
+            "level": "assist",
+            "modelVersion": null,
+            "parameterVersion": "10",
+            "parameters": {
+              "adapter": {
+                "debounce": 0,
+                "maximumObservationAge": 2,
+                "stillSpeed": 0.2
+              },
+              "parametersVersion": "10",
+              "preferencesVersion": 2,
+              "readiness": {
+                "cutOnMotionAllowed": false,
+                "maximumCutMotion": 0.1,
+                "maximumMotion": 0.2,
+                "minimumCutSettledTime": 0,
+                "minimumSettledTime": 0
+              },
+              "resolvedStyle": {
+                "cutOnMotionAllowed": false,
+                "maximumMovement": 0.2,
+                "minimumShotDuration": 1,
+                "onAirMoveRate": 0.2,
+                "preferredShotDuration": 2,
+                "repetitionWindow": 5,
+                "settleTime": 0,
+                "softMaximumShotDuration": 30,
+                "wideCadence": 80
+              },
+              "status": "available"
+            },
+            "phaseID": "capture-decision-3",
+            "route": "none",
+            "routeGenerations": [
+              "0"
+            ],
+            "segmentType": "liveEvent"
+          }
+        ],
+        "subjectSpeed": {
+          "distributionStatus": "observed",
+          "invalidSamples": 0,
+          "maximum": 0,
+          "median": 0,
+          "minimum": 0,
+          "reportedSamples": 1,
+          "unavailableSamples": 0,
+          "unit": "normalizedFrameUnitsPerSecond"
+        }
+      },
+      {
+        "phaseID": "capture-decision-4",
+        "scope": {
+          "configurationID": "capture-decision-4-config",
+          "evidenceClass": "synthetic",
+          "executionMode": "observing",
+          "judgeKind": "unobserved",
+          "judgeModels": [],
+          "level": "assist",
+          "modelVersion": null,
+          "parameterVersion": null,
+          "phaseID": "capture-decision-4",
+          "route": "none",
+          "routeGenerations": [
+            "0"
+          ]
+        },
+        "sessionID": "7FB628A4-40A4-41F0-8374-EF784F8337B8",
+        "snapshots": [
+          {
+            "configurationID": "capture-decision-4-config",
+            "evidenceClass": "synthetic",
+            "executionMode": "observing",
+            "judgeKind": "unobserved",
+            "judgeModels": [],
+            "level": "assist",
+            "modelVersion": null,
+            "parameterVersion": null,
+            "parameters": {
+              "preferencesVersion": 2,
+              "status": "unavailable"
+            },
+            "phaseID": "capture-decision-4",
+            "route": "none",
+            "routeGenerations": [
+              "0"
+            ],
+            "segmentType": "liveEvent"
+          }
+        ],
+        "subjectSpeed": {
+          "distributionStatus": "unavailableNoSamples",
+          "invalidSamples": 0,
+          "maximum": null,
+          "median": null,
+          "minimum": null,
+          "reportedSamples": 0,
+          "unavailableSamples": 0,
+          "unit": "normalizedFrameUnitsPerSecond"
+        }
+      },
+      {
+        "phaseID": "capture-decision-5",
+        "scope": {
+          "configurationID": "capture-decision-5-config",
+          "evidenceClass": "synthetic",
+          "executionMode": "observing",
+          "judgeKind": "unobserved",
+          "judgeModels": [],
+          "level": "assist",
+          "modelVersion": null,
+          "parameterVersion": "11",
+          "phaseID": "capture-decision-5",
+          "route": "none",
+          "routeGenerations": [
+            "0"
+          ]
+        },
+        "sessionID": "7FB628A4-40A4-41F0-8374-EF784F8337B8",
+        "snapshots": [
+          {
+            "configurationID": "capture-decision-5-config",
+            "evidenceClass": "synthetic",
+            "executionMode": "observing",
+            "judgeKind": "unobserved",
+            "judgeModels": [],
+            "level": "assist",
+            "modelVersion": null,
+            "parameterVersion": "11",
+            "parameters": {
+              "adapter": {
+                "debounce": 0,
+                "maximumObservationAge": 2,
+                "stillSpeed": 0.2
+              },
+              "judgeMaximumAge": 1,
+              "parametersVersion": "11",
+              "preferencesVersion": 2,
+              "readiness": {
+                "cutOnMotionAllowed": false,
+                "maximumCutMotion": 0.1,
+                "maximumMotion": 0.2,
+                "minimumCutSettledTime": 0,
+                "minimumSettledTime": 0
+              },
+              "resolvedStyle": {
+                "cutOnMotionAllowed": false,
+                "maximumMovement": 0.2,
+                "minimumShotDuration": 1,
+                "onAirMoveRate": 0.2,
+                "preferredShotDuration": 2,
+                "repetitionWindow": 5,
+                "settleTime": 0,
+                "softMaximumShotDuration": 30,
+                "wideCadence": 80
+              },
+              "status": "available"
+            },
+            "phaseID": "capture-decision-5",
+            "route": "none",
+            "routeGenerations": [
+              "0"
+            ],
+            "segmentType": "liveEvent"
+          }
+        ],
+        "subjectSpeed": {
+          "distributionStatus": "unavailableNoSamples",
+          "invalidSamples": 0,
+          "maximum": null,
+          "median": null,
+          "minimum": null,
+          "reportedSamples": 0,
+          "unavailableSamples": 0,
+          "unit": "normalizedFrameUnitsPerSecond"
+        }
+      },
+      {
+        "phaseID": "capture-decision-6",
+        "scope": {
+          "configurationID": "capture-decision-6-config",
+          "evidenceClass": "synthetic",
+          "executionMode": "observing",
+          "judgeKind": "rules",
+          "judgeModels": [
+            [
+              "rules",
+              null
+            ]
+          ],
+          "level": "auto",
+          "modelVersion": null,
+          "parameterVersion": "11",
+          "phaseID": "capture-decision-6",
+          "route": "none",
+          "routeGenerations": [
+            "0",
+            "1"
+          ]
+        },
+        "sessionID": "7FB628A4-40A4-41F0-8374-EF784F8337B8",
+        "snapshots": [
+          {
+            "configurationID": "capture-decision-6-config",
+            "evidenceClass": "synthetic",
+            "executionMode": "observing",
+            "judgeKind": "rules",
+            "judgeModels": [
+              [
+                "rules",
+                null
+              ]
+            ],
+            "level": "auto",
+            "modelVersion": null,
+            "parameterVersion": "11",
+            "parameters": {
+              "adapter": {
+                "debounce": 0,
+                "maximumObservationAge": 2,
+                "stillSpeed": 0.2
+              },
+              "judgeMaximumAge": 1,
+              "parametersVersion": "11",
+              "preferencesVersion": 2,
+              "readiness": {
+                "cutOnMotionAllowed": false,
+                "maximumCutMotion": 0.1,
+                "maximumMotion": 0.2,
+                "minimumCutSettledTime": 0,
+                "minimumSettledTime": 0
+              },
+              "resolvedStyle": {
+                "cutOnMotionAllowed": false,
+                "maximumMovement": 0.2,
+                "minimumShotDuration": 1,
+                "onAirMoveRate": 0.2,
+                "preferredShotDuration": 2,
+                "repetitionWindow": 5,
+                "settleTime": 0,
+                "softMaximumShotDuration": 30,
+                "wideCadence": 80
+              },
+              "status": "available"
+            },
+            "phaseID": "capture-decision-6",
+            "route": "none",
+            "routeGenerations": [
+              "0",
+              "1"
+            ],
+            "segmentType": "liveEvent"
+          }
+        ],
+        "subjectSpeed": {
+          "distributionStatus": "observed",
+          "invalidSamples": 0,
+          "maximum": 0,
+          "median": 0,
+          "minimum": 0,
+          "reportedSamples": 1,
+          "unavailableSamples": 0,
+          "unit": "normalizedFrameUnitsPerSecond"
+        }
+      }
+    ],
+    "phases": [
+      {
+        "acceptedRecords": 2,
+        "binding": {
+          "configurationID": "capture-decision-1-config",
+          "evidenceClass": "synthetic",
+          "executionMode": "shadow",
+          "firstSequence": "0",
+          "judgeKind": "unobserved",
+          "lastSequence": "1",
+          "level": "off",
+          "modelVersion": null,
+          "parameterContext": {
+            "adapter": null,
+            "judgeMaximumAge": null,
+            "minimumProbability": null,
+            "parametersVersion": null,
+            "preferencesVersion": 2,
+            "readiness": null,
+            "resolvedStyle": null,
+            "status": "unavailable"
+          },
+          "parameterVersion": null,
+          "phaseID": "capture-decision-1",
+          "route": "none",
+          "routeGenerations": [
+            "0"
+          ],
+          "sessionID": "7FB628A4-40A4-41F0-8374-EF784F8337B8"
+        },
+        "phaseID": "capture-decision-1",
+        "sessionID": "7FB628A4-40A4-41F0-8374-EF784F8337B8",
+        "status": "observed"
+      },
+      {
+        "acceptedRecords": 1,
+        "binding": {
+          "configurationID": "capture-decision-2-config",
+          "evidenceClass": "synthetic",
+          "executionMode": "observing",
+          "firstSequence": "2",
+          "judgeKind": "unobserved",
+          "lastSequence": "2",
+          "level": "assist",
+          "modelVersion": null,
+          "parameterContext": {
+            "adapter": null,
+            "judgeMaximumAge": null,
+            "minimumProbability": null,
+            "parametersVersion": null,
+            "preferencesVersion": 2,
+            "readiness": null,
+            "resolvedStyle": null,
+            "status": "unavailable"
+          },
+          "parameterVersion": null,
+          "phaseID": "capture-decision-2",
+          "route": "none",
+          "routeGenerations": [
+            "0"
+          ],
+          "sessionID": "7FB628A4-40A4-41F0-8374-EF784F8337B8"
+        },
+        "phaseID": "capture-decision-2",
+        "sessionID": "7FB628A4-40A4-41F0-8374-EF784F8337B8",
+        "status": "observed"
+      },
+      {
+        "acceptedRecords": 1,
+        "binding": {
+          "configurationID": "capture-decision-3-config",
+          "evidenceClass": "synthetic",
+          "executionMode": "observing",
+          "firstSequence": "3",
+          "judgeKind": "unobserved",
+          "lastSequence": "3",
+          "level": "assist",
+          "modelVersion": null,
+          "parameterContext": {
+            "adapter": {
+              "debounce": 0,
+              "maximumObservationAge": 2,
+              "stillSpeed": 0.2
+            },
+            "judgeMaximumAge": null,
+            "minimumProbability": null,
+            "parametersVersion": "10",
+            "preferencesVersion": 2,
+            "readiness": {
+              "cutOnMotionAllowed": false,
+              "maximumCutMotion": 0.1,
+              "maximumMotion": 0.2,
+              "minimumCutSettledTime": 0,
+              "minimumSettledTime": 0
+            },
+            "resolvedStyle": {
+              "cutOnMotionAllowed": false,
+              "maximumMovement": 0.2,
+              "minimumShotDuration": 1,
+              "onAirMoveRate": 0.2,
+              "preferredShotDuration": 2,
+              "repetitionWindow": 5,
+              "settleTime": 0,
+              "softMaximumShotDuration": 30,
+              "wideCadence": 80
+            },
+            "status": "available"
+          },
+          "parameterVersion": "10",
+          "phaseID": "capture-decision-3",
+          "route": "none",
+          "routeGenerations": [
+            "0"
+          ],
+          "sessionID": "7FB628A4-40A4-41F0-8374-EF784F8337B8"
+        },
+        "phaseID": "capture-decision-3",
+        "sessionID": "7FB628A4-40A4-41F0-8374-EF784F8337B8",
+        "status": "observed"
+      },
+      {
+        "acceptedRecords": 1,
+        "binding": {
+          "configurationID": "capture-decision-4-config",
+          "evidenceClass": "synthetic",
+          "executionMode": "observing",
+          "firstSequence": "4",
+          "judgeKind": "unobserved",
+          "lastSequence": "4",
+          "level": "assist",
+          "modelVersion": null,
+          "parameterContext": {
+            "adapter": null,
+            "judgeMaximumAge": null,
+            "minimumProbability": null,
+            "parametersVersion": null,
+            "preferencesVersion": 2,
+            "readiness": null,
+            "resolvedStyle": null,
+            "status": "unavailable"
+          },
+          "parameterVersion": null,
+          "phaseID": "capture-decision-4",
+          "route": "none",
+          "routeGenerations": [
+            "0"
+          ],
+          "sessionID": "7FB628A4-40A4-41F0-8374-EF784F8337B8"
+        },
+        "phaseID": "capture-decision-4",
+        "sessionID": "7FB628A4-40A4-41F0-8374-EF784F8337B8",
+        "status": "observed"
+      },
+      {
+        "acceptedRecords": 1,
+        "binding": {
+          "configurationID": "capture-decision-5-config",
+          "evidenceClass": "synthetic",
+          "executionMode": "observing",
+          "firstSequence": "5",
+          "judgeKind": "unobserved",
+          "lastSequence": "5",
+          "level": "assist",
+          "modelVersion": null,
+          "parameterContext": {
+            "adapter": {
+              "debounce": 0,
+              "maximumObservationAge": 2,
+              "stillSpeed": 0.2
+            },
+            "judgeMaximumAge": 1,
+            "minimumProbability": null,
+            "parametersVersion": "11",
+            "preferencesVersion": 2,
+            "readiness": {
+              "cutOnMotionAllowed": false,
+              "maximumCutMotion": 0.1,
+              "maximumMotion": 0.2,
+              "minimumCutSettledTime": 0,
+              "minimumSettledTime": 0
+            },
+            "resolvedStyle": {
+              "cutOnMotionAllowed": false,
+              "maximumMovement": 0.2,
+              "minimumShotDuration": 1,
+              "onAirMoveRate": 0.2,
+              "preferredShotDuration": 2,
+              "repetitionWindow": 5,
+              "settleTime": 0,
+              "softMaximumShotDuration": 30,
+              "wideCadence": 80
+            },
+            "status": "available"
+          },
+          "parameterVersion": "11",
+          "phaseID": "capture-decision-5",
+          "route": "none",
+          "routeGenerations": [
+            "0"
+          ],
+          "sessionID": "7FB628A4-40A4-41F0-8374-EF784F8337B8"
+        },
+        "phaseID": "capture-decision-5",
+        "sessionID": "7FB628A4-40A4-41F0-8374-EF784F8337B8",
+        "status": "observed"
+      },
+      {
+        "acceptedRecords": 4,
+        "binding": {
+          "configurationID": "capture-decision-6-config",
+          "evidenceClass": "synthetic",
+          "executionMode": "observing",
+          "firstSequence": "6",
+          "judgeKind": "rules",
+          "lastSequence": "9",
+          "level": "auto",
+          "modelVersion": null,
+          "parameterContext": {
+            "adapter": {
+              "debounce": 0,
+              "maximumObservationAge": 2,
+              "stillSpeed": 0.2
+            },
+            "judgeMaximumAge": 1,
+            "minimumProbability": null,
+            "parametersVersion": "11",
+            "preferencesVersion": 2,
+            "readiness": {
+              "cutOnMotionAllowed": false,
+              "maximumCutMotion": 0.1,
+              "maximumMotion": 0.2,
+              "minimumCutSettledTime": 0,
+              "minimumSettledTime": 0
+            },
+            "resolvedStyle": {
+              "cutOnMotionAllowed": false,
+              "maximumMovement": 0.2,
+              "minimumShotDuration": 1,
+              "onAirMoveRate": 0.2,
+              "preferredShotDuration": 2,
+              "repetitionWindow": 5,
+              "settleTime": 0,
+              "softMaximumShotDuration": 30,
+              "wideCadence": 80
+            },
+            "status": "available"
+          },
+          "parameterVersion": "11",
+          "phaseID": "capture-decision-6",
+          "route": "none",
+          "routeGenerations": [
+            "0",
+            "1"
+          ],
+          "sessionID": "7FB628A4-40A4-41F0-8374-EF784F8337B8"
+        },
+        "phaseID": "capture-decision-6",
+        "sessionID": "7FB628A4-40A4-41F0-8374-EF784F8337B8",
+        "status": "observed"
+      }
+    ],
+    "records": 10,
+    "rows": [
+      {
+        "binding": {
+          "configurationID": "capture-decision-3-config",
+          "evidenceClass": "synthetic",
+          "executionMode": "observing",
+          "firstSequence": "3",
+          "judgeKind": "unobserved",
+          "lastSequence": "3",
+          "level": "assist",
+          "modelVersion": null,
+          "parameterContext": {
+            "adapter": {
+              "debounce": 0,
+              "maximumObservationAge": 2,
+              "stillSpeed": 0.2
+            },
+            "judgeMaximumAge": null,
+            "minimumProbability": null,
+            "parametersVersion": "10",
+            "preferencesVersion": 2,
+            "readiness": {
+              "cutOnMotionAllowed": false,
+              "maximumCutMotion": 0.1,
+              "maximumMotion": 0.2,
+              "minimumCutSettledTime": 0,
+              "minimumSettledTime": 0
+            },
+            "resolvedStyle": {
+              "cutOnMotionAllowed": false,
+              "maximumMovement": 0.2,
+              "minimumShotDuration": 1,
+              "onAirMoveRate": 0.2,
+              "preferredShotDuration": 2,
+              "repetitionWindow": 5,
+              "settleTime": 0,
+              "softMaximumShotDuration": 30,
+              "wideCadence": 80
+            },
+            "status": "available"
+          },
+          "parameterVersion": "10",
+          "phaseID": "capture-decision-3",
+          "route": "none",
+          "routeGenerations": [
+            "0"
+          ],
+          "sessionID": "7FB628A4-40A4-41F0-8374-EF784F8337B8"
+        },
+        "counts": {
+          "compared": 0,
+          "completed_actions": 0,
+          "exact": 0,
+          "predictions": 1,
+          "unmatched_actions": 0,
+          "unmatched_predictions": 1,
+          "unscored_actions": 0
+        },
+        "phaseID": "capture-decision-3",
+        "sessionID": "7FB628A4-40A4-41F0-8374-EF784F8337B8",
+        "status": "observed",
+        "stratum": [
+          "7FB628A4-40A4-41F0-8374-EF784F8337B8",
+          "synthetic",
+          "liveEvent",
+          null,
+          "10",
+          2,
+          "0",
+          "0",
+          "wouldPrepare"
+        ]
+      },
+      {
+        "binding": {
+          "configurationID": "capture-decision-6-config",
+          "evidenceClass": "synthetic",
+          "executionMode": "observing",
+          "firstSequence": "6",
+          "judgeKind": "rules",
+          "lastSequence": "9",
+          "level": "auto",
+          "modelVersion": null,
+          "parameterContext": {
+            "adapter": {
+              "debounce": 0,
+              "maximumObservationAge": 2,
+              "stillSpeed": 0.2
+            },
+            "judgeMaximumAge": 1,
+            "minimumProbability": null,
+            "parametersVersion": "11",
+            "preferencesVersion": 2,
+            "readiness": {
+              "cutOnMotionAllowed": false,
+              "maximumCutMotion": 0.1,
+              "maximumMotion": 0.2,
+              "minimumCutSettledTime": 0,
+              "minimumSettledTime": 0
+            },
+            "resolvedStyle": {
+              "cutOnMotionAllowed": false,
+              "maximumMovement": 0.2,
+              "minimumShotDuration": 1,
+              "onAirMoveRate": 0.2,
+              "preferredShotDuration": 2,
+              "repetitionWindow": 5,
+              "settleTime": 0,
+              "softMaximumShotDuration": 30,
+              "wideCadence": 80
+            },
+            "status": "available"
+          },
+          "parameterVersion": "11",
+          "phaseID": "capture-decision-6",
+          "route": "none",
+          "routeGenerations": [
+            "0",
+            "1"
+          ],
+          "sessionID": "7FB628A4-40A4-41F0-8374-EF784F8337B8"
+        },
+        "counts": {
+          "compared": 1,
+          "completed_actions": 1,
+          "exact": 1,
+          "predictions": 1,
+          "unmatched_actions": 0,
+          "unmatched_predictions": 0,
+          "unscored_actions": 0
+        },
+        "phaseID": "capture-decision-6",
+        "sessionID": "7FB628A4-40A4-41F0-8374-EF784F8337B8",
+        "status": "observed",
+        "stratum": [
+          "7FB628A4-40A4-41F0-8374-EF784F8337B8",
+          "synthetic",
+          "liveEvent",
+          null,
+          "11",
+          2,
+          "0",
+          "0",
+          "wouldCut"
+        ]
+      }
+    ],
+    "sessions": [
+      {
+        "actualScopes": [
+          [
+            "synthetic",
+            "assist",
+            "observing"
+          ],
+          [
+            "synthetic",
+            "auto",
+            "observing"
+          ],
+          [
+            "synthetic",
+            "off",
+            "shadow"
+          ]
+        ],
+        "binding": null,
+        "judgeModels": [
+          [
+            "rules",
+            null
+          ]
+        ],
+        "phaseIDs": [
+          "capture-decision-1",
+          "capture-decision-2",
+          "capture-decision-3",
+          "capture-decision-4",
+          "capture-decision-5",
+          "capture-decision-6"
+        ],
+        "sessionID": "7FB628A4-40A4-41F0-8374-EF784F8337B8",
+        "status": "observed"
+      }
+    ]
+  },
+  "shadowBindingSHA256": "bb8457691aec88085fd76c4e58a0bbcd5243e673a231762a30302d1e85f33293",
+  "shadowRegressions": [],
+  "structuralZeros": [
+    "DirectorReplay.directorCuts"
+  ],
+  "unavailableMeasurements": [
+    "visibleOverrideLatency",
+    "downstreamPresentation",
+    "usefulPreparationCoverage"
+  ]
+}

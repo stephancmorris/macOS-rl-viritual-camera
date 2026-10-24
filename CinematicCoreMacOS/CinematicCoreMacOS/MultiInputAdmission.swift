@@ -23,7 +23,7 @@ import QuartzCore
 
 nonisolated enum AdmissionPolicy {
     /// Bump when thresholds or evaluation change; older records become unknown.
-    static let version = 1
+    static let version = 2
 }
 
 // MARK: - Fingerprint
@@ -128,6 +128,24 @@ nonisolated struct PairAdmissionResult: Equatable, Sendable {
     var previewFPS: Double
 }
 
+/// The exact live configuration measured by one pair check. Source instance
+/// identity also rejects removal/re-addition with a reused generation number.
+struct PairAdmissionBinding: Equatable {
+    struct Source: Equatable {
+        let instance: ObjectIdentifier
+        let generation: UInt64
+        let deviceID: String?
+    }
+
+    let fingerprint: AdmissionFingerprint
+    let program: ChannelID
+    let preview: ChannelID
+    let routeGeneration: UInt64
+    let operatorMode: OperatorMode
+    let context: PairAdmissionContext
+    let sources: [ChannelID: Source]
+}
+
 nonisolated enum PairAdmission {
     /// Provisional limits (calibrate against MULTI-QA).
     static let previewCadenceFloor = 0.9
@@ -143,13 +161,32 @@ nonisolated enum PairAdmission {
         let report = CapabilityReport.evaluate(samples: program, context: context.program, thresholds: thresholds)
         var reasons = report.reasons.compactMap(Self.map)
 
-        let previewSeconds = preview.reduce(0) { $0 + $1.windowSeconds }
-        let previewFrames = preview.reduce(0) { $0 + $1.renderedFrames }
-        let previewFPS = previewSeconds > 0 ? Double(previewFrames) / previewSeconds : 0
-        if preview.isEmpty || previewSeconds <= 0 {
+        let target = context.previewCaptureFPS
+        let validRate = target.map { $0.isFinite && $0 > 0 } ?? false
+        if !validRate {
+            reasons.append(.init(code: "preview.rateUnknown", bottleneck: .evidence,
+                message: "The second input did not report a valid configured capture rate."))
+        }
+        var previewSeconds = 0.0
+        var previewFrames = 0
+        var validPreview = !preview.isEmpty && preview.count == program.count
+            && zip(program, preview).allSatisfy { pair in pair.0.window.windowSeconds == pair.1.windowSeconds }
+        for sample in preview {
+            guard sample.windowSeconds.isFinite, sample.windowSeconds > 0, sample.renderedFrames >= 0 else {
+                validPreview = false
+                break
+            }
+            previewSeconds += sample.windowSeconds
+            let sum = previewFrames.addingReportingOverflow(sample.renderedFrames)
+            guard !sum.overflow else { validPreview = false; break }
+            previewFrames = sum.partialValue
+        }
+        validPreview = validPreview && previewSeconds.isFinite && previewSeconds > 0
+        let previewFPS = validPreview ? Double(previewFrames) / previewSeconds : 0
+        if !validPreview || !previewFPS.isFinite {
             reasons.append(.init(code: "preview.noEvidence", bottleneck: .evidence,
-                message: "The second input produced no measurement windows."))
-        } else if let target = context.previewCaptureFPS, target > 0,
+                message: "The second input produced no usable matching measurement windows."))
+        } else if validRate, let target,
                   previewFPS < target * previewCadenceFloor {
             reasons.append(.init(code: "preview.render", bottleneck: .render,
                 message: String(format: "The second input rendered %.1f fps; it needs about %@ fps to stay ready for Take.",
@@ -161,7 +198,10 @@ nonisolated enum PairAdmission {
             let mainMean = program.isEmpty ? 0
                 : program.reduce(0) { $0 + $1.window.mainMeanMS * Double($1.window.window.admitted) } / Double(max(1, m.counts.admitted))
             let budget = 1000 / fps * mainActorBudgetFraction
-            if mainMean > budget {
+            if !mainMean.isFinite {
+                reasons.append(.init(code: "program.mainActorEvidence", bottleneck: .evidence,
+                    message: "Main-thread measurements could not be aggregated into a finite result."))
+            } else if mainMean > budget {
                 reasons.append(.init(code: "program.mainActor", bottleneck: .cpu,
                     message: String(format: "Main-thread work took %.1f ms per Program frame with both inputs (limit %.1f ms).", mainMean, budget)))
             }
@@ -285,6 +325,9 @@ final class MultiInputCheck: ObservableObject {
     private var preview: [PreviewAdmissionSample] = []
     private var lastPreviewCount: UInt64 = 0
     private var subscription: AnyCancellable?
+    private var driftSubscriptions = Set<AnyCancellable>()
+    private(set) var binding: PairAdmissionBinding?
+    private var runID: UUID?
 
     init(warmUpSeconds: TimeInterval = 5, sampleWindows: Int = 4) {
         self.warmUpSeconds = warmUpSeconds
@@ -293,7 +336,11 @@ final class MultiInputCheck: ObservableObject {
 
     /// Core: feed one closed Program window and the Preview channel's
     /// cumulative new-render count at the same moment.
-    func begin(now: TimeInterval, previewCount: UInt64) {
+    func begin(now: TimeInterval, previewCount: UInt64, binding: PairAdmissionBinding? = nil) {
+        subscription = nil
+        driftSubscriptions.removeAll()
+        runID = UUID()
+        self.binding = binding
         startedAt = now
         program = []
         preview = []
@@ -302,15 +349,25 @@ final class MultiInputCheck: ObservableObject {
     }
 
     func ingest(_ window: DiagnosticsWindow?, previewCount: UInt64, thermal: ThermalLevel,
-                now: TimeInterval, context: PairAdmissionContext) {
+                now: TimeInterval, context: PairAdmissionContext,
+                binding currentBinding: PairAdmissionBinding? = nil) {
         guard phase.isRunning else { return }
+        guard binding == currentBinding else {
+            finish(.cancelled("The camera pair, source or roles changed during the check. Run it again."))
+            return
+        }
         guard let window, window.kind != .partial else {
             finish(.cancelled("Capture stopped during the check."))
             return
         }
-        let frames = Int(previewCount &- lastPreviewCount)
+        guard previewCount >= lastPreviewCount,
+              let frames = Int(exactly: previewCount - lastPreviewCount) else {
+            finish(.cancelled("The Preview render counter changed during the check. Run it again."))
+            return
+        }
         lastPreviewCount = previewCount
-        guard now - window.windowSeconds >= startedAt + warmUpSeconds - 0.25 else { return }
+        guard window.beganAfterWarmUp(closedAt: now, measurementStartedAt: startedAt,
+                                     warmUp: warmUpSeconds) else { return }
         program.append(CapabilitySample(window: window, thermal: thermal))
         preview.append(PreviewAdmissionSample(windowSeconds: window.windowSeconds, renderedFrames: frames))
         if program.count >= sampleWindows {
@@ -321,20 +378,56 @@ final class MultiInputCheck: ObservableObject {
     }
 
     /// Live wiring: sample on every closed Program window.
-    func start(show: ShowCoordinator, preview previewID: ChannelID, onResult: @escaping (PairAdmissionResult) -> Void) {
-        guard let previewChannel = show.channel(previewID) else {
+    func start(show: ShowCoordinator, preview previewID: ChannelID,
+               onResult: @escaping (PairAdmissionResult, PairAdmissionBinding) -> Void) {
+        subscription = nil
+        driftSubscriptions.removeAll()
+        runID = UUID()
+        binding = nil
+        guard let binding = show.admissionCheckBinding(preview: previewID),
+              let previewChannel = show.channel(previewID) else {
             phase = .cancelled("Add the second input first.")
             return
         }
-        begin(now: CACurrentMediaTime(), previewCount: previewChannel.renderedFrameCount &- previewChannel.repeatedFrameCount)
+        begin(now: CACurrentMediaTime(),
+              previewCount: previewChannel.renderedFrameCount &- previewChannel.repeatedFrameCount,
+              binding: binding)
+        let startedRun = runID
         subscription = show.programOutput.$lastPipelineWindow.dropFirst().sink { [weak self, weak show] window in
-            guard let self, let show, let previewChannel = show.channel(previewID) else { return }
+            guard let self, self.runID == startedRun, self.phase.isRunning else { return }
+            guard let show, let current = show.admissionCheckBinding(preview: previewID),
+                  current == binding, let previewChannel = show.channel(previewID) else {
+                self.finish(.cancelled("The camera pair, source or roles changed during the check. Run it again."))
+                return
+            }
             self.ingest(window,
                         previewCount: previewChannel.renderedFrameCount &- previewChannel.repeatedFrameCount,
                         thermal: ThermalLevel(ProcessInfo.processInfo.thermalState),
                         now: CACurrentMediaTime(),
-                        context: show.pairAdmissionContext(preview: previewID))
-            if case .finished(let result) = self.phase { onResult(result) }
+                        context: binding.context, binding: current)
+            // Published phase notifications can synchronously start a new run.
+            guard self.runID == startedRun, case .finished(let result) = self.phase else { return }
+            onResult(result, binding)
+        }
+        // Observe configuration changes as they happen, including A → B → A
+        // changes within one diagnostics window. These subscriptions add no
+        // frame-path work and only retire the check; they never change video.
+        func retireOnChange<P: Publisher>(_ publisher: P) where P.Output: Equatable, P.Failure == Never {
+            publisher.removeDuplicates().dropFirst().sink { [weak self] _ in
+                guard let self, self.runID == startedRun, self.phase.isRunning else { return }
+                self.finish(.cancelled("The camera pair, source or roles changed during the check. Run it again."))
+            }.store(in: &driftSubscriptions)
+        }
+        retireOnChange(show.operatorModes.$mode)
+        retireOnChange(show.programOutput.$activeRoute)
+        for channel in show.channels.values {
+            retireOnChange(channel.$activeMode)
+            retireOnChange(channel.$selectedCamera)
+            retireOnChange(channel.$sourcePixelWidth)
+            retireOnChange(channel.$sourcePixelHeight)
+            retireOnChange(channel.$sourceMissing)
+            retireOnChange(channel.$isRunning)
+            retireOnChange(channel.$detectionDiscoveryActive)
         }
     }
 
@@ -345,6 +438,7 @@ final class MultiInputCheck: ObservableObject {
 
     private func finish(_ result: Phase) {
         subscription = nil
+        driftSubscriptions.removeAll()
         phase = result
     }
 }

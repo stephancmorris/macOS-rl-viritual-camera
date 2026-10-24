@@ -1,16 +1,9 @@
 import Foundation
 
-nonisolated protocol SpeechTranscriptSource {
-    func finalTranscripts() -> [SpeechFinalTranscript]
-}
 nonisolated struct SpeechFinalTranscript: Equatable, Sendable {
     let id: String
     let text: String
     let confidence: Double
-}
-nonisolated struct FakeSpeechTranscriptSource: SpeechTranscriptSource {
-    var transcripts: [SpeechFinalTranscript]
-    func finalTranscripts() -> [SpeechFinalTranscript] { transcripts }
 }
 
 /// Supplied by a future coordinator boundary at utterance start and again at

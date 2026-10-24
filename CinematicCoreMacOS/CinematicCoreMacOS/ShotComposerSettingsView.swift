@@ -3,7 +3,6 @@
 //  CinematicCoreMacOS
 //
 //  Created by Stephan Morris on 2/7/2026.
-//  Ticket: LOGIC-01 - Rule-Based Shot Composer Settings
 //
 
 import SwiftUI
@@ -13,22 +12,10 @@ import SwiftUI
 /// Settings window can host them under a Basic/Advanced toggle.
 struct ShotComposerSettingsView: View {
     @ObservedObject var shotComposer: ShotComposer
-
-    @AppStorage("cinematicFormat") private var storedFormat: String =
-        ShotComposer.Config.CinematicFormat.stage.rawValue
-
-    /// Mirrors the persisted format and the live composer config. Writing here
-    /// updates both, which drives the operator pill and triggers the activeMode
-    /// reset binding in CameraManager.
-    private var formatBinding: Binding<ShotComposer.Config.CinematicFormat> {
-        Binding(
-            get: { ShotComposer.Config.CinematicFormat(rawValue: storedFormat) ?? .stage },
-            set: { newValue in
-                storedFormat = newValue.rawValue
-                shotComposer.config.cinematicFormat = newValue
-            }
-        )
-    }
+    /// The mode picker asks the store, which checks the live-switch rule,
+    /// persists the mode and sets every channel's format; that drives the
+    /// operator pill and the activeMode reset binding in CameraManager.
+    @ObservedObject var operatorModes: OperatorModeStore
 
     var body: some View {
         Form {
@@ -51,17 +38,8 @@ struct ShotComposerSettingsView: View {
                 .foregroundStyle(.secondary)
         }
 
-        Section("Format") {
-            Picker("Format", selection: formatBinding) {
-                ForEach(ShotComposer.Config.CinematicFormat.allCases) { format in
-                    Text(format.title).tag(format)
-                }
-            }
-            .pickerStyle(.segmented)
-
-            Text(formatBinding.wrappedValue.detail)
-                .font(.caption)
-                .foregroundStyle(.secondary)
+        Section("Mode") {
+            OperatorModePicker(store: operatorModes, style: .form)
         }
 
         Section("Framing Style") {
@@ -287,8 +265,8 @@ struct ShotComposerSettingsView: View {
             )
 
             LabeledContent(
-                "Format",
-                value: shotComposer.config.cinematicFormat.title
+                "Mode",
+                value: operatorModes.mode.title
             )
 
             if shotComposer.config.cinematicFormat == .webcam {
@@ -324,74 +302,11 @@ struct ShotComposerSettingsView: View {
     }
 }
 
-// MARK: - Liquid Glass Preset Switch
-
-struct LiquidPresetSwitch: View {
-    @Binding var selection: ShotComposer.Config.ShotPreset
-    @Environment(\.isEnabled) private var isEnabled
-
-    var body: some View {
-        HStack(spacing: 2) {
-            ForEach(ShotComposer.Config.ShotPreset.allCases) { option in
-                segment(for: option)
-            }
-        }
-        .padding(3)
-        .background {
-            Capsule(style: .continuous)
-                .fill(.ultraThinMaterial)
-                .overlay(
-                    Capsule(style: .continuous)
-                        .strokeBorder(.white.opacity(0.12), lineWidth: 1)
-                )
-        }
-        .opacity(isEnabled ? 1.0 : 0.5)
-    }
-
-    @ViewBuilder
-    private func segment(for option: ShotComposer.Config.ShotPreset) -> some View {
-        let isSelected = selection == option
-        Button {
-            guard isEnabled else { return }
-            withAnimation(.spring(response: 0.32, dampingFraction: 0.82)) {
-                selection = option
-            }
-        } label: {
-            Text(option.title)
-                .font(.system(size: 12, weight: .semibold, design: .rounded))
-                .foregroundStyle(isSelected ? Color.black.opacity(0.88) : Color.primary)
-                .padding(.horizontal, 12)
-                .padding(.vertical, 6)
-                .background {
-                    if isSelected {
-                        Capsule(style: .continuous)
-                            .fill(
-                                LinearGradient(
-                                    colors: [
-                                        Color.mint.opacity(0.95),
-                                        Color.green.opacity(0.85)
-                                    ],
-                                    startPoint: .topLeading,
-                                    endPoint: .bottomTrailing
-                                )
-                            )
-                            .overlay(
-                                Capsule(style: .continuous)
-                                    .strokeBorder(.white.opacity(0.35), lineWidth: 1)
-                            )
-                            .shadow(color: .mint.opacity(0.35), radius: 8, y: 2)
-                    }
-                }
-        }
-        .buttonStyle(.plain)
-    }
-}
-
 // MARK: - Liquid Glass Tuning Preset Switch
 
-/// Beginner-facing preset selector for the auto-framing feel. Mirrors the
-/// mint-capsule look of `LiquidPresetSwitch` but is bound to `TuningPreset`
-/// and lays its segments out equally so four options stay readable.
+/// Beginner-facing preset selector for the auto-framing feel. Its mint-capsule
+/// segments are bound to `TuningPreset` and laid out equally so four options
+/// stay readable.
 struct LiquidTuningSwitch: View {
     @Binding var selection: ShotComposer.Config.TuningPreset
     @Environment(\.isEnabled) private var isEnabled
@@ -524,84 +439,9 @@ struct LiquidAutoPanSpeedSwitch: View {
     }
 }
 
-// MARK: - Liquid Glass Framing Switch
-
-struct LiquidFramingSwitch: View {
-    @Binding var selection: ShotComposer.Config.ShotFraming
-    @Environment(\.isEnabled) private var isEnabled
-    @Namespace private var indicatorNamespace
-    private let options: [ShotComposer.Config.ShotFraming] = [.waistUp, .chestUp]
-
-    var body: some View {
-        HStack(spacing: 2) {
-            ForEach(options) { option in
-                segment(for: option)
-            }
-        }
-        .padding(3)
-        .background {
-            Capsule(style: .continuous)
-                .fill(.ultraThinMaterial)
-                .overlay(
-                    Capsule(style: .continuous)
-                        .strokeBorder(.white.opacity(0.12), lineWidth: 1)
-                )
-        }
-        .opacity(isEnabled ? 1.0 : 0.5)
-    }
-
-    @ViewBuilder
-    private func segment(for option: ShotComposer.Config.ShotFraming) -> some View {
-        let isSelected = selection == option
-        Button {
-            guard isEnabled else { return }
-            withAnimation(.spring(response: 0.32, dampingFraction: 0.82)) {
-                selection = option
-            }
-        } label: {
-            HStack(spacing: 6) {
-                Image(systemName: icon(for: option))
-                    .font(.system(size: 11, weight: .semibold))
-                Text(option.title)
-                    .font(.system(size: 12, weight: .semibold, design: .rounded))
-            }
-            .foregroundStyle(isSelected ? Color.black.opacity(0.88) : Color.white.opacity(0.82))
-            .padding(.horizontal, 12)
-            .padding(.vertical, 6)
-            .background {
-                if isSelected {
-                    Capsule(style: .continuous)
-                        .fill(
-                            LinearGradient(
-                                colors: [
-                                    Color.mint.opacity(0.95),
-                                    Color.green.opacity(0.85)
-                                ],
-                                startPoint: .topLeading,
-                                endPoint: .bottomTrailing
-                            )
-                        )
-                        .overlay(
-                            Capsule(style: .continuous)
-                                .strokeBorder(.white.opacity(0.35), lineWidth: 1)
-                        )
-                        .shadow(color: .mint.opacity(0.35), radius: 8, y: 2)
-                        .matchedGeometryEffect(id: "framingIndicator", in: indicatorNamespace)
-                }
-            }
-            .contentShape(Capsule(style: .continuous))
-        }
-        .buttonStyle(.plain)
-    }
-
-    private func icon(for option: ShotComposer.Config.ShotFraming) -> String {
-        switch option {
-        case .chestUp: return "person.crop.rectangle"
-        case .waistUp: return "person.fill"
-        }
-    }
-}
-
 #Preview {
-    ShotComposerSettingsView(shotComposer: ShotComposer())
+    ShotComposerSettingsView(
+        shotComposer: ShotComposer(),
+        operatorModes: OperatorModeStore(defaults: UserDefaults(suiteName: "com.alfie.preview") ?? .standard)
+    )
 }

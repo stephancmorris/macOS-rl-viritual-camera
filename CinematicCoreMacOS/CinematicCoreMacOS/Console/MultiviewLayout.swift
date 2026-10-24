@@ -41,6 +41,7 @@ nonisolated struct MultiviewLayout: Equatable, Sendable {
     let stripLabel: CGRect
     let strip: CGRect
     let tileSize: CGSize
+    let directorBar: CGRect
 
     init(size: CGSize) {
         self.size = size
@@ -65,6 +66,7 @@ nonisolated struct MultiviewLayout: Equatable, Sendable {
         let tileWidth = (contentWidth - Self.tileGap * (Self.tileColumns - 1)) / Self.tileColumns
         tileSize = CGSize(width: tileWidth, height: (tileWidth * 9 / 16).rounded())
         strip = CGRect(x: left, y: stripLabel.maxY, width: contentWidth, height: tileSize.height)
+        directorBar = CGRect(x: left, y: strip.maxY + 8, width: contentWidth, height: 36)
     }
 
     private static func paneWidth(forWidth width: CGFloat) -> CGFloat {

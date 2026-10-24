@@ -15,8 +15,8 @@ import Testing
         wideCadence: 60, repetitionWindow: 20, maximumMovement: 0.1, settleTime: 1, onAirMoveRate: 0.5,
         cutOnMotionAllowed: false)
 
-    @Test func savedStylesReachTheShowsDirector() throws {
-        guard DeveloperFlags.runDirectorShadow else { return }
+    @Test(.enabled(if: DeveloperFlags.runDirectorShadow, "Director shadow is off in this build"))
+    func savedStylesReachTheShowsDirector() throws {
         let show = ShowCoordinator(programOutput: ProgramOutputManager(sinks: []))
         let preferences = DirectorPreferences(styles: [.liveEvent: style])
         show.directorPreferencesChanged(preferences)
@@ -25,8 +25,8 @@ import Testing
         #expect(show.director.preferences == preferences)
     }
 
-    @Test func settingsEditorSaveIsForwardedThroughTheHook() throws {
-        guard DeveloperFlags.runDirectorShadow else { return }
+    @Test(.enabled(if: DeveloperFlags.runDirectorShadow, "Director shadow is off in this build"))
+    func settingsEditorSaveIsForwardedThroughTheHook() throws {
         let show = ShowCoordinator(programOutput: ProgramOutputManager(sinks: []))
         let url = FileManager.default.temporaryDirectory
             .appendingPathComponent("alfie-style-hook-\(UUID().uuidString).json")

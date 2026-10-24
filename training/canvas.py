@@ -26,7 +26,6 @@ from schema import CropData, IdealCropData, KeypointData, SpeakerData
 class CanvasState:
     """Persistent state across frames for a single video."""
 
-    zoom: float
     crop_h: float
     crop_w: float
     canvas_anchor_x: float  # where first speaker center maps in canvas X
@@ -81,7 +80,6 @@ def initialize_canvas(
     canvas_anchor_y = float(rng.uniform(0.30, 0.55))
 
     return CanvasState(
-        zoom=zoom,
         crop_h=crop_h,
         crop_w=crop_w,
         canvas_anchor_x=canvas_anchor_x,
@@ -141,7 +139,7 @@ def embed_in_canvas(
         )
         # Create a temporary state for continuity
         temp_state = CanvasState(
-            zoom=zoom, crop_h=default_crop_h, crop_w=default_crop_w,
+            crop_h=default_crop_h, crop_w=default_crop_w,
             canvas_anchor_x=0.5, canvas_anchor_y=0.5,
             first_frame_sx=0.5, first_frame_sy=0.5,
         )

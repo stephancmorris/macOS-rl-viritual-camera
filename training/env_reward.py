@@ -1,7 +1,7 @@
 """
 Reward function for CinematicFramingEnv.
 
-Five components matching the ROADMAP.md specification:
+Five components:
   1. Framing reward (+1.0): head at upper third, waist at lower third
   2. Jitter penalty (-0.5): penalizes jerky acceleration changes
   3. Head cutoff penalty (-1.0): head outside crop bounds

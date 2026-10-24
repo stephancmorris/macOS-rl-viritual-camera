@@ -1,0 +1,29 @@
+{
+  "date": "2026-10-20",
+  "parentPR": 67,
+  "parentCommit": "0466d0f8936e5d095df44a41d6af23ab7d0b9fbb",
+  "sourceFingerprint": "02da80e830c0d576caf77a1e13d0eeec8c0e920cfd6413be76ab7847126014a5",
+  "unit": {
+    "passedDefinitions": 725,
+    "passedExecutions": 1032,
+    "failed": 0,
+    "skipped": 3,
+    "configuration": "unsigned Debug"
+  },
+  "releaseBuild": "passed unsigned app and extension",
+  "manual": {
+    "escapeCancelsOnce": "pass",
+    "accessibleCancel": "pass",
+    "backupHasNoCancel": "pass",
+    "runSheetKeyboardAdvance": "pass",
+    "textFocusSuppressesAdvance": "pass",
+    "unappliedEditProtection": "pass",
+    "reorderKeepsCurrent": "pass",
+    "perShowSaveReloadIsolation": "pass",
+    "lastSegmentNoWrap": "pass",
+    "removeCurrentChoosesFollowing": "pass"
+  },
+  "liveRehearsal": "not run; B-08/B-11 integration pending",
+  "spokenVoiceOver": "not run",
+  "appQuit": true
+}
