@@ -1,6 +1,7 @@
 import Combine
 import CoreGraphics
 import Foundation
+import SwiftUI
 import Testing
 @testable import Alfie
 
@@ -124,16 +125,41 @@ import Testing
         start(recorder)
         frame(recorder, 1)
         let recordingObserver = recorder.$isRecording.dropFirst().sink { recording in
-            if !recording { frame(recorder, 2) }
+            if !recording { recorder.requestStopRecording(); frame(recorder, 2) }
         }
         let stoppingObserver = recorder.$isStopping.dropFirst().sink { stopping in
-            if stopping { start(recorder); frame(recorder, 3) }
+            if stopping { recorder.requestStopRecording(); start(recorder); frame(recorder, 3) }
         }
         await recorder.stopRecording()
         withExtendedLifetime((recordingObserver, stoppingObserver)) {}
         #expect(recorder.stats.framesRecorded == 1)
         #expect(try sessions(root).count == 1)
         #expect(try observations(try #require(try sessions(root).first)).count == 1)
+    }
+
+    @Test(arguments: [false, true])
+    func operatorStopClosesRecordingAdmissionBeforeReturning(cameraStop: Bool) async throws {
+        let (recorder, root, defaults, suite) = try fixture()
+        defer { defaults.removePersistentDomain(forName: suite); try? FileManager.default.removeItem(at: root) }
+        recorder.setTrainingDataConsent(true)
+        start(recorder)
+        frame(recorder, 1)
+        let output = ProgramOutputManager(sinks: [])
+        let camera = CameraManager(channelID: .a, programOutput: output, outputPort: output,
+            trainingDataRecorder: recorder)
+        let settings = RecorderSettingsView(recorder: recorder, cameraManager: camera)
+        let captureObserver = camera.$isStartingSession.dropFirst().sink { _ in frame(recorder, 3) }
+        if cameraStop { camera.stopCapture() } else { settings.recordingBinding.wrappedValue = false }
+        // Capture work can already be queued when the operator turns this off.
+        // The UI action must close admission before yielding to that work.
+        #expect(!recorder.isRecording && recorder.isStopping)
+        frame(recorder, 2)
+        await recorder.stopRecording()
+        withExtendedLifetime(captureObserver) {}
+        let rows = try observations(try #require(try sessions(root).first))
+        #expect(rows.compactMap { $0["t"] as? Double } == [1])
+        #expect(recorder.stats.framesRecorded == 1)
+        #expect(recorder.hasUserConsentedToTrainingData)
     }
 
     @Test func stopPersistsActualSchemaAndAllowsDistinctRenewedSession() async throws {

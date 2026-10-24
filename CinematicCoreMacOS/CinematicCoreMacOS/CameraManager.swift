@@ -288,7 +288,7 @@ final class CameraManager: NSObject, ObservableObject {
         }
     }
 
-    let trainingDataRecorder = TrainingDataRecorder()
+    let trainingDataRecorder: TrainingDataRecorder
 
     /// Routes the processed program feed to the currently active output sink.
     /// Program Display is a fullscreen clean feed on a selected display (e.g.
@@ -896,10 +896,12 @@ final class CameraManager: NSObject, ObservableObject {
     }
 
     /// Designated: the show (ShowCoordinator / ProgramRouter) supplies the port.
-    init(channelID: ChannelID, programOutput: ProgramOutputManager, outputPort: any ChannelOutputPort) {
+    init(channelID: ChannelID, programOutput: ProgramOutputManager, outputPort: any ChannelOutputPort,
+         trainingDataRecorder: TrainingDataRecorder? = nil) {
         self.channelID = channelID
         self.programOutput = programOutput
         self.outputPort = outputPort
+        self.trainingDataRecorder = trainingDataRecorder ?? TrainingDataRecorder()
         self.commands = CommandDispatcher(channelID: channelID)
         self.sessionQueue = DispatchQueue(label: "com.alfie.capture-session.\(channelID.letter)", qos: .userInitiated)
         self.cropEngine = CropEngine()
@@ -1664,6 +1666,7 @@ final class CameraManager: NSObject, ObservableObject {
     
     /// Stop the capture session
     func stopCapture() {
+        trainingDataRecorder.requestStopRecording()
         sessionStartRequest = nil
         sessionStartTask?.cancel()
         sessionStartTask = nil
@@ -1684,9 +1687,6 @@ final class CameraManager: NSObject, ObservableObject {
         clipPlaybackTask?.cancel()
         clipPlaybackTask = nil
         frameProcessingGate.reset()
-        if trainingDataRecorder.isRecording {
-            Task { await trainingDataRecorder.stopRecording() }
-        }
         outputPort.updateCaptureStatus(isRunning: false)
         workScheduler?.cancelWaiting(for: channelID)
         stopSessionAsync()

@@ -2,7 +2,7 @@
   "date": "2026-10-24",
   "base": "12a2bc5",
   "branch": "codex/next-ticket-batches-2026-10-24",
-  "sourceFingerprint": "f88154525504bed0835da664e8e602373ee6113d915e591f0c17dbf42751c35c",
+  "sourceFingerprint": "9ade93e3295052a6e876df3cc92b0b3f44b6c724213bdd0b3316686cb69ed15d",
   "toolchain": "Xcode 26.3 (17C529)",
   "host": "Mac mini / Apple M2 Pro / macOS 27.0.1",
   "swift": {
@@ -61,6 +61,38 @@
       "skippedTests": 0,
       "totalTestCount": 1,
       "passedExpanded": 1
+    },
+    "recording-stop-before": {
+      "result": "Failed",
+      "passedTests": 4,
+      "failedTests": 1,
+      "skippedTests": 0,
+      "totalTestCount": 5,
+      "passedExpanded": 5
+    },
+    "recording-stop-after": {
+      "result": "Passed",
+      "passedTests": 20,
+      "failedTests": 0,
+      "skippedTests": 0,
+      "totalTestCount": 20,
+      "passedExpanded": 24
+    },
+    "full-3": {
+      "result": "Passed",
+      "passedTests": 1071,
+      "failedTests": 0,
+      "skippedTests": 3,
+      "totalTestCount": 1074,
+      "passedExpanded": 1678
+    },
+    "full-4": {
+      "result": "Passed",
+      "passedTests": 1071,
+      "failedTests": 0,
+      "skippedTests": 3,
+      "totalTestCount": 1074,
+      "passedExpanded": 1678
     }
   },
   "python": {
@@ -74,5 +106,13 @@
   },
   "manualUI": "not verified: computer-control selection timed out, including Finder",
   "rigQualification": false,
-  "artifacts": "/private/tmp/alfie-batches-20261024"
+  "artifacts": "/private/tmp/alfie-batches-20261024",
+  "firstBoundarySourceFingerprint": "f88154525504bed0835da664e8e602373ee6113d915e591f0c17dbf42751c35c",
+  "recordingStop": {
+    "ticket": "https://trello.com/c/UUrJrSXP",
+    "fullFinal": "full-4",
+    "releaseLog": "/private/tmp/alfie-batches-20261024/release-recording-stop.log",
+    "coreMLInterop": "configured in full suite",
+    "cameraCapture": "not opened"
+  }
 }
