@@ -23,6 +23,12 @@ enum SettingsTab: String, CaseIterable, Identifiable {
 
     var id: String { rawValue }
 
+    /// The pages this build shows. Director is hidden until the Director runs
+    /// in this build (SU-5).
+    static var available: [SettingsTab] {
+        allCases.filter { $0 != .director || DeveloperFlags.runDirectorShadow }
+    }
+
     enum Group: String, CaseIterable, Identifiable {
         case show = "Show"
         case framing = "Framing"
@@ -31,7 +37,7 @@ enum SettingsTab: String, CaseIterable, Identifiable {
         var id: String { rawValue }
 
         var tabs: [SettingsTab] {
-            SettingsTab.allCases.filter { $0.group == self }
+            SettingsTab.available.filter { $0.group == self }
         }
     }
 
@@ -114,7 +120,7 @@ struct SettingsWindow: View {
     var onDirectorPreferencesChanged: (DirectorPreferences) -> Void = { _ in }
     var shadowLogProvider: () -> DirectorShadowLog? = { nil }
     @StateObject private var shadowExportModel = DirectorShadowExportModel()
-    @StateObject private var directorEditor = DirectorStyleEditor.makeForSettings()
+    @StateObject private var directorEditor = DirectorFeelEditor.makeForSettings()
     @State private var searchText = ""
 
     var body: some View {

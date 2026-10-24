@@ -15,6 +15,7 @@
 
 import Combine
 import Foundation
+import OSLog
 import QuartzCore
 
 final class ShowCoordinator: ObservableObject {
@@ -255,8 +256,25 @@ final class ShowCoordinator: ObservableObject {
     /// Start the Director's shadow when the flag allows it. Every launch is Manual.
     func startDirectorShadow() {
         guard DeveloperFlags.runDirectorShadow else { return }
+        loadDirectorStyles()
         director.attach()
         startedDirector = director
+    }
+
+    /// SU-01/SU-04: the Director starts with the saved styles, or the built-in
+    /// feel table when none are saved. An unreadable file leaves it without
+    /// styles and is kept untouched for Settings to report. Styles never carry
+    /// a level, so launch stays Manual.
+    private nonisolated static let directorLogger = Logger(subsystem: "com.alfie", category: "Director")
+
+    func loadDirectorStyles(store: DirectorPreferencesStore? = nil) {
+        let store = store ?? (try? DirectorPreferencesStore.applicationSupportFile()).map(DirectorPreferencesStore.init)
+        let result = store?.load() ?? .empty
+        guard let preferences = DirectorPreferences.forLaunch(result) else {
+            Self.directorLogger.notice("[DIRECTOR] saved styles unreadable; starting without styles")
+            return
+        }
+        director.preferencesChanged(preferences)
     }
 
     /// Explicit operator action against an already attached Director only.
