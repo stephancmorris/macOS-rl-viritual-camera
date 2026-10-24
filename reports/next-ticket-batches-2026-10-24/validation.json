@@ -2,7 +2,7 @@
   "date": "2026-10-24",
   "base": "12a2bc5",
   "branch": "codex/next-ticket-batches-2026-10-24",
-  "sourceFingerprint": "b1c1bcbb20737674fd61f83805076cd7971e6dde1f3cceca95b6731530014796",
+  "sourceFingerprint": "71ff75c4e3973b1866be4e99842715113198c4f97e727673d68b367d3f1ca721",
   "toolchain": "Xcode 26.3 (17C529)",
   "host": "Mac mini / Apple M2 Pro / macOS 27.0.1",
   "swift": {
@@ -157,6 +157,30 @@
       "skippedTests": 3,
       "totalTestCount": 1084,
       "passedExpanded": 1690
+    },
+    "scheduler-before": {
+      "result": "Failed",
+      "passedTests": 9,
+      "failedTests": 1,
+      "skippedTests": 0,
+      "totalTestCount": 10,
+      "passedExpanded": 9
+    },
+    "scheduler-after": {
+      "result": "Passed",
+      "passedTests": 32,
+      "failedTests": 0,
+      "skippedTests": 0,
+      "totalTestCount": 32,
+      "passedExpanded": 39
+    },
+    "full-7": {
+      "result": "Passed",
+      "passedTests": 1082,
+      "failedTests": 0,
+      "skippedTests": 3,
+      "totalTestCount": 1085,
+      "passedExpanded": 1698
     }
   },
   "python": {
@@ -197,5 +221,19 @@
     "releaseLog": "/private/tmp/alfie-batches-20261024/release-show-standard.log",
     "guideStaticCheck": "unique IDs and local references passed",
     "nativeWalkthrough": "not performed"
+  },
+  "showFormatSourceFingerprint": "b1c1bcbb20737674fd61f83805076cd7971e6dde1f3cceca95b6731530014796",
+  "schedulerPriority": {
+    "ticket": "https://trello.com/c/XmaaT3MT",
+    "fullFinal": "full-7",
+    "releaseLog": "/private/tmp/alfie-batches-20261024/release-scheduler.log",
+    "maxProgramStreak": "unchanged: 2",
+    "throughputImprovementClaimed": false
+  },
+  "latestCompleteSwiftRun": "full-7",
+  "publication": {
+    "pushedBranch": "codex/next-ticket-batches-2026-10-24",
+    "pullRequest": "not created: integration 403; gh not logged in",
+    "merged": false
   }
 }

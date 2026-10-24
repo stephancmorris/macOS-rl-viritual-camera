@@ -1,6 +1,8 @@
-# Setup and Take boundary repairs — 24 October 2026
+# Operator reliability batches — 24 October 2026
 
 Started from current `origin/main` at `12a2bc5`, after finding that the initial local branch (`r2/modes/spec-and-model`) predated the merged follow-ups through PR #77. Working branch: `codex/next-ticket-batches-2026-10-24`. Trello work is grouped in [the verification/setup batch](https://trello.com/c/7lJuEA8O) and [TAKE-CLOCK](https://trello.com/c/AzTxvqP6).
+
+Current software verification: **1,082 Swift definitions / 1,698 expanded cases passed**, zero failures and three opt-in fixture/hardware skips, including configured synthetic CoreML CPU interoperability. **111 script and 14 Director dataset/scorer Python tests passed**; subsequent batches did not change Python. The app and extension build in unsigned Release. Seven repair tickets are grouped for Human Review, alongside reconciliation of the two existing run-sheet cards. [Review the pushed branch](https://github.com/stephancmorris/macOS-rl-viritual-camera/compare/main...codex/next-ticket-batches-2026-10-24). PR creation is unavailable (integration 403; CLI not logged in); nothing was merged.
 
 ## Changes
 
@@ -51,3 +53,11 @@ The show now owns the standard from its first starting/running input until every
 Tests cover A and B as Program, source restart with a continuing Preview, a starting Preview, complete Stop and next-preference adoption, owner teardown and standalone output. Focused lifecycle/setup/Take tests passed **76 definitions / 99 expanded cases**. The complete suite passed **1,081 definitions / 1,690 expanded cases**, zero failures and the same three opt-in skips, with CoreML interoperability configured. Unsigned Release app/extension build passed. A first expanded test build caught a test's attempt to access private Config; that redundant assertion was removed without exposing the implementation. The reproducing `show-standard-before` and passing `show-standard-after-2`/`full-6` bundles remain local.
 
 The operator guide text now describes show-wide format freezing and recording Stop admission. Static HTML checks passed unique IDs and local references; no native walkthrough or print-layout acceptance is claimed. Calibration, output standard choices, delivered capture exceptions and per-level qualification are unchanged.
+
+## Additional operator batch: scheduler priority
+
+[SCHEDULER-PRIORITY](https://trello.com/c/XmaaT3MT) reproduced six wrong-priority selections across render and perception lanes. After two contested Program turns, the old streak survived an idle lane, uncontended Program work or a Program-role change. The next contested turn then selected Preview, including the former Program after a Take.
+
+Contention history now belongs to the current Program and a continuous contention interval. Idle/uncontended work, cancellation of the waiting non-Program work and Program-role changes reset the old history. The existing two-selection fairness limit, latest-only waiting slots and non-preemptible running permits remain. Tests cover both lanes and all four boundaries; the old supersession, fairness, stale-release and lane-independence tests remain green.
+
+Focused scheduler/capture/channel/subject-policy checks passed **32 definitions / 39 expanded cases**. The full suite passed **1,082 definitions / 1,698 expanded cases**, zero failures and the same three opt-in skips, with CoreML interoperability configured. Unsigned Release app/extension build passed. `scheduler-before` preserves the six failures; `scheduler-after` and `full-7` pass. This is selection-policy correctness, not a measured throughput/latency improvement or wall-clock service guarantee.
