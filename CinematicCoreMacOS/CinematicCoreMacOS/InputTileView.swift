@@ -14,12 +14,14 @@ struct InputTileView: View {
     /// Width kept for the AUTO badge at the top right.
     static let directorBadgeReserve: CGFloat = 64
 
+    @Environment(\.colorScheme) private var colorScheme
+
     /// Program red 3 pt, Preview green 3 pt, others 1 pt neutral (INPUT-STRIP).
     private var ring: (color: Color, width: CGFloat) {
         switch model.role {
         case .program: return (ConsoleStyle.programRed, 3)
         case .preview: return (ConsoleStyle.previewGreen, 3)
-        case .none: return (Color.white.opacity(model.isAssigned ? 0.18 : 0.28), 1)
+        case .none: return (AlfieColor.ink.opacity(model.isAssigned ? 0.18 : 0.28), 1)
         }
     }
 
@@ -43,7 +45,7 @@ struct InputTileView: View {
                         Text("Add a camera in Setup")
                             .font(.system(size: 11))
                     }
-                    .foregroundStyle(.white.opacity(0.6))
+                    .foregroundStyle(AlfieColor.ink.opacity(0.6))
                     .padding(12)
                     .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottomLeading)
                 }
@@ -57,6 +59,9 @@ struct InputTileView: View {
                     .strokeBorder(ring.color, style: StrokeStyle(lineWidth: ring.width, dash: model.isAssigned ? [] : [5, 4]))
             }
             .contentShape(RoundedRectangle(cornerRadius: 10))
+            // A tile with a camera shows video: dark in every appearance. An
+            // empty tile is a placeholder and follows the app's appearance.
+            .environment(\.colorScheme, model.isAssigned ? .dark : colorScheme)
         }
         .buttonStyle(.plain)
         .disabled(!model.isAssigned)
@@ -111,7 +116,11 @@ struct InputTileView: View {
 
     private var background: some View {
         ZStack {
-            Color(red: 0.08, green: 0.09, blue: 0.11)
+            if model.isAssigned {
+                Color(red: 0.08, green: 0.09, blue: 0.11)
+            } else {
+                AlfieColor.ink.opacity(0.05)
+            }
             if let picture {
                 picture
             } else if let image = model.renderedImage {

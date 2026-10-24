@@ -52,7 +52,7 @@ struct DirectorModeControl<Controller: DirectorConsoleControlling & ObservableOb
             }
             Text(section.statusLine)
                 .font(.system(size: 12))
-                .foregroundStyle(.white.opacity(0.85))
+                .foregroundStyle(AlfieColor.ink.opacity(0.85))
                 .accessibilityLabel(section.statusLine)
         }
         .padding(16)
@@ -89,13 +89,13 @@ struct DirectorModeControl<Controller: DirectorConsoleControlling & ObservableOb
                         .font(.system(size: 9, weight: .medium))
                 }
             }
-            .foregroundStyle(.white.opacity(allowed ? 1 : 0.38))
+            .foregroundStyle(AlfieColor.ink.opacity(allowed ? 1 : 0.38))
             .padding(.horizontal, 12)
             .padding(.vertical, 8)
             .frame(minWidth: 88, minHeight: 44)
             .background(
                 RoundedRectangle(cornerRadius: 8, style: .continuous)
-                    .fill(chip.selected ? Color.white.opacity(0.08) : Color.clear)
+                    .fill(chip.selected ? AlfieColor.ink.opacity(0.08) : Color.clear)
             )
             .overlay(
                 RoundedRectangle(cornerRadius: 8, style: .continuous)
@@ -143,9 +143,9 @@ struct DirectorModeControl<Controller: DirectorConsoleControlling & ObservableOb
         Button(action: action) {
             Text(title)
                 .font(.system(size: 14, weight: .semibold))
-                .foregroundStyle(selected ? .white : .white.opacity(0.45))
+                .foregroundStyle(selected ? AlfieColor.ink : AlfieColor.ink.opacity(0.45))
                 .frame(maxWidth: .infinity, minHeight: 36)
-                .background(selected ? Color.white.opacity(0.10) : Color.clear)
+                .background(selected ? AlfieColor.ink.opacity(0.10) : Color.clear)
                 .overlay(
                     Rectangle()
                         .strokeBorder(selected ? ConsoleStyle.previewGreen : ConsoleStyle.neutralBorder, lineWidth: selected ? 2 : 1)

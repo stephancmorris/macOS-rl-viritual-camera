@@ -17,7 +17,7 @@ struct NextShotPanel: View {
         case .ready: return ConsoleStyle.previewGreen
         case .notReady: return ConsoleStyle.amber
         case .editingLive: return ConsoleStyle.programRed
-        case .noPreviewCamera: return Color.white.opacity(0.35)
+        case .noPreviewCamera: return AlfieColor.ink.opacity(0.35)
         }
     }
 
@@ -36,10 +36,10 @@ struct NextShotPanel: View {
             HStack(spacing: 10) {
                 Text(NextShotStatus.label)
                     .font(ConsoleStyle.label(11))
-                    .foregroundStyle(.white.opacity(0.55))
+                    .foregroundStyle(AlfieColor.ink.opacity(0.55))
                 Text(status.shotLine)
                     .font(.system(size: 13, weight: .semibold))
-                    .foregroundStyle(.white)
+                    .foregroundStyle(AlfieColor.ink)
                     .lineLimit(1)
                     .truncationMode(.tail)
             }
@@ -49,14 +49,14 @@ struct NextShotPanel: View {
                     .frame(width: 8, height: 8)
                 Text(status.statusText)
                     .font(.system(size: 12))
-                    .foregroundStyle(.white.opacity(0.8))
+                    .foregroundStyle(AlfieColor.ink.opacity(0.8))
                     .lineLimit(1)
                     .truncationMode(.tail)
             }
             if let director = status.director {
                 Text(Self.directorLine(director))
                     .font(.system(size: 12))
-                    .foregroundStyle(.white.opacity(0.85))
+                    .foregroundStyle(AlfieColor.ink.opacity(0.85))
                     .lineLimit(1)
                     .truncationMode(.tail)
             }

@@ -19,7 +19,7 @@ struct OperatorModePicker: View {
     enum Style {
         /// Settings › Show & cameras: follows the app's appearance.
         case form
-        /// The single-camera stopped screen: centred, dark.
+        /// The single-camera stopped screen: centred.
         case stoppedScreen
         /// The Show setup header, beside Show standard and Program output.
         case setupHeader
@@ -71,26 +71,24 @@ struct OperatorModePicker: View {
                 segments(palette: .console, showsNotes: true)
                 Text(refusal ?? store.mode.detail)
                     .font(.system(size: 12))
-                    .foregroundStyle(refusal == nil ? Color.white.opacity(0.55) : Color.orange)
+                    .foregroundStyle(refusal == nil ? AlfieColor.ink.opacity(0.55) : AlfieColor.warning)
                     .multilineTextAlignment(.center)
             }
-            .environment(\.colorScheme, .dark)
 
         case .setupHeader:
             VStack(alignment: .leading, spacing: 5) {
                 Text("Mode")
                     .font(.system(size: 11, weight: .medium))
-                    .foregroundStyle(.white.opacity(0.6))
+                    .foregroundStyle(AlfieColor.ink.opacity(0.6))
                 segments(palette: .console, showsNotes: false)
                 if let refusal {
                     Text(refusal)
                         .font(.system(size: 11))
-                        .foregroundStyle(Color.orange)
+                        .foregroundStyle(AlfieColor.warning)
                         .frame(width: 280, alignment: .leading)
                         .fixedSize(horizontal: false, vertical: true)
                 }
             }
-            .environment(\.colorScheme, .dark)
         }
     }
 
@@ -157,11 +155,11 @@ struct OperatorModePicker: View {
                                         selected: AlfieColor.accent,
                                         text: AlfieColor.text,
                                         disabledText: AlfieColor.tertiaryText)
-        /// The always-dark console screens.
-        static let console = Palette(track: Color.white.opacity(0.08),
-                                     selected: Color(red: 0.04, green: 0.44, blue: 0.88),
-                                     text: Color.white.opacity(0.92),
-                                     disabledText: Color.white.opacity(0.42))
+        /// The console screens: the same roles on the console's backdrop.
+        static let console = Palette(track: AlfieColor.ink.opacity(0.08),
+                                     selected: AlfieColor.accent,
+                                     text: AlfieColor.ink.opacity(0.92),
+                                     disabledText: AlfieColor.ink.opacity(0.42))
     }
 }
 

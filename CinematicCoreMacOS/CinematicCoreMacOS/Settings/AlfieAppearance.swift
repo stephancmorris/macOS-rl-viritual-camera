@@ -66,6 +66,18 @@ nonisolated enum AlfieColor {
     static let nextStart = dynamic(light: 0x8A5F00, dark: 0xFFD60A)
     static let nextStartSoft = dynamic(light: 0xFFBE00, dark: 0xFFD60A, lightAlpha: 0.18, darkAlpha: 0.12)
     static let warning = dynamic(light: 0xB25000, dark: 0xFF9F0A)
+    /// Errors, Program tally and on-air red.
+    static let danger = dynamic(light: 0xD70015, dark: 0xFF453A)
+
+    // Console chrome. Older views tint white for text and hairlines over the
+    // dark console; `ink` is that white in Dark and near-black in Light, so
+    // `ink.opacity(x)` keeps the same hierarchy in both.
+    static let ink = dynamic(light: 0x1C1D21, dark: 0xFFFFFF)
+    /// The drawer that slides over the console (Inspector).
+    static let drawer = dynamic(light: 0xF7F7F9, dark: 0x141416, lightAlpha: 0.92, darkAlpha: 0.78)
+    /// Camera previews and Program/Preview panes stay dark in both
+    /// appearances so footage reads true.
+    static let videoWell = Color(red: 0.03, green: 0.03, blue: 0.04)
 
     private static func dynamic(light: UInt32, dark: UInt32,
                                 lightAlpha: CGFloat = 1, darkAlpha: CGFloat = 1) -> Color {

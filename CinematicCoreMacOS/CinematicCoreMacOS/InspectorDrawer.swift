@@ -57,7 +57,7 @@ struct InspectorDrawer: View {
         .background(drawerBackground)
         .overlay(
             Rectangle()
-                .fill(Color.white.opacity(0.10))
+                .fill(AlfieColor.ink.opacity(0.10))
                 .frame(width: 0.5)
                 .frame(maxHeight: .infinity),
             alignment: .leading
@@ -67,7 +67,7 @@ struct InspectorDrawer: View {
 
     private var drawerBackground: some View {
         Rectangle()
-            .fill(Color(red: 0.078, green: 0.078, blue: 0.086).opacity(0.78))
+            .fill(AlfieColor.drawer)
             .background(.ultraThinMaterial)
     }
 
@@ -77,14 +77,14 @@ struct InspectorDrawer: View {
         HStack {
             Text("Inspector")
                 .font(.system(size: 16, weight: .semibold))
-                .foregroundStyle(.white.opacity(0.94))
+                .foregroundStyle(AlfieColor.ink.opacity(0.94))
             Spacer()
             Button {
                 withAnimation(.easeInOut(duration: 0.36)) { isOpen = false }
             } label: {
                 Image(systemName: "chevron.right")
                     .font(.system(size: 14, weight: .semibold))
-                    .foregroundStyle(.white.opacity(0.55))
+                    .foregroundStyle(AlfieColor.ink.opacity(0.55))
                     .frame(width: 28, height: 28)
                     .contentShape(Rectangle())
             }
@@ -101,7 +101,7 @@ struct InspectorDrawer: View {
         Text(text.uppercased())
             .font(.system(size: 9, weight: .semibold, design: .monospaced))
             .tracking(1.6)
-            .foregroundStyle(.white.opacity(0.42))
+            .foregroundStyle(AlfieColor.ink.opacity(0.42))
     }
 
     private func row<Right: View>(
@@ -111,14 +111,14 @@ struct InspectorDrawer: View {
         HStack(alignment: .center) {
             Text(label)
                 .font(.system(size: 12.5, weight: .medium))
-                .foregroundStyle(.white.opacity(0.7))
+                .foregroundStyle(AlfieColor.ink.opacity(0.7))
             Spacer(minLength: 12)
             right()
         }
         .padding(.vertical, 8)
         .overlay(
             Rectangle()
-                .fill(Color.white.opacity(0.06))
+                .fill(AlfieColor.ink.opacity(0.06))
                 .frame(height: 0.5),
             alignment: .bottom
         )
@@ -131,7 +131,7 @@ struct InspectorDrawer: View {
                 weight: .medium,
                 design: monospaced ? .monospaced : .default
             ))
-            .foregroundStyle(.white.opacity(0.92))
+            .foregroundStyle(AlfieColor.ink.opacity(0.92))
     }
 
     private func smallButton(
@@ -150,17 +150,17 @@ struct InspectorDrawer: View {
                     .lineLimit(1)
                     .fixedSize(horizontal: true, vertical: false)
             }
-            .foregroundStyle(.white.opacity(0.88))
+            .foregroundStyle(AlfieColor.ink.opacity(0.88))
             .padding(.horizontal, 12)
             .padding(.vertical, 7)
             .frame(maxWidth: equalWidth ? .infinity : nil)
             .background(
                 RoundedRectangle(cornerRadius: 9, style: .continuous)
-                    .fill(Color.white.opacity(0.08))
+                    .fill(AlfieColor.ink.opacity(0.08))
             )
             .overlay(
                 RoundedRectangle(cornerRadius: 9, style: .continuous)
-                    .strokeBorder(Color.white.opacity(0.12), lineWidth: 0.5)
+                    .strokeBorder(AlfieColor.ink.opacity(0.12), lineWidth: 0.5)
             )
         }
         .buttonStyle(.plain)
@@ -201,7 +201,7 @@ struct InspectorDrawer: View {
                 }
                 .labelsHidden()
                 .pickerStyle(.menu)
-                .tint(.white)
+                .tint(AlfieColor.ink)
                 .fixedSize()
             }
 
@@ -217,7 +217,7 @@ struct InspectorDrawer: View {
 
             Text(cameraManager.captureProfileStatus)
                 .font(.caption2)
-                .foregroundStyle(.white.opacity(0.65))
+                .foregroundStyle(AlfieColor.ink.opacity(0.65))
                 .fixedSize(horizontal: false, vertical: true)
 
             if let capability = cameraManager.framingCapability {
@@ -308,9 +308,9 @@ struct InspectorDrawer: View {
 
             row("Virtual camera") {
                 if cameraManager.programOutput.activeRoute == .virtualCamera {
-                    statusPill("Routing", color: Color(red: 0.19, green: 0.82, blue: 0.35))
+                    statusPill("Routing", color: AlfieColor.live)
                 } else {
-                    statusPill("Idle", color: Color.white.opacity(0.4))
+                    statusPill("Idle", color: AlfieColor.ink.opacity(0.4))
                 }
             }
             HStack(spacing: 8) {
@@ -416,8 +416,8 @@ struct InspectorDrawer: View {
             HStack(alignment: .top, spacing: 12) {
                 Circle()
                     .fill(isActive
-                          ? Color(red: 0.19, green: 0.82, blue: 0.35)
-                          : Color.white.opacity(0.22))
+                          ? AlfieColor.live
+                          : AlfieColor.ink.opacity(0.22))
                     .frame(width: 8, height: 8)
                     .padding(.top, 5)
 
@@ -425,23 +425,23 @@ struct InspectorDrawer: View {
                     HStack(spacing: 8) {
                         Text(name)
                             .font(.system(size: 13, weight: .semibold))
-                            .foregroundStyle(.white.opacity(0.92))
+                            .foregroundStyle(AlfieColor.ink.opacity(0.92))
                         if let badge {
                             Text(badge)
                                 .font(.system(size: 9, weight: .bold, design: .monospaced))
                                 .tracking(1.0)
-                                .foregroundStyle(Color(red: 1.0, green: 0.27, blue: 0.23))
+                                .foregroundStyle(AlfieColor.danger)
                                 .padding(.horizontal, 6)
                                 .padding(.vertical, 2)
                                 .overlay(
                                     Capsule(style: .continuous)
-                                        .strokeBorder(Color(red: 1.0, green: 0.27, blue: 0.23).opacity(0.6), lineWidth: 1)
+                                        .strokeBorder(AlfieColor.danger.opacity(0.6), lineWidth: 1)
                                 )
                         }
                     }
                     Text(description)
                         .font(.system(size: 11.5, weight: .medium))
-                        .foregroundStyle(.white.opacity(0.55))
+                        .foregroundStyle(AlfieColor.ink.opacity(0.55))
                 }
                 Spacer()
             }
@@ -451,7 +451,7 @@ struct InspectorDrawer: View {
         .buttonStyle(.plain)
         .overlay(
             Rectangle()
-                .fill(Color.white.opacity(0.06))
+                .fill(AlfieColor.ink.opacity(0.06))
                 .frame(height: 0.5),
             alignment: .bottom
         )
@@ -527,14 +527,14 @@ struct PipelineStagesSection: View {
             Text("PIPELINE STAGES")
                 .font(.system(size: 9, weight: .semibold, design: .monospaced))
                 .tracking(1.6)
-                .foregroundStyle(.white.opacity(0.42))
+                .foregroundStyle(AlfieColor.ink.opacity(0.42))
                 .padding(.bottom, 6)
 
             if let window = programOutput.lastPipelineWindow {
                 let totals = programOutput.pipelineTotals
                 Text(String(format: "Last %@ window · %.1f s", window.kind == .partial ? "partial" : "full", window.windowSeconds))
                     .font(.system(size: 11, weight: .medium))
-                    .foregroundStyle(.white.opacity(0.5))
+                    .foregroundStyle(AlfieColor.ink.opacity(0.5))
                     .padding(.bottom, 4)
                 stageRow("Delivered", fps(Double(window.window.delivered), window), total: Int(totals.delivered))
                 stageRow("Admitted", fps(Double(window.window.admitted), window), total: totals.admitted)
@@ -548,13 +548,13 @@ struct PipelineStagesSection: View {
                 stageRow("No route", count(window.window.noRoute), total: totals.noRoute)
                 Text("Handoff is when the route accepted the frame; when the display or virtual-camera consumer shows it is not reported to Alfie.")
                     .font(.system(size: 10.5))
-                    .foregroundStyle(.white.opacity(0.42))
+                    .foregroundStyle(AlfieColor.ink.opacity(0.42))
                     .fixedSize(horizontal: false, vertical: true)
                     .padding(.top, 6)
             } else {
                 Text("No window closed yet. Counts appear about 5 s after capture starts.")
                     .font(.system(size: 11.5))
-                    .foregroundStyle(.white.opacity(0.5))
+                    .foregroundStyle(AlfieColor.ink.opacity(0.5))
             }
         }
     }
@@ -570,14 +570,14 @@ struct PipelineStagesSection: View {
         HStack {
             Text(label)
                 .font(.system(size: 12, weight: .medium))
-                .foregroundStyle(.white.opacity(0.7))
+                .foregroundStyle(AlfieColor.ink.opacity(0.7))
             Spacer(minLength: 12)
             Text(value)
                 .font(.system(size: 12, weight: .medium, design: .monospaced))
-                .foregroundStyle(.white.opacity(0.92))
+                .foregroundStyle(AlfieColor.ink.opacity(0.92))
             Text(total.map { "Σ \($0)" } ?? "")
                 .font(.system(size: 11, design: .monospaced))
-                .foregroundStyle(.white.opacity(0.4))
+                .foregroundStyle(AlfieColor.ink.opacity(0.4))
                 .frame(width: 72, alignment: .trailing)
         }
         .padding(.vertical, 4)
@@ -596,7 +596,7 @@ struct SetupCheckSection: View {
             Text("SETUP CHECK")
                 .font(.system(size: 9, weight: .semibold, design: .monospaced))
                 .tracking(1.6)
-                .foregroundStyle(.white.opacity(0.42))
+                .foregroundStyle(AlfieColor.ink.opacity(0.42))
 
             switch check.phase {
             case .idle:
@@ -619,7 +619,7 @@ struct SetupCheckSection: View {
     private func caption(_ text: String) -> some View {
         Text(text)
             .font(.system(size: 11.5))
-            .foregroundStyle(.white.opacity(0.6))
+            .foregroundStyle(AlfieColor.ink.opacity(0.6))
             .fixedSize(horizontal: false, vertical: true)
     }
 
@@ -635,7 +635,7 @@ struct SetupCheckSection: View {
             ProgressView().controlSize(.small)
             Text(text)
                 .font(.system(size: 12, weight: .medium))
-                .foregroundStyle(.white.opacity(0.8))
+                .foregroundStyle(AlfieColor.ink.opacity(0.8))
             Spacer()
             Button("Cancel") { check.cancel() }
                 .controlSize(.small)
@@ -644,9 +644,9 @@ struct SetupCheckSection: View {
 
     private func verdictColor(_ verdict: CapabilityVerdict) -> Color {
         switch verdict {
-        case .supported: return Color(red: 0.19, green: 0.82, blue: 0.35)
-        case .limited: return Color(red: 1.0, green: 0.62, blue: 0.04)
-        case .unverified: return Color.white.opacity(0.55)
+        case .supported: return AlfieColor.live
+        case .limited: return AlfieColor.warning
+        case .unverified: return AlfieColor.ink.opacity(0.55)
         }
     }
 
@@ -663,22 +663,22 @@ struct SetupCheckSection: View {
                 .overlay(Capsule().strokeBorder(verdictColor(report.verdict).opacity(0.5), lineWidth: 1))
             Text(report.context.source)
                 .font(.system(size: 11))
-                .foregroundStyle(.white.opacity(0.5))
+                .foregroundStyle(AlfieColor.ink.opacity(0.5))
                 .lineLimit(1)
         }
         Text(String(format: "Delivered %.1f fps · handoff %.1f fps · %.1f ms/frame · %.1f%% skipped · %.0f s measured",
                     m.deliveredFPS, m.handoffFPS, m.frameWallMeanMS, m.gateSkipRatio * 100, m.seconds))
             .font(.system(size: 11, design: .monospaced))
-            .foregroundStyle(.white.opacity(0.75))
+            .foregroundStyle(AlfieColor.ink.opacity(0.75))
             .fixedSize(horizontal: false, vertical: true)
         ForEach(report.reasons) { reason in
             HStack(alignment: .firstTextBaseline, spacing: 6) {
                 Image(systemName: icon(reason.kind))
                     .font(.system(size: 10))
-                    .foregroundStyle(reason.kind == .limit ? verdictColor(.limited) : .white.opacity(0.5))
+                    .foregroundStyle(reason.kind == .limit ? verdictColor(.limited) : AlfieColor.ink.opacity(0.5))
                 Text(reason.message)
                     .font(.system(size: 11.5))
-                    .foregroundStyle(.white.opacity(0.8))
+                    .foregroundStyle(AlfieColor.ink.opacity(0.8))
                     .fixedSize(horizontal: false, vertical: true)
             }
         }
@@ -703,11 +703,11 @@ struct InspectorHandle: View {
         } label: {
             Text("⌥")
                 .font(.system(size: 16, weight: .semibold, design: .rounded))
-                .foregroundStyle(.white.opacity(0.78))
+                .foregroundStyle(AlfieColor.ink.opacity(0.78))
                 .frame(width: 36, height: 36)
                 .background(
                     RoundedRectangle(cornerRadius: 12, style: .continuous)
-                        .fill(Color.white.opacity(0.10))
+                        .fill(AlfieColor.ink.opacity(0.10))
                 )
                 .background(
                     .ultraThinMaterial,
@@ -715,7 +715,7 @@ struct InspectorHandle: View {
                 )
                 .overlay(
                     RoundedRectangle(cornerRadius: 12, style: .continuous)
-                        .strokeBorder(Color.white.opacity(0.16), lineWidth: 0.5)
+                        .strokeBorder(AlfieColor.ink.opacity(0.16), lineWidth: 0.5)
                 )
                 .shadow(color: .black.opacity(0.4), radius: 12, y: 4)
         }
@@ -740,7 +740,7 @@ private struct BuiltInCameraTestControl: View {
                     .help("Stop all cameras before changing built-in camera testing.")
                 Text(ShowSetupModel.builtInCameraTestDetail)
                     .font(.caption2)
-                    .foregroundStyle(.white.opacity(0.65))
+                    .foregroundStyle(AlfieColor.ink.opacity(0.65))
                     .fixedSize(horizontal: false, vertical: true)
             }
             .padding(.vertical, 8)

@@ -34,7 +34,7 @@ struct DirectorNextCutNotice<Controller: DirectorConsoleControlling & Observable
                 HStack(spacing: 12) {
                     Text(nextCut.line)
                         .font(.system(size: 13, weight: .semibold))
-                        .foregroundStyle(.white)
+                        .foregroundStyle(AlfieColor.ink)
                         .lineLimit(1)
                         .truncationMode(.tail)
                         .accessibilityLabel(nextCut.line)

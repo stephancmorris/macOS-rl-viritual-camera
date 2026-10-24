@@ -95,6 +95,9 @@ struct ContentView: View {
                     onHoldPoint: holdPointHandler
                 )
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
+                // Live video and what floats on it stay dark in every
+                // appearance so footage and its labels read true.
+                .environment(\.colorScheme, .dark)
             } else if screen == .showSetup, let show {
                 // Show setup (SHOW-SETUP) replaces the stopped screen in
                 // Multi Cam. Channel A starts through startCamera() so
@@ -126,28 +129,31 @@ struct ContentView: View {
             // Layer 2: floating overlays — only in the single-camera view (the
             // Multiview console carries its own pill and status)
             if screen == .singleCameraLive {
-                IdentityStackOverlay(
-                    cameraManager: cameraManager,
-                    elapsedSeconds: elapsedSeconds
-                )
-                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-                .padding(.leading, 24)
-                .padding(.top, 24)
-                .allowsHitTesting(false)
-
-                TelemetryOverlay(cameraManager: cameraManager, programOutput: cameraManager.programOutput)
-                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topTrailing)
-                    .padding(.top, 28)
-                    .padding(.trailing, 72)
+                Group {
+                    IdentityStackOverlay(
+                        cameraManager: cameraManager,
+                        elapsedSeconds: elapsedSeconds
+                    )
+                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+                    .padding(.leading, 24)
+                    .padding(.top, 24)
                     .allowsHitTesting(false)
 
-                ProgramOnAirBadgeAnchor()
-                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
-                    .allowsHitTesting(false)
+                    TelemetryOverlay(cameraManager: cameraManager, programOutput: cameraManager.programOutput)
+                        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topTrailing)
+                        .padding(.top, 28)
+                        .padding(.trailing, 72)
+                        .allowsHitTesting(false)
 
-                OperatorPill(cameraManager: cameraManager)
-                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottom)
-                .padding(.bottom, 26)
+                    ProgramOnAirBadgeAnchor()
+                        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+                        .allowsHitTesting(false)
+
+                    OperatorPill(cameraManager: cameraManager)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottom)
+                    .padding(.bottom, 26)
+                }
+                .environment(\.colorScheme, .dark)
             }
 
             // Layer 3: inspector handle — always visible
@@ -171,7 +177,7 @@ struct ContentView: View {
         }
         .animation(.easeInOut(duration: 0.36), value: inspectorOpen)
         .frame(minWidth: 1280, minHeight: 800)
-        .background(Color.black)
+        .background(ConsoleStyle.background)
         .ignoresSafeArea()
         .onAppear {
             if cameraManager.availableCameras.isEmpty {
@@ -420,22 +426,27 @@ struct CameraRowView: View {
 }
 
 struct LiquidGlassBackdrop: View {
+    @Environment(\.colorScheme) private var colorScheme
+
     var body: some View {
+        let isDark = colorScheme == .dark
         ZStack {
             LinearGradient(
-                colors: [
-                    Color(red: 0.06, green: 0.08, blue: 0.13),
-                    Color(red: 0.03, green: 0.05, blue: 0.09),
-                    Color.black
-                ],
+                colors: isDark
+                    ? [Color(red: 0.06, green: 0.08, blue: 0.13),
+                       Color(red: 0.03, green: 0.05, blue: 0.09),
+                       Color.black]
+                    : [Color(red: 0.97, green: 0.97, blue: 0.98),
+                       Color(red: 0.95, green: 0.95, blue: 0.97),
+                       Color(red: 0.92, green: 0.93, blue: 0.95)],
                 startPoint: .topLeading,
                 endPoint: .bottomTrailing
             )
 
             RadialGradient(
                 colors: [
-                    Color.cyan.opacity(0.22),
-                    Color.cyan.opacity(0.05),
+                    Color.cyan.opacity(isDark ? 0.22 : 0.12),
+                    Color.cyan.opacity(isDark ? 0.05 : 0.03),
                     .clear
                 ],
                 center: .topTrailing,
@@ -445,8 +456,8 @@ struct LiquidGlassBackdrop: View {
 
             RadialGradient(
                 colors: [
-                    Color.mint.opacity(0.18),
-                    Color.mint.opacity(0.04),
+                    Color.mint.opacity(isDark ? 0.18 : 0.10),
+                    Color.mint.opacity(isDark ? 0.04 : 0.02),
                     .clear
                 ],
                 center: .bottomLeading,
@@ -455,7 +466,7 @@ struct LiquidGlassBackdrop: View {
             )
 
             LinearGradient(
-                colors: [.white.opacity(0.05), .clear, .clear],
+                colors: [AlfieColor.ink.opacity(0.05), .clear, .clear],
                 startPoint: .top,
                 endPoint: .bottom
             )
@@ -466,7 +477,7 @@ struct LiquidGlassBackdrop: View {
 
 struct GlassPanelModifier: ViewModifier {
     var cornerRadius: CGFloat
-    var tint: Color = .white.opacity(0.1)
+    var tint: Color = AlfieColor.ink.opacity(0.1)
     var opacity: CGFloat = 0.18
 
     func body(content: Content) -> some View {
@@ -478,7 +489,7 @@ struct GlassPanelModifier: ViewModifier {
                         RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
                             .fill(
                                 LinearGradient(
-                                    colors: [tint.opacity(opacity), .white.opacity(0.04), .clear],
+                                    colors: [tint.opacity(opacity), AlfieColor.ink.opacity(0.04), .clear],
                                     startPoint: .topLeading,
                                     endPoint: .bottomTrailing
                                 )
@@ -486,7 +497,7 @@ struct GlassPanelModifier: ViewModifier {
                     )
                     .overlay(
                         RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
-                            .strokeBorder(.white.opacity(0.14), lineWidth: 1)
+                            .strokeBorder(AlfieColor.ink.opacity(0.14), lineWidth: 1)
                     )
                     .shadow(color: .black.opacity(0.22), radius: 30, y: 14)
             }

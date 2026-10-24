@@ -52,10 +52,13 @@ struct MultiviewConsoleView<Strip: View, Pill: View>: View {
                 header
                     .place(layout.header)
 
+                // Panes show live video: dark in every appearance.
                 pane(.preview(from: snapshot))
+                    .environment(\.colorScheme, .dark)
                     .place(layout.previewPane)
 
                 pane(.program(from: snapshot))
+                    .environment(\.colorScheme, .dark)
                     .place(layout.programPane)
 
                 NextShotPanel(status: NextShotStatus.make(snapshot, availability: availability).withDirector(director))
@@ -105,10 +108,10 @@ struct MultiviewConsoleView<Strip: View, Pill: View>: View {
             Text("ALFIE")
                 .font(.system(size: 15, weight: .heavy))
                 .tracking(1.5)
-                .foregroundStyle(.white)
+                .foregroundStyle(AlfieColor.ink)
             Text("MULTIVIEW · \(snapshot.showStandard.title)")
                 .font(ConsoleStyle.label(11))
-                .foregroundStyle(.white.opacity(0.55))
+                .foregroundStyle(AlfieColor.ink.opacity(0.55))
             Spacer()
             if let headerTrailing { headerTrailing }
         }
@@ -141,12 +144,12 @@ struct ConsoleSlotPlaceholder: View {
     var body: some View {
         Text(title)
             .font(ConsoleStyle.label(11))
-            .foregroundStyle(.white.opacity(0.4))
+            .foregroundStyle(AlfieColor.ink.opacity(0.4))
             .frame(maxWidth: width ?? .infinity, maxHeight: height ?? .infinity)
             .frame(width: width, height: height)
             .background(
                 RoundedRectangle(cornerRadius: 10)
-                    .strokeBorder(Color.white.opacity(0.15), style: StrokeStyle(lineWidth: 1, dash: [5, 4]))
+                    .strokeBorder(AlfieColor.ink.opacity(0.15), style: StrokeStyle(lineWidth: 1, dash: [5, 4]))
             )
     }
 }

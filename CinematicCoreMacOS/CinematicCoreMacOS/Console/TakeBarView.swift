@@ -49,7 +49,7 @@ struct TakeBarView: View {
                     .animation(.easeInOut(duration: 0.18).repeatCount(3, autoreverses: true),
                                value: refusalFlash)
             }
-            .foregroundStyle(availability.isEligible ? Color.white : Color.white.opacity(0.45))
+            .foregroundStyle(availability.isEligible ? Color.white : AlfieColor.ink.opacity(0.45))
             .frame(maxWidth: .infinity, maxHeight: .infinity)
             .background(
                 RoundedRectangle(cornerRadius: 10, style: .continuous)
