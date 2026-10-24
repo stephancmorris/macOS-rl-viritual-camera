@@ -47,6 +47,8 @@ final class DirectorCutExecution {
         let judgeMaximumAge: TimeInterval
         let minimumProbability: Double?
         let judge: any DirectorJudge
+        /// Version/provenance supplied by the study; never an execution setting.
+        var capture: DirectorShadowRecorder.CaptureBinding? = nil
         var isValid: Bool {
             [autoNoticeLength, maximumLateness, permitValidity, judgeMaximumAge]
                 .allSatisfy { $0.isFinite && $0 >= 0 } &&
@@ -61,6 +63,8 @@ final class DirectorCutExecution {
         let programRevisions: ChannelRevisions
         let previewRevisions: ChannelRevisions
         let routeGeneration: UInt64
+        /// Provenance of this context's timeline, history and candidate confidence.
+        var provenance: [DirectorShadowRecord.EvidenceClass]? = nil
     }
     typealias ContextProvider = (TimeInterval) -> Context?
 
@@ -75,6 +79,12 @@ final class DirectorCutExecution {
     private(set) var lastResult: TakeResult?
     var pending: CutNotice.Token? { notice.pending }
     var isConfigured: Bool { configuration != nil }
+    var captureParameters: DirectorShadowRecorder.Parameters? {
+        guard let c = configuration, let binding = c.capture, let controller,
+              let readiness = controller.captureCutReadinessParameters else { return nil }
+        return controller.captureParameters(binding, readiness: readiness,
+            judgeMaximumAge: c.judgeMaximumAge, minimumProbability: c.minimumProbability)
+    }
 
     init(show: ShowCoordinator?, controller: DirectorController) {
         self.show = show; self.controller = controller
@@ -162,6 +172,10 @@ final class DirectorCutExecution {
 
     private func decision(now: TimeInterval, configuration c: Configuration)
         -> (decision: CutPolicy.Decision, live: DirectorTakeState)? {
+        var captureAccounted = false
+        defer {
+            if c.capture != nil && !captureAccounted { controller?.shadowRecorder?.log.noteDropped() }
+        }
         guard DeveloperFlags.allowDirectorAuto, c.isValid, let controller, controller.isAttached,
               let show, !show.editLive, now.isFinite, now >= 0,
               let context = context?(now), context.timeline.now == now,
@@ -178,9 +192,27 @@ final class DirectorCutExecution {
         let segment = controller.runSheet?.current?.type ?? .liveEvent
         if controller.authority.level == .backup,
            [.panel, .performance, .videoBreak].contains(segment), !context.prepared.shot.isWide { return nil }
-        let live = controller.currentTakeState(now: now)
-        return (CutPolicy.evaluate(live: live, timeline: context.timeline, prepared: context.prepared,
+        let snapshot = controller.currentTakeSnapshot(now: now), live = snapshot.live
+        let revision = controller.evidenceRevision
+        let result = CutPolicy.evaluate(live: live, timeline: context.timeline, prepared: context.prepared,
             programIdentity: context.programIdentity, style: style, evidenceRevision: controller.evidenceRevision,
-            judge: c.judge, judgeMaximumAge: c.judgeMaximumAge, minimumProbability: c.minimumProbability), live)
+            judge: c.judge, judgeMaximumAge: c.judgeMaximumAge, minimumProbability: c.minimumProbability)
+        if c.capture != nil {
+            if let parameters = captureParameters, let provenance = context.provenance,
+               !provenance.isEmpty, provenance.allSatisfy({ parameters.binding.provenance.contains($0) }),
+               controller.authority == live.world.authority, controller.evidenceRevision == revision,
+               controller.policyRevision == live.world.policyRevision,
+               controller.nominationRevision == live.world.nominationRevision,
+               controller.effectiveStyle == style, show.programChannel == context.program,
+               show.previewChannel == preview, show.router.routeGeneration == context.routeGeneration,
+               program.revisions == context.programRevisions, channel.revisions == context.previewRevisions {
+                captureAccounted = true
+                controller.captureDecision(DirectorShadowRecorder.cut(result), evaluation: .init(now: now,
+                    parameters: parameters, sample: snapshot.sample, revisions: live.world.revisions,
+                    adapter: controller.adapter, readinessInputs: snapshot.readinessInputs,
+                    prepareReadiness: nil, cutReadiness: snapshot.measuredReadiness, timeline: context.timeline))
+            }
+        }
+        return (result, live)
     }
 }

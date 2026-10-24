@@ -53,7 +53,7 @@ Use a disposable app-data fixture/new test account and an identified candidate w
 
 - Exercise denied/revoked camera permission under an authorized test and record refusal, restart and recovery. No fabricated source/Program should appear.
 - Refuse recorder Start without consent; consent and record synthetic observations; revoke during recording and test queued admission, orderly close and restart. Inspect persisted JSONL/metadata and the existing drop counters. Preserve earlier accepted files.
-- Place old/new CSV/session JSON and text fixtures in isolated storage; verify each documented cleanup rule separately. DiagnosticsFileWriter still needs an injectable root/clock before safely automating its real pruning behavior.
+- Place old/new CSV/session JSON and text fixtures in isolated storage; verify each documented cleanup rule separately. The existing injected directory/clock supports this isolated diagnostics check; the cleanup results below cover the real queued pruning path.
 - Test Stop/rebind/reset and late-work rejection without inferring memory zeroization.
 - Inspect a metrics projection and any deliberately shared raw package separately. Check privacy declarations in the actual built app and extension before distribution.
 
@@ -62,3 +62,13 @@ R2 PRIVACY remains **Human Review for these software changes**, with permission,
 ### Isolated diagnostics cleanup check — 21 October 2026
 
 `DiagnosticsCleanupTests` exercises the actual queued deletion path in disposable storage using an injected wall clock. Five expanded cases cover old/exact-cutoff/recent CSV and session-JSON files, unrelated/outside-root preservation, age advancing on the next session and all three session artifacts staying in the selected temporary root. Production directory, thirty-day modification-time policy, strict boundary and session-start trigger are unchanged. This verifies diagnostics cleanup software; permission/disclosure, other stores and owner retention acceptance remain open. Final full Swift/Release evidence is linked from the [batch report](../../reports/auto-director/evaluation-tools-2026-10-21/implementation.md).
+
+### Recording persistence integrity — 22 October 2026 candidate
+
+Training recording separates admitted observation sequence numbers from successfully persisted row totals. Backpressure and write failures remain losses; metadata totals are based on successful writes rather than rows submitted to a writer. Stop and consent revocation close admission immediately, drain outstanding writes, then persist the retained terminal buffer before metadata and close. This preserves the already admitted partial tail without adding an unbounded write queue. A failed partial append is truncated back to its prior boundary before another batch; rollback failure closes the writer and surfaces an error. An unrecoverable file can retain an incomplete tail, so successful-batch totals are not a power-loss or damaged-file completeness guarantee. Consent, retention defaults, data fields and cleanup triggers are unchanged. Synthetic writer fault/drain checks and final candidate results are recorded in the [batch report](../../reports/director-decision-evidence-2026-10-22/README.md). Live permission and distribution acceptance remain open.
+
+### Offline loader integrity — 22 October 2026 follow-up
+
+The framing-training loader validates JSONL object/field shapes and finite numeric observation/label fields used by consumers before returning sessions. Present FPS must be a positive finite number; present session IDs and completed row totals must match their directory and persisted row count. Legacy absent optional metadata remains supported. Invalid input raises an actionable error instead of silently feeding crashes or NaN actions into consumers. This is corpus validation, not authorization to train or a trained-model quality result. Existing consumer timing assumptions remain: gaps and subsampling strides are accepted, but the environment/BC velocity and action paths still use fixed FPS adjacency. The verified timing-gap issue remains a separate follow-up.
+
+The offline Python `SessionWriter` now appends a UUID to each timestamped session ID and exclusively creates the directory, frames and final metadata. Same-second or forced-collision writers cannot overwrite an existing session; errors may leave a new incomplete artifact. This changes file ownership safety without changing recorded fields, media consent, retention or network behavior.

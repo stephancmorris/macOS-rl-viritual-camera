@@ -9,6 +9,8 @@ final class DirectorAssistPreparation {
         let readiness: DirectorReadiness.Parameters
         let maximumRequestAge: TimeInterval
         let onePreparationPerTenure: Bool
+        /// Explicit study metadata only. Absence never changes preparation admission.
+        var capture: DirectorShadowRecorder.CaptureBinding? = nil
     }
     private weak var show: ShowCoordinator?
     private weak var controller: DirectorController?
@@ -57,6 +59,14 @@ final class DirectorAssistPreparation {
                 policyRevision: controller.policyRevision, nominationRevision: controller.nominationRevision),
               let request = preparation.propose(proposal, maximumAge: c.maximumRequestAge, now: now) else { return nil }
         configuration = c
+        if let binding = c.capture {
+            if let parameters = controller.captureParameters(binding, readiness: c.readiness) {
+                controller.captureDecision(DirectorShadowRecorder.preparation(request), evaluation: .init(now: now,
+                    parameters: parameters, sample: current.sample, revisions: revisions, adapter: controller.adapter,
+                    readinessInputs: current.inputs, prepareReadiness: current.measuredReadiness,
+                    cutReadiness: nil, timeline: nil))
+            } else { controller.shadowRecorder?.log.noteDropped() }
+        }
         return request
     }
 
@@ -116,25 +126,31 @@ final class DirectorAssistPreparation {
         return .init(input: value.intent.target, shot: value.intent.shot)
     }
 
-    private func snapshot(configuration c: Configuration, now: TimeInterval) -> (live: DirectorLiveState, ready: DirectorReadiness) {
+    private func snapshot(configuration c: Configuration, now: TimeInterval)
+        -> (live: DirectorLiveState, ready: DirectorReadiness, sample: ChannelEvidenceSample?,
+            inputs: DirectorReadiness.Inputs?, measuredReadiness: DirectorReadiness?) {
         let preview = show?.previewChannel, channel = preview.flatMap { show?.channel($0) }
         var ready = DirectorReadiness(reasons: [.evidenceUnavailable]), evidence = false
+        var observedSample: ChannelEvidenceSample?, evaluatedInputs: DirectorReadiness.Inputs?
+        var measuredReadiness: DirectorReadiness?
         if let controller, let adapter = controller.adapter, let channel, let show, let inputs = show.takeInputs() {
             let sample = DirectorController.sample(channel.evidenceReadings(now: now))
+            observedSample = sample
             let take = TakeAvailability.evaluate(take: inputs, program: show.programChannel, preview: preview,
                 standard: ShowStandard.activeOrCurrent, editLive: show.editLive)
             if let input = DirectorController.currentCutInputs(sample: sample, adapter: adapter, take: take, now: now) {
                 ready = DirectorReadiness.evaluate(input, parameters: c.readiness, bar: .prepare)
+                evaluatedInputs = input; measuredReadiness = ready
                 evidence = input.identity == .confirmed
             }
         }
         #if DEBUG
-        if let override = readinessForTesting { ready = override; evidence = override.isReady }
+        if let override = readinessForTesting { ready = override; evidence = override.isReady; measuredReadiness = nil }
         #endif
         return (.init(authority: controller?.authority ?? DirectorAuthority(reviewPolicy: .conservative),
             program: show?.programChannel ?? .a, preview: preview, revisions: channel?.revisions,
             routeGeneration: show?.router.routeGeneration ?? 0, sourceMissing: channel?.sourceMissing ?? true,
             policyRevision: controller?.policyRevision ?? 0, nominationRevision: controller?.nominationRevision ?? 0,
-            evidenceAvailable: evidence), ready)
+            evidenceAvailable: evidence), ready, observedSample, evaluatedInputs, measuredReadiness)
     }
 }

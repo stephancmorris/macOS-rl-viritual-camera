@@ -19,16 +19,41 @@ nonisolated protocol TrainingDataWriting: Sendable {
 
 actor TrainingDataSessionWriter: TrainingDataWriting {
     private let fileHandle: FileHandle
+    private let writeData: @Sendable (FileHandle, Data) throws -> Void
     private var isClosed = false
 
-    init(fileHandle: FileHandle) {
+    init(
+        fileHandle: FileHandle,
+        writeData: @escaping @Sendable (FileHandle, Data) throws -> Void = { handle, data in
+            try handle.write(contentsOf: data)
+        }
+    ) {
         self.fileHandle = fileHandle
+        self.writeData = writeData
     }
 
     func write(_ data: Data) throws -> Int64 {
         guard !isClosed else { throw CocoaError(.fileWriteUnknown) }
-        try fileHandle.write(contentsOf: data)
-        return Int64(data.count)
+        let batchOffset = try fileHandle.offset()
+        do {
+            try writeData(fileHandle, data)
+            return Int64(data.count)
+        } catch {
+            // FileHandle may append part of a batch before throwing. Restore
+            // the previous JSONL boundary before another batch can be written.
+            do {
+                try fileHandle.truncate(atOffset: batchOffset)
+                try fileHandle.seek(toOffset: batchOffset)
+            } catch {
+                // The file boundary is uncertain; reject every later write.
+                isClosed = true
+                try? fileHandle.close()
+                throw NSError(domain: "TrainingDataSessionWriter", code: 1, userInfo: [
+                    NSLocalizedDescriptionKey: "Failed to restore the training data file after a write error; the writer was closed. \(error.localizedDescription)"
+                ])
+            }
+            throw error
+        }
     }
 
     func close() throws {
@@ -73,6 +98,7 @@ final class TrainingDataRecorder: ObservableObject {
     @Published var manualCropOverride: CropEngine.CropRect?
 
     struct RecordingStats: Sendable {
+        /// Rows in batches successfully written to the session file.
         var framesRecorded: Int = 0
         var sessionDuration: TimeInterval = 0
         var fileSizeBytes: Int64 = 0
@@ -170,6 +196,7 @@ final class TrainingDataRecorder: ObservableObject {
     private let defaults: UserDefaults
     private let directoryOverride: URL?
     private let writerFactory: (FileHandle) -> any TrainingDataWriting
+    /// Producer sequence, independent of persisted rows; dropped batches leave gaps.
     private var frameIndex: Int = 0
     private var sessionStartTime: Date?
     private var buffer: [Data] = []
@@ -334,12 +361,8 @@ final class TrainingDataRecorder: ObservableObject {
         isRecording = false
         isStopping = true
 
-        if !buffer.isEmpty {
-            let batch = buffer
-            buffer = []
-            flushBuffer(batch)
-        }
-
+        // Retain the admitted tail until existing writes free a slot. The
+        // ordinary in-flight limit must not discard this last partial batch.
         let task = Task { await finalizeRecording() }
         shutdownTask = task
         return task
@@ -347,6 +370,12 @@ final class TrainingDataRecorder: ObservableObject {
 
     private func finalizeRecording() async {
         await finishPendingWrites()
+        if !buffer.isEmpty {
+            let batch = buffer
+            buffer = []
+            flushBuffer(batch)
+            await finishPendingWrites()
+        }
 
         // Finalize metadata
         if var metadata = pendingMetadata, let sessionDir = sessionDirectory {
@@ -486,7 +515,6 @@ final class TrainingDataRecorder: ObservableObject {
         }
 
         frameIndex += 1
-        stats.framesRecorded += 1
         if let start = sessionStartTime {
             stats.sessionDuration = Date().timeIntervalSince(start)
         }
@@ -575,6 +603,7 @@ final class TrainingDataRecorder: ObservableObject {
             if let predecessor { _ = try? await predecessor.value }
             do {
                 let byteCount = try await writer.write(combined)
+                stats.framesRecorded += batch.count
                 stats.fileSizeBytes += byteCount
                 return byteCount
             } catch {
@@ -590,8 +619,6 @@ final class TrainingDataRecorder: ObservableObject {
 
     private func finishPendingWrites() async {
         let tasks = Array(pendingWriteTasks.values)
-        pendingWriteTasks = [:]
-
         for task in tasks {
             do {
                 _ = try await task.value
