@@ -1,0 +1,78 @@
+{
+  "date": "2026-10-24",
+  "base": "12a2bc5",
+  "branch": "codex/next-ticket-batches-2026-10-24",
+  "sourceFingerprint": "f88154525504bed0835da664e8e602373ee6113d915e591f0c17dbf42751c35c",
+  "toolchain": "Xcode 26.3 (17C529)",
+  "host": "Mac mini / Apple M2 Pro / macOS 27.0.1",
+  "swift": {
+    "setup-before": {
+      "result": "Failed",
+      "passedTests": 32,
+      "failedTests": 1,
+      "skippedTests": 0,
+      "totalTestCount": 33,
+      "passedExpanded": 42
+    },
+    "setup-after": {
+      "result": "Passed",
+      "passedTests": 59,
+      "failedTests": 0,
+      "skippedTests": 0,
+      "totalTestCount": 59,
+      "passedExpanded": 88
+    },
+    "take-before": {
+      "result": "Failed",
+      "passedTests": 18,
+      "failedTests": 3,
+      "skippedTests": 0,
+      "totalTestCount": 21,
+      "passedExpanded": 23
+    },
+    "take-after": {
+      "result": "Passed",
+      "passedTests": 42,
+      "failedTests": 0,
+      "skippedTests": 0,
+      "totalTestCount": 42,
+      "passedExpanded": 81
+    },
+    "full-1": {
+      "result": "Passed",
+      "passedTests": 1065,
+      "failedTests": 0,
+      "skippedTests": 4,
+      "totalTestCount": 1069,
+      "passedExpanded": 1660
+    },
+    "full-2": {
+      "result": "Passed",
+      "passedTests": 1069,
+      "failedTests": 0,
+      "skippedTests": 4,
+      "totalTestCount": 1073,
+      "passedExpanded": 1674
+    },
+    "coreml-interop": {
+      "result": "Passed",
+      "passedTests": 1,
+      "failedTests": 0,
+      "skippedTests": 0,
+      "totalTestCount": 1,
+      "passedExpanded": 1
+    }
+  },
+  "python": {
+    "scripts": 111,
+    "directorDatasetAndScorer": 14,
+    "failed": 0
+  },
+  "release": {
+    "result": "passed",
+    "codeSigningAllowed": false
+  },
+  "manualUI": "not verified: computer-control selection timed out, including Finder",
+  "rigQualification": false,
+  "artifacts": "/private/tmp/alfie-batches-20261024"
+}
