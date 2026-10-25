@@ -17,6 +17,26 @@ FIXTURE = Path(__file__).with_name('fixtures') / 'director-scorer-synthetic'
 
 
 class DatasetTests(unittest.TestCase):
+    def test_complete_parameter_rollback_cannot_enter_training(self):
+        def complete(rows):
+            for row in rows:
+                row['parameters']['readiness'] = {
+                    'minimumSettledTime': 0, 'maximumMotion': 0.2, 'cutOnMotionAllowed': False,
+                    'minimumCutSettledTime': 0, 'maximumCutMotion': 0.1}
+                row['parameters']['adapter'] = {'stillSpeed': 0.2, 'debounce': 0, 'maximumObservationAge': 2}
+            rows[0]['parameters']['parametersVersion'] = '2'
+        self.records(complete)
+        rows, issues, source = dataset.shadow.load_input(self.root)
+        self.assertFalse(dataset.shadow.blocking_input(issues))
+        self.assertEqual(len(rows), 12)
+        analysis = dataset.shadow.analyze(rows, 0, issues, source)
+        self.assertGreater(analysis['issues']['parameter_version_rollback_records'], 0)
+        self.assertFalse(any(analysis['issues'].get(key, 0) for key in dataset.INCOMPLETE_ISSUES))
+        with self.assertRaises(dataset.DatasetError):
+            self.load()
+        self.records(lambda records: [r['parameters'].update(parametersVersion='1') for r in records])
+        self.assertEqual(len(self.load().groups['train']), 4)
+
     def test_transient_export_replacement_cannot_bind_different_parsed_bytes(self):
         original_loader = dataset.shadow.load_input
         for member in ('records.jsonl', 'manifest.json'):

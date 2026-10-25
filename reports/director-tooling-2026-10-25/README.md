@@ -80,6 +80,12 @@ The new scorer corpus was loaded with explicit whole-session splits and the harn
 
 The regression reproduced the omission and now covers reported loss, missing bindings, and a completed action crossing a phase boundary with original sequence spans. All **125 script Python definitions pass**, zero failures. Baseline/final logs: `/private/tmp/alfie-memo-completeness-baseline-20261025.log`, `/private/tmp/alfie-memo-completeness-final-20261025.log`. Matching, counts, thresholds and qualification are unchanged. Current main and the board were refreshed; active UI tasks remain separate.
 
+## Training capture completeness
+
+[AD-TRAINING-COMPLETENESS](https://trello.com/c/tSDoot5K) closes a mismatch between C-05 and C-10: a complete parameter-version rollback correctly blocked source-session scoring, but the dataset loader accepted it because its copied issue-name list omitted that diagnostic. Training now consumes the authoritative capture-blocked session set in addition to its existing strict issue checks, so future analyzer completeness rules cannot silently disappear at this boundary.
+
+The regression verifies a valid twelve-row export with a rollback as the only failing completeness condition, proves training previously accepted it, and then proves a monotonic complete-history control still loads. All **16 Director training and 125 script Python definitions pass**, zero failures. Logs: `/private/tmp/alfie-training-capture-status-baseline-20261025.log`, `/private/tmp/alfie-training-capture-status-final-20261025.log`, `/private/tmp/alfie-training-capture-status-scripts-20261025.log`. Labels, splits, features, model settings, application code and qualification are unchanged.
+
 ## Report completeness repair
 
 Version-1 evaluation session summaries said `observed` despite dropped records, a missing prefix, an orphan action with no comparison rows, or an unscored completed Take. Two added test definitions reproduced five failing cases before the fix. The analyzer now exposes its authoritative capture-blocked session set independently of optional phase output. The evaluator uses that set and unscored-action status for each session summary. Legacy C-05 Markdown also labels unscored comparisons incomplete. Matching, parameter settings and qualification behavior are unchanged.

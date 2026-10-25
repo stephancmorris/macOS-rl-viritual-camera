@@ -114,7 +114,8 @@ def load_dataset(bundle_path, labels_path, splits_path):
                 'export changed during validation')
         # Existing C-05 checks include loss, action pairs, clocks and immutable parameters.
         analysis = shadow.analyze(records, 0, issues, source)
-        require(not any(analysis['issues'].get(key, 0) for key in INCOMPLETE_ISSUES),
+        require(not analysis['captureBlockedSessions'] and
+                not any(analysis['issues'].get(key, 0) for key in INCOMPLETE_ISSUES),
                 'incomplete or inconsistent source sessions')
     except (ValueError, TypeError, KeyError, OverflowError, RecursionError, UnicodeError):
         raise DatasetError('invalid or incomplete explicit export bundle') from None
