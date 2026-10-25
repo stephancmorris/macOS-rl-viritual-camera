@@ -6,6 +6,8 @@
 
 ## Grouped work
 
+The [refreshed next-group sheet](next-groups.md) separates completed offline tooling, combined application integration, already assigned feel follow-through, current synthetic producer evidence and the remaining real evaluation gates. Board In Progress is an assignment signal; active execution elsewhere has not been established by the available chat inventory.
+
 **Current-main software check:** independently exported the unmodified `origin/main` commit `952d05d` into a new temporary directory without changing this checkout or integrating branches. Its full app test target passed **1,090 definitions / 1,683 expanded cases**, zero failures and three explicit investigation/consented-folder/real-camera skips. Existing synthetic CoreML CPU interoperability was configured and passed. The unsigned Release app and extension also build; the embedded source fingerprint matches `11ec9c50c05b64047296e2a681da364122a7c2f00ea39694eaf3e346be5a4329`. Exact sanitized provenance and binary hash are in [current-main-validation.json](current-main-validation.json). This verifies the newly merged Settings/feel source independently of the repairs on this branch. It does not verify their combined integration, native usability, receiver output, installation or Director level qualification. No installed app was changed. The earlier 18:01 note's lack of current-main binary verification is superseded by this check.
 
 1. **Report completeness:** [AD-EVIDENCE-STATUS](https://trello.com/c/FsPvuofO), related C-05/D-06. Repair contradictory session/row summaries first. Implemented below.
