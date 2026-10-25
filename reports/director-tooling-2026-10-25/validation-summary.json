@@ -1,16 +1,16 @@
 {
   "date": "2026-10-25",
   "scope": "Auto Director offline evidence/tooling review snapshot",
-  "latestCodeCommit": "f3c7c94",
+  "latestCodeCommit": "3f9797e3d8c4d25daa897a6854a3fe51fbe72df4",
   "scriptTests": {
-    "passed": 125,
+    "passed": 127,
     "failed": 0,
-    "log": "/private/tmp/alfie-training-capture-status-scripts-20261025.log"
+    "log": "/private/tmp/alfie-pr81-preview-20261025.FYC92c/scripts.log"
   },
   "directorTrainingTests": {
     "passed": 16,
     "failed": 0,
-    "log": "/private/tmp/alfie-training-capture-status-final-20261025.log"
+    "log": "/private/tmp/alfie-pr81-preview-20261025.FYC92c/training.log"
   },
   "currentMainAppValidation": "current-main-validation.json",
   "currentMainDirectorEvidence": "current-main-director-evidence.json",
@@ -71,10 +71,18 @@
       "ticket": "AD-EVIDENCE-STATUS",
       "url": "https://trello.com/c/FsPvuofO",
       "list": "👀 Human Review"
+    },
+    {
+      "ticket": "AD-WINDOW-PRECISION",
+      "url": "https://trello.com/c/qZ9gNww6",
+      "list": "👀 Human Review"
     }
   ],
   "qualification": "incomplete",
   "modelPromotion": "notPerformed",
-  "combinedBranchIntegration": "notPerformed",
-  "installedAppReplacement": false
+  "installedAppReplacement": false,
+  "pullRequest": "https://github.com/stephancmorris/macOS-rl-viritual-camera/pull/81",
+  "draft": true,
+  "combinedSourceValidation": "pr81-validation.json",
+  "branchMergePerformed": false
 }
