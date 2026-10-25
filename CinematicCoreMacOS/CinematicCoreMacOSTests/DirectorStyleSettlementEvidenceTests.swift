@@ -9,8 +9,9 @@ import Testing
         .init(parameters: .init(maximumObservationAge: 2, debounce: 0, stillSpeed: 0.05))
     }
     private func sample(_ time: Double, speed: Double = 0, age: Double = 0.05,
-                        gesture: Bool = false, target: UUID? = nil) -> ChannelEvidenceSample {
-        .init(channel: .b, sampledAt: time, lockPhase: .tracking, trackingOwnsControl: true,
+                        gesture: Bool = false, target: UUID? = nil,
+                        phase: RecoveryState.Phase = .tracking) -> ChannelEvidenceSample {
+        .init(channel: .b, sampledAt: time, lockPhase: phase, trackingOwnsControl: true,
               galleryReady: true, lockedTargetID: target ?? self.target, observationAge: age,
               subjectSpeed: speed, holdingSteady: true, cropConverged: true,
               operatorGestureInProgress: gesture, observedPersonCount: 1)
@@ -99,5 +100,18 @@ import Testing
         a.ingest(sample(0)); a.ingest(sample(2))
         #expect(a.settledFor(.b, now: 2) == 2)
         #expect(a.cutSettledFor(.b, motionLimit: limit, now: 2) == 0)
+    }
+
+    @Test func briefUnconfirmedLockCannotAccumulateCutSettlement() {
+        var a = DirectorEvidenceAdapter(parameters: .init(maximumObservationAge: 2,
+                                                         debounce: 0.5, stillSpeed: 0.05))
+        a.ingest(sample(0), cutMotionLimit: limit)
+        a.ingest(sample(0.6), cutMotionLimit: limit)
+        a.ingest(sample(0.7, phase: .hold), cutMotionLimit: limit)
+        #expect(a.state(for: .b)?.identity == .confirmed)
+        #expect(a.settledFor(.b, now: 0.7) > 0)
+        #expect(a.cutSettledFor(.b, motionLimit: limit, now: 0.7) == 0)
+        a.ingest(sample(0.8), cutMotionLimit: limit)
+        #expect(a.cutSettledFor(.b, motionLimit: limit, now: 0.8) == 0)
     }
 }

@@ -159,7 +159,7 @@ nonisolated struct DirectorEvidenceAdapter: Sendable {
         if state.cutMotionLimit != cutMotionLimit { state.cutSettledSince = nil }
         state.cutMotionLimit = cutMotionLimit
         if let limit = cutMotionLimit, limit.isFinite, limit >= 0,
-           state.evidenceAvailable, state.settledSince != nil, sample.subjectSpeed <= limit {
+           raw == .confirmed, state.evidenceAvailable, state.settledSince != nil, sample.subjectSpeed <= limit {
             state.cutSettledSince = state.cutSettledSince ?? now
         } else {
             state.cutSettledSince = nil
