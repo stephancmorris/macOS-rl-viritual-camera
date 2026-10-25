@@ -219,7 +219,8 @@ def summarize_shadow(path, window, bindings, binding_schema_version=1):
                 row['counts'].update(compared=None, exact=None, unscored_actions=counts['completed_actions'])
             rows.append(row)
     require(set(declared) <= set(by_session))
-    return {'records': data['records'], 'inputFingerprints': input_fingerprints(source),
+    return {'records': data['records'], 'matchingWindowSeconds': window,
+            'inputFingerprints': input_fingerprints(source),
             'rows': rows, 'gaps': gaps, 'sessions': sessions,
             'parameterEvidence': parameter_evidence,
             'issues': {k: v for k, v in data['issues'].items() if v},
@@ -347,7 +348,8 @@ def summarize_shadow_phases(path, window, bindings):
                          'judgeModels': [list(m) for m in sorted(models, key=repr)],
                          'status': 'incomplete' if session in blocked or
                                    any(p['sessionID'] == session and p['status'] == 'incomplete' for p in phases) else 'observed'})
-    return {'records': data['records'], 'inputFingerprints': input_fingerprints(source),
+    return {'records': data['records'], 'matchingWindowSeconds': window,
+            'inputFingerprints': input_fingerprints(source),
             'bindingMode': 'explicitPhases', 'rows': rows, 'gaps': [],
             'sessions': sessions, 'phases': phases, 'parameterEvidence': parameter_evidence,
             'issues': {k: v for k, v in data['issues'].items() if v},
@@ -388,7 +390,7 @@ def negative_shadow_regressions(path, window):
         data = shadow.analyze(accepted, window, row_issues)
         counts = {metric: sum(s[metric] for _, s, _ in data['groups']) for metric in
                   ('predictions', 'completed_actions', 'compared', 'exact', 'unscored_actions', 'unmatched_predictions', 'unmatched_actions')}
-        output.append({'case': name, 'evidenceClass': 'synthetic', 'counts': counts,
+        output.append({'case': name, 'evidenceClass': 'synthetic', 'matchingWindowSeconds': window, 'counts': counts,
                        'dwellSeconds': [v for values in data['dwell'].values() for v in values],
                        'issues': {k: v for k, v in data['issues'].items() if v},
                        'status': 'incomplete' if not accepted or counts['unscored_actions'] or any(b for _, _, b in data['groups']) else 'observed'})
@@ -463,6 +465,7 @@ def markdown(result):
         data = result['shadow']
         lines += ['', *shadow.fingerprint_lines(data['inputFingerprints'])]
         lines += ['## C-05 shadow observations', '', f'Accepted records: {data["records"]}. Explicit export validated: {str(data["exportValidated"]).lower()}.', '',
+                  f'Matching window: {data["matchingWindowSeconds"]:g} seconds (supplied). This is an analysis setting, not a directing recommendation.', '',
                   'Agreement describes operator matching, not independent correctness. Bindings are declared evaluation scope, not verified physical-route observations.', '',
                   '| Session | Scope | Exact / compared | Predictions | Unmatched predictions | Unmatched actions | Unscored actions | Status |',
                   '| --- | --- | --- | ---: | ---: | ---: | ---: | --- |']
@@ -499,6 +502,8 @@ def markdown(result):
         for row in result['shadowRegressions']:
             c = row['counts']
             lines.append(f'| {row["case"]} | {c["predictions"]} | {c["completed_actions"]} | {c["compared"]} | {c["exact"]} | {c["unscored_actions"]} | {", ".join(f"{v:g}" for v in row["dwellSeconds"]) or "unavailable"} | {row["status"]} |')
+        lines += ['', *[f'- {row["case"]}: matching window {row["matchingWindowSeconds"]:g} seconds (supplied).'
+                        for row in result['shadowRegressions']]]
     lines += ['', '## Missing assessment evidence', '']
     lines += [f'- {item}' for item in result['missingEvidence']]
     lines += ['', 'Assist, Auto and Backup remain incomplete without their required real evidence and explicit owner, event-operator and independent-reviewer sign-off. This tool never creates a qualification record.', '']
@@ -517,6 +522,7 @@ def parameter_memo(result):
                   '```json', json.dumps(run['parameters'], sort_keys=True, indent=2), '```', '']
     if result['shadow'] is not None:
         lines += shadow.fingerprint_lines(result['shadow']['inputFingerprints'])
+        lines += [f'Matching window: {result["shadow"]["matchingWindowSeconds"]:g} seconds (supplied). This is an analysis setting, not a directing recommendation.', '']
         for item in result['shadow']['parameterEvidence']:
             phase = f' / phase {item["phaseID"]}' if 'phaseID' in item else ''
             lines += [f'## Shadow session {item["sessionID"]}{phase}', '',

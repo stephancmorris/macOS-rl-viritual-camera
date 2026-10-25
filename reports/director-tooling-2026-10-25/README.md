@@ -36,15 +36,19 @@ The renewed request was received around 17:41 AEDT on 25 October. A thread heart
 
 One regression definition reproduced **four failing cases** before repair, plus a learned-model-without-version control already refused. All **121 script Python definitions pass**, zero failures. The regression also supplies a missing evidence path and verifies that invalid metadata is refused before file access. Baseline/final logs: `/private/tmp/alfie-binding-api-baseline-20261025.log` and `/private/tmp/alfie-binding-api-final-20261025.log`. No new schema or acceptance rule was introduced.
 
-## Report completeness repair
-
 ## Dataset consumed-byte integrity
 
 [AD-DATASET-DIGEST](https://trello.com/c/8vf2UFYx) uses the new same-read fingerprints to close a C-10 dataset provenance gap. The loader previously hashed files before and after parsing, but a file replaced only during parsing could pass those checks while supplying different metadata. Deterministic temporary-file regressions replaced records and manifest separately, restored the original file before the post-read checks, and reproduced two failures. The loader now also compares the bounded parser's consumed-byte hashes to the initial digests. Existing post-read checks remain.
 
 All **15 Director training and 121 script Python definitions pass**, zero failures. The ordinary synthetic corpus explicitly retains the exact manifest/records hashes. No labels, features, splits, model parameters, app code or qualification changed. Logs: `/private/tmp/alfie-dataset-digest-baseline-20261025.log`, `/private/tmp/alfie-dataset-digest-training-20261025.log`, `/private/tmp/alfie-dataset-digest-scripts-20261025.log`. Trello refresh still shows the Director style tasks active elsewhere; they were not duplicated.
 
-## Original completeness regression evidence
+## Matching-window provenance
+
+[AD-MATCH-WINDOW](https://trello.com/c/PfUxs7j0) retains the actual caller-supplied matching window in legacy and phase evaluation JSON, Markdown and parameter memos, plus every authored negative-regression row. Previously exact file hashes could identify inputs while omitting the analysis setting that changes agreement counts. No default or recommended value was introduced.
+
+The regression reproduced four missing-field errors before repair. All **122 script Python definitions pass**, zero failures. Zero, fractional and custom windows are retained; the historical synthetic fixture compares zero actions with 0/0.05 seconds and two actions with 2.75 seconds. A separate end-to-end CLI reanalysis of retained historical synthetic exports verified the JSON, report and memo at an explicitly supplied 2.75 seconds, with qualification still false. Logs/artifacts: `/private/tmp/alfie-match-window-baseline-20261025.log`, `/private/tmp/alfie-match-window-final-20261025.log`, `/private/tmp/alfie-matching-window-20261025.json`, `/private/tmp/alfie-matching-window-20261025.md`, `/private/tmp/alfie-matching-window-memo-20261025.md`. This is analysis reproducibility, not a new recording or operating parameter. Refreshed main remains `952d05d`; active style tasks remain separate.
+
+## Report completeness repair
 
 Version-1 evaluation session summaries said `observed` despite dropped records, a missing prefix, an orphan action with no comparison rows, or an unscored completed Take. Two added test definitions reproduced five failing cases before the fix. The analyzer now exposes its authoritative capture-blocked session set independently of optional phase output. The evaluator uses that set and unscored-action status for each session summary. Legacy C-05 Markdown also labels unscored comparisons incomplete. Matching, parameter settings and qualification behavior are unchanged.
 

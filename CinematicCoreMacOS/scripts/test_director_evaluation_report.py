@@ -242,6 +242,23 @@ class PhaseEvaluationTests(unittest.TestCase):
 
 
 class EvaluationTests(unittest.TestCase):
+    def test_reports_retain_the_supplied_matching_window(self):
+        directory = FIXTURES / 'director-shadow-synthetic-export'
+        bindings = [binding(shadow_rows())]
+        for window in (0, 0.05, 2.75):
+            with self.subTest(window=window):
+                data = report.summarize_shadow(directory, window, bindings)
+                self.assertEqual(data['matchingWindowSeconds'], window)
+                self.assertEqual(sum(r['counts']['compared'] for r in data['rows']), 2 if window == 2.75 else 0)
+                result = report.evaluate(envelope(), shadow_data=data)
+                for text in (report.markdown(result), report.parameter_memo(result)):
+                    self.assertIn(f'Matching window: {window:g} seconds (supplied)', text)
+                regressions = report.negative_shadow_regressions(directory, window)
+                self.assertTrue(all(r['matchingWindowSeconds'] == window for r in regressions))
+        phased = report.summarize_shadow(directory, 1.25,
+                                        [phase_binding(shadow_rows(), 0, 6, 'whole')], binding_schema_version=2)
+        self.assertEqual(phased['matchingWindowSeconds'], 1.25)
+
     def test_legacy_python_api_validates_bindings_before_loading_evidence(self):
         rows = shadow_rows()
         cases = []
