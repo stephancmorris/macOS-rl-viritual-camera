@@ -167,6 +167,8 @@ def summarize_shadow(path, window, bindings, binding_schema_version=1):
     require(type(binding_schema_version) is int and binding_schema_version in SCHEMA['supportedEvaluationVersions'])
     if binding_schema_version == 2:
         return summarize_shadow_phases(path, window, bindings)
+    validate_evaluation({'evaluationSchemaVersion': 1, 'producer': 'DirectorReplay',
+                         'runs': [], 'shadowBindings': bindings})
     records, issues, source = shadow.load_input(path)
     data = shadow.analyze(records, window, issues, source)
     blocked_sessions = set(data['captureBlockedSessions'])

@@ -242,6 +242,22 @@ class PhaseEvaluationTests(unittest.TestCase):
 
 
 class EvaluationTests(unittest.TestCase):
+    def test_legacy_python_api_validates_bindings_before_loading_evidence(self):
+        rows = shadow_rows()
+        cases = []
+        original = binding(rows)
+        cases.append([original, {**original, 'configurationID': 'conflicting'}])
+        cases.append([{**original, 'configurationID': 'PRIVATE INVALID TEXT'}])
+        cases.append([{**original, 'route': 'unrecognized'}])
+        cases.append([{**original, 'unexpected': 'PRIVATE'}])
+        cases.append([{**original, 'judgeKind': 'learned', 'modelVersion': None}])
+        for bindings in cases:
+            with self.subTest(bindings=bindings), self.assertRaises(ValueError):
+                analyze_shadow(rows, bindings)
+            with tempfile.TemporaryDirectory() as directory:
+                with self.assertRaises(ValueError):
+                    report.summarize_shadow(Path(directory) / 'missing.jsonl', 2, bindings)
+
     def test_legacy_external_sidecar_retains_exact_fingerprint(self):
         with tempfile.TemporaryDirectory() as directory:
             src, out = Path(directory) / 'input.json', Path(directory) / 'report.json'

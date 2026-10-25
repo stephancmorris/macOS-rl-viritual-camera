@@ -2,6 +2,8 @@
 
 25 October 2026. Continued at the owner's request, prioritizing Auto Director evidence and tooling. Refreshed the Trello board (194 open cards across eight lists) and inspected the clean branch at `6c11f1b`. The previous verified application candidate and its installed-app distinction remain documented in [the preceding report](../next-ticket-batches-2026-10-24/README.md).
 
+**18:01 AEDT refresh:** fetched `origin/main` at `952d05d`, which now includes PRs #78–#80 (Director style decisions, Settings sidebar/appearance, feel controls). The newly recorded F2/F3 and SU-1–SU-5 decisions supersede the earlier statement below that style defaults and mid-show policy were open. They remain provisional study parameters, not level qualification. This branch has not integrated those newer app/UI commits; its earlier app artifact is not a current-main build. Trello also shows SU-03/SU-06/SU-07/SU-08 actively assigned elsewhere. This follow-up remains in the separate offline reporting files and does not duplicate those tasks. No app integration, binary or native verification is claimed for the new main.
+
 ## Grouped work
 
 1. **Report completeness:** [AD-EVIDENCE-STATUS](https://trello.com/c/FsPvuofO), related C-05/D-06. Repair contradictory session/row summaries first. Implemented below.
@@ -27,6 +29,12 @@ The current CLI was also run end to end against the retained **21 October histor
 ## Continued work window
 
 The renewed request was received around 17:41 AEDT on 25 October. A thread heartbeat named **ALFIE Director tooling work window** is active every 15 minutes through 22:41 AEDT today, with explicit instructions to avoid overlapping active work and to stop at the deadline. The older goal remains platform-marked usage-limited; a replacement goal was refused because it is unfinished. No goal was falsely marked complete and no reset credit was consumed. The latest usage snapshot allowed ordinary usage (5% of the primary window used); consumption is not an acceptance criterion.
+
+## Legacy Python binding validation
+
+[AD-BINDING-API](https://trello.com/c/v5e2dwnA) closes a mismatch between the version-1 direct Python API and the CLI/version-2 paths. Direct calls silently accepted duplicate conflicting session declarations, arbitrary configuration text, unsupported routes and unknown keys. The existing closed validator now runs before reading evidence. Missing valid bindings still produce explicit incomplete scope, and valid legacy/phase behavior is preserved.
+
+One regression definition reproduced **four failing cases** before repair, plus a learned-model-without-version control already refused. All **121 script Python definitions pass**, zero failures. The regression also supplies a missing evidence path and verifies that invalid metadata is refused before file access. Baseline/final logs: `/private/tmp/alfie-binding-api-baseline-20261025.log` and `/private/tmp/alfie-binding-api-final-20261025.log`. No new schema or acceptance rule was introduced.
 
 ## Report completeness repair
 
