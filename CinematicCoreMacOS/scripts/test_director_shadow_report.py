@@ -80,6 +80,14 @@ def run(rows, window=2):
 
 
 class PredictionSequencePrecedenceTests(unittest.TestCase):
+    def test_legacy_unscored_take_is_incomplete_in_markdown(self):
+        rows = fixture()
+        rows[2]['context'].pop('programShot')
+        data = run(rows)
+        self.assertFalse(data['captureBlockedSessions'])
+        self.assertTrue(any(counts['unscored_actions'] for _, counts, _ in data['groups']))
+        self.assertIn('| incomplete |', report.markdown(data, 2))
+
     def assert_matching_in_v1_and_v2(self, rows, expected):
         records, issues = report.load_records(io.BytesIO(('\n'.join(json.dumps(r) for r in rows) + '\n').encode()))
         self.assertEqual(len(records), len(rows))

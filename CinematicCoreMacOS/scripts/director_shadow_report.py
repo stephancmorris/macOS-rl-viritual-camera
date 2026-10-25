@@ -648,7 +648,8 @@ def analyze(records, window, issues=None, source=None, phase_assignments=None):
             if stratum(b) == stratum(next_a) and b['context']['program'] == next_a['context']['program'] and not disruption and same_phase:
                 dwell[group(b)].append(next_b['eventTime'] - b['eventTime'])
     data = {'groups': result, 'issues': issues, 'abstentions': abstentions, 'dwell': dwell,
-            'records': len(records), 'source': source or {'kind': 'unbundled'}}
+            'records': len(records), 'source': source or {'kind': 'unbundled'},
+            'captureBlockedSessions': sorted(blocked)}
     if phase_assignments is not None:
         data['blockedSessions'] = sorted(blocked)
     return data
@@ -686,7 +687,7 @@ def markdown(data, window):
         label = f'{key[2]}/{key[3] or "none"}; policy {key[6]}; route {key[7]}; prefs {key[5] or "unknown"}'
         if len(key) == 10:
             label += f'; phase {key[-2]}'
-        incomplete = blocked or (len(key) == 10 and s['unscored_actions'])
+        incomplete = blocked or s['unscored_actions']
         lines.append(f'| {key[0]} | {key[1]} | {label} | {key[-1]} | {key[4] or "unknown"} | {s["predictions"]} | {s["completed_actions"]} | {s["compared"]} | {s["exact"]} | {agreement} | {s["unmatched_predictions"]} | {s["unmatched_actions"]} | {s["unscored_actions"]} | {"incomplete" if incomplete else "observed"} |')
     lines += ['', '## Abstentions', '', 'Reason totals count reasons, not independent opportunities.', '']
     for key, count in sorted(data['abstentions'].items(), key=lambda item: repr(item[0]) if 'blockedSessions' in data else item[0]):

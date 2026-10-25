@@ -169,6 +169,8 @@ def summarize_shadow(path, window, bindings, binding_schema_version=1):
         return summarize_shadow_phases(path, window, bindings)
     records, issues, source = shadow.load_input(path)
     data = shadow.analyze(records, window, issues, source)
+    blocked_sessions = set(data['captureBlockedSessions'])
+    unscored_sessions = {key[0] for key, counts, _ in data['groups'] if counts['unscored_actions']}
     by_session = defaultdict(list)
     for record in records:
         by_session[record['sessionID']].append(record)
@@ -192,7 +194,8 @@ def summarize_shadow(path, window, bindings, binding_schema_version=1):
         sessions.append({'sessionID': session, 'binding': binding,
                          'actualScopes': [list(s) for s in sorted(scopes)],
                          'judgeModels': [list(m) for m in sorted(models, key=repr)],
-                         'status': 'incomplete' if scope_problem or binding is None else 'observed'})
+                         'status': 'incomplete' if scope_problem or binding is None or
+                                   session in blocked_sessions or session in unscored_sessions else 'observed'})
         parameter_scopes = defaultdict(list)
         for record in records_in_session:
             record_models = tuple(sorted({(j['judgeKind'], j.get('modelVersion')) for j in record['judgements']}, key=repr))

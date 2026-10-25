@@ -237,6 +237,37 @@ class PhaseEvaluationTests(unittest.TestCase):
 
 
 class EvaluationTests(unittest.TestCase):
+    def test_legacy_session_status_retains_capture_loss_without_comparison_rows(self):
+        for fault in ('drop', 'gap', 'orphan', 'unknownShot'):
+            rows = shadow_rows()
+            if fault == 'drop':
+                rows[3]['droppedRecordsBefore'] = '1'
+            elif fault == 'gap':
+                for row in rows:
+                    row['sequence'] = str(int(row['sequence']) + 10)
+            elif fault == 'orphan':
+                rows = rows[1:2]
+                rows[0]['sequence'] = '0'
+            else:
+                rows[2]['context'].pop('programShot', None)
+            with self.subTest(fault=fault):
+                data = analyze_shadow(rows, [binding(rows)])
+                self.assertEqual(data['sessions'][0]['status'], 'incomplete')
+                text = report.markdown(report.evaluate(envelope(), shadow_data=data))
+                self.assertIn('scope incomplete.', text)
+                if fault == 'orphan':
+                    self.assertEqual(data['rows'], [])
+
+    def test_legacy_session_loss_does_not_taint_another_session(self):
+        affected, complete = shadow_rows(), shadow_rows()
+        affected[3]['droppedRecordsBefore'] = '1'
+        for row in complete:
+            row['sessionID'] = token('complete-session')
+            row['recordID'] = token('complete-' + row['sequence'])
+        data = analyze_shadow(affected + complete, [binding(affected), binding(complete)])
+        self.assertEqual({s['sessionID']: s['status'] for s in data['sessions']},
+                         {affected[0]['sessionID']: 'incomplete', complete[0]['sessionID']: 'observed'})
+
     def test_actual_decision_rehearsal_preserves_missing_per_level_binding(self):
         requested = os.environ.get('ALFIE_DIRECTOR_DECISION_EXPORT')
         if not requested:

@@ -45,6 +45,8 @@ The two-second matching window belongs to the supplied authored fixture, not a r
 
 The evaluator keeps every session, source class, level, execution mode, judge/model, route/configuration and parameter scope separate. A binding that contradicts actual record metadata refuses analysis. Heterogeneous level/mode/model evidence inside one session is conservatively unscored; no cross-scope matching is inferred. Physical route/configuration declarations are not proof of downstream observation. C-05 sequence gaps, drops, action-pair faults and global input failures retain their original suppression behavior.
 
+Session summaries also retain whole-session capture failures when there are no comparison rows, for example an orphan action without a prediction. Any unscored completed action makes its session summary incomplete. A failure attributed to one session does not change a separate complete session's status; malformed or unattributable input still suppresses all sessions through C-05.
+
 ### Explicit study phases (version 2)
 
 An opt-in version-2 sidecar permits multiple explicitly declared phases in one session. Each binding retains every version-1 scope field and adds a globally unique `phaseID`, inclusive original `firstSequence` / `lastSequence` Counter strings, canonical `parameterContext`, and sorted unique `routeGenerations` Counter strings. See the [decision fixture](../../CinematicCoreMacOS/scripts/fixtures/director-phase-decision-v2.json) and [binding fixture](../../CinematicCoreMacOS/scripts/fixtures/director-phase-binding-v2.json); their opaque session IDs bind only those specific historical exports. New exports require new explicit sidecars.
