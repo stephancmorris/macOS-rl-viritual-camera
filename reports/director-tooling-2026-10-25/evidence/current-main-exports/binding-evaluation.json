@@ -1,0 +1,1562 @@
+{
+  "evaluationSchemaVersion": 2,
+  "evidenceInventory": {
+    "replayScenarios": {
+      "synthetic": 5
+    },
+    "shadowRecords": {
+      "synthetic": 6
+    }
+  },
+  "inputSHA256": "fbbe869ba9ad3014afcda1413a7800892dc7a08fea59745021bbe4456711139d",
+  "levels": [
+    {
+      "directLiveRoute": "notRun",
+      "level": "assist",
+      "status": "incomplete",
+      "syntheticScenarios": 5,
+      "virtualCameraLiveRoute": "notRun"
+    },
+    {
+      "directLiveRoute": "notRun",
+      "level": "auto",
+      "status": "notRun",
+      "syntheticScenarios": 0,
+      "virtualCameraLiveRoute": "notRun"
+    },
+    {
+      "directLiveRoute": "notRun",
+      "level": "backup",
+      "status": "notRun",
+      "syntheticScenarios": 0,
+      "virtualCameraLiveRoute": "notRun"
+    }
+  ],
+  "missingEvidence": [
+    "ownerFrozenPlanAndBudgets",
+    "independentEligibleOpportunityLabels",
+    "labelledCommittedPreparationOutcomes",
+    "recordedValidation",
+    "r2RigEvidence",
+    "bothObservedLiveOutputRoutes",
+    "perLevelSignatories"
+  ],
+  "qualificationStatus": "incomplete",
+  "qualified": false,
+  "runs": [
+    {
+      "configurationID": "replay-study-1",
+      "durationSeconds": 60,
+      "evidenceClass": "synthetic",
+      "executionMode": "observing",
+      "judgeKind": "rules",
+      "level": "assist",
+      "metrics": {
+        "acknowledgementsAccepted": 1,
+        "acknowledgementsRejected": 0,
+        "clockAnomalies": 0,
+        "cutsPerMinute": 0,
+        "directorAttemptCount": 1,
+        "directorCuts": 0,
+        "duplicateCallbacks": 0,
+        "failedEffects": 0,
+        "finalLevel": "assist",
+        "finalPaused": false,
+        "labelledSubjectAttempts": 1,
+        "labelledSubjectProposals": 1,
+        "manualOverrideLatencies": [],
+        "manualOverridesHonoured": 0,
+        "minimumDurationViolations": 0,
+        "operatorCuts": 0,
+        "operatorTakeAttempts": 0,
+        "oscillations": 0,
+        "preparationsCommitted": 1,
+        "programChangesWithoutAuthority": 0,
+        "proposalCount": 1,
+        "proposalsMadeWhilePaused": 0,
+        "readyEvaluations": 0,
+        "rejectedAttempts": 0,
+        "staleEffectsCommitted": 0,
+        "staleProposalsRejected": {},
+        "unqualifiedRefusals": 0,
+        "wrongSubjectAttempts": 0,
+        "wrongSubjectProposals": 0
+      },
+      "modelVersion": null,
+      "opportunities": {
+        "eligible": null,
+        "unverified": null,
+        "useful": null
+      },
+      "parameterVersion": "1",
+      "parameters": {
+        "readiness": {
+          "cutOnMotionAllowed": false,
+          "maximumCutMotion": 0.1,
+          "maximumMotion": 0.1,
+          "minimumCutSettledTime": 0.2,
+          "minimumSettledTime": 0.2
+        },
+        "replay": {
+          "maximumEvidenceAge": 5,
+          "maximumProposalAge": 5
+        },
+        "shotPolicy": {
+          "cutOnMotionAllowed": false,
+          "maximumMovement": 0.1,
+          "maximumShotDuration": 35,
+          "minimumShotDuration": 8,
+          "repetitionWindow": 20,
+          "wideCadence": 90
+        }
+      },
+      "partition": [
+        "39C7C556-F73D-4BE9-A67E-B3C0525EFA6C",
+        "synthetic",
+        "assist",
+        "observing",
+        "none",
+        "replay-study-1",
+        "1",
+        "rules",
+        null
+      ],
+      "qualificationStatus": "incomplete",
+      "route": "none",
+      "scenarioID": "calm-presenter",
+      "sessionID": "39C7C556-F73D-4BE9-A67E-B3C0525EFA6C",
+      "softwareStatus": "observed",
+      "usefulPreparationCoverage": null,
+      "warnings": [],
+      "wrongCommittedPreparationRate": null
+    },
+    {
+      "configurationID": "replay-study-1",
+      "durationSeconds": 60,
+      "evidenceClass": "synthetic",
+      "executionMode": "observing",
+      "judgeKind": "rules",
+      "level": "assist",
+      "metrics": {
+        "acknowledgementsAccepted": 1,
+        "acknowledgementsRejected": 0,
+        "clockAnomalies": 0,
+        "cutsPerMinute": 0,
+        "directorAttemptCount": 1,
+        "directorCuts": 0,
+        "duplicateCallbacks": 0,
+        "failedEffects": 0,
+        "finalLevel": "assist",
+        "finalPaused": false,
+        "labelledSubjectAttempts": 1,
+        "labelledSubjectProposals": 1,
+        "manualOverrideLatencies": [],
+        "manualOverridesHonoured": 0,
+        "minimumDurationViolations": 0,
+        "operatorCuts": 0,
+        "operatorTakeAttempts": 0,
+        "oscillations": 0,
+        "preparationsCommitted": 1,
+        "programChangesWithoutAuthority": 0,
+        "proposalCount": 1,
+        "proposalsMadeWhilePaused": 0,
+        "readyEvaluations": 1,
+        "rejectedAttempts": 0,
+        "staleEffectsCommitted": 0,
+        "staleProposalsRejected": {},
+        "unqualifiedRefusals": 0,
+        "wrongSubjectAttempts": 0,
+        "wrongSubjectProposals": 0
+      },
+      "modelVersion": null,
+      "opportunities": {
+        "eligible": null,
+        "unverified": null,
+        "useful": null
+      },
+      "parameterVersion": "1",
+      "parameters": {
+        "readiness": {
+          "cutOnMotionAllowed": false,
+          "maximumCutMotion": 0.1,
+          "maximumMotion": 0.1,
+          "minimumCutSettledTime": 0.2,
+          "minimumSettledTime": 0.2
+        },
+        "replay": {
+          "maximumEvidenceAge": 5,
+          "maximumProposalAge": 5
+        },
+        "shotPolicy": {
+          "cutOnMotionAllowed": false,
+          "maximumMovement": 0.1,
+          "maximumShotDuration": 35,
+          "minimumShotDuration": 8,
+          "repetitionWindow": 20,
+          "wideCadence": 90
+        }
+      },
+      "partition": [
+        "1C7D27D8-CB53-451A-9262-406F1A915F53",
+        "synthetic",
+        "assist",
+        "observing",
+        "none",
+        "replay-study-1",
+        "1",
+        "rules",
+        null
+      ],
+      "qualificationStatus": "incomplete",
+      "route": "none",
+      "scenarioID": "walking-presenter",
+      "sessionID": "1C7D27D8-CB53-451A-9262-406F1A915F53",
+      "softwareStatus": "observed",
+      "usefulPreparationCoverage": null,
+      "warnings": [],
+      "wrongCommittedPreparationRate": null
+    },
+    {
+      "configurationID": "replay-study-1",
+      "durationSeconds": 60,
+      "evidenceClass": "synthetic",
+      "executionMode": "observing",
+      "judgeKind": "rules",
+      "level": "assist",
+      "metrics": {
+        "acknowledgementsAccepted": 1,
+        "acknowledgementsRejected": 0,
+        "clockAnomalies": 0,
+        "cutsPerMinute": 0,
+        "directorAttemptCount": 1,
+        "directorCuts": 0,
+        "duplicateCallbacks": 0,
+        "failedEffects": 0,
+        "finalLevel": "assist",
+        "finalPaused": false,
+        "labelledSubjectAttempts": 1,
+        "labelledSubjectProposals": 1,
+        "manualOverrideLatencies": [],
+        "manualOverridesHonoured": 0,
+        "minimumDurationViolations": 0,
+        "operatorCuts": 0,
+        "operatorTakeAttempts": 0,
+        "oscillations": 0,
+        "preparationsCommitted": 1,
+        "programChangesWithoutAuthority": 0,
+        "proposalCount": 1,
+        "proposalsMadeWhilePaused": 0,
+        "readyEvaluations": 2,
+        "rejectedAttempts": 0,
+        "staleEffectsCommitted": 0,
+        "staleProposalsRejected": {},
+        "unqualifiedRefusals": 0,
+        "wrongSubjectAttempts": 1,
+        "wrongSubjectProposals": 1
+      },
+      "modelVersion": null,
+      "opportunities": {
+        "eligible": null,
+        "unverified": null,
+        "useful": null
+      },
+      "parameterVersion": "1",
+      "parameters": {
+        "readiness": {
+          "cutOnMotionAllowed": false,
+          "maximumCutMotion": 0.1,
+          "maximumMotion": 0.1,
+          "minimumCutSettledTime": 0.2,
+          "minimumSettledTime": 0.2
+        },
+        "replay": {
+          "maximumEvidenceAge": 5,
+          "maximumProposalAge": 5
+        },
+        "shotPolicy": {
+          "cutOnMotionAllowed": false,
+          "maximumMovement": 0.1,
+          "maximumShotDuration": 35,
+          "minimumShotDuration": 8,
+          "repetitionWindow": 20,
+          "wideCadence": 90
+        }
+      },
+      "partition": [
+        "F2E5A883-7FB3-499C-B47F-66F771B1EFE7",
+        "synthetic",
+        "assist",
+        "observing",
+        "none",
+        "replay-study-1",
+        "1",
+        "rules",
+        null
+      ],
+      "qualificationStatus": "incomplete",
+      "route": "none",
+      "scenarioID": "panel-of-three",
+      "sessionID": "F2E5A883-7FB3-499C-B47F-66F771B1EFE7",
+      "softwareStatus": "observed",
+      "usefulPreparationCoverage": null,
+      "warnings": [
+        "wrongSubjectProposalObserved",
+        "wrongSubjectAttemptObserved"
+      ],
+      "wrongCommittedPreparationRate": null
+    },
+    {
+      "configurationID": "replay-study-1",
+      "durationSeconds": 60,
+      "evidenceClass": "synthetic",
+      "executionMode": "observing",
+      "judgeKind": "rules",
+      "level": "assist",
+      "metrics": {
+        "acknowledgementsAccepted": 1,
+        "acknowledgementsRejected": 0,
+        "clockAnomalies": 0,
+        "cutsPerMinute": 0,
+        "directorAttemptCount": 1,
+        "directorCuts": 0,
+        "duplicateCallbacks": 0,
+        "failedEffects": 0,
+        "finalLevel": "assist",
+        "finalPaused": true,
+        "labelledSubjectAttempts": 1,
+        "labelledSubjectProposals": 1,
+        "manualOverrideLatencies": [],
+        "manualOverridesHonoured": 0,
+        "minimumDurationViolations": 0,
+        "operatorCuts": 0,
+        "operatorTakeAttempts": 0,
+        "oscillations": 0,
+        "preparationsCommitted": 1,
+        "programChangesWithoutAuthority": 0,
+        "proposalCount": 1,
+        "proposalsMadeWhilePaused": 0,
+        "readyEvaluations": 0,
+        "rejectedAttempts": 0,
+        "staleEffectsCommitted": 0,
+        "staleProposalsRejected": {
+          "authorityRevoked": 1,
+          "shotChangedByOperator": 1,
+          "sourceMissing": 1,
+          "sourceRestarted": 1
+        },
+        "unqualifiedRefusals": 0,
+        "wrongSubjectAttempts": 0,
+        "wrongSubjectProposals": 0
+      },
+      "modelVersion": null,
+      "opportunities": {
+        "eligible": null,
+        "unverified": null,
+        "useful": null
+      },
+      "parameterVersion": "1",
+      "parameters": {
+        "readiness": {
+          "cutOnMotionAllowed": false,
+          "maximumCutMotion": 0.1,
+          "maximumMotion": 0.1,
+          "minimumCutSettledTime": 0.2,
+          "minimumSettledTime": 0.2
+        },
+        "replay": {
+          "maximumEvidenceAge": 5,
+          "maximumProposalAge": 5
+        },
+        "shotPolicy": {
+          "cutOnMotionAllowed": false,
+          "maximumMovement": 0.1,
+          "maximumShotDuration": 35,
+          "minimumShotDuration": 8,
+          "repetitionWindow": 20,
+          "wideCadence": 90
+        }
+      },
+      "partition": [
+        "E4D72660-6D31-46A8-BBFD-B1E878FD99B4",
+        "synthetic",
+        "assist",
+        "observing",
+        "none",
+        "replay-study-1",
+        "1",
+        "rules",
+        null
+      ],
+      "qualificationStatus": "incomplete",
+      "route": "none",
+      "scenarioID": "camera-b-drops",
+      "sessionID": "E4D72660-6D31-46A8-BBFD-B1E878FD99B4",
+      "softwareStatus": "observed",
+      "usefulPreparationCoverage": null,
+      "warnings": [],
+      "wrongCommittedPreparationRate": null
+    },
+    {
+      "configurationID": "replay-study-1",
+      "durationSeconds": 60,
+      "evidenceClass": "synthetic",
+      "executionMode": "observing",
+      "judgeKind": "rules",
+      "level": "assist",
+      "metrics": {
+        "acknowledgementsAccepted": 1,
+        "acknowledgementsRejected": 0,
+        "clockAnomalies": 0,
+        "cutsPerMinute": 1,
+        "directorAttemptCount": 1,
+        "directorCuts": 0,
+        "duplicateCallbacks": 0,
+        "failedEffects": 0,
+        "finalLevel": "assist",
+        "finalPaused": false,
+        "labelledSubjectAttempts": 1,
+        "labelledSubjectProposals": 1,
+        "manualOverrideLatencies": [
+          null
+        ],
+        "manualOverridesHonoured": 1,
+        "minimumDurationViolations": 0,
+        "operatorCuts": 1,
+        "operatorTakeAttempts": 1,
+        "oscillations": 0,
+        "preparationsCommitted": 1,
+        "programChangesWithoutAuthority": 0,
+        "proposalCount": 1,
+        "proposalsMadeWhilePaused": 0,
+        "readyEvaluations": 0,
+        "rejectedAttempts": 0,
+        "staleEffectsCommitted": 0,
+        "staleProposalsRejected": {
+          "authorityRevoked": 1,
+          "shotChangedByOperator": 1
+        },
+        "unqualifiedRefusals": 0,
+        "wrongSubjectAttempts": 0,
+        "wrongSubjectProposals": 0
+      },
+      "modelVersion": null,
+      "opportunities": {
+        "eligible": null,
+        "unverified": null,
+        "useful": null
+      },
+      "parameterVersion": "1",
+      "parameters": {
+        "readiness": {
+          "cutOnMotionAllowed": false,
+          "maximumCutMotion": 0.1,
+          "maximumMotion": 0.1,
+          "minimumCutSettledTime": 0.2,
+          "minimumSettledTime": 0.2
+        },
+        "replay": {
+          "maximumEvidenceAge": 5,
+          "maximumProposalAge": 5
+        },
+        "shotPolicy": {
+          "cutOnMotionAllowed": false,
+          "maximumMovement": 0.1,
+          "maximumShotDuration": 35,
+          "minimumShotDuration": 8,
+          "repetitionWindow": 20,
+          "wideCadence": 90
+        }
+      },
+      "partition": [
+        "12F023DF-CC43-4DD2-82A8-5BAFD7889619",
+        "synthetic",
+        "assist",
+        "observing",
+        "none",
+        "replay-study-1",
+        "1",
+        "rules",
+        null
+      ],
+      "qualificationStatus": "incomplete",
+      "route": "none",
+      "scenarioID": "operator-intervention",
+      "sessionID": "12F023DF-CC43-4DD2-82A8-5BAFD7889619",
+      "softwareStatus": "observed",
+      "usefulPreparationCoverage": null,
+      "warnings": [],
+      "wrongCommittedPreparationRate": null
+    }
+  ],
+  "shadow": {
+    "abstentions": [
+      {
+        "count": 2,
+        "phaseID": "capture-binding-2",
+        "stratum": [
+          "C9F2A03B-869C-42F8-A3F0-07D5460025EC",
+          "synthetic",
+          "panel",
+          "85DB2AE5-BABE-EE0A-A97A-6F6BF3F73D7D",
+          "11",
+          2,
+          "1",
+          "0",
+          "capture-binding-2",
+          "observation",
+          "unclassified"
+        ]
+      },
+      {
+        "count": 2,
+        "phaseID": "capture-binding-1",
+        "stratum": [
+          "C9F2A03B-869C-42F8-A3F0-07D5460025EC",
+          "synthetic",
+          "presenter",
+          "0CA82695-0370-0AFC-BB85-CE893773676C",
+          "10",
+          2,
+          "0",
+          "0",
+          "capture-binding-1",
+          "observation",
+          "unclassified"
+        ]
+      }
+    ],
+    "bindingMode": "explicitPhases",
+    "dwell": [],
+    "exportValidated": true,
+    "gaps": [],
+    "inputFingerprints": {
+      "manifestSHA256": "fb395d017164a387d437f5b6bc166662deeb4a47b36290ad3513cd3c43a71828",
+      "recordsSHA256": "c6a9a80707e404428924f290e12c202078e1799271a8f27136f28d7cdbd4cda5"
+    },
+    "issues": {
+      "operator_accepted": 1
+    },
+    "matchingWindowSeconds": 2.0,
+    "parameterEvidence": [
+      {
+        "phaseID": "capture-binding-1",
+        "scope": {
+          "channel": "input-2",
+          "configurationID": "capture-binding-1-config",
+          "declaredJudgeKind": "rules",
+          "declaredModelVersion": null,
+          "evidenceClass": "synthetic",
+          "executionMode": "shadow",
+          "judgeModels": [],
+          "level": "off",
+          "parameterContext": {
+            "adapter": {
+              "debounce": 0,
+              "maximumObservationAge": 2,
+              "stillSpeed": 0.2
+            },
+            "judgeMaximumAge": 1,
+            "minimumProbability": 0.7,
+            "parametersVersion": "10",
+            "preferencesVersion": 2,
+            "readiness": {
+              "cutOnMotionAllowed": false,
+              "maximumCutMotion": 0.1,
+              "maximumMotion": 0.2,
+              "minimumCutSettledTime": 0,
+              "minimumSettledTime": 0
+            },
+            "resolvedStyle": {
+              "cutOnMotionAllowed": false,
+              "maximumMovement": 0.2,
+              "minimumShotDuration": 1,
+              "onAirMoveRate": 0.2,
+              "preferredShotDuration": 2,
+              "repetitionWindow": 5,
+              "settleTime": 0,
+              "softMaximumShotDuration": 30,
+              "wideCadence": 80
+            },
+            "status": "available"
+          },
+          "parameterVersion": "10",
+          "phaseID": "capture-binding-1",
+          "route": "none",
+          "routeGenerations": [
+            "0"
+          ],
+          "segmentToken": "0CA82695-0370-0AFC-BB85-CE893773676C",
+          "segmentType": "presenter"
+        },
+        "sessionID": "C9F2A03B-869C-42F8-A3F0-07D5460025EC",
+        "snapshots": [
+          {
+            "channel": "input-2",
+            "configurationID": "capture-binding-1-config",
+            "declaredJudgeKind": "rules",
+            "declaredModelVersion": null,
+            "evidenceClass": "synthetic",
+            "executionMode": "shadow",
+            "judgeModels": [],
+            "level": "off",
+            "parameterContext": {
+              "adapter": {
+                "debounce": 0,
+                "maximumObservationAge": 2,
+                "stillSpeed": 0.2
+              },
+              "judgeMaximumAge": 1,
+              "minimumProbability": 0.7,
+              "parametersVersion": "10",
+              "preferencesVersion": 2,
+              "readiness": {
+                "cutOnMotionAllowed": false,
+                "maximumCutMotion": 0.1,
+                "maximumMotion": 0.2,
+                "minimumCutSettledTime": 0,
+                "minimumSettledTime": 0
+              },
+              "resolvedStyle": {
+                "cutOnMotionAllowed": false,
+                "maximumMovement": 0.2,
+                "minimumShotDuration": 1,
+                "onAirMoveRate": 0.2,
+                "preferredShotDuration": 2,
+                "repetitionWindow": 5,
+                "settleTime": 0,
+                "softMaximumShotDuration": 30,
+                "wideCadence": 80
+              },
+              "status": "available"
+            },
+            "parameterVersion": "10",
+            "parameters": {
+              "adapter": {
+                "debounce": 0,
+                "maximumObservationAge": 2,
+                "stillSpeed": 0.2
+              },
+              "judgeMaximumAge": 1,
+              "minimumProbability": 0.7,
+              "parametersVersion": "10",
+              "preferencesVersion": 2,
+              "readiness": {
+                "cutOnMotionAllowed": false,
+                "maximumCutMotion": 0.1,
+                "maximumMotion": 0.2,
+                "minimumCutSettledTime": 0,
+                "minimumSettledTime": 0
+              },
+              "resolvedStyle": {
+                "cutOnMotionAllowed": false,
+                "maximumMovement": 0.2,
+                "minimumShotDuration": 1,
+                "onAirMoveRate": 0.2,
+                "preferredShotDuration": 2,
+                "repetitionWindow": 5,
+                "settleTime": 0,
+                "softMaximumShotDuration": 30,
+                "wideCadence": 80
+              },
+              "status": "available"
+            },
+            "phaseID": "capture-binding-1",
+            "route": "none",
+            "routeGenerations": [
+              "0"
+            ],
+            "segmentToken": "0CA82695-0370-0AFC-BB85-CE893773676C",
+            "segmentType": "presenter"
+          }
+        ],
+        "subjectSpeed": {
+          "distributionStatus": "observed",
+          "invalidSamples": 0,
+          "maximum": 0,
+          "median": 0,
+          "minimum": 0,
+          "reportedSamples": 1,
+          "unavailableSamples": 0,
+          "unit": "normalizedFrameUnitsPerSecond"
+        }
+      },
+      {
+        "phaseID": "capture-binding-1",
+        "scope": {
+          "channel": null,
+          "configurationID": "capture-binding-1-config",
+          "declaredJudgeKind": "rules",
+          "declaredModelVersion": null,
+          "evidenceClass": "synthetic",
+          "executionMode": "shadow",
+          "judgeModels": [
+            [
+              "rules",
+              null
+            ]
+          ],
+          "level": "off",
+          "parameterContext": {
+            "adapter": {
+              "debounce": 0,
+              "maximumObservationAge": 2,
+              "stillSpeed": 0.2
+            },
+            "judgeMaximumAge": 1,
+            "minimumProbability": 0.7,
+            "parametersVersion": "10",
+            "preferencesVersion": 2,
+            "readiness": {
+              "cutOnMotionAllowed": false,
+              "maximumCutMotion": 0.1,
+              "maximumMotion": 0.2,
+              "minimumCutSettledTime": 0,
+              "minimumSettledTime": 0
+            },
+            "resolvedStyle": {
+              "cutOnMotionAllowed": false,
+              "maximumMovement": 0.2,
+              "minimumShotDuration": 1,
+              "onAirMoveRate": 0.2,
+              "preferredShotDuration": 2,
+              "repetitionWindow": 5,
+              "settleTime": 0,
+              "softMaximumShotDuration": 30,
+              "wideCadence": 80
+            },
+            "status": "available"
+          },
+          "parameterVersion": "10",
+          "phaseID": "capture-binding-1",
+          "route": "none",
+          "routeGenerations": [
+            "0"
+          ],
+          "segmentToken": "0CA82695-0370-0AFC-BB85-CE893773676C",
+          "segmentType": "presenter"
+        },
+        "sessionID": "C9F2A03B-869C-42F8-A3F0-07D5460025EC",
+        "snapshots": [
+          {
+            "channel": null,
+            "configurationID": "capture-binding-1-config",
+            "declaredJudgeKind": "rules",
+            "declaredModelVersion": null,
+            "evidenceClass": "synthetic",
+            "executionMode": "shadow",
+            "judgeModels": [
+              [
+                "rules",
+                null
+              ]
+            ],
+            "level": "off",
+            "parameterContext": {
+              "adapter": {
+                "debounce": 0,
+                "maximumObservationAge": 2,
+                "stillSpeed": 0.2
+              },
+              "judgeMaximumAge": 1,
+              "minimumProbability": 0.7,
+              "parametersVersion": "10",
+              "preferencesVersion": 2,
+              "readiness": {
+                "cutOnMotionAllowed": false,
+                "maximumCutMotion": 0.1,
+                "maximumMotion": 0.2,
+                "minimumCutSettledTime": 0,
+                "minimumSettledTime": 0
+              },
+              "resolvedStyle": {
+                "cutOnMotionAllowed": false,
+                "maximumMovement": 0.2,
+                "minimumShotDuration": 1,
+                "onAirMoveRate": 0.2,
+                "preferredShotDuration": 2,
+                "repetitionWindow": 5,
+                "settleTime": 0,
+                "softMaximumShotDuration": 30,
+                "wideCadence": 80
+              },
+              "status": "available"
+            },
+            "parameterVersion": "10",
+            "parameters": {
+              "adapter": {
+                "debounce": 0,
+                "maximumObservationAge": 2,
+                "stillSpeed": 0.2
+              },
+              "judgeMaximumAge": 1,
+              "minimumProbability": 0.7,
+              "parametersVersion": "10",
+              "preferencesVersion": 2,
+              "readiness": {
+                "cutOnMotionAllowed": false,
+                "maximumCutMotion": 0.1,
+                "maximumMotion": 0.2,
+                "minimumCutSettledTime": 0,
+                "minimumSettledTime": 0
+              },
+              "resolvedStyle": {
+                "cutOnMotionAllowed": false,
+                "maximumMovement": 0.2,
+                "minimumShotDuration": 1,
+                "onAirMoveRate": 0.2,
+                "preferredShotDuration": 2,
+                "repetitionWindow": 5,
+                "settleTime": 0,
+                "softMaximumShotDuration": 30,
+                "wideCadence": 80
+              },
+              "status": "available"
+            },
+            "phaseID": "capture-binding-1",
+            "route": "none",
+            "routeGenerations": [
+              "0"
+            ],
+            "segmentToken": "0CA82695-0370-0AFC-BB85-CE893773676C",
+            "segmentType": "presenter"
+          }
+        ],
+        "subjectSpeed": {
+          "distributionStatus": "unavailableNoSamples",
+          "invalidSamples": 0,
+          "maximum": null,
+          "median": null,
+          "minimum": null,
+          "reportedSamples": 0,
+          "unavailableSamples": 0,
+          "unit": "normalizedFrameUnitsPerSecond"
+        }
+      },
+      {
+        "phaseID": "capture-binding-1",
+        "scope": {
+          "channel": null,
+          "configurationID": "capture-binding-1-config",
+          "declaredJudgeKind": "rules",
+          "declaredModelVersion": null,
+          "evidenceClass": "synthetic",
+          "executionMode": "shadow",
+          "judgeModels": [],
+          "level": "off",
+          "parameterContext": {
+            "adapter": {
+              "debounce": 0,
+              "maximumObservationAge": 2,
+              "stillSpeed": 0.2
+            },
+            "judgeMaximumAge": 1,
+            "minimumProbability": 0.7,
+            "parametersVersion": "10",
+            "preferencesVersion": 2,
+            "readiness": {
+              "cutOnMotionAllowed": false,
+              "maximumCutMotion": 0.1,
+              "maximumMotion": 0.2,
+              "minimumCutSettledTime": 0,
+              "minimumSettledTime": 0
+            },
+            "resolvedStyle": {
+              "cutOnMotionAllowed": false,
+              "maximumMovement": 0.2,
+              "minimumShotDuration": 1,
+              "onAirMoveRate": 0.2,
+              "preferredShotDuration": 2,
+              "repetitionWindow": 5,
+              "settleTime": 0,
+              "softMaximumShotDuration": 30,
+              "wideCadence": 80
+            },
+            "status": "available"
+          },
+          "parameterVersion": "10",
+          "phaseID": "capture-binding-1",
+          "route": "none",
+          "routeGenerations": [
+            "0"
+          ],
+          "segmentToken": "0CA82695-0370-0AFC-BB85-CE893773676C",
+          "segmentType": "presenter"
+        },
+        "sessionID": "C9F2A03B-869C-42F8-A3F0-07D5460025EC",
+        "snapshots": [
+          {
+            "channel": null,
+            "configurationID": "capture-binding-1-config",
+            "declaredJudgeKind": "rules",
+            "declaredModelVersion": null,
+            "evidenceClass": "synthetic",
+            "executionMode": "shadow",
+            "judgeModels": [],
+            "level": "off",
+            "parameterContext": {
+              "adapter": {
+                "debounce": 0,
+                "maximumObservationAge": 2,
+                "stillSpeed": 0.2
+              },
+              "judgeMaximumAge": 1,
+              "minimumProbability": 0.7,
+              "parametersVersion": "10",
+              "preferencesVersion": 2,
+              "readiness": {
+                "cutOnMotionAllowed": false,
+                "maximumCutMotion": 0.1,
+                "maximumMotion": 0.2,
+                "minimumCutSettledTime": 0,
+                "minimumSettledTime": 0
+              },
+              "resolvedStyle": {
+                "cutOnMotionAllowed": false,
+                "maximumMovement": 0.2,
+                "minimumShotDuration": 1,
+                "onAirMoveRate": 0.2,
+                "preferredShotDuration": 2,
+                "repetitionWindow": 5,
+                "settleTime": 0,
+                "softMaximumShotDuration": 30,
+                "wideCadence": 80
+              },
+              "status": "available"
+            },
+            "parameterVersion": "10",
+            "parameters": {
+              "adapter": {
+                "debounce": 0,
+                "maximumObservationAge": 2,
+                "stillSpeed": 0.2
+              },
+              "judgeMaximumAge": 1,
+              "minimumProbability": 0.7,
+              "parametersVersion": "10",
+              "preferencesVersion": 2,
+              "readiness": {
+                "cutOnMotionAllowed": false,
+                "maximumCutMotion": 0.1,
+                "maximumMotion": 0.2,
+                "minimumCutSettledTime": 0,
+                "minimumSettledTime": 0
+              },
+              "resolvedStyle": {
+                "cutOnMotionAllowed": false,
+                "maximumMovement": 0.2,
+                "minimumShotDuration": 1,
+                "onAirMoveRate": 0.2,
+                "preferredShotDuration": 2,
+                "repetitionWindow": 5,
+                "settleTime": 0,
+                "softMaximumShotDuration": 30,
+                "wideCadence": 80
+              },
+              "status": "available"
+            },
+            "phaseID": "capture-binding-1",
+            "route": "none",
+            "routeGenerations": [
+              "0"
+            ],
+            "segmentToken": "0CA82695-0370-0AFC-BB85-CE893773676C",
+            "segmentType": "presenter"
+          }
+        ],
+        "subjectSpeed": {
+          "distributionStatus": "unavailableNoSamples",
+          "invalidSamples": 0,
+          "maximum": null,
+          "median": null,
+          "minimum": null,
+          "reportedSamples": 0,
+          "unavailableSamples": 0,
+          "unit": "normalizedFrameUnitsPerSecond"
+        }
+      },
+      {
+        "phaseID": "capture-binding-2",
+        "scope": {
+          "channel": "input-2",
+          "configurationID": "capture-binding-2-config",
+          "declaredJudgeKind": "rules",
+          "declaredModelVersion": null,
+          "evidenceClass": "synthetic",
+          "executionMode": "shadow",
+          "judgeModels": [],
+          "level": "off",
+          "parameterContext": {
+            "adapter": {
+              "debounce": 0,
+              "maximumObservationAge": 2,
+              "stillSpeed": 0.2
+            },
+            "judgeMaximumAge": 1,
+            "minimumProbability": 0.7,
+            "parametersVersion": "11",
+            "preferencesVersion": 2,
+            "readiness": {
+              "cutOnMotionAllowed": false,
+              "maximumCutMotion": 0.1,
+              "maximumMotion": 0.2,
+              "minimumCutSettledTime": 0,
+              "minimumSettledTime": 0
+            },
+            "resolvedStyle": {
+              "cutOnMotionAllowed": false,
+              "maximumMovement": 0.2,
+              "minimumShotDuration": 2,
+              "onAirMoveRate": 0.2,
+              "preferredShotDuration": 3,
+              "repetitionWindow": 5,
+              "settleTime": 0,
+              "softMaximumShotDuration": 30,
+              "wideCadence": 80
+            },
+            "status": "available"
+          },
+          "parameterVersion": "11",
+          "phaseID": "capture-binding-2",
+          "route": "none",
+          "routeGenerations": [
+            "0"
+          ],
+          "segmentToken": "85DB2AE5-BABE-EE0A-A97A-6F6BF3F73D7D",
+          "segmentType": "panel"
+        },
+        "sessionID": "C9F2A03B-869C-42F8-A3F0-07D5460025EC",
+        "snapshots": [
+          {
+            "channel": "input-2",
+            "configurationID": "capture-binding-2-config",
+            "declaredJudgeKind": "rules",
+            "declaredModelVersion": null,
+            "evidenceClass": "synthetic",
+            "executionMode": "shadow",
+            "judgeModels": [],
+            "level": "off",
+            "parameterContext": {
+              "adapter": {
+                "debounce": 0,
+                "maximumObservationAge": 2,
+                "stillSpeed": 0.2
+              },
+              "judgeMaximumAge": 1,
+              "minimumProbability": 0.7,
+              "parametersVersion": "11",
+              "preferencesVersion": 2,
+              "readiness": {
+                "cutOnMotionAllowed": false,
+                "maximumCutMotion": 0.1,
+                "maximumMotion": 0.2,
+                "minimumCutSettledTime": 0,
+                "minimumSettledTime": 0
+              },
+              "resolvedStyle": {
+                "cutOnMotionAllowed": false,
+                "maximumMovement": 0.2,
+                "minimumShotDuration": 2,
+                "onAirMoveRate": 0.2,
+                "preferredShotDuration": 3,
+                "repetitionWindow": 5,
+                "settleTime": 0,
+                "softMaximumShotDuration": 30,
+                "wideCadence": 80
+              },
+              "status": "available"
+            },
+            "parameterVersion": "11",
+            "parameters": {
+              "adapter": {
+                "debounce": 0,
+                "maximumObservationAge": 2,
+                "stillSpeed": 0.2
+              },
+              "judgeMaximumAge": 1,
+              "minimumProbability": 0.7,
+              "parametersVersion": "11",
+              "preferencesVersion": 2,
+              "readiness": {
+                "cutOnMotionAllowed": false,
+                "maximumCutMotion": 0.1,
+                "maximumMotion": 0.2,
+                "minimumCutSettledTime": 0,
+                "minimumSettledTime": 0
+              },
+              "resolvedStyle": {
+                "cutOnMotionAllowed": false,
+                "maximumMovement": 0.2,
+                "minimumShotDuration": 2,
+                "onAirMoveRate": 0.2,
+                "preferredShotDuration": 3,
+                "repetitionWindow": 5,
+                "settleTime": 0,
+                "softMaximumShotDuration": 30,
+                "wideCadence": 80
+              },
+              "status": "available"
+            },
+            "phaseID": "capture-binding-2",
+            "route": "none",
+            "routeGenerations": [
+              "0"
+            ],
+            "segmentToken": "85DB2AE5-BABE-EE0A-A97A-6F6BF3F73D7D",
+            "segmentType": "panel"
+          }
+        ],
+        "subjectSpeed": {
+          "distributionStatus": "observed",
+          "invalidSamples": 0,
+          "maximum": 0,
+          "median": 0,
+          "minimum": 0,
+          "reportedSamples": 1,
+          "unavailableSamples": 0,
+          "unit": "normalizedFrameUnitsPerSecond"
+        }
+      },
+      {
+        "phaseID": "capture-binding-2",
+        "scope": {
+          "channel": null,
+          "configurationID": "capture-binding-2-config",
+          "declaredJudgeKind": "rules",
+          "declaredModelVersion": null,
+          "evidenceClass": "synthetic",
+          "executionMode": "shadow",
+          "judgeModels": [
+            [
+              "rules",
+              null
+            ]
+          ],
+          "level": "off",
+          "parameterContext": {
+            "adapter": {
+              "debounce": 0,
+              "maximumObservationAge": 2,
+              "stillSpeed": 0.2
+            },
+            "judgeMaximumAge": 1,
+            "minimumProbability": 0.7,
+            "parametersVersion": "11",
+            "preferencesVersion": 2,
+            "readiness": {
+              "cutOnMotionAllowed": false,
+              "maximumCutMotion": 0.1,
+              "maximumMotion": 0.2,
+              "minimumCutSettledTime": 0,
+              "minimumSettledTime": 0
+            },
+            "resolvedStyle": {
+              "cutOnMotionAllowed": false,
+              "maximumMovement": 0.2,
+              "minimumShotDuration": 2,
+              "onAirMoveRate": 0.2,
+              "preferredShotDuration": 3,
+              "repetitionWindow": 5,
+              "settleTime": 0,
+              "softMaximumShotDuration": 30,
+              "wideCadence": 80
+            },
+            "status": "available"
+          },
+          "parameterVersion": "11",
+          "phaseID": "capture-binding-2",
+          "route": "none",
+          "routeGenerations": [
+            "0"
+          ],
+          "segmentToken": "85DB2AE5-BABE-EE0A-A97A-6F6BF3F73D7D",
+          "segmentType": "panel"
+        },
+        "sessionID": "C9F2A03B-869C-42F8-A3F0-07D5460025EC",
+        "snapshots": [
+          {
+            "channel": null,
+            "configurationID": "capture-binding-2-config",
+            "declaredJudgeKind": "rules",
+            "declaredModelVersion": null,
+            "evidenceClass": "synthetic",
+            "executionMode": "shadow",
+            "judgeModels": [
+              [
+                "rules",
+                null
+              ]
+            ],
+            "level": "off",
+            "parameterContext": {
+              "adapter": {
+                "debounce": 0,
+                "maximumObservationAge": 2,
+                "stillSpeed": 0.2
+              },
+              "judgeMaximumAge": 1,
+              "minimumProbability": 0.7,
+              "parametersVersion": "11",
+              "preferencesVersion": 2,
+              "readiness": {
+                "cutOnMotionAllowed": false,
+                "maximumCutMotion": 0.1,
+                "maximumMotion": 0.2,
+                "minimumCutSettledTime": 0,
+                "minimumSettledTime": 0
+              },
+              "resolvedStyle": {
+                "cutOnMotionAllowed": false,
+                "maximumMovement": 0.2,
+                "minimumShotDuration": 2,
+                "onAirMoveRate": 0.2,
+                "preferredShotDuration": 3,
+                "repetitionWindow": 5,
+                "settleTime": 0,
+                "softMaximumShotDuration": 30,
+                "wideCadence": 80
+              },
+              "status": "available"
+            },
+            "parameterVersion": "11",
+            "parameters": {
+              "adapter": {
+                "debounce": 0,
+                "maximumObservationAge": 2,
+                "stillSpeed": 0.2
+              },
+              "judgeMaximumAge": 1,
+              "minimumProbability": 0.7,
+              "parametersVersion": "11",
+              "preferencesVersion": 2,
+              "readiness": {
+                "cutOnMotionAllowed": false,
+                "maximumCutMotion": 0.1,
+                "maximumMotion": 0.2,
+                "minimumCutSettledTime": 0,
+                "minimumSettledTime": 0
+              },
+              "resolvedStyle": {
+                "cutOnMotionAllowed": false,
+                "maximumMovement": 0.2,
+                "minimumShotDuration": 2,
+                "onAirMoveRate": 0.2,
+                "preferredShotDuration": 3,
+                "repetitionWindow": 5,
+                "settleTime": 0,
+                "softMaximumShotDuration": 30,
+                "wideCadence": 80
+              },
+              "status": "available"
+            },
+            "phaseID": "capture-binding-2",
+            "route": "none",
+            "routeGenerations": [
+              "0"
+            ],
+            "segmentToken": "85DB2AE5-BABE-EE0A-A97A-6F6BF3F73D7D",
+            "segmentType": "panel"
+          }
+        ],
+        "subjectSpeed": {
+          "distributionStatus": "unavailableNoSamples",
+          "invalidSamples": 0,
+          "maximum": null,
+          "median": null,
+          "minimum": null,
+          "reportedSamples": 0,
+          "unavailableSamples": 0,
+          "unit": "normalizedFrameUnitsPerSecond"
+        }
+      },
+      {
+        "phaseID": "capture-binding-2",
+        "scope": {
+          "channel": null,
+          "configurationID": "capture-binding-2-config",
+          "declaredJudgeKind": "rules",
+          "declaredModelVersion": null,
+          "evidenceClass": "synthetic",
+          "executionMode": "shadow",
+          "judgeModels": [],
+          "level": "off",
+          "parameterContext": {
+            "adapter": {
+              "debounce": 0,
+              "maximumObservationAge": 2,
+              "stillSpeed": 0.2
+            },
+            "judgeMaximumAge": 1,
+            "minimumProbability": 0.7,
+            "parametersVersion": "11",
+            "preferencesVersion": 2,
+            "readiness": {
+              "cutOnMotionAllowed": false,
+              "maximumCutMotion": 0.1,
+              "maximumMotion": 0.2,
+              "minimumCutSettledTime": 0,
+              "minimumSettledTime": 0
+            },
+            "resolvedStyle": {
+              "cutOnMotionAllowed": false,
+              "maximumMovement": 0.2,
+              "minimumShotDuration": 2,
+              "onAirMoveRate": 0.2,
+              "preferredShotDuration": 3,
+              "repetitionWindow": 5,
+              "settleTime": 0,
+              "softMaximumShotDuration": 30,
+              "wideCadence": 80
+            },
+            "status": "available"
+          },
+          "parameterVersion": "11",
+          "phaseID": "capture-binding-2",
+          "route": "none",
+          "routeGenerations": [
+            "0"
+          ],
+          "segmentToken": "85DB2AE5-BABE-EE0A-A97A-6F6BF3F73D7D",
+          "segmentType": "panel"
+        },
+        "sessionID": "C9F2A03B-869C-42F8-A3F0-07D5460025EC",
+        "snapshots": [
+          {
+            "channel": null,
+            "configurationID": "capture-binding-2-config",
+            "declaredJudgeKind": "rules",
+            "declaredModelVersion": null,
+            "evidenceClass": "synthetic",
+            "executionMode": "shadow",
+            "judgeModels": [],
+            "level": "off",
+            "parameterContext": {
+              "adapter": {
+                "debounce": 0,
+                "maximumObservationAge": 2,
+                "stillSpeed": 0.2
+              },
+              "judgeMaximumAge": 1,
+              "minimumProbability": 0.7,
+              "parametersVersion": "11",
+              "preferencesVersion": 2,
+              "readiness": {
+                "cutOnMotionAllowed": false,
+                "maximumCutMotion": 0.1,
+                "maximumMotion": 0.2,
+                "minimumCutSettledTime": 0,
+                "minimumSettledTime": 0
+              },
+              "resolvedStyle": {
+                "cutOnMotionAllowed": false,
+                "maximumMovement": 0.2,
+                "minimumShotDuration": 2,
+                "onAirMoveRate": 0.2,
+                "preferredShotDuration": 3,
+                "repetitionWindow": 5,
+                "settleTime": 0,
+                "softMaximumShotDuration": 30,
+                "wideCadence": 80
+              },
+              "status": "available"
+            },
+            "parameterVersion": "11",
+            "parameters": {
+              "adapter": {
+                "debounce": 0,
+                "maximumObservationAge": 2,
+                "stillSpeed": 0.2
+              },
+              "judgeMaximumAge": 1,
+              "minimumProbability": 0.7,
+              "parametersVersion": "11",
+              "preferencesVersion": 2,
+              "readiness": {
+                "cutOnMotionAllowed": false,
+                "maximumCutMotion": 0.1,
+                "maximumMotion": 0.2,
+                "minimumCutSettledTime": 0,
+                "minimumSettledTime": 0
+              },
+              "resolvedStyle": {
+                "cutOnMotionAllowed": false,
+                "maximumMovement": 0.2,
+                "minimumShotDuration": 2,
+                "onAirMoveRate": 0.2,
+                "preferredShotDuration": 3,
+                "repetitionWindow": 5,
+                "settleTime": 0,
+                "softMaximumShotDuration": 30,
+                "wideCadence": 80
+              },
+              "status": "available"
+            },
+            "phaseID": "capture-binding-2",
+            "route": "none",
+            "routeGenerations": [
+              "0"
+            ],
+            "segmentToken": "85DB2AE5-BABE-EE0A-A97A-6F6BF3F73D7D",
+            "segmentType": "panel"
+          }
+        ],
+        "subjectSpeed": {
+          "distributionStatus": "unavailableNoSamples",
+          "invalidSamples": 0,
+          "maximum": null,
+          "median": null,
+          "minimum": null,
+          "reportedSamples": 0,
+          "unavailableSamples": 0,
+          "unit": "normalizedFrameUnitsPerSecond"
+        }
+      }
+    ],
+    "phases": [
+      {
+        "acceptedRecords": 3,
+        "binding": {
+          "configurationID": "capture-binding-1-config",
+          "evidenceClass": "synthetic",
+          "executionMode": "shadow",
+          "firstSequence": "0",
+          "judgeKind": "rules",
+          "lastSequence": "2",
+          "level": "off",
+          "modelVersion": null,
+          "parameterContext": {
+            "adapter": {
+              "debounce": 0,
+              "maximumObservationAge": 2,
+              "stillSpeed": 0.2
+            },
+            "judgeMaximumAge": 1,
+            "minimumProbability": 0.7,
+            "parametersVersion": "10",
+            "preferencesVersion": 2,
+            "readiness": {
+              "cutOnMotionAllowed": false,
+              "maximumCutMotion": 0.1,
+              "maximumMotion": 0.2,
+              "minimumCutSettledTime": 0,
+              "minimumSettledTime": 0
+            },
+            "resolvedStyle": {
+              "cutOnMotionAllowed": false,
+              "maximumMovement": 0.2,
+              "minimumShotDuration": 1,
+              "onAirMoveRate": 0.2,
+              "preferredShotDuration": 2,
+              "repetitionWindow": 5,
+              "settleTime": 0,
+              "softMaximumShotDuration": 30,
+              "wideCadence": 80
+            },
+            "status": "available"
+          },
+          "parameterVersion": "10",
+          "phaseID": "capture-binding-1",
+          "route": "none",
+          "routeGenerations": [
+            "0"
+          ],
+          "sessionID": "C9F2A03B-869C-42F8-A3F0-07D5460025EC"
+        },
+        "phaseID": "capture-binding-1",
+        "sessionID": "C9F2A03B-869C-42F8-A3F0-07D5460025EC",
+        "status": "observed"
+      },
+      {
+        "acceptedRecords": 3,
+        "binding": {
+          "configurationID": "capture-binding-2-config",
+          "evidenceClass": "synthetic",
+          "executionMode": "shadow",
+          "firstSequence": "3",
+          "judgeKind": "rules",
+          "lastSequence": "5",
+          "level": "off",
+          "modelVersion": null,
+          "parameterContext": {
+            "adapter": {
+              "debounce": 0,
+              "maximumObservationAge": 2,
+              "stillSpeed": 0.2
+            },
+            "judgeMaximumAge": 1,
+            "minimumProbability": 0.7,
+            "parametersVersion": "11",
+            "preferencesVersion": 2,
+            "readiness": {
+              "cutOnMotionAllowed": false,
+              "maximumCutMotion": 0.1,
+              "maximumMotion": 0.2,
+              "minimumCutSettledTime": 0,
+              "minimumSettledTime": 0
+            },
+            "resolvedStyle": {
+              "cutOnMotionAllowed": false,
+              "maximumMovement": 0.2,
+              "minimumShotDuration": 2,
+              "onAirMoveRate": 0.2,
+              "preferredShotDuration": 3,
+              "repetitionWindow": 5,
+              "settleTime": 0,
+              "softMaximumShotDuration": 30,
+              "wideCadence": 80
+            },
+            "status": "available"
+          },
+          "parameterVersion": "11",
+          "phaseID": "capture-binding-2",
+          "route": "none",
+          "routeGenerations": [
+            "0"
+          ],
+          "sessionID": "C9F2A03B-869C-42F8-A3F0-07D5460025EC"
+        },
+        "phaseID": "capture-binding-2",
+        "sessionID": "C9F2A03B-869C-42F8-A3F0-07D5460025EC",
+        "status": "observed"
+      }
+    ],
+    "recordEvidenceCounts": {
+      "synthetic": 6
+    },
+    "records": 6,
+    "rows": [],
+    "sessions": [
+      {
+        "actualScopes": [
+          [
+            "synthetic",
+            "off",
+            "shadow"
+          ]
+        ],
+        "binding": null,
+        "judgeModels": [
+          [
+            "rules",
+            null
+          ]
+        ],
+        "phaseIDs": [
+          "capture-binding-1",
+          "capture-binding-2"
+        ],
+        "sessionID": "C9F2A03B-869C-42F8-A3F0-07D5460025EC",
+        "status": "observed"
+      }
+    ]
+  },
+  "shadowBindingSHA256": "7a0a129d291d77a5b40185eb69499c23a0e3e264b1ca42c5c3077340f95b954f",
+  "shadowRegressions": [],
+  "structuralZeros": [
+    "DirectorReplay.directorCuts"
+  ],
+  "unavailableMeasurements": [
+    "visibleOverrideLatency",
+    "downstreamPresentation",
+    "usefulPreparationCoverage"
+  ]
+}

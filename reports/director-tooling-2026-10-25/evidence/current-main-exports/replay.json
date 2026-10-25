@@ -1,0 +1,383 @@
+{
+  "evaluationSchemaVersion" : 1,
+  "producer" : "DirectorReplay",
+  "runs" : [
+    {
+      "configurationID" : "replay-study-1",
+      "durationSeconds" : 60,
+      "evidenceClass" : "synthetic",
+      "executionMode" : "observing",
+      "judgeKind" : "rules",
+      "level" : "assist",
+      "metrics" : {
+        "acknowledgementsAccepted" : 1,
+        "acknowledgementsRejected" : 0,
+        "clockAnomalies" : 0,
+        "cutsPerMinute" : 0,
+        "directorAttemptCount" : 1,
+        "directorCuts" : 0,
+        "duplicateCallbacks" : 0,
+        "failedEffects" : 0,
+        "finalLevel" : "assist",
+        "finalPaused" : false,
+        "labelledSubjectAttempts" : 1,
+        "labelledSubjectProposals" : 1,
+        "manualOverrideLatencies" : [
+
+        ],
+        "manualOverridesHonoured" : 0,
+        "minimumDurationViolations" : 0,
+        "operatorCuts" : 0,
+        "operatorTakeAttempts" : 0,
+        "oscillations" : 0,
+        "preparationsCommitted" : 1,
+        "programChangesWithoutAuthority" : 0,
+        "proposalCount" : 1,
+        "proposalsMadeWhilePaused" : 0,
+        "readyEvaluations" : 0,
+        "rejectedAttempts" : 0,
+        "staleEffectsCommitted" : 0,
+        "staleProposalsRejected" : {
+
+        },
+        "unqualifiedRefusals" : 0,
+        "wrongSubjectAttempts" : 0,
+        "wrongSubjectProposals" : 0
+      },
+      "modelVersion" : null,
+      "opportunities" : {
+        "eligible" : null,
+        "unverified" : null,
+        "useful" : null
+      },
+      "parameters" : {
+        "readiness" : {
+          "cutOnMotionAllowed" : false,
+          "maximumCutMotion" : 0.10000000000000001,
+          "maximumMotion" : 0.10000000000000001,
+          "minimumCutSettledTime" : 0.20000000000000001,
+          "minimumSettledTime" : 0.20000000000000001
+        },
+        "replay" : {
+          "maximumEvidenceAge" : 5,
+          "maximumProposalAge" : 5
+        },
+        "shotPolicy" : {
+          "cutOnMotionAllowed" : false,
+          "maximumMovement" : 0.10000000000000001,
+          "maximumShotDuration" : 35,
+          "minimumShotDuration" : 8,
+          "repetitionWindow" : 20,
+          "wideCadence" : 90
+        }
+      },
+      "parameterVersion" : "1",
+      "route" : "none",
+      "scenarioID" : "calm-presenter",
+      "sessionID" : "39C7C556-F73D-4BE9-A67E-B3C0525EFA6C"
+    },
+    {
+      "configurationID" : "replay-study-1",
+      "durationSeconds" : 60,
+      "evidenceClass" : "synthetic",
+      "executionMode" : "observing",
+      "judgeKind" : "rules",
+      "level" : "assist",
+      "metrics" : {
+        "acknowledgementsAccepted" : 1,
+        "acknowledgementsRejected" : 0,
+        "clockAnomalies" : 0,
+        "cutsPerMinute" : 0,
+        "directorAttemptCount" : 1,
+        "directorCuts" : 0,
+        "duplicateCallbacks" : 0,
+        "failedEffects" : 0,
+        "finalLevel" : "assist",
+        "finalPaused" : false,
+        "labelledSubjectAttempts" : 1,
+        "labelledSubjectProposals" : 1,
+        "manualOverrideLatencies" : [
+
+        ],
+        "manualOverridesHonoured" : 0,
+        "minimumDurationViolations" : 0,
+        "operatorCuts" : 0,
+        "operatorTakeAttempts" : 0,
+        "oscillations" : 0,
+        "preparationsCommitted" : 1,
+        "programChangesWithoutAuthority" : 0,
+        "proposalCount" : 1,
+        "proposalsMadeWhilePaused" : 0,
+        "readyEvaluations" : 1,
+        "rejectedAttempts" : 0,
+        "staleEffectsCommitted" : 0,
+        "staleProposalsRejected" : {
+
+        },
+        "unqualifiedRefusals" : 0,
+        "wrongSubjectAttempts" : 0,
+        "wrongSubjectProposals" : 0
+      },
+      "modelVersion" : null,
+      "opportunities" : {
+        "eligible" : null,
+        "unverified" : null,
+        "useful" : null
+      },
+      "parameters" : {
+        "readiness" : {
+          "cutOnMotionAllowed" : false,
+          "maximumCutMotion" : 0.10000000000000001,
+          "maximumMotion" : 0.10000000000000001,
+          "minimumCutSettledTime" : 0.20000000000000001,
+          "minimumSettledTime" : 0.20000000000000001
+        },
+        "replay" : {
+          "maximumEvidenceAge" : 5,
+          "maximumProposalAge" : 5
+        },
+        "shotPolicy" : {
+          "cutOnMotionAllowed" : false,
+          "maximumMovement" : 0.10000000000000001,
+          "maximumShotDuration" : 35,
+          "minimumShotDuration" : 8,
+          "repetitionWindow" : 20,
+          "wideCadence" : 90
+        }
+      },
+      "parameterVersion" : "1",
+      "route" : "none",
+      "scenarioID" : "walking-presenter",
+      "sessionID" : "1C7D27D8-CB53-451A-9262-406F1A915F53"
+    },
+    {
+      "configurationID" : "replay-study-1",
+      "durationSeconds" : 60,
+      "evidenceClass" : "synthetic",
+      "executionMode" : "observing",
+      "judgeKind" : "rules",
+      "level" : "assist",
+      "metrics" : {
+        "acknowledgementsAccepted" : 1,
+        "acknowledgementsRejected" : 0,
+        "clockAnomalies" : 0,
+        "cutsPerMinute" : 0,
+        "directorAttemptCount" : 1,
+        "directorCuts" : 0,
+        "duplicateCallbacks" : 0,
+        "failedEffects" : 0,
+        "finalLevel" : "assist",
+        "finalPaused" : false,
+        "labelledSubjectAttempts" : 1,
+        "labelledSubjectProposals" : 1,
+        "manualOverrideLatencies" : [
+
+        ],
+        "manualOverridesHonoured" : 0,
+        "minimumDurationViolations" : 0,
+        "operatorCuts" : 0,
+        "operatorTakeAttempts" : 0,
+        "oscillations" : 0,
+        "preparationsCommitted" : 1,
+        "programChangesWithoutAuthority" : 0,
+        "proposalCount" : 1,
+        "proposalsMadeWhilePaused" : 0,
+        "readyEvaluations" : 2,
+        "rejectedAttempts" : 0,
+        "staleEffectsCommitted" : 0,
+        "staleProposalsRejected" : {
+
+        },
+        "unqualifiedRefusals" : 0,
+        "wrongSubjectAttempts" : 1,
+        "wrongSubjectProposals" : 1
+      },
+      "modelVersion" : null,
+      "opportunities" : {
+        "eligible" : null,
+        "unverified" : null,
+        "useful" : null
+      },
+      "parameters" : {
+        "readiness" : {
+          "cutOnMotionAllowed" : false,
+          "maximumCutMotion" : 0.10000000000000001,
+          "maximumMotion" : 0.10000000000000001,
+          "minimumCutSettledTime" : 0.20000000000000001,
+          "minimumSettledTime" : 0.20000000000000001
+        },
+        "replay" : {
+          "maximumEvidenceAge" : 5,
+          "maximumProposalAge" : 5
+        },
+        "shotPolicy" : {
+          "cutOnMotionAllowed" : false,
+          "maximumMovement" : 0.10000000000000001,
+          "maximumShotDuration" : 35,
+          "minimumShotDuration" : 8,
+          "repetitionWindow" : 20,
+          "wideCadence" : 90
+        }
+      },
+      "parameterVersion" : "1",
+      "route" : "none",
+      "scenarioID" : "panel-of-three",
+      "sessionID" : "F2E5A883-7FB3-499C-B47F-66F771B1EFE7"
+    },
+    {
+      "configurationID" : "replay-study-1",
+      "durationSeconds" : 60,
+      "evidenceClass" : "synthetic",
+      "executionMode" : "observing",
+      "judgeKind" : "rules",
+      "level" : "assist",
+      "metrics" : {
+        "acknowledgementsAccepted" : 1,
+        "acknowledgementsRejected" : 0,
+        "clockAnomalies" : 0,
+        "cutsPerMinute" : 0,
+        "directorAttemptCount" : 1,
+        "directorCuts" : 0,
+        "duplicateCallbacks" : 0,
+        "failedEffects" : 0,
+        "finalLevel" : "assist",
+        "finalPaused" : true,
+        "labelledSubjectAttempts" : 1,
+        "labelledSubjectProposals" : 1,
+        "manualOverrideLatencies" : [
+
+        ],
+        "manualOverridesHonoured" : 0,
+        "minimumDurationViolations" : 0,
+        "operatorCuts" : 0,
+        "operatorTakeAttempts" : 0,
+        "oscillations" : 0,
+        "preparationsCommitted" : 1,
+        "programChangesWithoutAuthority" : 0,
+        "proposalCount" : 1,
+        "proposalsMadeWhilePaused" : 0,
+        "readyEvaluations" : 0,
+        "rejectedAttempts" : 0,
+        "staleEffectsCommitted" : 0,
+        "staleProposalsRejected" : {
+          "authorityRevoked" : 1,
+          "shotChangedByOperator" : 1,
+          "sourceMissing" : 1,
+          "sourceRestarted" : 1
+        },
+        "unqualifiedRefusals" : 0,
+        "wrongSubjectAttempts" : 0,
+        "wrongSubjectProposals" : 0
+      },
+      "modelVersion" : null,
+      "opportunities" : {
+        "eligible" : null,
+        "unverified" : null,
+        "useful" : null
+      },
+      "parameters" : {
+        "readiness" : {
+          "cutOnMotionAllowed" : false,
+          "maximumCutMotion" : 0.10000000000000001,
+          "maximumMotion" : 0.10000000000000001,
+          "minimumCutSettledTime" : 0.20000000000000001,
+          "minimumSettledTime" : 0.20000000000000001
+        },
+        "replay" : {
+          "maximumEvidenceAge" : 5,
+          "maximumProposalAge" : 5
+        },
+        "shotPolicy" : {
+          "cutOnMotionAllowed" : false,
+          "maximumMovement" : 0.10000000000000001,
+          "maximumShotDuration" : 35,
+          "minimumShotDuration" : 8,
+          "repetitionWindow" : 20,
+          "wideCadence" : 90
+        }
+      },
+      "parameterVersion" : "1",
+      "route" : "none",
+      "scenarioID" : "camera-b-drops",
+      "sessionID" : "E4D72660-6D31-46A8-BBFD-B1E878FD99B4"
+    },
+    {
+      "configurationID" : "replay-study-1",
+      "durationSeconds" : 60,
+      "evidenceClass" : "synthetic",
+      "executionMode" : "observing",
+      "judgeKind" : "rules",
+      "level" : "assist",
+      "metrics" : {
+        "acknowledgementsAccepted" : 1,
+        "acknowledgementsRejected" : 0,
+        "clockAnomalies" : 0,
+        "cutsPerMinute" : 1,
+        "directorAttemptCount" : 1,
+        "directorCuts" : 0,
+        "duplicateCallbacks" : 0,
+        "failedEffects" : 0,
+        "finalLevel" : "assist",
+        "finalPaused" : false,
+        "labelledSubjectAttempts" : 1,
+        "labelledSubjectProposals" : 1,
+        "manualOverrideLatencies" : [
+          null
+        ],
+        "manualOverridesHonoured" : 1,
+        "minimumDurationViolations" : 0,
+        "operatorCuts" : 1,
+        "operatorTakeAttempts" : 1,
+        "oscillations" : 0,
+        "preparationsCommitted" : 1,
+        "programChangesWithoutAuthority" : 0,
+        "proposalCount" : 1,
+        "proposalsMadeWhilePaused" : 0,
+        "readyEvaluations" : 0,
+        "rejectedAttempts" : 0,
+        "staleEffectsCommitted" : 0,
+        "staleProposalsRejected" : {
+          "authorityRevoked" : 1,
+          "shotChangedByOperator" : 1
+        },
+        "unqualifiedRefusals" : 0,
+        "wrongSubjectAttempts" : 0,
+        "wrongSubjectProposals" : 0
+      },
+      "modelVersion" : null,
+      "opportunities" : {
+        "eligible" : null,
+        "unverified" : null,
+        "useful" : null
+      },
+      "parameters" : {
+        "readiness" : {
+          "cutOnMotionAllowed" : false,
+          "maximumCutMotion" : 0.10000000000000001,
+          "maximumMotion" : 0.10000000000000001,
+          "minimumCutSettledTime" : 0.20000000000000001,
+          "minimumSettledTime" : 0.20000000000000001
+        },
+        "replay" : {
+          "maximumEvidenceAge" : 5,
+          "maximumProposalAge" : 5
+        },
+        "shotPolicy" : {
+          "cutOnMotionAllowed" : false,
+          "maximumMovement" : 0.10000000000000001,
+          "maximumShotDuration" : 35,
+          "minimumShotDuration" : 8,
+          "repetitionWindow" : 20,
+          "wideCadence" : 90
+        }
+      },
+      "parameterVersion" : "1",
+      "route" : "none",
+      "scenarioID" : "operator-intervention",
+      "sessionID" : "12F023DF-CC43-4DD2-82A8-5BAFD7889619"
+    }
+  ],
+  "shadowBindings" : [
+
+  ]
+}

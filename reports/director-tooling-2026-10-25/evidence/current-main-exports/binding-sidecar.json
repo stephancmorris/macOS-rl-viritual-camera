@@ -1,0 +1,99 @@
+{
+  "evaluationSchemaVersion": 2,
+  "shadowBindings": [
+    {
+      "configurationID": "capture-binding-1-config",
+      "evidenceClass": "synthetic",
+      "executionMode": "shadow",
+      "firstSequence": "0",
+      "judgeKind": "rules",
+      "lastSequence": "2",
+      "level": "off",
+      "modelVersion": null,
+      "parameterContext": {
+        "adapter": {
+          "debounce": 0,
+          "maximumObservationAge": 2,
+          "stillSpeed": 0.2
+        },
+        "judgeMaximumAge": 1,
+        "minimumProbability": 0.7,
+        "parametersVersion": "10",
+        "preferencesVersion": 2,
+        "readiness": {
+          "cutOnMotionAllowed": false,
+          "maximumCutMotion": 0.1,
+          "maximumMotion": 0.2,
+          "minimumCutSettledTime": 0,
+          "minimumSettledTime": 0
+        },
+        "resolvedStyle": {
+          "cutOnMotionAllowed": false,
+          "maximumMovement": 0.2,
+          "minimumShotDuration": 1,
+          "onAirMoveRate": 0.2,
+          "preferredShotDuration": 2,
+          "repetitionWindow": 5,
+          "settleTime": 0,
+          "softMaximumShotDuration": 30,
+          "wideCadence": 80
+        },
+        "status": "available"
+      },
+      "parameterVersion": "10",
+      "phaseID": "capture-binding-1",
+      "route": "none",
+      "routeGenerations": [
+        "0"
+      ],
+      "sessionID": "C9F2A03B-869C-42F8-A3F0-07D5460025EC"
+    },
+    {
+      "configurationID": "capture-binding-2-config",
+      "evidenceClass": "synthetic",
+      "executionMode": "shadow",
+      "firstSequence": "3",
+      "judgeKind": "rules",
+      "lastSequence": "5",
+      "level": "off",
+      "modelVersion": null,
+      "parameterContext": {
+        "adapter": {
+          "debounce": 0,
+          "maximumObservationAge": 2,
+          "stillSpeed": 0.2
+        },
+        "judgeMaximumAge": 1,
+        "minimumProbability": 0.7,
+        "parametersVersion": "11",
+        "preferencesVersion": 2,
+        "readiness": {
+          "cutOnMotionAllowed": false,
+          "maximumCutMotion": 0.1,
+          "maximumMotion": 0.2,
+          "minimumCutSettledTime": 0,
+          "minimumSettledTime": 0
+        },
+        "resolvedStyle": {
+          "cutOnMotionAllowed": false,
+          "maximumMovement": 0.2,
+          "minimumShotDuration": 2,
+          "onAirMoveRate": 0.2,
+          "preferredShotDuration": 3,
+          "repetitionWindow": 5,
+          "settleTime": 0,
+          "softMaximumShotDuration": 30,
+          "wideCadence": 80
+        },
+        "status": "available"
+      },
+      "parameterVersion": "11",
+      "phaseID": "capture-binding-2",
+      "route": "none",
+      "routeGenerations": [
+        "0"
+      ],
+      "sessionID": "C9F2A03B-869C-42F8-A3F0-07D5460025EC"
+    }
+  ]
+}
