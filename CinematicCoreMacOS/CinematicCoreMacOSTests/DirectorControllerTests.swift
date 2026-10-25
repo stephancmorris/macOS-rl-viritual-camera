@@ -263,6 +263,43 @@ import Testing
         #expect(rig.controller.preferences != nil)
     }
 
+    // MARK: Mid-show style changes (F2, SU-07)
+
+    private var feelStyle: DirectorStyle {
+        DirectorFeelTable.v1.style(for: DirectorFeel(pace: .calm, wideShots: .often, movement: .waitUntilSettled))
+    }
+
+    @Test func aStyleSavedMidShowAppliesWhenHandedBack() {
+        let rig = directing(.auto)
+        let saved = DirectorPreferences(styles: [.liveEvent: feelStyle])
+        rig.controller.preferencesChanged(saved)
+        #expect(rig.controller.authority.paused)
+        #expect(rig.controller.directorSection.activity == .paused(.styleChanged))
+        #expect(rig.controller.handToAlfie() == .accepted)
+        #expect(!rig.controller.authority.paused)
+        #expect(rig.controller.effectiveStyle == feelStyle)
+    }
+
+    @Test func aStyleSavedInManualAppliesWithoutAPause() {
+        let rig = rig()
+        let count = rig.controller.appliedEvents.count
+        rig.controller.preferencesChanged(DirectorPreferences(styles: [.liveEvent: feelStyle]))
+        #expect(rig.controller.appliedEvents.count == count)
+        #expect(rig.controller.authority.level == .off)
+        #expect(rig.controller.effectiveStyle == feelStyle)
+    }
+
+    @Test func advancingTheRunSheetMidShowDoesNotPause() throws {
+        let rig = rig()
+        #expect(rig.controller.setRunSheet(try RunSheet(segments: [.init(type: .presenter), .init(type: .panel)])))
+        #expect(rig.controller.setLevel(.assist) == .accepted)
+        let revision = rig.controller.policyRevision
+        rig.controller.advanceSegment()
+        #expect(!rig.controller.authority.paused)
+        #expect(rig.controller.runSheet?.current?.type == .panel)
+        #expect(rig.controller.policyRevision == revision + 1)
+    }
+
     @Test func healthReturnsOnTheTickButNeverClearsPause() {
         let rig = directing(.auto)
         rig.b.setSourceMissingForTesting(true)

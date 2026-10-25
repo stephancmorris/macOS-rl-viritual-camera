@@ -44,6 +44,18 @@ nonisolated enum CutPolicy {
         let gate: DirectorJudgeGate.Result?
     }
 
+    /// The timing half of a cut, once the minimum shot has passed: why a cut
+    /// to the prepared shot is due now, or nil when nothing is better yet.
+    /// Shared with `DirectorRhythmPreview` so the Settings preview can't drift
+    /// from the live decision.
+    static func timingReason(dwell: TimeInterval, sinceWide: TimeInterval, preparedIsWide: Bool,
+                             programConfirmed: Bool, style: DirectorStyle) -> Reason? {
+        if !programConfirmed { return .programUncertain }
+        if sinceWide >= style.wideCadence && preparedIsWide { return .wideDue }
+        if dwell >= style.preferredShotDuration { return .preferredLength }
+        return nil
+    }
+
     /// Only the actual prepared Preview shot is a candidate for this cut.
     static func evaluate(live: DirectorTakeState, timeline: DirectorShotPolicy.Timeline,
                          prepared: DirectorShotPolicy.Candidate, programIdentity: IdentityEvidence,
@@ -68,11 +80,11 @@ nonisolated enum CutPolicy {
               style.cutOnMotionAllowed || prepared.movement <= style.maximumMovement else { return .abstain(.notReady) }
         let dwell = now - timeline.programStartedAt
         guard dwell >= style.minimumShotDuration else { return .abstain(.minimumDwell) }
-        let reason: Reason
-        if programIdentity != .confirmed { reason = .programUncertain }
-        else if now - timeline.lastWideAt >= style.wideCadence && prepared.shot.isWide { reason = .wideDue }
-        else if dwell >= style.preferredShotDuration { reason = .preferredLength }
-        else { return .abstain(.nothingBetter) }
+        guard let reason = timingReason(dwell: dwell, sinceWide: now - timeline.lastWideAt,
+                                        preparedIsWide: prepared.shot.isWide,
+                                        programConfirmed: programIdentity == .confirmed, style: style) else {
+            return .abstain(.nothingBetter)
+        }
         let filtered = DirectorShotPolicy.Timeline(programShot: timeline.programShot,
             programStartedAt: timeline.programStartedAt, lastWideAt: timeline.lastWideAt,
             history: timeline.history, candidates: [prepared], now: now)
