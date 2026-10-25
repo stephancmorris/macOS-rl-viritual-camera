@@ -6,6 +6,8 @@
 
 ## Grouped work
 
+**Current-main software check:** independently exported the unmodified `origin/main` commit `952d05d` into a new temporary directory without changing this checkout or integrating branches. Its full app test target passed **1,090 definitions / 1,683 expanded cases**, zero failures and three explicit investigation/consented-folder/real-camera skips. Existing synthetic CoreML CPU interoperability was configured and passed. The unsigned Release app and extension also build; the embedded source fingerprint matches `11ec9c50c05b64047296e2a681da364122a7c2f00ea39694eaf3e346be5a4329`. Exact sanitized provenance and binary hash are in [current-main-validation.json](current-main-validation.json). This verifies the newly merged Settings/feel source independently of the repairs on this branch. It does not verify their combined integration, native usability, receiver output, installation or Director level qualification. No installed app was changed. The earlier 18:01 note's lack of current-main binary verification is superseded by this check.
+
 1. **Report completeness:** [AD-EVIDENCE-STATUS](https://trello.com/c/FsPvuofO), related C-05/D-06. Repair contradictory session/row summaries first. Implemented below.
 2. **Parameter evidence attribution:** inspect D-08's subject-speed summaries for segment, configuration and source attribution before using them to prepare any parameter memo. No owner values or numeric recommendations are authorized by synthetic fixtures.
 3. **Reproducible study artifacts:** inspect report provenance and explicit input binding. Retain exact source identities and missing evidence rather than inferring successful collection.
