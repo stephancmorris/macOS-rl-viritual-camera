@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """D-06 synthetic replay and shadow observations; never issues qualification."""
 import argparse
-from collections import defaultdict
+from collections import Counter, defaultdict
 import copy
 import hashlib
 import io
@@ -220,6 +220,7 @@ def summarize_shadow(path, window, bindings, binding_schema_version=1):
             rows.append(row)
     require(set(declared) <= set(by_session))
     return {'records': data['records'], 'matchingWindowSeconds': window,
+            'recordEvidenceCounts': dict(sorted(Counter(r['evidenceClass'] for r in records).items())),
             'inputFingerprints': input_fingerprints(source),
             'rows': rows, 'gaps': gaps, 'sessions': sessions,
             'parameterEvidence': parameter_evidence,
@@ -353,6 +354,7 @@ def summarize_shadow_phases(path, window, bindings):
                          'status': 'incomplete' if session in blocked or
                                    any(p['sessionID'] == session and p['status'] == 'incomplete' for p in phases) else 'observed'})
     return {'records': data['records'], 'matchingWindowSeconds': window,
+            'recordEvidenceCounts': dict(sorted(Counter(r['evidenceClass'] for r in records).items())),
             'inputFingerprints': input_fingerprints(source),
             'bindingMode': 'explicitPhases', 'rows': rows, 'gaps': [],
             'sessions': sessions, 'phases': phases, 'parameterEvidence': parameter_evidence,
@@ -421,6 +423,8 @@ def evaluate(value, digest=None, shadow_data=None, regressions=None):
                'status': 'incomplete' if any(r['level'] == level for r in runs) else 'notRun',
                'directLiveRoute': 'notRun', 'virtualCameraLiveRoute': 'notRun'} for level in SCHEMA['levels']]
     return {'evaluationSchemaVersion': value['evaluationSchemaVersion'], 'inputSHA256': digest, 'qualified': False,
+            'evidenceInventory': {'replayScenarios': dict(sorted(Counter(r['evidenceClass'] for r in runs).items())),
+                                  'shadowRecords': shadow_data['recordEvidenceCounts'] if shadow_data is not None else {}},
             'qualificationStatus': 'incomplete', 'runs': runs, 'levels': levels,
             'shadow': shadow_data, 'shadowRegressions': regressions or [],
             'missingEvidence': ['ownerFrozenPlanAndBudgets', 'independentEligibleOpportunityLabels',
@@ -434,9 +438,21 @@ def fraction(numerator, denominator):
     return f'{numerator}/{denominator}' if denominator else 'unavailable (0 labelled)'
 
 
+def evidence_inventory_lines(result):
+    lines = ['## Supplied evidence inventory', '',
+             '| Input unit | Declared evidence class | Accepted count |',
+             '| --- | --- | ---: |']
+    inventory = result['evidenceInventory']
+    for key, label in (('replayScenarios', 'Replay scenarios'), ('shadowRecords', 'Shadow records')):
+        for evidence_class, count in sorted(inventory[key].items()):
+            lines.append(f'| {label} | {evidence_class} | {count} |')
+    lines += ['', 'Counts retain their input units and declared classes. They do not authenticate collection, establish exposure or prove complete capture.', '']
+    return lines
+
+
 def markdown(result):
     lines = ['# Director evaluation observations', '',
-             '**Synthetic software evidence. Qualification incomplete; no operating permission or parameter recommendation.**', '',
+             '**Evaluation observations. Qualification incomplete; no operating permission or parameter recommendation.**', '',
              f'Input SHA-256: `{result["inputSHA256"] or "unavailable"}`.', '',
              'Every scenario is kept in its own session, level, evidence, execution, route, configuration, parameter and judge/model partition. Rates are not pooled.', '',
              '| Level | Synthetic scenarios | Assessment | Direct live output | Virtual Camera live output |',
@@ -445,7 +461,7 @@ def markdown(result):
         lines[6:6] = [f'Shadow sidecar SHA-256: `{result["shadowBindingSHA256"]}`.', '']
     for row in result['levels']:
         lines.append(f'| {row["level"]} | {row["syntheticScenarios"]} | {row["status"]} | {row["directLiveRoute"]} | {row["virtualCameraLiveRoute"]} |')
-    lines += ['', '## Actual replay scenario measurements', '',
+    lines += ['', *evidence_inventory_lines(result), '## Actual replay scenario measurements', '',
               'Wrong proposals and attempts are separate from commits. The replay does not label committed subject correctness or independent useful opportunities.', '',
               '| Scenario | Attempted / committed preparations | Wrong / labelled proposals | Wrong / labelled attempts | Stale commits / all commits | Operator cuts / attempts | Overrides honoured | UI latency | Software observation |',
               '| --- | --- | --- | --- | --- | --- | ---: | --- | --- |']
@@ -516,8 +532,9 @@ def markdown(result):
 
 def parameter_memo(result):
     lines = ['# Observed parameter evidence — AWAITING OWNER', '',
-             'Synthetic fixture settings and observed metadata only. No numeric recommendation, tuning choice, approved bar or qualification is derived here.', '',
+             'Exported replay settings and shadow metadata only. No numeric recommendation, tuning choice, approved bar or qualification is derived here.', '',
              'Configured durations, movement bounds and rates describe test inputs; they are not measured subject speed or measured notice/on-air behavior.', '']
+    lines += evidence_inventory_lines(result)
     lines += [f'Evaluation input SHA-256: `{result["inputSHA256"] or "unavailable"}`.', '']
     if result.get('shadowBindingSHA256'):
         lines += [f'Shadow sidecar SHA-256: `{result["shadowBindingSHA256"]}`.', '']

@@ -54,6 +54,12 @@ The regression reproduced four missing-field errors before repair. All **122 scr
 
 All **123 script Python definitions pass**, zero failures. The existing legacy mixed-model, missingness, actual phase-fixture and matching tests remain green. Logs: `/private/tmp/alfie-phase-model-attribution-baseline-20261025.log` and `/private/tmp/alfie-phase-model-attribution-final-20261025.log`. No new model observations, matching, settings or qualification are inferred. Main and active UI task status were refreshed and remain separate.
 
+## Declared evidence inventory
+
+[AD-EVIDENCE-INVENTORY](https://trello.com/c/URMUc3OZ) replaces the evaluation's unconditional synthetic heading with an explicit inventory: replay scenarios and accepted shadow records remain separate units, each retaining its declared evidence class. JSON, Markdown and parameter memos show the same inventory. Declared recorded/live classes are not authentication or verified exposure, and capture failures continue to suppress scoring.
+
+All **124 script Python definitions pass**, zero failures. Authored synthetic-fixture class mutations exercise all three labels without collecting real recorded/live data; explicit phase totals remain seven synthetic records. Baseline/final logs: `/private/tmp/alfie-evidence-inventory-baseline-20261025.log`, `/private/tmp/alfie-evidence-inventory-final-20261025.log`. No input/record schema, app behavior or qualification changed.
+
 ## Report completeness repair
 
 Version-1 evaluation session summaries said `observed` despite dropped records, a missing prefix, an orphan action with no comparison rows, or an unscored completed Take. Two added test definitions reproduced five failing cases before the fix. The analyzer now exposes its authoritative capture-blocked session set independently of optional phase output. The evaluator uses that set and unscored-action status for each session summary. Legacy C-05 Markdown also labels unscored comparisons incomplete. Matching, parameter settings and qualification behavior are unchanged.

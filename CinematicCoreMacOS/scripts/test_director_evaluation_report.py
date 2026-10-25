@@ -123,6 +123,7 @@ class PhaseEvaluationTests(unittest.TestCase):
         bindings = [phase_binding(rows, 0, 2, 'first'), phase_binding(rows, 3, 6, 'second')]
         data = analyze_phases(rows, bindings)
         self.assertEqual(data['records'], 7)
+        self.assertEqual(data['recordEvidenceCounts'], {'synthetic': 7})
         self.assertEqual(data['bindingMode'], 'explicitPhases')
         self.assertEqual({row['phaseID'] for row in data['rows']}, {'first', 'second'})
         self.assertEqual(sum(row['counts']['compared'] for row in data['rows']), 2)
@@ -259,6 +260,23 @@ class PhaseEvaluationTests(unittest.TestCase):
 
 
 class EvaluationTests(unittest.TestCase):
+    def test_evidence_inventory_preserves_declared_shadow_classes_and_replay_counts(self):
+        for declared_class in ('synthetic', 'recorded', 'live'):
+            rows = shadow_rows()
+            for row in rows:
+                row['evidenceClass'] = declared_class
+            # Authored class mutations exercise reporting only, not real collection.
+            data = analyze_shadow(rows, [binding(rows)])
+            result = report.evaluate(envelope(run_fixture()), shadow_data=data)
+            with self.subTest(declared_class=declared_class):
+                self.assertEqual(result['evidenceInventory']['replayScenarios'], {'synthetic': 1})
+                self.assertEqual(result['evidenceInventory']['shadowRecords'], {declared_class: 7})
+                for text in (report.markdown(result), report.parameter_memo(result)):
+                    self.assertNotIn('**Synthetic software evidence.', text)
+                    self.assertIn(f'| Shadow records | {declared_class} | 7 |', text)
+                    self.assertIn('| Replay scenarios | synthetic | 1 |', text)
+                self.assertFalse(result['qualified'])
+
     def test_reports_retain_the_supplied_matching_window(self):
         directory = FIXTURES / 'director-shadow-synthetic-export'
         bindings = [binding(shadow_rows())]
