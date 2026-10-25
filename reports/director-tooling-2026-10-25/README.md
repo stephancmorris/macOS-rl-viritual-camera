@@ -34,6 +34,8 @@ The current CLI was also run end to end against the retained **21 October histor
 
 ## Continued work window
 
+The schedule includes one cleanup-only follow-up after the deadline so the automation can delete itself and report the final checkpoint. That follow-up must do no further application work; the 22:41 AEDT implementation deadline is unchanged.
+
 The renewed request was received around 17:41 AEDT on 25 October. A thread heartbeat named **ALFIE Director tooling work window** is active every 15 minutes through 22:41 AEDT today, with explicit instructions to avoid overlapping active work and to stop at the deadline. The older goal remains platform-marked usage-limited; a replacement goal was refused because it is unfinished. No goal was falsely marked complete and no reset credit was consumed. The latest usage snapshot allowed ordinary usage (5% of the primary window used); consumption is not an acceptance criterion.
 
 ## Legacy Python binding validation
