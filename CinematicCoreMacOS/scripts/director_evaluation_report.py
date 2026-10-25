@@ -203,31 +203,7 @@ def summarize_shadow(path, window, bindings, binding_schema_version=1):
         for scope_key, scoped_records in sorted(parameter_scopes.items(), key=lambda item: repr(item[0])):
             scope = {'evidenceClass': scope_key[0], 'level': scope_key[1], 'executionMode': scope_key[2],
                      'judgeModels': [list(model) for model in scope_key[3]]}
-            snapshots = {}
-            speeds, unavailable_speeds, invalid_speeds = [], 0, 0
-            for record in scoped_records:
-                snapshot = {**scope, 'segmentType': record['context']['segmentType'], 'parameters': record['parameters']}
-                snapshots[json.dumps(snapshot, sort_keys=True)] = snapshot
-                for index, evidence in enumerate(record['evidence']):
-                    speed = evidence.get('subjectSpeed')
-                    if speed is not None:
-                        speeds.append(speed)
-                    elif f'evidence[{index}].subjectSpeed' in record['invalidFields']:
-                        invalid_speeds += 1
-                    else:
-                        unavailable_speeds += 1
-            # Multiple judge/model identities on one record cannot be attributed
-            # to a single model. Preserve sample counts but suppress distributions.
-            distribution_available = bool(speeds) and len(scope_key[3]) <= 1
-            distribution_status = ('unavailableMixedModelScope' if len(scope_key[3]) > 1 else
-                                   'observed' if speeds else 'unavailableNoSamples')
-            parameter_evidence.append({'sessionID': session, 'scope': scope, 'snapshots': list(snapshots.values()),
-                                       'subjectSpeed': {'reportedSamples': len(speeds), 'unavailableSamples': unavailable_speeds,
-                                                        'invalidSamples': invalid_speeds, 'distributionStatus': distribution_status,
-                                                        'minimum': min(speeds) if distribution_available else None,
-                                                        'median': statistics.median(speeds) if distribution_available else None,
-                                                        'maximum': max(speeds) if distribution_available else None,
-                                                        'unit': 'normalizedFrameUnitsPerSecond'}})
+            parameter_evidence.extend(summarize_parameter_samples(session, scoped_records, scope))
         for key, counts, blocked in data['groups']:
             if key[0] != session:
                 continue
@@ -254,6 +230,51 @@ def summarize_shadow(path, window, bindings, binding_schema_version=1):
 def canonical_parameter_context(parameters):
     """Absent optional wire values remain unknown; no settings are filled in."""
     return {key: parameters.get(key) for key in shadow.SCHEMA['objects']['ParameterContext']}
+
+
+def summarize_parameter_samples(session, records, scope):
+    """Frame-normalized speeds retain segment, settings and channel attribution."""
+    groups = {}
+    for record in records:
+        context = record['context']
+        # Even rows without channel evidence retain their actual settings.
+        for index, evidence in enumerate(record['evidence'] or [None]):
+            sample_scope = {**scope, 'segmentType': context['segmentType'],
+                            'segmentToken': context.get('segmentToken'),
+                            'parameterContext': canonical_parameter_context(record['parameters']),
+                            'channel': evidence['channel'] if evidence is not None else None}
+            key = json.dumps(sample_scope, sort_keys=True)
+            group = groups.setdefault(key, {'scope': sample_scope, 'snapshots': {}, 'speeds': [],
+                                             'unavailable': 0, 'invalid': 0})
+            snapshot = {**sample_scope, 'parameters': record['parameters']}
+            group['snapshots'][json.dumps(snapshot, sort_keys=True)] = snapshot
+            if evidence is None:
+                continue
+            speed = evidence.get('subjectSpeed')
+            if speed is not None:
+                group['speeds'].append(speed)
+            elif f'evidence[{index}].subjectSpeed' in record['invalidFields']:
+                group['invalid'] += 1
+            else:
+                group['unavailable'] += 1
+    output = []
+    for key in sorted(groups):
+        group = groups[key]
+        speeds = group['speeds']
+        mixed_model = len(scope['judgeModels']) > 1
+        available = bool(speeds) and not mixed_model
+        output.append({'sessionID': session, 'scope': group['scope'],
+                       'snapshots': list(group['snapshots'].values()),
+                       'subjectSpeed': {'reportedSamples': len(speeds),
+                                        'unavailableSamples': group['unavailable'],
+                                        'invalidSamples': group['invalid'],
+                                        'distributionStatus': 'unavailableMixedModelScope' if mixed_model else
+                                                              'observed' if speeds else 'unavailableNoSamples',
+                                        'minimum': min(speeds) if available else None,
+                                        'median': statistics.median(speeds) if available else None,
+                                        'maximum': max(speeds) if available else None,
+                                        'unit': 'normalizedFrameUnitsPerSecond'}})
+    return output
 
 
 def summarize_shadow_phases(path, window, bindings):
@@ -303,27 +324,8 @@ def summarize_shadow_phases(path, window, bindings):
         scope = {key: binding[key] for key in SCHEMA['requiredBindingKeys'] if key != 'sessionID'}
         scope.update(phaseID=phase_id, routeGenerations=binding['routeGenerations'],
                      judgeModels=[list(model) for model in models])
-        speeds, unavailable_speeds, invalid_speeds, snapshots = [], 0, 0, {}
-        for record in scoped_records:
-            snapshot = {**scope, 'segmentType': record['context']['segmentType'], 'parameters': record['parameters']}
-            snapshots[json.dumps(snapshot, sort_keys=True)] = snapshot
-            for index, evidence in enumerate(record['evidence']):
-                speed = evidence.get('subjectSpeed')
-                if speed is not None:
-                    speeds.append(speed)
-                elif f'evidence[{index}].subjectSpeed' in record['invalidFields']:
-                    invalid_speeds += 1
-                else:
-                    unavailable_speeds += 1
-        parameter_evidence.append({'sessionID': session, 'phaseID': phase_id, 'scope': scope,
-                                   'snapshots': list(snapshots.values()),
-                                   'subjectSpeed': {'reportedSamples': len(speeds), 'unavailableSamples': unavailable_speeds,
-                                                    'invalidSamples': invalid_speeds,
-                                                    'distributionStatus': 'observed' if speeds else 'unavailableNoSamples',
-                                                    'minimum': min(speeds) if speeds else None,
-                                                    'median': statistics.median(speeds) if speeds else None,
-                                                    'maximum': max(speeds) if speeds else None,
-                                                    'unit': 'normalizedFrameUnitsPerSecond'}})
+        parameter_evidence.extend({**item, 'phaseID': phase_id}
+                                  for item in summarize_parameter_samples(session, scoped_records, scope))
         phase_unscored = any(row['phaseID'] == phase_id and row['counts']['unscored_actions'] for row in rows)
         phases.append({'sessionID': session, 'phaseID': phase_id, 'binding': binding,
                        'acceptedRecords': len(scoped_records),

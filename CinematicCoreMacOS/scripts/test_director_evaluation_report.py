@@ -237,6 +237,57 @@ class PhaseEvaluationTests(unittest.TestCase):
 
 
 class EvaluationTests(unittest.TestCase):
+    def test_parameter_distributions_keep_segments_contexts_and_channels_separate(self):
+        for dimension in ('segmentType', 'segmentToken', 'parameters', 'channel'):
+            rows = with_speed(shadow_rows(), 0.1)
+            for row in rows[4:]:
+                row['evidence'][0]['subjectSpeed'] = 0.9
+                if dimension == 'segmentType':
+                    row['context']['segmentType'] = 'panel'
+                elif dimension == 'segmentToken':
+                    row['context']['segmentToken'] = token('second-segment')
+                elif dimension == 'parameters':
+                    row['parameters']['parametersVersion'] = '2'
+                    row['parameters']['resolvedStyle']['maximumMovement'] = 0.8
+                else:
+                    row['evidence'][0]['channel'] = 'input-1'
+            with self.subTest(dimension=dimension):
+                evidence = analyze_shadow(rows, [])['parameterEvidence']
+                self.assertEqual(len(evidence), 2)
+                self.assertEqual({p['subjectSpeed']['median'] for p in evidence}, {0.1, 0.9})
+                self.assertEqual({p['subjectSpeed']['reportedSamples'] for p in evidence}, {3, 4})
+
+    def test_phase_parameter_distributions_keep_two_channels_separate(self):
+        rows = with_speed(shadow_rows(), 0.1)
+        for row in rows:
+            row['evidence'].append({**row['evidence'][0], 'channel': 'input-1', 'subjectSpeed': 0.9})
+        data = analyze_phases(rows, [phase_binding(rows, 0, 6, 'whole')])
+        evidence = data['parameterEvidence']
+        self.assertEqual(len(evidence), 2)
+        self.assertEqual({p['scope']['channel']: p['subjectSpeed']['median'] for p in evidence},
+                         {'input-1': 0.9, 'input-2': 0.1})
+        self.assertTrue(all(p['subjectSpeed']['reportedSamples'] == 7 for p in evidence))
+
+    def test_channel_partition_preserves_invalid_and_unavailable_samples(self):
+        rows = with_speed(shadow_rows(), 0.1)
+        for row in rows:
+            row['evidence'].append({**row['evidence'][0], 'channel': 'input-1'})
+            row['evidence'][1].pop('subjectSpeed')
+        rows[0]['invalidFields'] = ['evidence[1].subjectSpeed']
+        for phased in (False, True):
+            data = (analyze_phases(rows, [phase_binding(rows, 0, 6, 'whole')]) if phased else
+                    analyze_shadow(rows, [binding(rows)]))
+            with self.subTest(phased=phased):
+                samples = {p['scope']['channel']: p['subjectSpeed'] for p in data['parameterEvidence']}
+                self.assertEqual(samples['input-2']['reportedSamples'], 7)
+                self.assertEqual(samples['input-1']['reportedSamples'], 0)
+                self.assertEqual(samples['input-1']['invalidSamples'], 1)
+                self.assertEqual(samples['input-1']['unavailableSamples'], 6)
+                self.assertIsNone(samples['input-1']['median'])
+                memo = report.parameter_memo(report.evaluate(envelope(), shadow_data=data))
+                self.assertIn('"channel": "input-1"', memo)
+                self.assertIn('"segmentType": "presenter"', memo)
+
     def test_legacy_session_status_retains_capture_loss_without_comparison_rows(self):
         for fault in ('drop', 'gap', 'orphan', 'unknownShot'):
             rows = shadow_rows()

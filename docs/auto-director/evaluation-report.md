@@ -65,6 +65,8 @@ The optional memo copies only actual exported replay settings and actual C-05 pa
 
 The memo is **AWAITING OWNER** and makes no numeric recommendation. T1–T3, N4, P3, A4 and N2 still require suitable real observations, a manual baseline, independent opportunities and owner decisions. Existing exported evidence keeps its source class and original retention provenance. Export is not consent, disclosure permission or qualification.
 
+Within each existing scope, speed distributions are further separated by actual segment type/token, complete canonical parameter context and input channel. The memo prints these fields explicitly. A channel label identifies the recorded input, not a calibrated physical camera or persistent subject. Empty evidence rows retain a settings-only block with a null channel and zero reported samples. Invalid and unavailable measurements stay with their own channel; they never become zero-speed observations. These descriptive samples remain visible even when capture completeness prevents agreement scoring.
+
 The reporter can expose useful synthetic regressions now. Completing D-06 still needs the frozen per-level plan/budgets, consented recorded validation where required, current R2 rig evidence, actual attended downstream observations on both routes, complete fault/override cells and owner/operator/independent-reviewer sign-off. Do not mark a level qualified from these generated artifacts.
 
 Verification:

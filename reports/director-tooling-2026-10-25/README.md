@@ -10,6 +10,12 @@
 
 The queued initial Program handoff repair remains separate. D-06 real per-level evaluations, D-08 real-data recommendations, frozen owner plans, independent labels, both attended output routes and signatories remain open. Newly proposed Director style defaults and mid-show policy remain owner decisions.
 
+## Parameter evidence attribution
+
+[AD-PARAMETER-ATTRIBUTION](https://trello.com/c/nB2el8ZI) reproduced five failing cases: legacy distributions mixed segment types, segment instances, parameter contexts and channels, while explicit phases also mixed channels. One shared summarizer now partitions those dimensions inside existing evidence/level/mode/model/phase boundaries. Each block retains the actual settings and input channel. Missing/invalid samples remain attributed; a settings-only row preserves a null channel without inventing a measurement. Channels are recorded labels, not proof of persistent physical source or subject identity.
+
+All **117 script Python test definitions pass**, zero failures. Additional regressions preserve both channels' reported, unavailable and invalid counts in legacy and phase reports and check the generated memo. Baseline and final logs: `/private/tmp/alfie-parameter-attribution-baseline-20261025.log` and `/private/tmp/alfie-parameter-attribution-all-python-20261025.log`. This changes offline summaries only. No numeric recommendation, schema change, app policy or qualification follows.
+
 ## Report completeness repair
 
 Version-1 evaluation session summaries said `observed` despite dropped records, a missing prefix, an orphan action with no comparison rows, or an unscored completed Take. Two added test definitions reproduced five failing cases before the fix. The analyzer now exposes its authoritative capture-blocked session set independently of optional phase output. The evaluator uses that set and unscored-action status for each session summary. Legacy C-05 Markdown also labels unscored comparisons incomplete. Matching, parameter settings and qualification behavior are unchanged.
