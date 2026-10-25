@@ -84,5 +84,12 @@
   "pullRequest": "https://github.com/stephancmorris/macOS-rl-viritual-camera/pull/81",
   "draft": true,
   "combinedSourceValidation": "pr81-validation.json",
-  "branchMergePerformed": false
+  "branchMergePerformed": false,
+  "separateStyleSettlingFollowup": {
+    "pullRequest": "https://github.com/stephancmorris/macOS-rl-viritual-camera/pull/83",
+    "basePullRequest": 82,
+    "evidence": "style-settle-followup.json",
+    "jointValidationWithPR81": false,
+    "reviewCard": "https://trello.com/c/JRBFINdK"
+  }
 }

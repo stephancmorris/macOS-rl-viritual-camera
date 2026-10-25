@@ -1,0 +1,48 @@
+{
+  "date": "2026-10-25",
+  "basePullRequest": "https://github.com/stephancmorris/macOS-rl-viritual-camera/pull/82",
+  "baseCommit": "82cca822d191c867c8f5a341b9f3ada43c82949d",
+  "sourceFingerprint": "9cff1e3b9cae1b31ab4768c05b45580523a6acc4672bb28ef33906621e317e5e",
+  "sourceFileSHA256": {
+    "CinematicCoreMacOS/CinematicCoreMacOS/Director/DirectorController.swift": "8d7c60b0d3ecdfa941921232f95937fb37b8010a99031e75dad2df50596fdbdc",
+    "CinematicCoreMacOS/CinematicCoreMacOS/Director/DirectorEvidenceAdapter.swift": "b363072509f56f151f7b643b57059c05951d706466c5dbc3c77cdc67abc74c36",
+    "CinematicCoreMacOS/CinematicCoreMacOSTests/DirectorStyleSettlementEvidenceTests.swift": "90020c6d08b5bb7e132f717dd22b5917a6e5e3b09c57f96c02dd74738906b1cd"
+  },
+  "baselineProbe": {
+    "result": "Failed",
+    "failedDefinitions": 1,
+    "observation": "ready.reasons was empty despite the first sample under the stricter style bound",
+    "resultBundle": "/private/tmp/alfie-pr82-evidence-review-20261025.D1bitM/settle-review-detail.xcresult"
+  },
+  "focused": {
+    "result": "Passed",
+    "passedDefinitions": 50,
+    "passedExpandedCases": 70,
+    "failedDefinitions": 0,
+    "skippedDefinitions": 0
+  },
+  "full": {
+    "result": "Passed",
+    "passedDefinitions": 1113,
+    "passedExpandedCases": 1711,
+    "failedDefinitions": 0,
+    "skippedDefinitions": 3
+  },
+  "release": "Unsigned app and extension passed",
+  "appExecutableSHA256": "e81859445eed2d3c0bb267b639d561e1e4f6730b84f5de385d8b2a7c3c7c6913",
+  "coreMLInterop": "Existing current-main synthetic scorer explicitly configured in the full suite",
+  "limitations": [
+    "Authored evidence sequences, no camera or live-show observations",
+    "No parameter recommendation, model promotion, signed-install or Director qualification",
+    "Stacked follow-up to PR82, independently of PR81; no branch merge performed"
+  ],
+  "evidencePaths": {
+    "focused": "/private/tmp/alfie-style-settle-fix-20261025-focused.xcresult",
+    "full": "/private/tmp/alfie-style-settle-fix-20261025-full.xcresult",
+    "releaseLog": "/private/tmp/alfie-style-settle-fix-20261025-release.log"
+  },
+  "pullRequest": "https://github.com/stephancmorris/macOS-rl-viritual-camera/pull/83",
+  "fixCommit": "be540782a1ca0cda843fe587e618d3d3afe26ca3",
+  "generatedPreviewCommit": "e604a05d3dfea08d3743bbf514cd5ff3e7a93515",
+  "previewTreeEqualsTestedHead": true
+}
