@@ -507,6 +507,7 @@ def markdown(result):
                 lines.append(f'- Phase `{item["phaseID"]}` / session `{item["sessionID"]}`: original sequences {b["firstSequence"]}–{b["lastSequence"]}, {item["acceptedRecords"]} accepted records; route generations `{json.dumps(b["routeGenerations"])}`; scope {item["status"]}.')
         for item in data['abstentions']:
             lines.append(f'- Abstention reasons {" / ".join(str(x) for x in item["stratum"])}: {item["count"]}. Reasons are not independent opportunities.')
+        lines += ['', 'Interior dwell describes recorded Program input-role tenure. It does not establish a stable composition, subject hold or downstream presentation; unknown shot metadata can leave tenure available while agreement is unscored.', '']
         for item in data['dwell']:
             values = item['seconds']
             phase = f' / phase {item["phaseID"]}' if 'phaseID' in item else ''

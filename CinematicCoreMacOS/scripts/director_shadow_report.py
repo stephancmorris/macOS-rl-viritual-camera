@@ -711,7 +711,10 @@ def markdown(data, window):
         lines.append(f'- {" / ".join(str(x) for x in key)}: {count}')
     if not data['abstentions']:
         lines.append('No observed abstentions.')
-    lines += ['', '## Interior Program dwell', '', 'Seconds between consecutive completed Takes with continuous roles and no observed disruption.', 'First/last censored holds and missing intervals are excluded; this is not downstream presentation.', '']
+    lines += ['', '## Interior Program input tenure (dwell)', '',
+              'Seconds between consecutive completed Takes with continuous roles and no observed disruption.',
+              'This measures recorded input-role tenure, not a stable composition or subject hold. Missing shot metadata can prevent agreement scoring while input roles still support this interval.',
+              'First/last censored holds and missing intervals are excluded; this is not downstream presentation.', '']
     for key, values in sorted(data['dwell'].items(), key=lambda kv: repr(kv[0])):
         phase = f' / phase {key[-1]}' if len(key) == 9 else ''
         lines.append(f'- {key[0]} / {key[1]} / {key[2]} / parameters {key[4]}{phase}: n={len(values)}, min={min(values):g}, median={statistics.median(values):g}, max={max(values):g} s')

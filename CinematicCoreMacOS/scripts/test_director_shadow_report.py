@@ -575,7 +575,10 @@ class ShadowReportTests(unittest.TestCase):
 
     def test_unknown_shot_and_intervening_manual_edit_exclude_metrics(self):
         rows = fixture(); rows[2]['context'].pop('programShot')
-        self.assertEqual(run(rows)['groups'][0][1]['unscored_actions'], 1)
+        data = run(rows)
+        self.assertEqual(data['groups'][0][1]['unscored_actions'], 1)
+        # Exact roles still establish input tenure, independently of composition.
+        self.assertAlmostEqual(next(iter(data['dwell'].values()))[0], 10)
         rows = fixture(); rows[3]['event'] = action('attempt', kind='setLevel')
         self.assertFalse(run(rows)['dwell'])
         self.assertFalse(run(fixture()[:3])['dwell'])
