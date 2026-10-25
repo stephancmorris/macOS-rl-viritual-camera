@@ -73,6 +73,8 @@ The memo is **AWAITING OWNER** and makes no numeric recommendation. T1–T3, N4,
 
 Within each existing scope, speed distributions are further separated by actual segment type/token, complete canonical parameter context and input channel. The memo prints these fields explicitly. A channel label identifies the recorded input, not a calibrated physical camera or persistent subject. Empty evidence rows retain a settings-only block with a null channel and zero reported samples. Invalid and unavailable measurements stay with their own channel; they never become zero-speed observations. These descriptive samples remain visible even when capture completeness prevents agreement scoring.
 
+This attribution also applies inside explicit phases: a row with no judgement has an empty actual `judgeModels` list and stays separate from rows that observed the phase's model. Parameter-evidence scope names the phase declaration `declaredJudgeKind` / `declaredModelVersion`; it does not imply that model participated on every row. The full phase binding is retained separately. Empty judgement rows remain neutral for validating the phase declaration and do not alter comparison matching.
+
 The reporter can expose useful synthetic regressions now. Completing D-06 still needs the frozen per-level plan/budgets, consented recorded validation where required, current R2 rig evidence, actual attended downstream observations on both routes, complete fault/override cells and owner/operator/independent-reviewer sign-off. Do not mark a level qualified from these generated artifacts.
 
 Verification:

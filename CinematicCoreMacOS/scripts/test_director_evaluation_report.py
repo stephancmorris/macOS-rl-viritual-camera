@@ -99,6 +99,23 @@ def analyze_phases(rows, bindings):
 
 
 class PhaseEvaluationTests(unittest.TestCase):
+    def test_phase_speed_samples_retain_unobserved_judge_rows(self):
+        rows = with_speed(with_model(shadow_rows(), 'model-A'), 0.1)
+        for row in rows[4:]:
+            row['judgements'] = []
+            row['evidence'][0]['subjectSpeed'] = 0.9
+        data = analyze_phases(rows, [phase_binding(rows, 0, 6, 'whole')])
+        samples = data['parameterEvidence']
+        self.assertEqual(len(samples), 2)
+        actual = {json.dumps(p['scope']['judgeModels']): p['subjectSpeed'] for p in samples}
+        self.assertEqual(actual['[]']['reportedSamples'], 3)
+        self.assertEqual(actual['[]']['median'], 0.9)
+        self.assertEqual(actual[json.dumps([['learned', 'model-A']])]['reportedSamples'], 4)
+        self.assertEqual(actual[json.dumps([['learned', 'model-A']])]['median'], 0.1)
+        self.assertTrue(all(p['phaseID'] == 'whole' for p in samples))
+        self.assertTrue(all(p['scope']['declaredModelVersion'] == 'model-A' for p in samples))
+        self.assertTrue(all('modelVersion' not in p['scope'] for p in samples))
+
     def test_explicit_phases_preserve_actual_counts_and_isolate_parameter_samples(self):
         rows = with_speed(shadow_rows(), 0.1)
         for row in rows[3:]:

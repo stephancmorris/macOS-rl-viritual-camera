@@ -245,9 +245,11 @@ def summarize_parameter_samples(session, records, scope):
     groups = {}
     for record in records:
         context = record['context']
+        actual_models = sorted({(j['judgeKind'], j.get('modelVersion')) for j in record['judgements']}, key=repr)
         # Even rows without channel evidence retain their actual settings.
         for index, evidence in enumerate(record['evidence'] or [None]):
             sample_scope = {**scope, 'segmentType': context['segmentType'],
+                            'judgeModels': [list(model) for model in actual_models],
                             'segmentToken': context.get('segmentToken'),
                             'parameterContext': canonical_parameter_context(record['parameters']),
                             'channel': evidence['channel'] if evidence is not None else None}
@@ -269,7 +271,7 @@ def summarize_parameter_samples(session, records, scope):
     for key in sorted(groups):
         group = groups[key]
         speeds = group['speeds']
-        mixed_model = len(scope['judgeModels']) > 1
+        mixed_model = len(group['scope']['judgeModels']) > 1
         available = bool(speeds) and not mixed_model
         output.append({'sessionID': session, 'scope': group['scope'],
                        'snapshots': list(group['snapshots'].values()),
@@ -329,8 +331,10 @@ def summarize_shadow_phases(path, window, bindings):
         phase_id, session = binding['phaseID'], binding['sessionID']
         scoped_records = phase_records[phase_id]
         models = sorted({(j['judgeKind'], j.get('modelVersion')) for r in scoped_records for j in r['judgements']}, key=repr)
-        scope = {key: binding[key] for key in SCHEMA['requiredBindingKeys'] if key != 'sessionID'}
+        scope = {key: binding[key] for key in SCHEMA['requiredBindingKeys']
+                 if key not in ('sessionID', 'judgeKind', 'modelVersion')}
         scope.update(phaseID=phase_id, routeGenerations=binding['routeGenerations'],
+                     declaredJudgeKind=binding['judgeKind'], declaredModelVersion=binding['modelVersion'],
                      judgeModels=[list(model) for model in models])
         parameter_evidence.extend({**item, 'phaseID': phase_id}
                                   for item in summarize_parameter_samples(session, scoped_records, scope))
