@@ -36,6 +36,8 @@ An empty bundle has count zero and empty summary arrays. Each record's original 
 
 A matching manifest does not establish complete capture or qualification. Original sequence numbers and action pairs remain unchanged. Time-limited exports may deliberately lack a prefix or a correlated result; those sessions still show incomplete and suppress agreement/dwell.
 
+New reports include separate SHA-256 fingerprints for the exact records and manifest bytes read by the bounded parser. Whitespace changes therefore change the fingerprint. A complete malformed input can still be identified, while its scoring remains suppressed. Missing files or reads stopped by a resource bound have an unavailable full-file fingerprint; a consumed prefix is never labelled as the complete file. Hashes establish byte identity only, not capture completeness, consent or qualification. No source path is copied into the report.
+
 A file argument still accepts unbundled JSONL, including the [original fixture](../../CinematicCoreMacOS/scripts/fixtures/director-shadow-synthetic.jsonl):
 
 ```sh

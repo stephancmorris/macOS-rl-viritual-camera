@@ -217,7 +217,8 @@ def summarize_shadow(path, window, bindings, binding_schema_version=1):
                 row['counts'].update(compared=None, exact=None, unscored_actions=counts['completed_actions'])
             rows.append(row)
     require(set(declared) <= set(by_session))
-    return {'records': data['records'], 'rows': rows, 'gaps': gaps, 'sessions': sessions,
+    return {'records': data['records'], 'inputFingerprints': input_fingerprints(source),
+            'rows': rows, 'gaps': gaps, 'sessions': sessions,
             'parameterEvidence': parameter_evidence,
             'issues': {k: v for k, v in data['issues'].items() if v},
             'abstentions': [{'stratum': list(k), 'count': v} for k, v in sorted(data['abstentions'].items())],
@@ -230,6 +231,10 @@ def summarize_shadow(path, window, bindings, binding_schema_version=1):
 def canonical_parameter_context(parameters):
     """Absent optional wire values remain unknown; no settings are filled in."""
     return {key: parameters.get(key) for key in shadow.SCHEMA['objects']['ParameterContext']}
+
+
+def input_fingerprints(source):
+    return {key: source.get(key) for key in ('recordsSHA256', 'manifestSHA256')}
 
 
 def summarize_parameter_samples(session, records, scope):
@@ -340,7 +345,8 @@ def summarize_shadow_phases(path, window, bindings):
                          'judgeModels': [list(m) for m in sorted(models, key=repr)],
                          'status': 'incomplete' if session in blocked or
                                    any(p['sessionID'] == session and p['status'] == 'incomplete' for p in phases) else 'observed'})
-    return {'records': data['records'], 'bindingMode': 'explicitPhases', 'rows': rows, 'gaps': [],
+    return {'records': data['records'], 'inputFingerprints': input_fingerprints(source),
+            'bindingMode': 'explicitPhases', 'rows': rows, 'gaps': [],
             'sessions': sessions, 'phases': phases, 'parameterEvidence': parameter_evidence,
             'issues': {k: v for k, v in data['issues'].items() if v},
             'abstentions': [{'stratum': list(k), 'phaseID': k[-3], 'count': v}
@@ -427,6 +433,8 @@ def markdown(result):
              'Every scenario is kept in its own session, level, evidence, execution, route, configuration, parameter and judge/model partition. Rates are not pooled.', '',
              '| Level | Synthetic scenarios | Assessment | Direct live output | Virtual Camera live output |',
              '| --- | ---: | --- | --- | --- |']
+    if result.get('shadowBindingSHA256'):
+        lines[6:6] = [f'Shadow sidecar SHA-256: `{result["shadowBindingSHA256"]}`.', '']
     for row in result['levels']:
         lines.append(f'| {row["level"]} | {row["syntheticScenarios"]} | {row["status"]} | {row["directLiveRoute"]} | {row["virtualCameraLiveRoute"]} |')
     lines += ['', '## Actual replay scenario measurements', '',
@@ -451,6 +459,7 @@ def markdown(result):
               'Useful-preparation coverage, wrong committed-subject rate, visible override latency and downstream presentation are unavailable. Missing values are never replaced with zero.', '']
     if result['shadow'] is not None:
         data = result['shadow']
+        lines += ['', *shadow.fingerprint_lines(data['inputFingerprints'])]
         lines += ['## C-05 shadow observations', '', f'Accepted records: {data["records"]}. Explicit export validated: {str(data["exportValidated"]).lower()}.', '',
                   'Agreement describes operator matching, not independent correctness. Bindings are declared evaluation scope, not verified physical-route observations.', '',
                   '| Session | Scope | Exact / compared | Predictions | Unmatched predictions | Unmatched actions | Unscored actions | Status |',
@@ -498,10 +507,14 @@ def parameter_memo(result):
     lines = ['# Observed parameter evidence — AWAITING OWNER', '',
              'Synthetic fixture settings and observed metadata only. No numeric recommendation, tuning choice, approved bar or qualification is derived here.', '',
              'Configured durations, movement bounds and rates describe test inputs; they are not measured subject speed or measured notice/on-air behavior.', '']
+    lines += [f'Evaluation input SHA-256: `{result["inputSHA256"] or "unavailable"}`.', '']
+    if result.get('shadowBindingSHA256'):
+        lines += [f'Shadow sidecar SHA-256: `{result["shadowBindingSHA256"]}`.', '']
     for run in result['runs']:
         lines += [f'## {run["scenarioID"]} / {run["configurationID"]}', '',
                   '```json', json.dumps(run['parameters'], sort_keys=True, indent=2), '```', '']
     if result['shadow'] is not None:
+        lines += shadow.fingerprint_lines(result['shadow']['inputFingerprints'])
         for item in result['shadow']['parameterEvidence']:
             phase = f' / phase {item["phaseID"]}' if 'phaseID' in item else ''
             lines += [f'## Shadow session {item["sessionID"]}{phase}', '',
@@ -549,7 +562,7 @@ def main(argv=None):
                                 binding_schema_version=value['evaluationSchemaVersion']) if args.shadow_bundle else None
         regressions = negative_shadow_regressions(args.regression_fixture, args.match_window_seconds) if args.regression_fixture else []
         result = evaluate(value, digest, data, regressions)
-        if value['evaluationSchemaVersion'] == 2:
+        if binding_digest is not None or value['evaluationSchemaVersion'] == 2:
             result['shadowBindingSHA256'] = binding_digest
         outputs = []
         if args.output:

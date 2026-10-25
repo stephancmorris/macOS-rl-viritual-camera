@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Synthetic evaluation metadata and report regressions; no app or real evidence."""
 import copy
+import hashlib
 import json
 import os
 from pathlib import Path
@@ -233,10 +234,40 @@ class PhaseEvaluationTests(unittest.TestCase):
             data = json.loads(out.read_text())
             self.assertEqual(data['evaluationSchemaVersion'], 2)
             self.assertEqual(len(data['shadowBindingSHA256']), 64)
+            expected = hashlib.sha256(records.read_bytes()).hexdigest()
+            self.assertEqual(data['shadow']['inputFingerprints']['recordsSHA256'], expected)
+            self.assertIn(expected, report.markdown(data))
+            self.assertIn(expected, report.parameter_memo(data))
             self.assertFalse(data['qualified'])
 
 
 class EvaluationTests(unittest.TestCase):
+    def test_legacy_external_sidecar_retains_exact_fingerprint(self):
+        with tempfile.TemporaryDirectory() as directory:
+            src, out = Path(directory) / 'input.json', Path(directory) / 'report.json'
+            src.write_text(json.dumps(envelope()))
+            sidecar = FIXTURES / 'director-evaluation-shadow-sidecar.json'
+            command = [sys.executable, str(Path(report.__file__)), str(src),
+                       '--shadow-bundle', str(FIXTURES / 'director-shadow-synthetic-export'),
+                       '--shadow-sidecar', str(sidecar), '--match-window-seconds', '2', '--json-output', str(out)]
+            completed = subprocess.run(command, capture_output=True)
+            self.assertEqual(completed.returncode, 0, completed.stderr)
+            result = json.loads(out.read_text())
+            expected = hashlib.sha256(sidecar.read_bytes()).hexdigest()
+            self.assertEqual(result['shadowBindingSHA256'], expected)
+            self.assertIn(expected, report.markdown(result))
+            self.assertIn(expected, report.parameter_memo(result))
+
+    def test_legacy_report_preserves_bundle_fingerprints(self):
+        directory = FIXTURES / 'director-shadow-synthetic-export'
+        data = report.summarize_shadow(directory, 2, [binding(shadow_rows())])
+        for name, field in [('records.jsonl', 'recordsSHA256'), ('manifest.json', 'manifestSHA256')]:
+            expected = hashlib.sha256((directory / name).read_bytes()).hexdigest()
+            self.assertEqual(data['inputFingerprints'][field], expected)
+            result = report.evaluate(envelope(), shadow_data=data)
+            self.assertIn(expected, report.markdown(result))
+            self.assertIn(expected, report.parameter_memo(result))
+
     def test_parameter_distributions_keep_segments_contexts_and_channels_separate(self):
         for dimension in ('segmentType', 'segmentToken', 'parameters', 'channel'):
             rows = with_speed(shadow_rows(), 0.1)
