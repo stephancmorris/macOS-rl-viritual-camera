@@ -13,6 +13,8 @@ python3 -m unittest discover -s CinematicCoreMacOS/scripts -p test_director_shad
 
 The two-second window is a supplied synthetic fixture value, not a production recommendation. A matching window is always required. Output defaults to stdout; `--output` creates a new file and refuses to overwrite one. Exit status is 0 for analyzed input (which may still have incomplete sessions), 2 for malformed/unsupported/limited input or invalid arguments, and 1 for an I/O failure. Check the Completeness section even after exit 0.
 
+The displayed matching window preserves the supplied numeric value on a text round trip. It is not rounded to a short descriptive precision, since reusing a rounded setting can change comparisons at a boundary. The evaluation report and standalone parameter memo use the same representation.
+
 The shared synthetic bundle contains [seven generated records](../../CinematicCoreMacOS/scripts/fixtures/director-shadow-synthetic-export/records.jsonl) and a [companion manifest](../../CinematicCoreMacOS/scripts/fixtures/director-shadow-synthetic-export/manifest.json): two matched operator cuts, one abstention and one ten-second interior Program interval. The [example report](../../reports/auto-director/shadow-report-synthetic-example.md) is deterministic and includes its synthetic provenance. Swift export tests check the same fixture against the actual record decoder and generated manifest.
 
 ## Bundles and unbundled input
@@ -36,6 +38,8 @@ An empty bundle has count zero and empty summary arrays. Each record's original 
 
 A matching manifest does not establish complete capture or qualification. Original sequence numbers and action pairs remain unchanged. Time-limited exports may deliberately lack a prefix or a correlated result; those sessions still show incomplete and suppress agreement/dwell.
 
+New reports include separate SHA-256 fingerprints for the exact records and manifest bytes read by the bounded parser. Whitespace changes therefore change the fingerprint. A complete malformed input can still be identified, while its scoring remains suppressed. Missing files or reads stopped by a resource bound have an unavailable full-file fingerprint; a consumed prefix is never labelled as the complete file. Hashes establish byte identity only, not capture completeness, consent or qualification. No source path is copied into the report.
+
 A file argument still accepts unbundled JSONL, including the [original fixture](../../CinematicCoreMacOS/scripts/fixtures/director-shadow-synthetic.jsonl):
 
 ```sh
@@ -57,6 +61,8 @@ Action correlation preserves the attempt's prediction partition while validating
 The controller records a shared action ID on the pre-event attempt and current terminal result for level selection, handback, takeover and explicit segment advance. Settings notifications currently arrive before the published setting is committed, so their terminal result is `unobserved`; it closes the observed intent without claiming an applied setting or a completed camera effect. Ordinary admitted preset commands remain `accepted` until a separate observer establishes completion.
 
 Only consecutive completed Takes with continuous role/parameter scope and no observed intervening disruption support interior dwell. The tool reports count/minimum/median/maximum in seconds. First/last censored holds are excluded. Routing metadata is not proof of downstream presentation or useful subject coverage.
+
+The `dwell` field measures recorded **Program input-role tenure**, not a stable crop, composition or subject hold. Exact Take roles can establish that interval even when missing shot metadata makes an agreement comparison unscored. On-air composition changes and useful subject coverage require their own observations; do not use input tenure alone as measured shot-duration or directing-quality evidence. Earlier generated reports labelled this field “Interior Program dwell”; its calculation is unchanged.
 
 ## Invalid and incomplete evidence
 

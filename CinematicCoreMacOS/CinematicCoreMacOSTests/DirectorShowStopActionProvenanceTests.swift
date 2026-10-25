@@ -89,6 +89,7 @@ import Testing
         #expect(rows.allSatisfy { $0.evidenceClass == (setup == "recordedPair" ? .recorded : .live) && $0.evidence.isEmpty && $0.judgements.isEmpty })
         let json = String(decoding: try JSONEncoder().encode(rows), as: UTF8.self)
         #expect(!json.contains("show-stop-private") && !json.contains("deviceName") && !json.contains("ObjectIdentifier"))
+        #expect(cameras.allSatisfy { !json.contains($0.lifetimeID.uuidString) })
         if setup == "pairB", let requested = ProcessInfo.processInfo.environment["ALFIE_DIRECTOR_SHOW_STOP_EXPORT"] {
             #expect(requested.hasPrefix("/") && !FileManager.default.fileExists(atPath: requested))
             guard requested.hasPrefix("/"), !FileManager.default.fileExists(atPath: requested) else {

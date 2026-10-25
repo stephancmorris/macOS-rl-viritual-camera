@@ -61,6 +61,7 @@ import Testing
         let data = try JSONEncoder().encode(rows)
         let json = String(decoding: data, as: UTF8.self)
         #expect(!json.contains("stop-private") && !json.contains("deviceName") && !json.contains("ObjectIdentifier"))
+        #expect(!json.contains(r.a.lifetimeID.uuidString) && !json.contains(r.b.lifetimeID.uuidString))
         // A duplicate result and a new attempt from the stopped camera cannot
         // turn that historical origin into evidence of a currently live source.
         r.a.manualResultObserver?(command, .accepted)

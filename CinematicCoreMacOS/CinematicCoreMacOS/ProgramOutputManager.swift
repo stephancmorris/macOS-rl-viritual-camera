@@ -243,6 +243,10 @@ final class ProgramOutputManager: ObservableObject {
     }
 
     @Published private(set) var activeRoute: Route?
+    /// Standalone capture owns its format lifetime here. A ShowCoordinator
+    /// instead holds it while any attached input runs or starts, including
+    /// while Program's output temporarily stops during a source replacement.
+    var managesShowStandard = true
     @Published private(set) var sinkStatuses: [SinkStatus] = []
     @Published private(set) var framesSent: Int = 0
     @Published private(set) var droppedFrames: Int = 0
@@ -588,10 +592,10 @@ final class ProgramOutputManager: ObservableObject {
     }
 
     func start() {
-        // Freeze the preference before any sink connects. Capture configuration,
-        // playout, reconnect restoration and bring-up checks must all describe
-        // this one session even if the operator changes the picker mid-show.
-        ShowStandard.beginSession()
+        // Standalone output freezes before any sink connects. For a routed
+        // show, the coordinator already froze it at the first starting/live
+        // input and keeps it through Program source replacements.
+        if managesShowStandard { ShowStandard.beginSession() }
         framesSent = 0
         droppedFrames = 0
         dropRatePerMinute = 0
@@ -681,7 +685,7 @@ final class ProgramOutputManager: ObservableObject {
         lastSoakTime = 0
         diagnosticsLog.endSession(note: "capture stop")
         diagnosticsFileName = nil
-        ShowStandard.endSession()
+        if managesShowStandard { ShowStandard.endSession() }
     }
 
     private func startWindowWatchdog() {

@@ -346,6 +346,13 @@ final class TrainingDataRecorder: ObservableObject {
         Self.logger.notice("Started recording session: \(id, privacy: .public)")
     }
 
+    /// Close observation admission in this MainActor turn. UI/camera Stop
+    /// callers cannot defer this boundary to a newly scheduled Task; draining
+    /// the already accepted rows continues through the shared shutdown task.
+    func requestStopRecording() {
+        _ = beginStopping()
+    }
+
     /// Stop and wait for all previously accepted observations to reach disk.
     /// Concurrent Stop/revoke callers await the same shutdown operation.
     func stopRecording() async {
@@ -355,7 +362,7 @@ final class TrainingDataRecorder: ObservableObject {
     @discardableResult
     private func beginStopping() -> Task<Void, Never>? {
         if let shutdownTask { return shutdownTask }
-        guard isRecording else { return nil }
+        guard isRecording, acceptsObservations else { return nil }
         // Close the plain gate before Published sends synchronous notifications.
         acceptsObservations = false
         isRecording = false

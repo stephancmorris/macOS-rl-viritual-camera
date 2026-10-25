@@ -103,7 +103,7 @@ struct RecorderSettingsView: View {
         )
     }
 
-    private var recordingBinding: Binding<Bool> {
+    var recordingBinding: Binding<Bool> {
         Binding(
             get: { recorder.isRecording },
             set: { newValue in
@@ -118,9 +118,7 @@ struct RecorderSettingsView: View {
                         detectorConfig: cameraManager.personDetector.config
                     )
                 } else {
-                    Task {
-                        await recorder.stopRecording()
-                    }
+                    recorder.requestStopRecording()
                 }
             }
         )

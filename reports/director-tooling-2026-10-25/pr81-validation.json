@@ -1,0 +1,38 @@
+{
+  "date": "2026-10-25",
+  "pullRequest": "https://github.com/stephancmorris/macOS-rl-viritual-camera/pull/81",
+  "draft": true,
+  "sourceScope": "GitHub-generated integration preview fetched and archived for local verification; no branch merge performed",
+  "generatedPreviewCommit": "66f1783d20a6bf482a5d00559e144145244992cb",
+  "mainParent": "952d05deac305e1d56e5aabb66c552f3dbe383e9",
+  "prHeadAtValidation": "92cb8c014941076446649912c1d46492f3b426e3",
+  "sourceFingerprint": "409ab16b45d4fae44ed9b6703ea635c8539710ea792908d203ddcb7ff83f1d4c",
+  "swiftTests": {
+    "result": "Passed",
+    "passedDefinitions": 1108,
+    "passedExpandedCases": 1724,
+    "failedDefinitions": 0,
+    "skippedDefinitions": 3
+  },
+  "scriptPythonTests": {
+    "passed": 127,
+    "failed": 0
+  },
+  "directorTrainingTests": {
+    "passed": 16,
+    "failed": 0
+  },
+  "coreMLInterop": "Actual current-main synthetic scorer explicitly configured in the Swift suite",
+  "releaseBuild": "Unsigned app and embedded extension passed",
+  "appVersion": "1.0",
+  "appBuild": "4",
+  "appExecutableSHA256": "098c2f4a8614dbb128f5b720b98c3f8705e987489a68eb2834ca1524e3ab1d89",
+  "embeddedExtensionExecutableSHA256": "51628af2e5878956a20c610fb9c030a66041cad4186b843fe82dbc8465545faa",
+  "localEvidenceRoot": "/private/tmp/alfie-pr81-preview-20261025.FYC92c",
+  "githubChecksAtReview": [],
+  "limitations": [
+    "Local checks, not GitHub Actions results",
+    "No native operator, camera/receiver, signed-install or per-level Director qualification",
+    "No model promotion or installed-app replacement"
+  ]
+}

@@ -122,6 +122,58 @@ struct FrameWorkSchedulerTests {
         #expect(render != nil && perception != nil)
     }
 
+    @Test(arguments: [FrameWorkScheduler.WorkClass.render, .perception], ["idle", "uncontended", "roles", "cancel"])
+    func newContentionUsesTheCurrentProgramsPriority(workClass: FrameWorkScheduler.WorkClass, reset: String) async {
+        let scheduler = FrameWorkScheduler()
+        var running = await scheduler.acquire(workClass, for: .a)!
+        let previousPreview = Task { await scheduler.acquire(workClass, for: .b) }
+        await settle()
+        // Spend the two consecutive Program selections while B waits.
+        for _ in 0..<FrameWorkScheduler.maxProgramStreak {
+            let program = Task { await scheduler.acquire(workClass, for: .a) }
+            await settle()
+            scheduler.release(running)
+            running = await program.value!
+        }
+        let nextProgram: Task<FrameWorkScheduler.Permit?, Never>
+        let nextPreview: Task<FrameWorkScheduler.Permit?, Never>
+        let expected: ChannelID
+        if reset == "roles" {
+            // The waiting B becomes Program after a Take. The old Program's
+            // contention history must not penalize the new priority owner.
+            scheduler.isProgram = { $0 == .b }
+            nextProgram = previousPreview
+            nextPreview = Task { await scheduler.acquire(workClass, for: .a) }
+            expected = .b
+        } else {
+            scheduler.cancelWaiting(workClass, for: .b)
+            #expect(await previousPreview.value == nil)
+            if reset == "idle" {
+                scheduler.release(running)
+                running = await scheduler.acquire(workClass, for: .a)!
+            } else if reset == "uncontended" {
+                let uncontended = Task { await scheduler.acquire(workClass, for: .a) }
+                await settle()
+                scheduler.release(running)
+                running = await uncontended.value!
+            }
+            nextProgram = Task { await scheduler.acquire(workClass, for: .a) }
+            nextPreview = Task { await scheduler.acquire(workClass, for: .b) }
+            expected = .a
+        }
+        await settle()
+        scheduler.release(running)
+        #expect(scheduler.runningPermit(workClass)?.channel == expected)
+        // Drain both requests regardless of the failed selection, so the
+        // before-fix regression cannot leave a suspended test task behind.
+        if let granted = scheduler.runningPermit(workClass) { scheduler.release(granted) }
+        if let granted = scheduler.runningPermit(workClass) { scheduler.release(granted) }
+        _ = await nextProgram.value
+        _ = await nextPreview.value
+        #expect(scheduler.runningPermit(workClass) == nil)
+        #expect(scheduler.waitingChannels(workClass).isEmpty)
+    }
+
     @Test func showSchedulerFollowsTheRoutersProgram() {
         let show = ShowCoordinator(programOutput: ProgramOutputManager(sinks: []))
         let b = show.addChannel(.b)

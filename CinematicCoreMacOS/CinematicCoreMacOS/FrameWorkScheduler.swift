@@ -58,6 +58,7 @@ final class FrameWorkScheduler {
         var waiting: [ChannelID: Waiter] = [:]
         /// Program selections in a row while another channel was waiting.
         var programStreak = 0
+        var priorityOwner: ChannelID?
     }
 
     private var lanes: [WorkClass: Lane] = [:]
@@ -77,6 +78,8 @@ final class FrameWorkScheduler {
     func acquire(_ workClass: WorkClass, for channel: ChannelID) async -> Permit? {
         var lane = lanes[workClass] ?? Lane()
         if lane.running == nil {
+            lane.programStreak = 0
+            lane.priorityOwner = ChannelID.allCases.first(where: isProgram)
             let permit = makePermit(workClass, channel)
             lane.running = permit
             lanes[workClass] = lane
@@ -99,7 +102,11 @@ final class FrameWorkScheduler {
     func release(_ permit: Permit) {
         guard var lane = lanes[permit.workClass], lane.running == permit else { return }
         lane.running = nil
+        let priorityOwner = ChannelID.allCases.first(where: isProgram)
+        if lane.priorityOwner != priorityOwner { lane.programStreak = 0 }
+        lane.priorityOwner = priorityOwner
         guard !lane.waiting.isEmpty else {
+            lane.programStreak = 0
             lanes[permit.workClass] = lane
             return
         }
@@ -109,7 +116,7 @@ final class FrameWorkScheduler {
         let next: ChannelID
         if let program, others.isEmpty || lane.programStreak < Self.maxProgramStreak {
             next = program
-            if !others.isEmpty { lane.programStreak += 1 }
+            lane.programStreak = others.isEmpty ? 0 : lane.programStreak + 1
         } else {
             next = others.first ?? waitingIDs[0]
             lane.programStreak = 0
@@ -128,6 +135,7 @@ final class FrameWorkScheduler {
     func cancelWaiting(for channel: ChannelID) {
         for workClass in Array(lanes.keys) {
             guard var lane = lanes[workClass], let waiter = lane.waiting.removeValue(forKey: channel) else { continue }
+            resetStreakIfUncontended(&lane)
             lanes[workClass] = lane
             stats[channel, default: .init()].cancelled += 1
             waiter.continuation.resume(returning: nil)
@@ -139,6 +147,7 @@ final class FrameWorkScheduler {
     /// running work are unaffected.
     func cancelWaiting(_ workClass: WorkClass, for channel: ChannelID) {
         guard var lane = lanes[workClass], let waiter = lane.waiting.removeValue(forKey: channel) else { return }
+        resetStreakIfUncontended(&lane)
         lanes[workClass] = lane
         stats[channel, default: .init()].cancelled += 1
         waiter.continuation.resume(returning: nil)
@@ -147,5 +156,11 @@ final class FrameWorkScheduler {
     private func makePermit(_ workClass: WorkClass, _ channel: ChannelID) -> Permit {
         nextID &+= 1
         return Permit(workClass: workClass, channel: channel, id: nextID)
+    }
+
+    private func resetStreakIfUncontended(_ lane: inout Lane) {
+        if !lane.waiting.keys.contains(where: { !isProgram($0) }) {
+            lane.programStreak = 0
+        }
     }
 }

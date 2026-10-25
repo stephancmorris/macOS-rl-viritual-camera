@@ -161,6 +161,61 @@ struct ProgramTakeTests {
         expectOldRolesKept(rig)
     }
 
+    @Test(arguments: [Double.infinity, Double.nan, -1, 1000.01])
+    func invalidOrFutureHostTimesNeverReachTheSink(time: Double) throws {
+        for invalidRenderTime in [false, true] {
+            let rig = rig()
+            let frame = RenderedChannelFrame(channelID: .b, revisions: rig.b.revisions,
+                sourceTimestamp: 1, processingStartedAt: invalidRenderTime ? rig.clock.now : time,
+                renderedAt: invalidRenderTime ? time : rig.clock.now,
+                crop: .fullFrame, outputSize: CGSize(width: 1920, height: 1080), isRepeat: false,
+                pixelBuffer: try buffer())
+            rig.b.setLatestRenderedFrameForTesting(frame)
+            #expect(rig.show.takeInputs()?.hasFreshRender == false)
+            #expect(rig.show.take() == .rejected(.notEligible(.preparing)))
+            expectOldRolesKept(rig)
+        }
+    }
+
+    @Test func renderCannotFinishBeforeItsSourceWasProcessed() throws {
+        let rig = rig()
+        rig.b.setLatestRenderedFrameForTesting(.init(channelID: .b, revisions: rig.b.revisions,
+            sourceTimestamp: 1, processingStartedAt: 999.99, renderedAt: 999.98,
+            crop: .fullFrame, outputSize: CGSize(width: 1920, height: 1080), isRepeat: false,
+            pixelBuffer: try buffer()))
+        #expect(rig.show.take() == .rejected(.notEligible(.preparing)))
+        expectOldRolesKept(rig)
+    }
+
+    @Test(arguments: [Double.infinity, -Double.infinity, Double.nan, -1, 0])
+    func invalidClockOrFramePeriodCannotProveFreshness(value: Double) throws {
+        let rig = rig()
+        let frame = try prepare(rig.b, rig: rig)
+        let invalidPeriod = TakeRules.inputs(frame: frame, previewChannel: .b, current: rig.b.revisions,
+            sourceMissing: false, admission: .trialOnly, now: rig.clock.now, framePeriod: value)
+        #expect(!invalidPeriod.hasFreshRender)
+        if value != 0 { // Host-clock zero is a valid origin; negative/nonfinite values are not.
+            let invalidClock = TakeRules.inputs(frame: frame, previewChannel: .b, current: rig.b.revisions,
+                sourceMissing: false, admission: .trialOnly, now: value, framePeriod: 1 / 50)
+            #expect(!invalidClock.hasFreshRender)
+        }
+    }
+
+    @Test(arguments: [Double.infinity, Double.nan, -1, 0])
+    func invalidOutputDimensionsNeverReachTheSink(dimension: Double) throws {
+        for invalidWidth in [false, true] {
+            let rig = rig()
+            rig.b.setLatestRenderedFrameForTesting(.init(channelID: .b, revisions: rig.b.revisions,
+                sourceTimestamp: 1, processingStartedAt: rig.clock.now, renderedAt: rig.clock.now,
+                crop: .fullFrame, outputSize: CGSize(width: invalidWidth ? dimension : 1920,
+                    height: invalidWidth ? 1080 : dimension), isRepeat: false,
+                pixelBuffer: try buffer()))
+            #expect(rig.show.takeInputs()?.legalGeometry == false)
+            #expect(rig.show.take() == .rejected(.notEligible(.preparing)))
+            expectOldRolesKept(rig)
+        }
+    }
+
     @Test func frameFromBeforeAShotChangeIsRejected() throws {
         let rig = rig()
         // Rendered under the current shot, then the operator picks a preset.
