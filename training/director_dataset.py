@@ -109,6 +109,9 @@ def load_dataset(bundle_path, labels_path, splits_path):
         records, issues, source = shadow.load_input(bundle)
         require(not shadow.blocking_input(issues) and source.get('manifest') is not None,
                 'invalid explicit export bundle')
+        require(digests == {'manifest.json': source.get('manifestSHA256'),
+                            'records.jsonl': source.get('recordsSHA256')},
+                'export changed during validation')
         # Existing C-05 checks include loss, action pairs, clocks and immutable parameters.
         analysis = shadow.analyze(records, 0, issues, source)
         require(not any(analysis['issues'].get(key, 0) for key in INCOMPLETE_ISSUES),

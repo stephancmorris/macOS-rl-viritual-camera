@@ -38,6 +38,14 @@ One regression definition reproduced **four failing cases** before repair, plus 
 
 ## Report completeness repair
 
+## Dataset consumed-byte integrity
+
+[AD-DATASET-DIGEST](https://trello.com/c/8vf2UFYx) uses the new same-read fingerprints to close a C-10 dataset provenance gap. The loader previously hashed files before and after parsing, but a file replaced only during parsing could pass those checks while supplying different metadata. Deterministic temporary-file regressions replaced records and manifest separately, restored the original file before the post-read checks, and reproduced two failures. The loader now also compares the bounded parser's consumed-byte hashes to the initial digests. Existing post-read checks remain.
+
+All **15 Director training and 121 script Python definitions pass**, zero failures. The ordinary synthetic corpus explicitly retains the exact manifest/records hashes. No labels, features, splits, model parameters, app code or qualification changed. Logs: `/private/tmp/alfie-dataset-digest-baseline-20261025.log`, `/private/tmp/alfie-dataset-digest-training-20261025.log`, `/private/tmp/alfie-dataset-digest-scripts-20261025.log`. Trello refresh still shows the Director style tasks active elsewhere; they were not duplicated.
+
+## Original completeness regression evidence
+
 Version-1 evaluation session summaries said `observed` despite dropped records, a missing prefix, an orphan action with no comparison rows, or an unscored completed Take. Two added test definitions reproduced five failing cases before the fix. The analyzer now exposes its authoritative capture-blocked session set independently of optional phase output. The evaluator uses that set and unscored-action status for each session summary. Legacy C-05 Markdown also labels unscored comparisons incomplete. Matching, parameter settings and qualification behavior are unchanged.
 
 Regressions cover the four failures, Markdown, a separate complete session alongside a damaged session, and an unscored legacy Take. All **114 script Python test definitions pass**, zero failures. Baseline and final logs are local at `/private/tmp/alfie-evidence-status-baseline-20261025.log` and `/private/tmp/alfie-evidence-status-all-python-20261025.log`. This slice changes offline Python/report documentation only; the previously verified Swift app binary is unchanged. No new physical or editorial acceptance is claimed.

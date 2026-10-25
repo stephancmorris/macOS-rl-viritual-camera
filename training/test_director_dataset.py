@@ -1,12 +1,14 @@
 #!/usr/bin/env python3
 """Synthetic acceptance of the metadata-only C-10 dataset contract."""
 import copy
+import hashlib
 import json
 from pathlib import Path
 import shutil
 import sys
 import tempfile
 import unittest
+from unittest import mock
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import director_dataset as dataset
@@ -15,6 +17,31 @@ FIXTURE = Path(__file__).with_name('fixtures') / 'director-scorer-synthetic'
 
 
 class DatasetTests(unittest.TestCase):
+    def test_transient_export_replacement_cannot_bind_different_parsed_bytes(self):
+        original_loader = dataset.shadow.load_input
+        for member in ('records.jsonl', 'manifest.json'):
+            path = self.root / member
+            original = path.read_bytes()
+            if member == 'records.jsonl':
+                changed = original.replace(b'2026-10-18T00:00:00.000Z', b'2026-10-18T00:00:00.001Z')
+            else:
+                value = json.loads(original)
+                value['exportID'] = '00000000-0000-0000-0000-000000000001'
+                changed = json.dumps(value).encode()
+            self.assertNotEqual(original, changed)
+
+            def load_replacement(*args, **kwargs):
+                path.write_bytes(changed)
+                try:
+                    return original_loader(*args, **kwargs)
+                finally:
+                    path.write_bytes(original)
+
+            with self.subTest(member=member), mock.patch.object(dataset.shadow, 'load_input', side_effect=load_replacement):
+                with self.assertRaises(dataset.DatasetError):
+                    self.load()
+            self.assertEqual(path.read_bytes(), original)
+
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory()
         self.root = Path(self.temp.name) / 'bundle'
@@ -43,6 +70,8 @@ class DatasetTests(unittest.TestCase):
         self.assertEqual([len(data.groups[name]) for name in dataset.SPLITS], [4, 4, 4])
         self.assertEqual([g.chosen_rank for g in data.groups['train']], [1] * 4)
         self.assertEqual(data.provenance['recordSchemaVersions'], [2])
+        for member, field in [('manifest.json', 'manifestSHA256'), ('records.jsonl', 'recordsSHA256')]:
+            self.assertEqual(data.provenance[field], hashlib.sha256((self.root / member).read_bytes()).hexdigest())
         self.assertEqual(data.projection()['featureNames'], list(dataset.FEATURE_NAMES))
 
     def test_labels_must_cover_every_comparison_without_duplicates_or_unknown_references(self):
