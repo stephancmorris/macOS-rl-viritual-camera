@@ -573,119 +573,367 @@ private struct FeelPresetButton: View {
 
 // MARK: - Director
 
+/// SU-05 (AD-STYLE-UX): each kind of segment gets a feel (Pace, Wide shots,
+/// When someone moves) instead of nine numbers. Every change saves itself.
 struct DirectorSettingsPage: View {
-    @ObservedObject var editor: DirectorStyleEditor
+    @ObservedObject var editor: DirectorFeelEditor
+    @State private var showExactValues = false
+
+    private static let segments: [SegmentType] = [.liveEvent, .presenter, .panel, .performance, .videoBreak]
 
     var body: some View {
-        let draft = editor.binding(for: editor.selected)
+        let segment = editor.selected
+        let feel = editor.feel(for: segment)
         SettingsPage(title: "Director",
-                     subtitle: "Pace for each kind of segment. Live event is required. The level is never saved.") {
-            SettingsCard {
-                SettingsRow(title: "Style", detail: editor.message.isEmpty ? "Using the saved styles." : editor.message) {
-                    if editor.hasError {
-                        Image(systemName: "exclamationmark.triangle.fill")
-                            .foregroundStyle(AlfieColor.warning)
-                            .accessibilityLabel("Style problem")
-                    }
+                     subtitle: "How Alfie paces each kind of segment. Pick a feel; exact values are optional.") {
+            if !editor.message.isEmpty {
+                HStack(spacing: 8) {
+                    Image(systemName: editor.hasError ? "exclamationmark.triangle.fill" : "checkmark.circle.fill")
+                        .foregroundStyle(editor.hasError ? AlfieColor.warning : AlfieColor.live)
+                        .accessibilityHidden(true)
+                    Text(editor.message)
+                        .font(.system(size: 12))
+                        .foregroundStyle(AlfieColor.secondaryText)
+                        .fixedSize(horizontal: false, vertical: true)
                 }
-                SettingsRow(title: "Segment") {
-                    Picker("Segment", selection: $editor.selected) {
-                        ForEach(SegmentType.allCases, id: \.self) { segment in
-                            Text(segment.styleTitle).tag(segment)
-                        }
-                    }
-                    .labelsHidden()
-                    .fixedSize()
+                .padding(.top, 14)
+            }
+
+            SettingsSectionLabel("Kinds of segment")
+            SettingsCard {
+                ForEach(Self.segments, id: \.self) { kind in
+                    segmentRow(kind)
                 }
             }
-            .padding(.top, 20)
+            SettingsFootnote("Live event is used when a show has no run sheet. The other kinds take effect once the show's run sheet says which segment is on.")
 
-            SettingsSectionLabel("Shot length · \(editor.selected.styleTitle)")
+            HStack(alignment: .firstTextBaseline, spacing: 10) {
+                SettingsSectionLabel(segment.styleTitle)
+                if feel == nil {
+                    SettingsTag(text: "Custom")
+                }
+                Spacer(minLength: 0)
+                if segment != .liveEvent, editor.hasOwnStyle(segment) {
+                    Button("Use Live event's feel") { editor.followLiveEvent(segment) }
+                        .buttonStyle(.link)
+                        .padding(.top, 26)
+                }
+            }
+            if segment != .liveEvent, !editor.hasOwnStyle(segment) {
+                Text("Same as Live event. Change anything below to give \(segment.styleTitle) its own feel.")
+                    .font(.system(size: 12))
+                    .foregroundStyle(AlfieColor.secondaryText)
+                    .padding(.leading, 4)
+                    .padding(.bottom, 8)
+            } else if feel == nil {
+                Text("Exact values were changed by hand. Pick a feel to reset them.")
+                    .font(.system(size: 12))
+                    .foregroundStyle(AlfieColor.secondaryText)
+                    .padding(.leading, 4)
+                    .padding(.bottom, 8)
+            }
+
+            choiceGroup("Pace", columns: 3) {
+                ForEach(DirectorFeel.Pace.allCases) { pace in
+                    ChoiceTile(title: pace.title, detail: pace.detail, isSelected: feel?.pace == pace) {
+                        editor.choose(pace: pace, for: segment)
+                    }
+                }
+            }
+            choiceGroup("Wide shots", columns: 3) {
+                ForEach(DirectorFeel.WideShots.allCases) { wide in
+                    ChoiceTile(title: wide.title, detail: wide.detail, isSelected: feel?.wideShots == wide) {
+                        editor.choose(wideShots: wide, for: segment)
+                    }
+                }
+            }
+            choiceGroup("When someone moves", columns: 2) {
+                ForEach(DirectorFeel.Movement.allCases) { movement in
+                    ChoiceTile(title: movement.title, detail: movement.detail, isSelected: feel?.movement == movement) {
+                        editor.choose(movement: movement, for: segment)
+                    }
+                }
+            }
+
+            SettingsSectionLabel("What three minutes could look like")
+            DirectorRhythmStrip(style: editor.style(for: segment))
+
+            exactValuesHeader
+            if showExactValues {
+                exactValuesCard(segment)
+            }
+        }
+    }
+
+    private func segmentRow(_ kind: SegmentType) -> some View {
+        let isSelected = editor.selected == kind
+        return Button {
+            editor.selected = kind
+        } label: {
             HStack(spacing: 12) {
-                labelledField("Minimum", text: draft.minimumShotDuration)
-                labelledField("Preferred", text: draft.preferredShotDuration)
-                labelledField("Soft maximum", text: draft.softMaximumShotDuration)
+                Text(kind.styleTitle)
+                    .font(.system(size: 13, weight: .semibold))
+                    .foregroundStyle(isSelected ? AlfieColor.accentText : AlfieColor.text)
+                Spacer(minLength: 8)
+                Text(editor.summary(for: kind))
+                    .font(.system(size: 12))
+                    .foregroundStyle(AlfieColor.secondaryText)
+                Image(systemName: isSelected ? "checkmark" : "chevron.right")
+                    .font(.system(size: 11, weight: .semibold))
+                    .foregroundStyle(isSelected ? AlfieColor.accentText : AlfieColor.tertiaryText)
+                    .frame(width: 14)
             }
-            .padding(16)
-            .background(RoundedRectangle(cornerRadius: 12, style: .continuous).fill(AlfieColor.card))
-            .overlay(RoundedRectangle(cornerRadius: 12, style: .continuous).strokeBorder(AlfieColor.separator))
+            .padding(.horizontal, 16)
+            .frame(minHeight: 44)
+            .background(isSelected ? AlfieColor.accentSoft : Color.clear)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel("\(kind.styleTitle), \(editor.summary(for: kind))")
+        .accessibilityAddTraits(isSelected ? .isSelected : [])
+    }
 
-            SettingsSectionLabel("Rhythm")
-            SettingsCard {
-                fieldRow("Wide cadence", text: draft.wideCadence)
-                fieldRow("Repetition window", text: draft.repetitionWindow)
+    private func choiceGroup<Content: View>(_ title: String, columns: Int,
+                                            @ViewBuilder content: () -> Content) -> some View {
+        VStack(alignment: .leading, spacing: 0) {
+            SettingsSectionLabel(title)
+            LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 8), count: columns), spacing: 8) {
+                content()
             }
+        }
+    }
 
-            SettingsSectionLabel("Movement")
-            SettingsCard {
-                fieldRow("Maximum movement", text: draft.maximumMovement)
-                fieldRow("Settle time", text: draft.settleTime)
-                fieldRow("On-air move rate", text: draft.onAirMoveRate)
-                SettingsRow(title: "Cut while moving") {
-                    Picker("Cut while moving", selection: cutChoice(draft)) {
-                        Text("Not set").tag(CutChoice.notSet)
-                        Text("No").tag(CutChoice.no)
-                        Text("Yes").tag(CutChoice.yes)
+    private var exactValuesHeader: some View {
+        Button {
+            withAnimation(.easeOut(duration: 0.15)) { showExactValues.toggle() }
+        } label: {
+            HStack(spacing: 8) {
+                Image(systemName: "chevron.right")
+                    .font(.system(size: 10, weight: .bold))
+                    .rotationEffect(.degrees(showExactValues ? 90 : 0))
+                Text("EXACT VALUES")
+                    .font(.system(size: 11, weight: .semibold, design: .monospaced))
+                    .tracking(1.5)
+                Text("· editing these makes the feel Custom")
+                    .font(.system(size: 12))
+            }
+            .foregroundStyle(AlfieColor.tertiaryText)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .padding(.leading, 4)
+        .padding(.top, 26)
+        .padding(.bottom, 8)
+        .accessibilityLabel("Exact values")
+        .accessibilityValue(showExactValues ? "Expanded" : "Collapsed")
+    }
+
+    @ViewBuilder
+    private func exactValuesCard(_ segment: SegmentType) -> some View {
+        if let issue = editor.exactValueIssue {
+            Text(issue)
+                .font(.system(size: 12, weight: .medium))
+                .foregroundStyle(AlfieColor.warning)
+                .padding(.leading, 4)
+                .padding(.bottom, 8)
+        }
+        SettingsCard {
+            ForEach(DirectorFeelEditor.Field.allCases) { field in
+                SettingsRow(title: field.title, detail: field.detail) {
+                    HStack(spacing: 10) {
+                        SettingsValueText(field.format(editor.value(field, for: segment)))
+                        Stepper(field.title, value: Binding(
+                            get: { editor.value(field, for: segment) },
+                            set: { editor.setValue($0, field, for: segment) }
+                        ), in: field.range, step: field.step)
+                        .labelsHidden()
                     }
-                    .pickerStyle(.segmented)
-                    .labelsHidden()
-                    .fixedSize()
                 }
             }
-
-            HStack {
-                Spacer()
-                Button("Save styles") { editor.save() }
-                    .keyboardShortcut(.defaultAction)
-                    .disabled(!editor.canSave)
+            SettingsRow(title: "Cut while moving", detail: "Allow a cut while the subject is still moving.") {
+                Toggle("Cut while moving", isOn: Binding(
+                    get: { editor.style(for: segment).cutOnMotionAllowed },
+                    set: { editor.setCutWhileMoving($0, for: segment) }
+                ))
+                .toggleStyle(.switch)
+                .labelsHidden()
             }
-            .padding(.top, 16)
+        }
+    }
+}
+
+private extension DirectorFeelEditor.Field {
+    var title: String {
+        switch self {
+        case .minimumShot: "Minimum shot"
+        case .preferredShot: "Preferred shot"
+        case .softMaximumShot: "Soft maximum shot"
+        case .wideCadence: "Wide shot every"
+        case .repetitionWindow: "Repetition window"
+        case .maximumMovement: "Still means under"
+        case .settleTime: "Settle time"
+        case .onAirMoveRate: "On-air move rate"
         }
     }
 
-    private func labelledField(_ title: String, text: Binding<String>) -> some View {
-        VStack(alignment: .leading, spacing: 6) {
-            Text(title)
-                .font(.system(size: 12))
-                .foregroundStyle(AlfieColor.secondaryText)
-            TextField(title, text: text, prompt: Text("Not set"))
-                .textFieldStyle(.roundedBorder)
-                .labelsHidden()
-                .accessibilityLabel("\(title) shot length")
-        }
-        .frame(maxWidth: .infinity)
-    }
-
-    private func fieldRow(_ title: String, text: Binding<String>) -> some View {
-        SettingsRow(title: title) {
-            TextField(title, text: text, prompt: Text("Not set"))
-                .textFieldStyle(.roundedBorder)
-                .labelsHidden()
-                .frame(width: 140)
-                .accessibilityLabel(title)
+    var detail: String {
+        switch self {
+        case .minimumShot: "Never cut sooner than this."
+        case .preferredShot: "The length Alfie aims for."
+        case .softMaximumShot: "After this Alfie looks for a change. Never a forced cut."
+        case .wideCadence: "A reminder to show the room, never a forced cut."
+        case .repetitionWindow: "How long before the same shot is used again."
+        case .maximumMovement: "Subject speed, in frame widths per second."
+        case .settleTime: "How long someone must stay still."
+        case .onAirMoveRate: "Fastest reframe on Program, in shot steps per second."
         }
     }
 
-    private func cutChoice(_ draft: Binding<DirectorStyleDraft>) -> Binding<CutChoice> {
-        Binding(
-            get: {
-                switch draft.wrappedValue.cutOnMotionAllowed {
-                case nil: .notSet
-                case false: .no
-                case true: .yes
+    var range: ClosedRange<Double> {
+        switch self {
+        case .minimumShot, .preferredShot, .softMaximumShot: 0...600
+        case .wideCadence: 5...600
+        case .repetitionWindow: 0...1200
+        case .maximumMovement: 0...1
+        case .settleTime: 0...10
+        case .onAirMoveRate: 0.05...2
+        }
+    }
+
+    var step: Double {
+        switch self {
+        case .minimumShot, .preferredShot, .softMaximumShot: 1
+        case .wideCadence, .repetitionWindow: 5
+        case .maximumMovement: 0.01
+        case .settleTime: 0.25
+        case .onAirMoveRate: 0.05
+        }
+    }
+
+    func format(_ value: Double) -> String {
+        switch self {
+        case .minimumShot, .preferredShot, .softMaximumShot, .wideCadence, .repetitionWindow:
+            String(format: "%.0f s", value)
+        case .maximumMovement: String(format: "%.2f frame/s", value)
+        case .settleTime: String(format: "%.2f s", value)
+        case .onAirMoveRate: String(format: "%.2f steps/s", value)
+        }
+    }
+}
+
+/// One option in a feel group.
+private struct ChoiceTile: View {
+    let title: String
+    let detail: String
+    let isSelected: Bool
+    let action: () -> Void
+
+    var body: some View {
+        Button(action: action) {
+            VStack(alignment: .leading, spacing: 3) {
+                Text(title)
+                    .font(.system(size: 13, weight: .semibold))
+                    .foregroundStyle(isSelected ? AlfieColor.accentText : AlfieColor.text)
+                Text(detail)
+                    .font(.system(size: 11.5))
+                    .foregroundStyle(AlfieColor.secondaryText)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
+            .padding(.horizontal, 12)
+            .padding(.vertical, 10)
+            .background(
+                RoundedRectangle(cornerRadius: 10, style: .continuous)
+                    .fill(isSelected ? AlfieColor.accentSoft : AlfieColor.card)
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: 10, style: .continuous)
+                    .strokeBorder(isSelected ? AlfieColor.accent : AlfieColor.border, lineWidth: isSelected ? 1.5 : 1)
+            )
+            .contentShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel("\(title). \(detail)")
+        .accessibilityAddTraits(isSelected ? .isSelected : [])
+    }
+}
+
+/// An illustration of three minutes of cuts from a style's shot lengths and
+/// wide cadence. It shows rhythm only; SU-06 replaces it with a run of the
+/// real Director policy.
+struct DirectorRhythmStrip: View {
+    let style: DirectorStyle
+
+    struct Block: Identifiable {
+        let id: Int
+        let isWide: Bool
+        let length: TimeInterval
+    }
+
+    static let span: TimeInterval = 180
+
+    static func blocks(for style: DirectorStyle) -> [Block] {
+        let pattern = [1.0, 0.75, 1.3, 0.9, 1.1]
+        var blocks: [Block] = []
+        var time: TimeInterval = 0
+        var lastWide: TimeInterval = 0
+        var closeShots = 0
+        while time < span, blocks.count < 200 {
+            var length: TimeInterval
+            let isWide = time - lastWide >= style.wideCadence
+            if isWide {
+                length = max(style.minimumShotDuration, style.preferredShotDuration * 0.5)
+                lastWide = time
+            } else {
+                length = min(style.softMaximumShotDuration,
+                             max(style.minimumShotDuration, style.preferredShotDuration * pattern[closeShots % pattern.count]))
+                closeShots += 1
+            }
+            length = min(max(length, 1), span - time)
+            blocks.append(Block(id: blocks.count, isWide: isWide, length: length))
+            time += length
+        }
+        return blocks
+    }
+
+    var body: some View {
+        let blocks = Self.blocks(for: style)
+        VStack(alignment: .leading, spacing: 8) {
+            GeometryReader { geo in
+                let gaps = CGFloat(max(blocks.count - 1, 0)) * 2
+                let unit = max(geo.size.width - gaps, 0) / Self.span
+                HStack(spacing: 2) {
+                    ForEach(blocks) { block in
+                        RoundedRectangle(cornerRadius: 2)
+                            .fill(block.isWide ? AlfieColor.tertiaryText.opacity(0.55) : AlfieColor.accent)
+                            .frame(width: unit * block.length)
+                    }
                 }
-            },
-            set: { choice in
-                draft.wrappedValue.cutOnMotionAllowed = switch choice {
-                case .notSet: nil
-                case .no: false
-                case .yes: true
-                }
-            })
+            }
+            .frame(height: 30)
+            .accessibilityHidden(true)
+
+            HStack(spacing: 16) {
+                legend(color: AlfieColor.accent, title: "Close shot")
+                legend(color: AlfieColor.tertiaryText.opacity(0.55), title: "Wide")
+                Spacer(minLength: 0)
+                Text(String(format: "About %d cuts · shots %.0f–%.0f s", max(blocks.count - 1, 0),
+                            style.minimumShotDuration, style.softMaximumShotDuration))
+                    .font(.system(size: 12))
+                    .foregroundStyle(AlfieColor.secondaryText)
+            }
+        }
+        .padding(16)
+        .background(RoundedRectangle(cornerRadius: 12, style: .continuous).fill(AlfieColor.card))
+        .overlay(RoundedRectangle(cornerRadius: 12, style: .continuous).strokeBorder(AlfieColor.separator))
+        .accessibilityElement(children: .combine)
     }
 
-    private enum CutChoice: Hashable {
-        case notSet, no, yes
+    private func legend(color: Color, title: String) -> some View {
+        HStack(spacing: 6) {
+            RoundedRectangle(cornerRadius: 2).fill(color).frame(width: 10, height: 10)
+            Text(title).font(.system(size: 12)).foregroundStyle(AlfieColor.secondaryText)
+        }
     }
 }
 
