@@ -544,6 +544,17 @@ def parameter_memo(result):
     if result['shadow'] is not None:
         lines += shadow.fingerprint_lines(result['shadow']['inputFingerprints'])
         lines += [f'Matching window: {result["shadow"]["matchingWindowSeconds"]:g} seconds (supplied). This is an analysis setting, not a directing recommendation.', '']
+        data = result['shadow']
+        lines += ['## Shadow evidence completeness', '',
+                  f'Completeness issues: `{json.dumps(data["issues"], sort_keys=True)}`.',
+                  f'Scope gaps: `{json.dumps(data["gaps"], sort_keys=True)}`.', '',
+                  'Descriptive settings and sample distributions below do not repair incomplete capture or missing assessment scope. Zero reported loss does not prove full capture.', '']
+        for item in data['sessions']:
+            lines.append(f'- Session `{item["sessionID"]}`: scope {item["status"]}.')
+        for item in data.get('phases', []):
+            binding = item['binding']
+            lines.append(f'- Phase `{item["phaseID"]}` / session `{item["sessionID"]}`: original sequences {binding["firstSequence"]}–{binding["lastSequence"]}; scope {item["status"]}.')
+        lines.append('')
         for item in result['shadow']['parameterEvidence']:
             phase = f' / phase {item["phaseID"]}' if 'phaseID' in item else ''
             lines += [f'## Shadow session {item["sessionID"]}{phase}', '',

@@ -77,6 +77,8 @@ Within each existing scope, speed distributions are further separated by actual 
 
 This attribution also applies inside explicit phases: a row with no judgement has an empty actual `judgeModels` list and stays separate from rows that observed the phase's model. Parameter-evidence scope names the phase declaration `declaredJudgeKind` / `declaredModelVersion`; it does not imply that model participated on every row. The full phase binding is retained separately. Empty judgement rows remain neutral for validating the phase declaration and do not alter comparison matching.
 
+The standalone parameter memo also carries the source's completeness issues, scope gaps and session/phase statuses before its descriptive sample blocks. Explicit phases retain original sequence spans. Dropped records, missing bindings or actions crossing phase boundaries therefore remain visible when the memo is read separately from the evaluation report. Retained samples do not repair those gaps or establish independent opportunities.
+
 The reporter can expose useful synthetic regressions now. Completing D-06 still needs the frozen per-level plan/budgets, consented recorded validation where required, current R2 rig evidence, actual attended downstream observations on both routes, complete fault/override cells and owner/operator/independent-reviewer sign-off. Do not mark a level qualified from these generated artifacts.
 
 Verification:

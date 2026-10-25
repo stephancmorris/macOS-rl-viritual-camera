@@ -12,7 +12,7 @@
 2. **Parameter evidence attribution:** inspect D-08's subject-speed summaries for segment, configuration and source attribution before using them to prepare any parameter memo. No owner values or numeric recommendations are authorized by synthetic fixtures.
 3. **Reproducible study artifacts:** inspect report provenance and explicit input binding. Retain exact source identities and missing evidence rather than inferring successful collection.
 
-The queued initial Program handoff repair remains separate. D-06 real per-level evaluations, D-08 real-data recommendations, frozen owner plans, independent labels, both attended output routes and signatories remain open. Newly proposed Director style defaults and mid-show policy remain owner decisions.
+The queued initial Program handoff repair remains separate. D-06 real per-level evaluations, D-08 real-data recommendations, frozen evaluation plans, independent labels, both attended output routes and signatories remain open. The F2/F3 and SU style decisions are now recorded on main; the active SU implementation/documentation tasks remain owned elsewhere. Provisional feel values do not supply level qualification or calibrated evaluation budgets.
 
 ## Parameter evidence attribution
 
@@ -71,6 +71,12 @@ The current branch's strict offline tools consumed the actual new exports. Exist
 The new scorer corpus was loaded with explicit whole-session splits and the harness's alternating chosen-rank labels, then fitted with the documented explicit synthetic settings (4 hidden units, 160 epochs, learning rate 0.3, seed 42, five reporting bins). The model and rules each match **2/4 choices in every split**. This corpus demonstrates no improvement over the rules baseline. The new exported CoreML artifact then passed the actual app adapter/CPU parity test: **1 definition / 1 case**, zero failures/skips. It stays outside app resources with promotion `notPerformed` and no qualification.
 
 [current-main-director-evidence.json](current-main-director-evidence.json) retains producer/tooling revisions, exact settings, test results and SHA-256 for all 22 retained artifacts. The [inputs, reports and model](evidence/current-main-exports) are metadata/synthetic artifacts only; both the input bundles and explicit labels/splits are retained for reproduction. Local xcodebuild logs, result bundles and full summaries remain under `/private/tmp/alfie-current-main-20261025.3jxt1Q`. This covers D-06/C-10 software evidence only; real evaluations, frozen budgets, independent opportunities and signatories remain open.
+
+## Standalone parameter memo completeness
+
+[AD-MEMO-COMPLETENESS](https://trello.com/c/7QVGgPMu) keeps source capture issues, missing binding gaps and session/phase statuses in the standalone memo before its descriptive sample blocks. Previously a dropped-record source could show an observed speed distribution with no visible drop information in that artifact. Samples remain available for description, but do not repair incomplete capture or assessment scope.
+
+The regression reproduced the omission and now covers reported loss, missing bindings, and a completed action crossing a phase boundary with original sequence spans. All **125 script Python definitions pass**, zero failures. Baseline/final logs: `/private/tmp/alfie-memo-completeness-baseline-20261025.log`, `/private/tmp/alfie-memo-completeness-final-20261025.log`. Matching, counts, thresholds and qualification are unchanged. Current main and the board were refreshed; active UI tasks remain separate.
 
 ## Report completeness repair
 

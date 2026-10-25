@@ -260,6 +260,25 @@ class PhaseEvaluationTests(unittest.TestCase):
 
 
 class EvaluationTests(unittest.TestCase):
+    def test_parameter_memo_retains_capture_and_binding_completeness(self):
+        rows = with_speed(shadow_rows(), 0.2)
+        rows[3]['droppedRecordsBefore'] = '1'
+        data = analyze_shadow(rows, [binding(rows)])
+        memo = report.parameter_memo(report.evaluate(envelope(), shadow_data=data))
+        self.assertIn('"reported_drops": 1', memo)
+        self.assertIn('scope incomplete.', memo)
+        self.assertIn('"reportedSamples": 7', memo)
+        unbound = analyze_shadow(shadow_rows(), [])
+        memo = report.parameter_memo(report.evaluate(envelope(), shadow_data=unbound))
+        self.assertIn('missingShadowBinding', memo)
+        phased = analyze_phases(shadow_rows(), [phase_binding(shadow_rows(), 0, 1, 'before'),
+                                               phase_binding(shadow_rows(), 2, 6, 'after')])
+        memo = report.parameter_memo(report.evaluate(envelope(), shadow_data=phased))
+        self.assertIn('phase_boundary_actions', memo)
+        self.assertIn('Phase `before`', memo)
+        self.assertIn('original sequences 0–1', memo)
+        self.assertIn('scope incomplete.', memo)
+
     def test_evidence_inventory_preserves_declared_shadow_classes_and_replay_counts(self):
         for declared_class in ('synthetic', 'recorded', 'live'):
             rows = shadow_rows()
