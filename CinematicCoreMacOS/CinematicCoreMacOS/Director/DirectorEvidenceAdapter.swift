@@ -31,6 +31,8 @@ nonisolated struct DirectorEvidenceAdapter: Sendable {
         var pendingIdentity: IdentityEvidence?
         var pendingSince: TimeInterval?
         var settledSince: TimeInterval?
+        var cutSettledSince: TimeInterval?
+        var cutMotionLimit: Double?
         var lockedTargetID: UUID?
         var operatorGestureInProgress = false
         var subjectSpeed = 0.0
@@ -63,6 +65,17 @@ nonisolated struct DirectorEvidenceAdapter: Sendable {
         return now - since
     }
 
+    /// Cut-only history under the effective motion bound; preparation retains
+    /// its existing clock. A changed bound cannot reuse the previous interval.
+    func cutSettledFor(_ channel: ChannelID, motionLimit: Double, now: TimeInterval) -> TimeInterval {
+        guard parameters.isValid, motionLimit.isFinite, motionLimit >= 0,
+              let state = channels[channel], state.cutMotionLimit == motionLimit,
+              let since = state.cutSettledSince, let sampledAt = state.lastSampleAt,
+              now.isFinite, now >= since, now >= sampledAt,
+              now - sampledAt <= parameters.maximumObservationAge else { return 0 }
+        return now - since
+    }
+
     /// Readiness inputs for a channel, or nil before its first sample.
     func readinessInputs(for channel: ChannelID, take: TakeAvailability, now: TimeInterval) -> DirectorReadiness.Inputs? {
         guard let state = channels[channel] else { return nil }
@@ -71,7 +84,7 @@ nonisolated struct DirectorEvidenceAdapter: Sendable {
     }
 
     @discardableResult
-    mutating func ingest(_ sample: ChannelEvidenceSample) -> [Event] {
+    mutating func ingest(_ sample: ChannelEvidenceSample, cutMotionLimit: Double? = nil) -> [Event] {
         let now = sample.sampledAt
         var state = channels[sample.channel] ?? ChannelState()
         let wasAvailable = channels[sample.channel]?.evidenceAvailable ?? false
@@ -80,7 +93,7 @@ nonisolated struct DirectorEvidenceAdapter: Sendable {
         guard now.isFinite, now >= 0 else {
             guard channels[sample.channel] != nil else { return [] }
             if state.identity != .lost { state.identity = .unavailable }
-            state.pendingIdentity = nil; state.pendingSince = nil; state.settledSince = nil
+            state.pendingIdentity = nil; state.pendingSince = nil; state.settledSince = nil; state.cutSettledSince = nil
             channels[sample.channel] = state
             return wasAvailable ? [.evidenceAvailable(sample.channel, false)] : []
         }
@@ -102,7 +115,7 @@ nonisolated struct DirectorEvidenceAdapter: Sendable {
         // Declared wideWaiting loss still follows its ordinary revocation path.
         if raw != .lost, raw == .unavailable || !observationIsFresh {
             state.identity = raw
-            state.pendingIdentity = nil; state.pendingSince = nil; state.settledSince = nil
+            state.pendingIdentity = nil; state.pendingSince = nil; state.settledSince = nil; state.cutSettledSince = nil
         }
 
         // Nomination: a different subject, or a cleared one that wasn't a loss.
@@ -112,7 +125,7 @@ nonisolated struct DirectorEvidenceAdapter: Sendable {
         if nominationChanged {
             events.append(.nominationChanged(sample.channel))
             state.identity = raw
-            state.pendingIdentity = nil; state.pendingSince = nil; state.settledSince = nil
+            state.pendingIdentity = nil; state.pendingSince = nil; state.settledSince = nil; state.cutSettledSince = nil
         }
         if sample.lockedTargetID != nil || raw == .lost || nominationChanged {
             state.lockedTargetID = sample.lockedTargetID
@@ -141,7 +154,15 @@ nonisolated struct DirectorEvidenceAdapter: Sendable {
         if parameters.isValid, state.identity == .confirmed, sample.holdingSteady, still, sample.cropConverged {
             state.settledSince = state.settledSince ?? now
         } else {
-            state.settledSince = nil
+            state.settledSince = nil; state.cutSettledSince = nil
+        }
+        if state.cutMotionLimit != cutMotionLimit { state.cutSettledSince = nil }
+        state.cutMotionLimit = cutMotionLimit
+        if let limit = cutMotionLimit, limit.isFinite, limit >= 0,
+           state.evidenceAvailable, state.settledSince != nil, sample.subjectSpeed <= limit {
+            state.cutSettledSince = state.cutSettledSince ?? now
+        } else {
+            state.cutSettledSince = nil
         }
         state.lastSampleAt = now
         channels[sample.channel] = state
