@@ -13,6 +13,8 @@ python3 -m unittest discover -s CinematicCoreMacOS/scripts -p test_director_shad
 
 The two-second window is a supplied synthetic fixture value, not a production recommendation. A matching window is always required. Output defaults to stdout; `--output` creates a new file and refuses to overwrite one. Exit status is 0 for analyzed input (which may still have incomplete sessions), 2 for malformed/unsupported/limited input or invalid arguments, and 1 for an I/O failure. Check the Completeness section even after exit 0.
 
+The displayed matching window preserves the supplied numeric value on a text round trip. It is not rounded to a short descriptive precision, since reusing a rounded setting can change comparisons at a boundary. The evaluation report and standalone parameter memo use the same representation.
+
 The shared synthetic bundle contains [seven generated records](../../CinematicCoreMacOS/scripts/fixtures/director-shadow-synthetic-export/records.jsonl) and a [companion manifest](../../CinematicCoreMacOS/scripts/fixtures/director-shadow-synthetic-export/manifest.json): two matched operator cuts, one abstention and one ten-second interior Program interval. The [example report](../../reports/auto-director/shadow-report-synthetic-example.md) is deterministic and includes its synthetic provenance. Swift export tests check the same fixture against the actual record decoder and generated manifest.
 
 ## Bundles and unbundled input

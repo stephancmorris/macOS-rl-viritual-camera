@@ -666,6 +666,11 @@ def analyze(records, window, issues=None, source=None, phase_assignments=None):
     return data
 
 
+def format_window(window):
+    """Keep the supplied analysis setting reproducible, including boundary bits."""
+    return repr(window).removesuffix('.0')
+
+
 def markdown(data, window):
     lines = ['# Director shadow report', '', 'Metadata observations only; no qualification or tuning recommendation.', '']
     source = data.get('source', {'kind': 'unbundled'})
@@ -684,7 +689,7 @@ def markdown(data, window):
         lines += ['Input: unbundled JSONL. Export metadata is unavailable; explicit-export retention is not established.', '']
     lines += fingerprint_lines(source)
     lines += [
-             f'Accepted records: {data["records"]}. Matching window: {window:g} seconds (supplied).', '',
+             f'Accepted records: {data["records"]}. Matching window: {format_window(window)} seconds (supplied).', '',
              'Matching: latest unused preceding prediction of the same kind, within the supplied window,',
              'matched to a paired completed operator action at its attempt time. Target and preset must both agree.',
              'Partitions: session, source class, segment/token, parameter/preference versions, policy and route revision.',

@@ -6,7 +6,7 @@
 
 ## Grouped work
 
-[validation-summary.json](validation-summary.json) provides the current compact review index: ten completed offline tooling child cards, latest 125 script / 16 Director training test passes, and links to the separate main-app and producer evidence. A follow-up integrity check verified all 22 retained producer/tooling artifact hashes; the latest strict dataset loader accepts the actual current-main synthetic corpus with unchanged provenance and four groups per split. This does not rerun the app or widen the earlier qualification limits.
+[validation-summary.json](validation-summary.json) provides the 20:16 review snapshot: ten completed offline tooling child cards, 125 script / 16 Director training test passes, and links to the separate main-app and producer evidence. Subsequent changes and checks are recorded in their sections below. An integrity check verified all 22 retained producer/tooling artifact hashes; the strict dataset loader accepts the actual current-main synthetic corpus with unchanged provenance and four groups per split. This does not rerun the app or widen the earlier qualification limits.
 
 The [refreshed next-group sheet](next-groups.md) separates completed offline tooling, combined application integration, already assigned feel follow-through, current synthetic producer evidence and the remaining real evaluation gates. Board In Progress is an assignment signal; active execution elsewhere has not been established by the available chat inventory.
 
@@ -87,6 +87,12 @@ The regression reproduced the omission and now covers reported loss, missing bin
 [AD-TRAINING-COMPLETENESS](https://trello.com/c/tSDoot5K) closes a mismatch between C-05 and C-10: a complete parameter-version rollback correctly blocked source-session scoring, but the dataset loader accepted it because its copied issue-name list omitted that diagnostic. Training now consumes the authoritative capture-blocked session set in addition to its existing strict issue checks, so future analyzer completeness rules cannot silently disappear at this boundary.
 
 The regression verifies a valid twelve-row export with a rollback as the only failing completeness condition, proves training previously accepted it, and then proves a monotonic complete-history control still loads. All **16 Director training and 125 script Python definitions pass**, zero failures. Logs: `/private/tmp/alfie-training-capture-status-baseline-20261025.log`, `/private/tmp/alfie-training-capture-status-final-20261025.log`, `/private/tmp/alfie-training-capture-status-scripts-20261025.log`. Labels, splits, features, model settings, application code and qualification are unchanged.
+
+## Matching-window display precision
+
+[AD-WINDOW-PRECISION](https://trello.com/c/qZ9gNww6) preserves the actual supplied matching window in standalone text. Six-significant-digit formatting printed `1.00000004` as `1`, so repeating analysis from that label changed a synthetic boundary comparison. C-05, D-06 Markdown/memos and authored regression labels now use concise round-trip numeric text. JSON values and matching behavior are unchanged.
+
+Two regression definitions failed before repair; all **127 script Python definitions pass** afterward. The boundary test verifies that parsing the displayed value reproduces both the exact supplied window and the original two comparisons. Logs: `/private/tmp/alfie-window-precision-baseline-20261025.log`, `/private/tmp/alfie-window-precision-final-20261025.log`. This fixes settings provenance, without selecting a study window or changing any Director/runtime policy. Main and the board were refreshed and remain unchanged.
 
 ## Report completeness repair
 

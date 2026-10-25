@@ -81,6 +81,17 @@ def run(rows, window=2):
 
 
 class PredictionSequencePrecedenceTests(unittest.TestCase):
+    def test_displayed_matching_window_round_trips_at_a_comparison_boundary(self):
+        rows = fixture()
+        rows[0]['eventTime'] = 8.99999997
+        window = 1.00000004
+        data = run(rows, window)
+        self.assertEqual(sum(c['compared'] for _, c, _ in data['groups']), 2)
+        displayed = report.markdown(data, window).split('Matching window: ', 1)[1].split(' seconds', 1)[0]
+        self.assertEqual(float(displayed), window)
+        repeated = run(rows, float(displayed))
+        self.assertEqual(sum(c['compared'] for _, c, _ in repeated['groups']), 2)
+
     def test_input_fingerprints_identify_exact_bytes_and_suppress_partial_reads(self):
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / 'records.jsonl'

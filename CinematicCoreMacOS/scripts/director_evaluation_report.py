@@ -485,7 +485,7 @@ def markdown(result):
         data = result['shadow']
         lines += ['', *shadow.fingerprint_lines(data['inputFingerprints'])]
         lines += ['## C-05 shadow observations', '', f'Accepted records: {data["records"]}. Explicit export validated: {str(data["exportValidated"]).lower()}.', '',
-                  f'Matching window: {data["matchingWindowSeconds"]:g} seconds (supplied). This is an analysis setting, not a directing recommendation.', '',
+                  f'Matching window: {shadow.format_window(data["matchingWindowSeconds"])} seconds (supplied). This is an analysis setting, not a directing recommendation.', '',
                   'Agreement describes operator matching, not independent correctness. Bindings are declared evaluation scope, not verified physical-route observations.', '',
                   '| Session | Scope | Exact / compared | Predictions | Unmatched predictions | Unmatched actions | Unscored actions | Status |',
                   '| --- | --- | --- | ---: | ---: | ---: | ---: | --- |']
@@ -522,7 +522,7 @@ def markdown(result):
         for row in result['shadowRegressions']:
             c = row['counts']
             lines.append(f'| {row["case"]} | {c["predictions"]} | {c["completed_actions"]} | {c["compared"]} | {c["exact"]} | {c["unscored_actions"]} | {", ".join(f"{v:g}" for v in row["dwellSeconds"]) or "unavailable"} | {row["status"]} |')
-        lines += ['', *[f'- {row["case"]}: matching window {row["matchingWindowSeconds"]:g} seconds (supplied).'
+        lines += ['', *[f'- {row["case"]}: matching window {shadow.format_window(row["matchingWindowSeconds"])} seconds (supplied).'
                         for row in result['shadowRegressions']]]
     lines += ['', '## Missing assessment evidence', '']
     lines += [f'- {item}' for item in result['missingEvidence']]
@@ -543,7 +543,7 @@ def parameter_memo(result):
                   '```json', json.dumps(run['parameters'], sort_keys=True, indent=2), '```', '']
     if result['shadow'] is not None:
         lines += shadow.fingerprint_lines(result['shadow']['inputFingerprints'])
-        lines += [f'Matching window: {result["shadow"]["matchingWindowSeconds"]:g} seconds (supplied). This is an analysis setting, not a directing recommendation.', '']
+        lines += [f'Matching window: {shadow.format_window(result["shadow"]["matchingWindowSeconds"])} seconds (supplied). This is an analysis setting, not a directing recommendation.', '']
         data = result['shadow']
         lines += ['## Shadow evidence completeness', '',
                   f'Completeness issues: `{json.dumps(data["issues"], sort_keys=True)}`.',

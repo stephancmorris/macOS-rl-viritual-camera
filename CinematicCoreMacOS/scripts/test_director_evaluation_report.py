@@ -260,6 +260,16 @@ class PhaseEvaluationTests(unittest.TestCase):
 
 
 class EvaluationTests(unittest.TestCase):
+    def test_matching_window_precision_survives_standalone_artifacts(self):
+        directory = FIXTURES / 'director-shadow-synthetic-export'
+        window = 1.00000004
+        data = report.summarize_shadow(directory, window, [binding(shadow_rows())])
+        regressions = report.negative_shadow_regressions(directory, window)
+        result = report.evaluate(envelope(), shadow_data=data, regressions=regressions)
+        for text in (report.markdown(result), report.parameter_memo(result)):
+            self.assertIn('Matching window: 1.00000004 seconds (supplied)', text)
+        self.assertIn('matching window 1.00000004 seconds (supplied)', report.markdown(result))
+
     def test_parameter_memo_retains_capture_and_binding_completeness(self):
         rows = with_speed(shadow_rows(), 0.2)
         rows[3]['droppedRecordsBefore'] = '1'
