@@ -19,6 +19,8 @@ struct ShowSetupActions {
     /// See PairCheckPanel.onCheck.
     var checkPair: (() -> Void)?
     var setBuiltInCameraTestEnabled: ((Bool) -> Void)? = nil
+    /// SU-09: opens the show's run sheet. Nil where the Director doesn't run.
+    var editRunSheet: (() -> Void)? = nil
 }
 
 struct ShowSetupView: View {
@@ -76,6 +78,13 @@ struct ShowSetupView: View {
                 .buttonStyle(SetupButtonStyle(isPrimary: true))
                 .disabled(!model.canStartPair)
                 Spacer()
+                if let editRunSheet = actions.editRunSheet {
+                    Button(action: editRunSheet) {
+                        Text("Run sheet…")
+                    }
+                    .buttonStyle(SetupButtonStyle(isPrimary: false))
+                    .help("Optional. Plan the show's segments; each uses its feel from Settings › Director.")
+                }
             }
 
             Spacer(minLength: 12)
