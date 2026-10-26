@@ -15,7 +15,7 @@ import Testing
          .active(.ready(input: .b, shot: waistUp)), .active(.holdingOperatorShot(input: .a)),
          .paused(.manualMode), .paused(.operatorTookOver), .paused(.editLive), .paused(.sourceLost(.b)),
          .paused(.outputProblem), .paused(.setupChanged), .paused(.subjectLost(.b)),
-         .paused(.afterFallback), .paused(.styleChanged), .paused(.subjectChanged), .paused(.showStopped),
+         .paused(.afterFallback), .paused(.styleChanged), .paused(.runSheetChanged), .paused(.subjectChanged), .paused(.showStopped),
          .inhibited(.operatorAdjusting(.b)), .inhibited(.learningSubject(.b)),
          .inhibited(.recoveringSubject(.b)), .inhibited(.noFreshView(.b)), .inhibited(.cameraNotReady),
          .abstaining(.noPreview), .abstaining(.previewIsSafeWide), .abstaining(.moreThanOnePerson(.b)),

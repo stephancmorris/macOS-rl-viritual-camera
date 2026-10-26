@@ -300,6 +300,76 @@ import Testing
         #expect(rig.controller.policyRevision == revision + 1)
     }
 
+    @Test func advancingChangesTheActiveStyleWithoutAPauseOrACut() throws {
+        let rig = rig()
+        let panelStyle = DirectorFeelTable.v1.style(for: DirectorFeel(pace: .lively, wideShots: .often, movement: .cutWhileMoving))
+        rig.controller.preferencesChanged(DirectorPreferences(styles: [.liveEvent: feelStyle, .panel: panelStyle]))
+        #expect(rig.controller.setRunSheet(try RunSheet(segments: [.init(type: .presenter), .init(type: .panel)])))
+        #expect(rig.controller.setLevel(.auto) == .accepted)
+        #expect(rig.controller.effectiveStyle == feelStyle)
+        let program = rig.show.programChannel, route = rig.show.router.routeGeneration
+        rig.controller.advanceSegment()
+        #expect(rig.controller.effectiveStyle == panelStyle)
+        #expect(!rig.controller.authority.paused && rig.controller.authority.level == .auto)
+        #expect(rig.show.programChannel == program && rig.show.router.routeGeneration == route)
+    }
+
+    // MARK: Operator run-sheet edits (F2, SU-10)
+
+    private let presenter = RunSheet.Segment(type: .presenter, name: "Welcome")
+    private let panel = RunSheet.Segment(type: .panel, name: "Q&A")
+    private let music = RunSheet.Segment(type: .performance, name: "Band")
+
+    @Test func editingTheRunSheetWhileDirectingPausesAndKeepsTheCurrentSegment() throws {
+        let rig = rig()
+        #expect(rig.controller.setRunSheet(try RunSheet(segments: [presenter, panel])))
+        rig.controller.advanceSegment()
+        #expect(rig.controller.setLevel(.auto) == .accepted)
+        // The editor's copy still points at the first segment; the show is on the second.
+        #expect(rig.controller.runSheetEdited(try RunSheet(segments: [presenter, panel, music])))
+        #expect(rig.controller.authority.paused)
+        #expect(rig.controller.directorSection.activity == .paused(.runSheetChanged))
+        #expect(rig.controller.runSheet?.currentSegmentID == panel.id)
+        #expect(rig.controller.runSheet?.segments.count == 3)
+        #expect(rig.controller.handToAlfie() == .accepted)
+    }
+
+    @Test func removingTheCurrentSegmentFallsBackToTheEditedSheet() throws {
+        let rig = rig()
+        #expect(rig.controller.setRunSheet(try RunSheet(segments: [presenter, panel])))
+        rig.controller.advanceSegment()
+        #expect(rig.controller.runSheetEdited(try RunSheet(segments: [presenter, music])))
+        #expect(rig.controller.runSheet?.currentSegmentID == presenter.id)
+    }
+
+    @Test func editingTheRunSheetInManualAppliesWithoutAPause() throws {
+        let rig = rig()
+        let count = rig.controller.appliedEvents.count
+        #expect(rig.controller.runSheetEdited(try RunSheet(segments: [presenter])))
+        #expect(rig.controller.appliedEvents.count == count)
+        #expect(rig.controller.runSheet?.current?.type == .presenter)
+    }
+
+    @Test func savingAnUnchangedRunSheetDoesNotPause() throws {
+        let rig = rig()
+        #expect(rig.controller.setRunSheet(try RunSheet(segments: [presenter, panel])))
+        rig.controller.advanceSegment()
+        #expect(rig.controller.setLevel(.assist) == .accepted)
+        // Same segments, stale current segment from the editor.
+        #expect(rig.controller.runSheetEdited(try RunSheet(segments: [presenter, panel])))
+        #expect(!rig.controller.authority.paused)
+        #expect(rig.controller.runSheet?.currentSegmentID == panel.id)
+    }
+
+    @Test func clearingTheRunSheetWhileDirectingPauses() throws {
+        let rig = rig()
+        #expect(rig.controller.setRunSheet(try RunSheet(segments: [presenter])))
+        #expect(rig.controller.setLevel(.auto) == .accepted)
+        #expect(rig.controller.runSheetEdited(nil))
+        #expect(rig.controller.runSheet == nil)
+        #expect(rig.controller.directorSection.activity == .paused(.runSheetChanged))
+    }
+
     @Test func healthReturnsOnTheTickButNeverClearsPause() {
         let rig = directing(.auto)
         rig.b.setSourceMissingForTesting(true)

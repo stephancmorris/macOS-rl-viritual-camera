@@ -248,6 +248,10 @@ final class LiveConsoleModel: ObservableObject, ConsoleActions {
         refresh()
     }
 
+    /// SU-10: the run sheet can be edited mid-show; saving it pauses Alfie.
+    var canEditRunSheet: Bool { show.showRunSheet != nil }
+    func editRunSheet() { show.showRunSheet?.isPresented = true }
+
     // MARK: Show-level
 
     func stopShow() {
@@ -478,8 +482,16 @@ struct LiveConsoleHeader: View {
                 Button("Advance") { model.advanceDirectorSegment() }
                     .controlSize(.small)
                     .disabled(sheet.next == nil)
+                    .keyboardShortcut(RunSheetAdvanceShortcut.key, modifiers: RunSheetAdvanceShortcut.modifiers)
+                    .help("Advance run sheet (\(RunSheetAdvanceShortcut.title))")
                     .accessibilityLabel("Advance run sheet")
                     .accessibilityHint("Changes segment style only. Never advances automatically or wraps.")
+                if model.canEditRunSheet {
+                    Button("Edit…") { model.editRunSheet() }
+                        .controlSize(.small)
+                        .accessibilityLabel("Edit run sheet")
+                        .accessibilityHint("Saving changed segments pauses Alfie until you hand back.")
+                }
             }
             if let text = model.pairCheckText ?? model.admissionTitle {
                 Text(text)
