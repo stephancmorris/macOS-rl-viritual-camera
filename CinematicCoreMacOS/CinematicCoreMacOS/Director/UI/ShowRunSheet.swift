@@ -71,6 +71,11 @@ final class ShowRunSheet: ObservableObject {
         return true
     }
 
+    /// RUNSHEET-FOLLOWUPS: the editor's Current marker follows the Director.
+    func followDirector(currentSegmentID id: UUID?) {
+        editor.followDirector(currentSegmentID: id)
+    }
+
     /// Begins a new show with an empty sheet; this one becomes "last show".
     func startNewShow() {
         defaults.set(showID.uuidString, forKey: Self.previousShowKey)

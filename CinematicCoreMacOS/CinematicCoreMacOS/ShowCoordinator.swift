@@ -337,6 +337,17 @@ final class ShowCoordinator: ObservableObject {
     func advanceDirectorSegment() {
         guard DeveloperFlags.runDirectorShadow, let startedDirector, startedDirector.isAttached else { return }
         startedDirector.advanceSegment()
+        syncRunSheetEditorWithDirector()
+    }
+
+    /// The Director's current run-sheet segment, when it is running one.
+    var directorCurrentSegmentID: UUID? { startedDirector?.runSheet?.currentSegmentID }
+
+    /// RUNSHEET-FOLLOWUPS: the editor shows the Director's position as Current.
+    /// Called after Advance and when the run-sheet panel opens; never per frame.
+    func syncRunSheetEditorWithDirector() {
+        guard DeveloperFlags.runDirectorShadow else { return }
+        showRunSheet?.followDirector(currentSegmentID: directorCurrentSegmentID)
     }
 
     /// SU-09: the show's run sheet. Created on first use, and only where the
