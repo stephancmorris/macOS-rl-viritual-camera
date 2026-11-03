@@ -858,50 +858,17 @@ private struct ChoiceTile: View {
     }
 }
 
-/// An illustration of three minutes of cuts from a style's shot lengths and
-/// wide cadence. It shows rhythm only; SU-06 replaces it with a run of the
-/// real Director policy.
+/// Three minutes of cuts for a style, from the real Director policy
+/// (`DirectorRhythmPreview`, SU-06).
 struct DirectorRhythmStrip: View {
     let style: DirectorStyle
 
-    struct Block: Identifiable {
-        let id: Int
-        let isWide: Bool
-        let length: TimeInterval
-    }
-
-    static let span: TimeInterval = 180
-
-    static func blocks(for style: DirectorStyle) -> [Block] {
-        let pattern = [1.0, 0.75, 1.3, 0.9, 1.1]
-        var blocks: [Block] = []
-        var time: TimeInterval = 0
-        var lastWide: TimeInterval = 0
-        var closeShots = 0
-        while time < span, blocks.count < 200 {
-            var length: TimeInterval
-            let isWide = time - lastWide >= style.wideCadence
-            if isWide {
-                length = max(style.minimumShotDuration, style.preferredShotDuration * 0.5)
-                lastWide = time
-            } else {
-                length = min(style.softMaximumShotDuration,
-                             max(style.minimumShotDuration, style.preferredShotDuration * pattern[closeShots % pattern.count]))
-                closeShots += 1
-            }
-            length = min(max(length, 1), span - time)
-            blocks.append(Block(id: blocks.count, isWide: isWide, length: length))
-            time += length
-        }
-        return blocks
-    }
-
     var body: some View {
-        let blocks = Self.blocks(for: style)
+        let blocks = DirectorRhythmPreview.shots(for: style)
         VStack(alignment: .leading, spacing: 8) {
             GeometryReader { geo in
                 let gaps = CGFloat(max(blocks.count - 1, 0)) * 2
-                let unit = max(geo.size.width - gaps, 0) / Self.span
+                let unit = max(geo.size.width - gaps, 0) / DirectorRhythmPreview.span
                 HStack(spacing: 2) {
                     ForEach(blocks) { block in
                         RoundedRectangle(cornerRadius: 2)
@@ -917,8 +884,7 @@ struct DirectorRhythmStrip: View {
                 legend(color: AlfieColor.accent, title: "Close shot")
                 legend(color: AlfieColor.tertiaryText.opacity(0.55), title: "Wide")
                 Spacer(minLength: 0)
-                Text(String(format: "About %d cuts · shots %.0f–%.0f s", max(blocks.count - 1, 0),
-                            style.minimumShotDuration, style.softMaximumShotDuration))
+                Text(Self.summary(blocks))
                     .font(.system(size: 12))
                     .foregroundStyle(AlfieColor.secondaryText)
             }
@@ -927,6 +893,16 @@ struct DirectorRhythmStrip: View {
         .background(RoundedRectangle(cornerRadius: 12, style: .continuous).fill(AlfieColor.card))
         .overlay(RoundedRectangle(cornerRadius: 12, style: .continuous).strokeBorder(AlfieColor.separator))
         .accessibilityElement(children: .combine)
+    }
+
+    /// Cut count and the range of finished shot lengths (the last shot is
+    /// cut off by the end of the preview).
+    static func summary(_ shots: [DirectorRhythmPreview.Shot]) -> String {
+        let finished = shots.dropLast().map(\.length)
+        guard let shortest = finished.min(), let longest = finished.max() else {
+            return "No cut in three minutes"
+        }
+        return String(format: "About %d cuts · shots %.0f–%.0f s", finished.count, shortest, longest)
     }
 
     private func legend(color: Color, title: String) -> some View {

@@ -19,7 +19,21 @@ The A-07 `SegmentType` cases are `presenter`, `panel`, `performance`, `videoBrea
 | `onAirMoveRate` | Finite positive shot-ladder steps/s; storing it does not implement or approve N2 |
 | `cutOnMotionAllowed` | Boolean; does not relax the stricter cut-ready bar |
 
-All values are injected study parameters. This document removes the old sermon timing/motion starting values rather than turning them into production defaults. Select candidate values from labelled shadow evidence and freeze a complete parameter revision before a scored run.
+## Feel table v1 (SU-1, SU-2, recorded 2026-10-25)
+
+Operators set each segment with three choices instead of these nine numbers ([options summary](director-style-options.md)). `DirectorFeelTable.v1` (`Director/DirectorFeel.swift`) maps each feel to a style; the feel is derived by matching, so the stored schema is unchanged. Values are provisional study parameters, frozen as version 1; a new set of values is a new version.
+
+| Choice | Option | Values |
+|---|---|---|
+| Pace | Calm / Balanced / Lively | minimum · preferred · soft maximum shot 12·30·60 / 8·20·40 / 5·12·25 s; repetition window = 2 × preferred; on-air move rate 0.25 / 0.35 / 0.5 steps/s |
+| Wide shots | Rarely / Sometimes / Often | wide cadence 120 / 75 / 40 s |
+| When someone moves | Wait until they settle / Cut while moving | maximum movement 0.05 / 0.15 frame/s; settle time 1.0 / 0.5 s; `cutOnMotionAllowed` false / true |
+
+With nothing saved, the Live event style is Balanced · wide sometimes · wait until settled (SU-1); other segments follow Live event until given their own feel. The movement values are placeholders until checked against shadow evidence. Hand-edited exact values read as "Custom".
+
+The style tightens the cut-ready bar (SU-4, `DirectorReadiness.Parameters.tightened(by:)`): settle time raises the required settled time, and when cutting while moving isn't allowed, maximum movement lowers the cut motion limit. A style never loosens the injected study parameters, and the prepare bar is unchanged, so preparation may still move.
+
+Settings › Director previews three minutes of cuts for the selected style (`DirectorRhythmPreview`, SU-06) by running a fixed synthetic presenter timeline through `DirectorShotPolicy` ranking and the same `CutPolicy.timingReason` the live cut uses.
 
 `DirectorShotPolicy` ranks eligible Preview candidates using explicit parameters. It may recommend preparing Preview before the current Program shot's minimum duration has elapsed. `recommendationDue`, soft maximum and wide cadence are advisory, never a forced cut, readiness waiver or permit. Abstentions are `invalidInput`, `minimumDuration`, `noEligibleCandidate`, `repetition`, `movement`, `noPreview`.
 

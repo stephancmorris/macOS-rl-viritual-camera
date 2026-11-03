@@ -576,7 +576,7 @@ final class DirectorController: ObservableObject, DirectorConsoleControlling {
             let availability = TakeAvailability.evaluate(take: inputs, program: show.programChannel,
                 preview: preview, standard: ShowStandard.activeOrCurrent, editLive: show.editLive)
             if let input = Self.currentCutInputs(sample: sample, adapter: adapter, take: availability, now: now) {
-                ready = DirectorReadiness.evaluate(input, parameters: p, bar: .cut)
+                ready = DirectorReadiness.evaluate(input, parameters: p.tightened(by: effectiveStyle), bar: .cut)
                 evaluatedInputs = input; measuredReadiness = ready
                 evidence = IdentityEvidence.classify(sample, maximumObservationAge: adapter.parameters.maximumObservationAge) == .confirmed &&
                     adapter.state(for: preview)?.evidenceAvailable == true
