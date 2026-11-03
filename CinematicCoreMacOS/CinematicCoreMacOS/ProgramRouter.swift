@@ -40,6 +40,18 @@ final class ProgramRouter {
         case standby
     }
 
+    /// PAIR-FIRST-FRAME: the first new (non-repeat) Program frame the output
+    /// accepted in this output session, bound to the channel, route
+    /// generation, session and the route that accepted it. Set once per
+    /// session; cleared when the output starts, stops or Program changes.
+    /// Host acceptance only: not proof the receiver presented it.
+    nonisolated struct ProgramHandoff: Equatable, Sendable {
+        let program: ChannelID
+        let routeGeneration: UInt64
+        let outputSession: UInt64
+        let route: ProgramOutputManager.Route?
+    }
+
     /// The actual detected hold, bound to the route that lost Program.
     nonisolated struct HoldWindow: Equatable, Sendable {
         let program: ChannelID
@@ -67,6 +79,18 @@ final class ProgramRouter {
     /// S3 B-03: told of each state change (routed / holding / standby / idle).
     /// Transitions only, never per frame.
     var stateObserver: ((State) -> Void)?
+
+    /// Increments each time the Program channel starts or stops the output.
+    private(set) var outputSession: UInt64 = 0
+    private(set) var handoff: ProgramHandoff?
+    /// Told when `handoff` is set, and at every output-session boundary (even
+    /// when it was already nil) so waiters recheck. Never per frame.
+    var handoffObserver: ((ProgramHandoff?) -> Void)?
+
+    private func resetHandoff() {
+        handoff = nil
+        handoffObserver?(nil)
+    }
     private(set) var lastOutputTimestamp: Double = 0
     /// Frames offered by non-Program channels or stale generations (dropped).
     private(set) var framesNotRouted = 0
@@ -126,6 +150,8 @@ final class ProgramRouter {
         lastProgramFrameAt = 0
         lastGoodBuffer = nil
         lastSentBuffer = nil
+        outputSession &+= 1
+        resetHandoff()
         startWatchdog()
     }
 
@@ -137,6 +163,8 @@ final class ProgramRouter {
         state = .idle
         lastGoodBuffer = nil
         lastSentBuffer = nil
+        outputSession &+= 1
+        resetHandoff()
     }
 
     func updateCaptureStatus(_ channel: ChannelID, isRunning: Bool) {
@@ -161,7 +189,26 @@ final class ProgramRouter {
             state = .routed
             stopFaultTicker()
         }
-        send(buffer, isRepeat: isRepeat)
+        // `routed` above is set before the sink answers; only an accepted new
+        // frame proves the handoff.
+        if send(buffer, isRepeat: isRepeat), !isRepeat, handoff == nil {
+            recordHandoff()
+        }
+    }
+
+    private func recordHandoff() {
+        handoff = ProgramHandoff(program: programChannel, routeGeneration: routeGeneration,
+                                 outputSession: outputSession, route: output.activeRoute)
+        handoffObserver?(handoff)
+    }
+
+    /// Whether `handoff` still describes the current Program, route
+    /// generation, output session and route.
+    func hasCurrentHandoff(from channel: ChannelID) -> Bool {
+        guard let handoff, isOutputStarted else { return false }
+        return handoff == ProgramHandoff(program: channel, routeGeneration: routeGeneration,
+                                         outputSession: outputSession, route: output.activeRoute)
+            && isProgram(channel)
     }
 
     /// Strictly increasing host-clock timestamp for the next output frame.
@@ -171,9 +218,10 @@ final class ProgramRouter {
         return timestamp
     }
 
-    private func send(_ buffer: CVPixelBuffer, isRepeat: Bool) {
+    @discardableResult
+    private func send(_ buffer: CVPixelBuffer, isRepeat: Bool) -> Bool {
         lastSentBuffer = buffer
-        output.sendFrame(buffer, timestamp: nextOutputTimestamp(), isRepeat: isRepeat)
+        return output.sendFrameAccepted(buffer, timestamp: nextOutputTimestamp(), isRepeat: isRepeat)
     }
 
     // MARK: Roles
@@ -186,6 +234,7 @@ final class ProgramRouter {
         guard expectedRouteGeneration == routeGeneration else { return false }
         programChannel = channel
         routeGeneration &+= 1
+        if handoff != nil { resetHandoff() }
         return true
     }
 
@@ -215,6 +264,7 @@ final class ProgramRouter {
         lastProgramFrameAt = clock()
         state = .routed
         stopFaultTicker()
+        recordHandoff()
         output.noteDiagnostics("take → \(channel.cameraLabel)")
         return true
     }

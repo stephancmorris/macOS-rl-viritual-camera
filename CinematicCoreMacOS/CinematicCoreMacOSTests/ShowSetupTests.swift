@@ -13,6 +13,7 @@
 #if DEBUG
 import AppKit
 import Combine
+import CoreVideo
 import Foundation
 import SwiftUI
 import Testing
@@ -326,6 +327,7 @@ struct ShowSetupTests {
     }
 
     private func pairedLiveSetup(
+        sinks: [any ProgramOutputSink] = [],
         startChannelB: @escaping (CameraManager) -> Void = { _ in
             Issue.record("this retired pair start must not request B capture")
         },
@@ -336,7 +338,7 @@ struct ShowSetupTests {
         defaults.set(wide.uniqueID, forKey: LiveShowSetupModel.deviceAKey)
         defaults.set(side.uniqueID, forKey: LiveShowSetupModel.deviceBKey)
         let show = ShowCoordinator(
-            programOutput: ProgramOutputManager(sinks: []),
+            programOutput: ProgramOutputManager(sinks: sinks),
             admissionRecords: AdmissionRecordStore(defaults: defaults),
             operatorModes: OperatorModeStore(defaults: defaults, multiviewEnabled: true))
         let cameras = [wide, side].map {
@@ -409,23 +411,51 @@ struct ShowSetupTests {
         #expect(show.channel(.b) == nil)
     }
 
-    @Test func stayingInMultiCamStartsTheSelectedCameraBOnceAfterA() async {
+    /// A as Program with its output started, as a real Start leaves it.
+    private func runA(_ show: ShowCoordinator) {
+        show.channelA.setRunningForTesting(true)
+        show.channelA.setStartingForTesting(false)
+        show.channelA.outputPort.start()
+        show.channelA.outputPort.updateCaptureStatus(isRunning: true)
+    }
+
+    private func frame() throws -> CVPixelBuffer {
+        var buffer: CVPixelBuffer?
+        CVPixelBufferCreate(kCFAllocatorDefault, 64, 36, kCVPixelFormatType_32BGRA,
+                            [kCVPixelBufferIOSurfacePropertiesKey: [:]] as CFDictionary, &buffer)
+        return try #require(buffer)
+    }
+
+    /// Let the suspended pair start observe what just happened.
+    private func settle() async {
+        for _ in 0..<5 { await Task.yield() }
+    }
+
+    @Test func stayingInMultiCamStartsTheSelectedCameraBOnceAfterA() async throws {
         let entered = SetupStartLatch()
         let release = SetupStartLatch()
         var requestedB: [CameraManager] = []
-        let (show, live) = pairedLiveSetup(startChannelB: { requestedB.append($0) }) { show in
+        let sink = SetupFakeSink()
+        let (show, live) = pairedLiveSetup(sinks: [sink], startChannelB: { requestedB.append($0) }) { show in
             show.channelA.setStartingForTesting(true)
             entered.signal()
             await release.wait()
-            show.channelA.setRunningForTesting(true)
-            show.channelA.setStartingForTesting(false)
+            self.runA(show)
         }
         live.startPair()
         await entered.wait()
         #expect(show.channel(.b) == nil)
         #expect(requestedB.isEmpty)
         release.signal()
+        await settle()
+        // A runs, but nothing has reached the output yet: B waits.
+        #expect(show.channelA.isRunning)
+        #expect(show.channel(.b) == nil && requestedB.isEmpty)
+        #expect(show.pendingPreviewStart == .b)
+        show.channelA.outputPort.sendFrame(try frame(), timestamp: 1, isRepeat: false)
+        #expect(sink.accepted == 1)
         await live.waitForStartForTesting()
+        #expect(show.pendingPreviewStart == nil)
 
         #expect(show.operatorModes.mode == .multiCam)
         #expect(show.channelA.isRunning)
@@ -434,6 +464,77 @@ struct ShowSetupTests {
         #expect(show.channel(.b)?.selectedCamera?.uniqueID == side.uniqueID)
         #expect(requestedB.count == 1)
         #expect(requestedB.first === show.channel(.b))
+    }
+
+    /// PAIR-FIRST-FRAME: what A sends, and whether the output takes it.
+    enum FirstFrameCase: String, CaseIterable { case noFrame, refusedSink, missingSink, repeatFrame, staleRoute }
+
+    @Test(arguments: FirstFrameCase.allCases)
+    func cameraBWaitsUntilANewAFrameIsAccepted(_ scenario: FirstFrameCase) async throws {
+        let sink = SetupFakeSink()
+        sink.accepts = scenario != .refusedSink
+        var requestedB = 0
+        let (show, live) = pairedLiveSetup(sinks: scenario == .missingSink ? [] : [sink],
+                                           startChannelB: { _ in requestedB += 1 }) { show in self.runA(show) }
+        live.startPair()
+        await settle()
+        #expect(show.channelA.isRunning && show.pendingPreviewStart == .b)
+        let port = show.channelA.outputPort
+        switch scenario {
+        case .noFrame: break
+        case .refusedSink, .missingSink: port.sendFrame(try frame(), timestamp: 1, isRepeat: false)
+        case .repeatFrame: port.sendFrame(try frame(), timestamp: 1, isRepeat: true)
+        case .staleRoute:
+            let stamped = port.routeGeneration
+            #expect(show.router.setProgram(.a, expectedRouteGeneration: stamped))
+            port.submitFrame(try frame(), timestamp: 1, isRepeat: false, routeGeneration: stamped)
+        }
+        await settle()
+        #expect(show.channel(.b) == nil, "\(scenario)")
+        #expect(requestedB == 0, "\(scenario)")
+        #expect(show.channelA.isRunning)                 // A stays usable on its own
+        #expect(show.pendingPreviewStart == .b)
+        // Stop retires the wait without ever starting B.
+        show.stopShow(origin: .operatorUI)
+        await live.waitForStartForTesting()
+        #expect(requestedB == 0 && show.pendingPreviewStart == nil)
+    }
+
+    @Test func aHandoffFromAnEarlierOutputSessionCannotStartB() async throws {
+        let sink = SetupFakeSink()
+        var requestedB = 0
+        let (show, live) = pairedLiveSetup(sinks: [sink], startChannelB: { _ in requestedB += 1 }) { show in
+            self.runA(show)
+        }
+        live.startPair()
+        await settle()
+        // A frame is accepted, then A's output session is replaced before the
+        // waiting start can act on it: that handoff no longer counts.
+        show.channelA.outputPort.sendFrame(try frame(), timestamp: 1, isRepeat: false)
+        show.channelA.outputPort.stop()
+        show.channelA.outputPort.start()
+        show.channelA.outputPort.updateCaptureStatus(isRunning: true)
+        #expect(!show.hasProgramHandoff(from: .a))
+        await settle()
+        #expect(requestedB == 0)
+        show.channelA.outputPort.sendFrame(try frame(), timestamp: 2, isRepeat: false)
+        await live.waitForStartForTesting()
+        #expect(requestedB == 1)
+    }
+
+    @Test func leavingMultiCamWhileWaitingRetiresTheWait() async throws {
+        var requestedB = 0
+        let (show, live) = pairedLiveSetup(sinks: [SetupFakeSink()], startChannelB: { _ in requestedB += 1 }) { show in
+            self.runA(show)
+        }
+        live.startPair()
+        await settle()
+        #expect(show.operatorModes.request(.singleCam) == nil)
+        await live.waitForStartForTesting()
+        #expect(show.pendingPreviewStart == nil)
+        show.channelA.outputPort.sendFrame(try frame(), timestamp: 1, isRepeat: false)
+        await settle()
+        #expect(requestedB == 0 && show.channel(.b) == nil)
     }
 
     @Test(arguments: [false, true])
@@ -677,6 +778,27 @@ struct ShowSetupTests {
             let data = try #require(rep.representation(using: NSBitmapImageRep.FileType.png, properties: [:]))
             try data.write(to: dir.appendingPathComponent(file))
         }
+    }
+}
+
+/// A Program output that accepts or refuses every frame (PAIR-FIRST-FRAME).
+@MainActor
+private final class SetupFakeSink: ProgramOutputSink {
+    let route: ProgramOutputManager.Route = .display
+    var accepts = true
+    private(set) var accepted = 0
+    var isAvailable: Bool { true }
+    var summary: String { "fake" }
+    var detail: String { "fake" }
+    var lastErrorDescription: String? { nil }
+    var onStateChange: (() -> Void)?
+    func connect() {}
+    func disconnect() {}
+    func updateCaptureStatus(isRunning: Bool) {}
+    func sendFrame(pixelBuffer: CVPixelBuffer, timestamp: Double) -> Bool {
+        guard accepts else { return false }
+        accepted += 1
+        return true
     }
 }
 
