@@ -104,8 +104,8 @@ import Testing
         #expect(fixture.recorder.stats.fileSizeBytes == result.bytes)
     }
 
-    @Test(arguments: [false, true])
-    func shutdownPreservesTailBehindEightBlockedBatches(revoke: Bool) async throws {
+    @Test(arguments: ["await", "consent", "request"])
+    func shutdownPreservesTailBehindEightBlockedBatches(stop: String) async throws {
         let fixture = try fixture(bufferSize: 100, gated: true)
         defer { cleanUp(fixture) }
         let recorder = fixture.recorder
@@ -113,8 +113,12 @@ import Testing
         await fixture.writer.waitUntilBlocked()
         #expect(recorder.stats.framesRecorded == 0 && recorder.stats.droppedFrames == 0)
 
-        if revoke { recorder.setTrainingDataConsent(false) }
-        let stop = Task { await recorder.stopRecording() }
+        if stop == "consent" { recorder.setTrainingDataConsent(false) }
+        if stop == "request" {
+            recorder.requestStopRecording()
+            recorder.requestStopRecording() // An immediate repeated UI Stop shares the drain.
+        }
+        let shutdown = Task { await recorder.stopRecording() }
         for _ in 0..<1_000 {
             if recorder.isStopping { break }
             await Task.yield()
@@ -129,7 +133,7 @@ import Testing
         #expect(!recorder.isRecording)
         let secondStop = Task { await recorder.stopRecording() }
         await fixture.writer.release()
-        await stop.value
+        await shutdown.value
         await secondStop.value
         await recorder.stopRecording()
 

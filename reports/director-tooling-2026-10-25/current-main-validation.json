@@ -1,0 +1,36 @@
+{
+  "scope": "unmodified origin/main archive, separate from implementation branch",
+  "sourceCommit": "952d05deac305e1d56e5aabb66c552f3dbe383e9",
+  "sourceFingerprint": "11ec9c50c05b64047296e2a681da364122a7c2f00ea39694eaf3e346be5a4329",
+  "date": "2026-10-25",
+  "testResult": "Passed",
+  "passedDefinitions": 1090,
+  "passedExpandedCases": 1683,
+  "failedDefinitions": 0,
+  "skippedDefinitions": 3,
+  "skipped": [
+    {
+      "name": "compareAcceleratedWallClockAndSourceClockWindows()",
+      "nodeIdentifier": "InstrumentationInvestigationTests/compareAcceleratedWallClockAndSourceClockWindows()"
+    },
+    {
+      "name": "replayConsentedFolderWhenConfigured()",
+      "nodeIdentifier": "ReadinessEvaluationTests/replayConsentedFolderWhenConfigured()"
+    },
+    {
+      "name": "twoWebcamsRenderPicturesAndBJoinsWithoutCrashing()",
+      "nodeIdentifier": "RealCameraTests/twoWebcamsRenderPicturesAndBJoinsWithoutCrashing()"
+    }
+  ],
+  "coreMLInterop": "existing synthetic scorer fixture explicitly configured",
+  "releaseBuild": "unsigned app and extension passed",
+  "appVersion": "1.0",
+  "appBuild": "4",
+  "appExecutableSHA256": "8afd960c1758e7495c95d04648e4f35b81504cd3efe927838f7e2ddd0479f4b8",
+  "localEvidenceRoot": "/private/tmp/alfie-current-main-20261025.3jxt1Q",
+  "limitations": [
+    "No integration of implementation branch changes",
+    "No installed app replacement",
+    "No native operator, receiver, installation or level qualification"
+  ]
+}

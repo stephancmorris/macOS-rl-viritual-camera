@@ -18,6 +18,8 @@ Each group references an actual rules judgement. It must include every candidate
 
 A comparison without materialized inputs refuses training. The loader never reconstructs history from adjacent records, substitutes missing values or turns a recorded judgement into a ground-truth label. Other operator/abstention records need no invented feature vector. The pipeline rejects observed gaps, missing prefixes, drops, backward clocks, inconsistent parameters, invalid measurements and incomplete or inconsistent operator-action pairs. An absence of observed loss still cannot prove complete capture or authenticity.
 
+The dataset loader also refuses any source session that C-05 marks capture-blocked, including complete parameter-version rollbacks. This uses the analyzer's authoritative session result rather than relying only on a copied list of issue names. Existing stricter dataset checks for invalid measurements and inconsistent evidence remain. A clean monotonic version history still passes; this introduces no new directing threshold.
+
 ## Explicit labels and session splits
 
 Labels use this exact closed JSON shape:
@@ -67,7 +69,7 @@ The stdlib model has sixteen raw inputs, one sigmoid hidden layer and one sigmoi
 
 Outputs are:
 
-- `dataset.json`: explicit candidate groups, labels, splits and feature schema, with original export ID/time, counts and SHA-256 digests of the input manifest, records, labels and split specification. Hash consistency establishes local linkage, not source authenticity.
+- `dataset.json`: explicit candidate groups, labels, splits and feature schema, with original export ID/time, counts and SHA-256 digests of the input manifest, records, labels and split specification. Export digests must match both the bytes consumed by the bounded parser and the before/after file checks; temporarily replacing an export during parsing cannot bind different parsed metadata to the original digest. Hash consistency establishes local linkage, not source authenticity.
 - `model.json`: reviewable Float32 weights, feature order/shapes, train-only preprocessing statistics, explicit fit parameters, evidence class and deterministic model token. This is data, not executable code or a pickled checkpoint.
 - `report.json` and `report.md`: exact top-choice agreement against original rules rank zero on the same comparison groups, candidate Brier/log loss and descriptive reliability bins. Ties retain rules order. Baseline probability metrics are unavailable because `RuleJudge` provides no probability. Group agreement weights groups equally; probability metrics weight candidates equally. No calibrated-probability or release claim follows from these summaries.
 - With `--coreml`, `DirectorScorer.mlmodel`: an uncompiled immutable model with exactly `directorFeatures: Float32[1,16]` and `probability: Float32[1,1]`, plus feature-schema/model-version and evidence-class metadata. A synthetic dataset produces a model token beginning `synthetic-` and synthetic training metadata. Companion `parity.json` contains every unique captured raw vector and its expected JSON-model probability for an actual CoreML runtime comparison. Export never copies a model into app resources, compiles/installs it or chooses an abstention threshold.

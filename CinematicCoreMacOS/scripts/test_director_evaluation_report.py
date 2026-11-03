@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Synthetic evaluation metadata and report regressions; no app or real evidence."""
 import copy
+import hashlib
 import json
 import os
 from pathlib import Path
@@ -98,6 +99,23 @@ def analyze_phases(rows, bindings):
 
 
 class PhaseEvaluationTests(unittest.TestCase):
+    def test_phase_speed_samples_retain_unobserved_judge_rows(self):
+        rows = with_speed(with_model(shadow_rows(), 'model-A'), 0.1)
+        for row in rows[4:]:
+            row['judgements'] = []
+            row['evidence'][0]['subjectSpeed'] = 0.9
+        data = analyze_phases(rows, [phase_binding(rows, 0, 6, 'whole')])
+        samples = data['parameterEvidence']
+        self.assertEqual(len(samples), 2)
+        actual = {json.dumps(p['scope']['judgeModels']): p['subjectSpeed'] for p in samples}
+        self.assertEqual(actual['[]']['reportedSamples'], 3)
+        self.assertEqual(actual['[]']['median'], 0.9)
+        self.assertEqual(actual[json.dumps([['learned', 'model-A']])]['reportedSamples'], 4)
+        self.assertEqual(actual[json.dumps([['learned', 'model-A']])]['median'], 0.1)
+        self.assertTrue(all(p['phaseID'] == 'whole' for p in samples))
+        self.assertTrue(all(p['scope']['declaredModelVersion'] == 'model-A' for p in samples))
+        self.assertTrue(all('modelVersion' not in p['scope'] for p in samples))
+
     def test_explicit_phases_preserve_actual_counts_and_isolate_parameter_samples(self):
         rows = with_speed(shadow_rows(), 0.1)
         for row in rows[3:]:
@@ -105,6 +123,7 @@ class PhaseEvaluationTests(unittest.TestCase):
         bindings = [phase_binding(rows, 0, 2, 'first'), phase_binding(rows, 3, 6, 'second')]
         data = analyze_phases(rows, bindings)
         self.assertEqual(data['records'], 7)
+        self.assertEqual(data['recordEvidenceCounts'], {'synthetic': 7})
         self.assertEqual(data['bindingMode'], 'explicitPhases')
         self.assertEqual({row['phaseID'] for row in data['rows']}, {'first', 'second'})
         self.assertEqual(sum(row['counts']['compared'] for row in data['rows']), 2)
@@ -233,10 +252,201 @@ class PhaseEvaluationTests(unittest.TestCase):
             data = json.loads(out.read_text())
             self.assertEqual(data['evaluationSchemaVersion'], 2)
             self.assertEqual(len(data['shadowBindingSHA256']), 64)
+            expected = hashlib.sha256(records.read_bytes()).hexdigest()
+            self.assertEqual(data['shadow']['inputFingerprints']['recordsSHA256'], expected)
+            self.assertIn(expected, report.markdown(data))
+            self.assertIn(expected, report.parameter_memo(data))
             self.assertFalse(data['qualified'])
 
 
 class EvaluationTests(unittest.TestCase):
+    def test_matching_window_precision_survives_standalone_artifacts(self):
+        directory = FIXTURES / 'director-shadow-synthetic-export'
+        window = 1.00000004
+        data = report.summarize_shadow(directory, window, [binding(shadow_rows())])
+        regressions = report.negative_shadow_regressions(directory, window)
+        result = report.evaluate(envelope(), shadow_data=data, regressions=regressions)
+        for text in (report.markdown(result), report.parameter_memo(result)):
+            self.assertIn('Matching window: 1.00000004 seconds (supplied)', text)
+        self.assertIn('matching window 1.00000004 seconds (supplied)', report.markdown(result))
+
+    def test_parameter_memo_retains_capture_and_binding_completeness(self):
+        rows = with_speed(shadow_rows(), 0.2)
+        rows[3]['droppedRecordsBefore'] = '1'
+        data = analyze_shadow(rows, [binding(rows)])
+        memo = report.parameter_memo(report.evaluate(envelope(), shadow_data=data))
+        self.assertIn('"reported_drops": 1', memo)
+        self.assertIn('scope incomplete.', memo)
+        self.assertIn('"reportedSamples": 7', memo)
+        unbound = analyze_shadow(shadow_rows(), [])
+        memo = report.parameter_memo(report.evaluate(envelope(), shadow_data=unbound))
+        self.assertIn('missingShadowBinding', memo)
+        phased = analyze_phases(shadow_rows(), [phase_binding(shadow_rows(), 0, 1, 'before'),
+                                               phase_binding(shadow_rows(), 2, 6, 'after')])
+        memo = report.parameter_memo(report.evaluate(envelope(), shadow_data=phased))
+        self.assertIn('phase_boundary_actions', memo)
+        self.assertIn('Phase `before`', memo)
+        self.assertIn('original sequences 0–1', memo)
+        self.assertIn('scope incomplete.', memo)
+
+    def test_evidence_inventory_preserves_declared_shadow_classes_and_replay_counts(self):
+        for declared_class in ('synthetic', 'recorded', 'live'):
+            rows = shadow_rows()
+            for row in rows:
+                row['evidenceClass'] = declared_class
+            # Authored class mutations exercise reporting only, not real collection.
+            data = analyze_shadow(rows, [binding(rows)])
+            result = report.evaluate(envelope(run_fixture()), shadow_data=data)
+            with self.subTest(declared_class=declared_class):
+                self.assertEqual(result['evidenceInventory']['replayScenarios'], {'synthetic': 1})
+                self.assertEqual(result['evidenceInventory']['shadowRecords'], {declared_class: 7})
+                for text in (report.markdown(result), report.parameter_memo(result)):
+                    self.assertNotIn('**Synthetic software evidence.', text)
+                    self.assertIn(f'| Shadow records | {declared_class} | 7 |', text)
+                    self.assertIn('| Replay scenarios | synthetic | 1 |', text)
+                self.assertFalse(result['qualified'])
+
+    def test_reports_retain_the_supplied_matching_window(self):
+        directory = FIXTURES / 'director-shadow-synthetic-export'
+        bindings = [binding(shadow_rows())]
+        for window in (0, 0.05, 2.75):
+            with self.subTest(window=window):
+                data = report.summarize_shadow(directory, window, bindings)
+                self.assertEqual(data['matchingWindowSeconds'], window)
+                self.assertEqual(sum(r['counts']['compared'] for r in data['rows']), 2 if window == 2.75 else 0)
+                result = report.evaluate(envelope(), shadow_data=data)
+                for text in (report.markdown(result), report.parameter_memo(result)):
+                    self.assertIn(f'Matching window: {window:g} seconds (supplied)', text)
+                regressions = report.negative_shadow_regressions(directory, window)
+                self.assertTrue(all(r['matchingWindowSeconds'] == window for r in regressions))
+        phased = report.summarize_shadow(directory, 1.25,
+                                        [phase_binding(shadow_rows(), 0, 6, 'whole')], binding_schema_version=2)
+        self.assertEqual(phased['matchingWindowSeconds'], 1.25)
+
+    def test_legacy_python_api_validates_bindings_before_loading_evidence(self):
+        rows = shadow_rows()
+        cases = []
+        original = binding(rows)
+        cases.append([original, {**original, 'configurationID': 'conflicting'}])
+        cases.append([{**original, 'configurationID': 'PRIVATE INVALID TEXT'}])
+        cases.append([{**original, 'route': 'unrecognized'}])
+        cases.append([{**original, 'unexpected': 'PRIVATE'}])
+        cases.append([{**original, 'judgeKind': 'learned', 'modelVersion': None}])
+        for bindings in cases:
+            with self.subTest(bindings=bindings), self.assertRaises(ValueError):
+                analyze_shadow(rows, bindings)
+            with tempfile.TemporaryDirectory() as directory:
+                with self.assertRaises(ValueError):
+                    report.summarize_shadow(Path(directory) / 'missing.jsonl', 2, bindings)
+
+    def test_legacy_external_sidecar_retains_exact_fingerprint(self):
+        with tempfile.TemporaryDirectory() as directory:
+            src, out = Path(directory) / 'input.json', Path(directory) / 'report.json'
+            src.write_text(json.dumps(envelope()))
+            sidecar = FIXTURES / 'director-evaluation-shadow-sidecar.json'
+            command = [sys.executable, str(Path(report.__file__)), str(src),
+                       '--shadow-bundle', str(FIXTURES / 'director-shadow-synthetic-export'),
+                       '--shadow-sidecar', str(sidecar), '--match-window-seconds', '2', '--json-output', str(out)]
+            completed = subprocess.run(command, capture_output=True)
+            self.assertEqual(completed.returncode, 0, completed.stderr)
+            result = json.loads(out.read_text())
+            expected = hashlib.sha256(sidecar.read_bytes()).hexdigest()
+            self.assertEqual(result['shadowBindingSHA256'], expected)
+            self.assertIn(expected, report.markdown(result))
+            self.assertIn(expected, report.parameter_memo(result))
+
+    def test_legacy_report_preserves_bundle_fingerprints(self):
+        directory = FIXTURES / 'director-shadow-synthetic-export'
+        data = report.summarize_shadow(directory, 2, [binding(shadow_rows())])
+        for name, field in [('records.jsonl', 'recordsSHA256'), ('manifest.json', 'manifestSHA256')]:
+            expected = hashlib.sha256((directory / name).read_bytes()).hexdigest()
+            self.assertEqual(data['inputFingerprints'][field], expected)
+            result = report.evaluate(envelope(), shadow_data=data)
+            self.assertIn(expected, report.markdown(result))
+            self.assertIn(expected, report.parameter_memo(result))
+
+    def test_parameter_distributions_keep_segments_contexts_and_channels_separate(self):
+        for dimension in ('segmentType', 'segmentToken', 'parameters', 'channel'):
+            rows = with_speed(shadow_rows(), 0.1)
+            for row in rows[4:]:
+                row['evidence'][0]['subjectSpeed'] = 0.9
+                if dimension == 'segmentType':
+                    row['context']['segmentType'] = 'panel'
+                elif dimension == 'segmentToken':
+                    row['context']['segmentToken'] = token('second-segment')
+                elif dimension == 'parameters':
+                    row['parameters']['parametersVersion'] = '2'
+                    row['parameters']['resolvedStyle']['maximumMovement'] = 0.8
+                else:
+                    row['evidence'][0]['channel'] = 'input-1'
+            with self.subTest(dimension=dimension):
+                evidence = analyze_shadow(rows, [])['parameterEvidence']
+                self.assertEqual(len(evidence), 2)
+                self.assertEqual({p['subjectSpeed']['median'] for p in evidence}, {0.1, 0.9})
+                self.assertEqual({p['subjectSpeed']['reportedSamples'] for p in evidence}, {3, 4})
+
+    def test_phase_parameter_distributions_keep_two_channels_separate(self):
+        rows = with_speed(shadow_rows(), 0.1)
+        for row in rows:
+            row['evidence'].append({**row['evidence'][0], 'channel': 'input-1', 'subjectSpeed': 0.9})
+        data = analyze_phases(rows, [phase_binding(rows, 0, 6, 'whole')])
+        evidence = data['parameterEvidence']
+        self.assertEqual(len(evidence), 2)
+        self.assertEqual({p['scope']['channel']: p['subjectSpeed']['median'] for p in evidence},
+                         {'input-1': 0.9, 'input-2': 0.1})
+        self.assertTrue(all(p['subjectSpeed']['reportedSamples'] == 7 for p in evidence))
+
+    def test_channel_partition_preserves_invalid_and_unavailable_samples(self):
+        rows = with_speed(shadow_rows(), 0.1)
+        for row in rows:
+            row['evidence'].append({**row['evidence'][0], 'channel': 'input-1'})
+            row['evidence'][1].pop('subjectSpeed')
+        rows[0]['invalidFields'] = ['evidence[1].subjectSpeed']
+        for phased in (False, True):
+            data = (analyze_phases(rows, [phase_binding(rows, 0, 6, 'whole')]) if phased else
+                    analyze_shadow(rows, [binding(rows)]))
+            with self.subTest(phased=phased):
+                samples = {p['scope']['channel']: p['subjectSpeed'] for p in data['parameterEvidence']}
+                self.assertEqual(samples['input-2']['reportedSamples'], 7)
+                self.assertEqual(samples['input-1']['reportedSamples'], 0)
+                self.assertEqual(samples['input-1']['invalidSamples'], 1)
+                self.assertEqual(samples['input-1']['unavailableSamples'], 6)
+                self.assertIsNone(samples['input-1']['median'])
+                memo = report.parameter_memo(report.evaluate(envelope(), shadow_data=data))
+                self.assertIn('"channel": "input-1"', memo)
+                self.assertIn('"segmentType": "presenter"', memo)
+
+    def test_legacy_session_status_retains_capture_loss_without_comparison_rows(self):
+        for fault in ('drop', 'gap', 'orphan', 'unknownShot'):
+            rows = shadow_rows()
+            if fault == 'drop':
+                rows[3]['droppedRecordsBefore'] = '1'
+            elif fault == 'gap':
+                for row in rows:
+                    row['sequence'] = str(int(row['sequence']) + 10)
+            elif fault == 'orphan':
+                rows = rows[1:2]
+                rows[0]['sequence'] = '0'
+            else:
+                rows[2]['context'].pop('programShot', None)
+            with self.subTest(fault=fault):
+                data = analyze_shadow(rows, [binding(rows)])
+                self.assertEqual(data['sessions'][0]['status'], 'incomplete')
+                text = report.markdown(report.evaluate(envelope(), shadow_data=data))
+                self.assertIn('scope incomplete.', text)
+                if fault == 'orphan':
+                    self.assertEqual(data['rows'], [])
+
+    def test_legacy_session_loss_does_not_taint_another_session(self):
+        affected, complete = shadow_rows(), shadow_rows()
+        affected[3]['droppedRecordsBefore'] = '1'
+        for row in complete:
+            row['sessionID'] = token('complete-session')
+            row['recordID'] = token('complete-' + row['sequence'])
+        data = analyze_shadow(affected + complete, [binding(affected), binding(complete)])
+        self.assertEqual({s['sessionID']: s['status'] for s in data['sessions']},
+                         {affected[0]['sessionID']: 'incomplete', complete[0]['sessionID']: 'observed'})
+
     def test_actual_decision_rehearsal_preserves_missing_per_level_binding(self):
         requested = os.environ.get('ALFIE_DIRECTOR_DECISION_EXPORT')
         if not requested:

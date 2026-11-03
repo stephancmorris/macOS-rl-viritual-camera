@@ -8,9 +8,11 @@ See the [current candidate operator guide](docs/user-guide/README.md). The [comb
 
 ## Inputs and framing
 
-Camera/capture devices supply the delivered resolution and rate. Stage framing benefits from a clean wide 4K source; Webcam supports a closer source. Check actual delivery rather than advertised camera specifications. Capture follows the session show standard: default 1080p50, with 59.94/60 options. The active standard is frozen until Stop/restart.
+Camera/capture devices supply the delivered resolution and rate. Stage framing benefits from a clean wide 4K source; Webcam supports a closer source. Check actual delivery rather than advertised camera specifications. Capture follows the session show standard: default 1080p50, with 59.94/60 options. The active standard stays frozen while any input runs or starts; replacing Program's source cannot change it while Preview continues. A new preference applies after the whole show stops and starts again.
 
 Vision body/pose/face observations support operator-selected subject tracking. ShotComposer provides rule-based framing and recovery; the RL agent remains developer scaffolding. Core Image renders the crop to Program. Detection confidence alone is not qualified identity readiness.
+
+For local rehearsal, **Built-in camera testing** in stopped Multi Cam setup or the Single Cam inspector lets a system-identified built-in camera use its own HD rate when it cannot supply the show rate. It resets each launch, locks while inputs run/start, and preserves the output standard and all crop, freshness and pair-workload checks. This is a test configuration, not a qualified native-rate setup.
 
 With two inputs, prepare Preview without changing Program, then Take explicitly. A successful Take swaps roles. Controls normally target Preview; Edit Live targets Program deliberately. Return to Wide affects the controlled camera, so widening Preview does not widen Program. C/D slots are reserved; three/four live inputs remain separate follow-on work.
 

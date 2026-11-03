@@ -4,6 +4,7 @@
 //
 
 import CoreMedia
+import Foundation
 import Testing
 @testable import Alfie
 
@@ -73,5 +74,102 @@ struct OutputRateRegressionTests {
         #expect(!handshake.isReady(rate: rate, generation: 2))
         handshake.complete(rate: rate, generation: 2, accepted: true)
         #expect(handshake.isReady(rate: rate, generation: 2))
+    }
+}
+
+@MainActor
+struct ShowStandardLifecycleTests {
+    private func withPreferences(_ work: (UserDefaults) -> Void) {
+        let defaults = UserDefaults.standard
+        let previous = defaults.object(forKey: ShowStandard.userDefaultsKey)
+        ShowStandard.endSession()
+        defaults.set(ShowStandard.p50.rawValue, forKey: ShowStandard.userDefaultsKey)
+        defer {
+            if let previous { defaults.set(previous, forKey: ShowStandard.userDefaultsKey) }
+            else { defaults.removeObject(forKey: ShowStandard.userDefaultsKey) }
+            ShowStandard.endSession()
+        }
+        work(defaults)
+    }
+
+    @Test(arguments: [ChannelID.a, .b])
+    func programSourceRestartKeepsTheStandardWhilePreviewIsStillLive(program: ChannelID) {
+        withPreferences { defaults in
+            let show = ShowCoordinator(programOutput: ProgramOutputManager(sinks: []))
+            defer { show.stopShow() }
+            let a = show.channelA, b = show.addChannel(.b)
+            a.sessionStopRunningForTesting = {}; b.sessionStopRunningForTesting = {}
+            a.outputPort.start()
+            a.setRunningForTesting(true); b.setRunningForTesting(true)
+            if program == .b { #expect(show.router.setProgram(.b, expectedRouteGeneration: show.router.routeGeneration)) }
+            #expect(ShowStandard.activeOrCurrent == .p50)
+            defaults.set(ShowStandard.p60.rawValue, forKey: ShowStandard.userDefaultsKey)
+            let channel = show.channel(program)!
+            channel.stopCapture()
+            #expect(show.isAnyChannelLive)
+            #expect(ShowStandard.activeOrCurrent == .p50)
+            channel.setStartingForTesting(true)
+            channel.outputPort.start()
+            #expect(ShowStandard.activeOrCurrent == .p50)
+        }
+    }
+
+    @Test func aStartingPreviewKeepsTheShowStandardUntilItsStartIsRetired() {
+        withPreferences { defaults in
+            let show = ShowCoordinator(programOutput: ProgramOutputManager(sinks: []))
+            defer { show.stopShow() }
+            show.channelA.sessionStopRunningForTesting = {}
+            show.channelA.setRunningForTesting(true)
+            let b = show.addChannel(.b)
+            b.sessionStopRunningForTesting = {}
+            b.setStartingForTesting(true)
+            defaults.set(ShowStandard.p60.rawValue, forKey: ShowStandard.userDefaultsKey)
+            show.channelA.stopCapture()
+            #expect(ShowStandard.activeSession == .p50)
+            b.setStartingForTesting(false)
+            #expect(!show.isAnyChannelLive && ShowStandard.activeSession == nil)
+            show.channelA.setStartingForTesting(true)
+            #expect(ShowStandard.activeSession == .p60)
+        }
+    }
+
+    @Test func stoppingEveryChannelLetsTheNextShowUseTheNewPreference() {
+        withPreferences { defaults in
+            let show = ShowCoordinator(programOutput: ProgramOutputManager(sinks: []))
+            defer { show.stopShow() }
+            show.channelA.sessionStopRunningForTesting = {}
+            let b = show.addChannel(.b); b.sessionStopRunningForTesting = {}
+            show.channelA.setRunningForTesting(true); b.setRunningForTesting(true)
+            defaults.set(ShowStandard.p60.rawValue, forKey: ShowStandard.userDefaultsKey)
+            show.stopShow()
+            #expect(!show.isAnyChannelLive && ShowStandard.activeSession == nil)
+            show.channelA.setStartingForTesting(true)
+            show.channelA.outputPort.start()
+            #expect(ShowStandard.activeOrCurrent == .p60)
+        }
+    }
+
+    @Test func releasingALiveShowReleasesItsFormatOwnership() {
+        withPreferences { _ in
+            var show: ShowCoordinator? = ShowCoordinator(programOutput: ProgramOutputManager(sinks: []))
+            show?.channelA.setStartingForTesting(true)
+            #expect(ShowStandard.activeSession == .p50)
+            show = nil
+            #expect(ShowStandard.activeSession == nil)
+        }
+    }
+
+    @Test func standaloneOutputStillOwnsItsCaptureStandard() {
+        withPreferences { defaults in
+            let output = ProgramOutputManager(sinks: [])
+            defer { output.stop() }
+            output.start()
+            defaults.set(ShowStandard.p60.rawValue, forKey: ShowStandard.userDefaultsKey)
+            #expect(ShowStandard.activeOrCurrent == .p50)
+            output.stop()
+            #expect(ShowStandard.activeSession == nil)
+            output.start()
+            #expect(ShowStandard.activeOrCurrent == .p60)
+        }
     }
 }

@@ -1,0 +1,95 @@
+{
+  "date": "2026-10-25",
+  "scope": "Auto Director offline evidence/tooling review snapshot",
+  "latestCodeCommit": "3f9797e3d8c4d25daa897a6854a3fe51fbe72df4",
+  "scriptTests": {
+    "passed": 127,
+    "failed": 0,
+    "log": "/private/tmp/alfie-pr81-preview-20261025.FYC92c/scripts.log"
+  },
+  "directorTrainingTests": {
+    "passed": 16,
+    "failed": 0,
+    "log": "/private/tmp/alfie-pr81-preview-20261025.FYC92c/training.log"
+  },
+  "currentMainAppValidation": "current-main-validation.json",
+  "currentMainDirectorEvidence": "current-main-director-evidence.json",
+  "retainedArtifactHashesRechecked": 22,
+  "currentStrictLoaderAcceptedCurrentMainSyntheticCorpus": true,
+  "wholeSessionGroups": {
+    "train": 4,
+    "validation": 4,
+    "test": 4
+  },
+  "reviewCards": [
+    {
+      "ticket": "AD-TRAINING-COMPLETENESS",
+      "url": "https://trello.com/c/tSDoot5K",
+      "list": "👀 Human Review"
+    },
+    {
+      "ticket": "AD-MEMO-COMPLETENESS",
+      "url": "https://trello.com/c/7QVGgPMu",
+      "list": "👀 Human Review"
+    },
+    {
+      "ticket": "AD-EVIDENCE-INVENTORY",
+      "url": "https://trello.com/c/URMUc3OZ",
+      "list": "👀 Human Review"
+    },
+    {
+      "ticket": "AD-PHASE-MODEL-SAMPLES",
+      "url": "https://trello.com/c/2BkIe1XZ",
+      "list": "👀 Human Review"
+    },
+    {
+      "ticket": "AD-MATCH-WINDOW",
+      "url": "https://trello.com/c/PfUxs7j0",
+      "list": "👀 Human Review"
+    },
+    {
+      "ticket": "AD-DATASET-DIGEST",
+      "url": "https://trello.com/c/8vf2UFYx",
+      "list": "👀 Human Review"
+    },
+    {
+      "ticket": "AD-BINDING-API",
+      "url": "https://trello.com/c/v5e2dwnA",
+      "list": "👀 Human Review"
+    },
+    {
+      "ticket": "AD-EVIDENCE-FINGERPRINT",
+      "url": "https://trello.com/c/sB0AbpE0",
+      "list": "👀 Human Review"
+    },
+    {
+      "ticket": "AD-PARAMETER-ATTRIBUTION",
+      "url": "https://trello.com/c/nB2el8ZI",
+      "list": "👀 Human Review"
+    },
+    {
+      "ticket": "AD-EVIDENCE-STATUS",
+      "url": "https://trello.com/c/FsPvuofO",
+      "list": "👀 Human Review"
+    },
+    {
+      "ticket": "AD-WINDOW-PRECISION",
+      "url": "https://trello.com/c/qZ9gNww6",
+      "list": "👀 Human Review"
+    }
+  ],
+  "qualification": "incomplete",
+  "modelPromotion": "notPerformed",
+  "installedAppReplacement": false,
+  "pullRequest": "https://github.com/stephancmorris/macOS-rl-viritual-camera/pull/81",
+  "draft": true,
+  "combinedSourceValidation": "pr81-validation.json",
+  "branchMergePerformed": false,
+  "separateStyleSettlingFollowup": {
+    "pullRequest": "https://github.com/stephancmorris/macOS-rl-viritual-camera/pull/83",
+    "basePullRequest": 82,
+    "evidence": "style-settle-followup.json",
+    "jointValidationWithPR81": false,
+    "reviewCard": "https://trello.com/c/JRBFINdK"
+  }
+}

@@ -241,7 +241,12 @@ final class CameraManager: NSObject, ObservableObject {
     @Published private(set) var currentFrameBuffer: CVPixelBuffer?
     
     /// Capture session status
-    @Published private(set) var isRunning: Bool = false
+    @Published private(set) var isRunning: Bool = false {
+        didSet { if isRunning != oldValue { sessionLivenessDidChange?() } }
+    }
+    /// Lifecycle-only notification after state is installed, unlike Published's
+    /// willSet signal. The owning show uses it to retain the frozen standard.
+    var sessionLivenessDidChange: (() -> Void)?
     
     /// Error state
     @Published private(set) var error: CameraError?
@@ -288,7 +293,7 @@ final class CameraManager: NSObject, ObservableObject {
         }
     }
 
-    let trainingDataRecorder = TrainingDataRecorder()
+    let trainingDataRecorder: TrainingDataRecorder
 
     /// Routes the processed program feed to the currently active output sink.
     /// Program Display is a fullscreen clean feed on a selected display (e.g.
@@ -301,6 +306,9 @@ final class CameraManager: NSObject, ObservableObject {
     /// port is `programOutput` itself; any other channel's port is unrouted and
     /// cannot touch the output (see CameraChannel.swift).
     let channelID: ChannelID
+    /// In-memory owner identity, distinct from the reusable channel address
+    /// and an object's allocator address. Never persisted or exported.
+    let lifetimeID = UUID()
     /// The operator mode this channel runs in. Set with the composer format by
     /// `OperatorModeStore.apply(to:)`; read for diagnostics.
     var operatorMode: OperatorMode = .singleCam
@@ -896,10 +904,12 @@ final class CameraManager: NSObject, ObservableObject {
     }
 
     /// Designated: the show (ShowCoordinator / ProgramRouter) supplies the port.
-    init(channelID: ChannelID, programOutput: ProgramOutputManager, outputPort: any ChannelOutputPort) {
+    init(channelID: ChannelID, programOutput: ProgramOutputManager, outputPort: any ChannelOutputPort,
+         trainingDataRecorder: TrainingDataRecorder? = nil) {
         self.channelID = channelID
         self.programOutput = programOutput
         self.outputPort = outputPort
+        self.trainingDataRecorder = trainingDataRecorder ?? TrainingDataRecorder()
         self.commands = CommandDispatcher(channelID: channelID)
         self.sessionQueue = DispatchQueue(label: "com.alfie.capture-session.\(channelID.letter)", qos: .userInitiated)
         self.cropEngine = CropEngine()
@@ -997,7 +1007,9 @@ final class CameraManager: NSObject, ObservableObject {
     /// Request camera permissions and start the capture session
     let commands: CommandDispatcher
     @Published private(set) var controlStatus: String?
-    @Published private(set) var isStartingSession = false
+    @Published private(set) var isStartingSession = false {
+        didSet { if isStartingSession != oldValue { sessionLivenessDidChange?() } }
+    }
     @Published private(set) var isProgramHolding = false
     @Published private(set) var zoomMoveDirection: OperatorCommand.ZoomDirection?
     private var sessionStartTask: Task<Void, Never>?
@@ -1664,6 +1676,7 @@ final class CameraManager: NSObject, ObservableObject {
     
     /// Stop the capture session
     func stopCapture() {
+        trainingDataRecorder.requestStopRecording()
         sessionStartRequest = nil
         sessionStartTask?.cancel()
         sessionStartTask = nil
@@ -1684,9 +1697,6 @@ final class CameraManager: NSObject, ObservableObject {
         clipPlaybackTask?.cancel()
         clipPlaybackTask = nil
         frameProcessingGate.reset()
-        if trainingDataRecorder.isRecording {
-            Task { await trainingDataRecorder.stopRecording() }
-        }
         outputPort.updateCaptureStatus(isRunning: false)
         workScheduler?.cancelWaiting(for: channelID)
         stopSessionAsync()

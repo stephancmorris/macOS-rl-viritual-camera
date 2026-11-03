@@ -3,6 +3,7 @@
 import argparse
 from collections import Counter, defaultdict, deque
 from datetime import datetime, timedelta
+import hashlib
 import json
 import math
 from pathlib import Path
@@ -306,13 +307,16 @@ def strict_json(raw):
 
 
 def load_records(stream, maximum_records=DEFAULT_MAX_RECORDS,
-                 maximum_line_bytes=MAX_LINE_BYTES, maximum_input_bytes=MAX_INPUT_BYTES):
+                 maximum_line_bytes=MAX_LINE_BYTES, maximum_input_bytes=MAX_INPUT_BYTES,
+                 content_hash=None):
     records, issues, ids, sequences = [], Counter(), set(), {}
     total_bytes = 0
     for count in range(maximum_records + 1):
         raw = stream.readline(maximum_line_bytes + 1)
         if not raw:
             break
+        if content_hash is not None:
+            content_hash.update(raw)
         total_bytes += len(raw)
         if count == maximum_records or len(raw) > maximum_line_bytes or total_bytes > maximum_input_bytes:
             issues['input_limit'] += 1
@@ -363,12 +367,15 @@ def load_input(path, maximum_records=DEFAULT_MAX_RECORDS,
     dataset. Bundle metadata and records share the existing byte budget.
     """
     path = Path(path)
+    records_hash = hashlib.sha256()
     if not path.is_dir():
         with path.open('rb') as stream:
-            records, issues = load_records(stream, maximum_records, maximum_line_bytes, maximum_input_bytes)
-        return records, issues, {'kind': 'unbundled'}
+            records, issues = load_records(stream, maximum_records, maximum_line_bytes, maximum_input_bytes,
+                                          content_hash=records_hash)
+        return records, issues, {'kind': 'unbundled',
+                                'recordsSHA256': None if issues['input_limit'] else records_hash.hexdigest()}
 
-    source = {'kind': 'bundle', 'manifest': None}
+    source = {'kind': 'bundle', 'manifest': None, 'recordsSHA256': None, 'manifestSHA256': None}
     issues = Counter()
     manifest = None
     manifest_bytes = 0
@@ -382,6 +389,7 @@ def load_input(path, maximum_records=DEFAULT_MAX_RECORDS,
         if manifest_bytes > maximum_input_bytes:
             issues['input_limit'] += 1
             return [], issues, source
+        source['manifestSHA256'] = hashlib.sha256(raw).hexdigest()
         try:
             manifest = strict_json(raw)
         except (ValueError, TypeError, KeyError, OverflowError, RecursionError, UnicodeError):
@@ -393,7 +401,10 @@ def load_input(path, maximum_records=DEFAULT_MAX_RECORDS,
         return [], issues, source
     with records_path.open('rb') as stream:
         records, record_issues = load_records(
-            stream, maximum_records, maximum_line_bytes, maximum_input_bytes - manifest_bytes)
+            stream, maximum_records, maximum_line_bytes, maximum_input_bytes - manifest_bytes,
+            content_hash=records_hash)
+    if not record_issues['input_limit']:
+        source['recordsSHA256'] = records_hash.hexdigest()
     issues.update(record_issues)
     if not issues.get('invalid_export_manifest'):
         try:
@@ -648,10 +659,16 @@ def analyze(records, window, issues=None, source=None, phase_assignments=None):
             if stratum(b) == stratum(next_a) and b['context']['program'] == next_a['context']['program'] and not disruption and same_phase:
                 dwell[group(b)].append(next_b['eventTime'] - b['eventTime'])
     data = {'groups': result, 'issues': issues, 'abstentions': abstentions, 'dwell': dwell,
-            'records': len(records), 'source': source or {'kind': 'unbundled'}}
+            'records': len(records), 'source': source or {'kind': 'unbundled'},
+            'captureBlockedSessions': sorted(blocked)}
     if phase_assignments is not None:
         data['blockedSessions'] = sorted(blocked)
     return data
+
+
+def format_window(window):
+    """Keep the supplied analysis setting reproducible, including boundary bits."""
+    return repr(window).removesuffix('.0')
 
 
 def markdown(data, window):
@@ -670,8 +687,9 @@ def markdown(data, window):
             ]
     else:
         lines += ['Input: unbundled JSONL. Export metadata is unavailable; explicit-export retention is not established.', '']
+    lines += fingerprint_lines(source)
     lines += [
-             f'Accepted records: {data["records"]}. Matching window: {window:g} seconds (supplied).', '',
+             f'Accepted records: {data["records"]}. Matching window: {format_window(window)} seconds (supplied).', '',
              'Matching: latest unused preceding prediction of the same kind, within the supplied window,',
              'matched to a paired completed operator action at its attempt time. Target and preset must both agree.',
              'Partitions: session, source class, segment/token, parameter/preference versions, policy and route revision.',
@@ -686,14 +704,17 @@ def markdown(data, window):
         label = f'{key[2]}/{key[3] or "none"}; policy {key[6]}; route {key[7]}; prefs {key[5] or "unknown"}'
         if len(key) == 10:
             label += f'; phase {key[-2]}'
-        incomplete = blocked or (len(key) == 10 and s['unscored_actions'])
+        incomplete = blocked or s['unscored_actions']
         lines.append(f'| {key[0]} | {key[1]} | {label} | {key[-1]} | {key[4] or "unknown"} | {s["predictions"]} | {s["completed_actions"]} | {s["compared"]} | {s["exact"]} | {agreement} | {s["unmatched_predictions"]} | {s["unmatched_actions"]} | {s["unscored_actions"]} | {"incomplete" if incomplete else "observed"} |')
     lines += ['', '## Abstentions', '', 'Reason totals count reasons, not independent opportunities.', '']
     for key, count in sorted(data['abstentions'].items(), key=lambda item: repr(item[0]) if 'blockedSessions' in data else item[0]):
         lines.append(f'- {" / ".join(str(x) for x in key)}: {count}')
     if not data['abstentions']:
         lines.append('No observed abstentions.')
-    lines += ['', '## Interior Program dwell', '', 'Seconds between consecutive completed Takes with continuous roles and no observed disruption.', 'First/last censored holds and missing intervals are excluded; this is not downstream presentation.', '']
+    lines += ['', '## Interior Program input tenure (dwell)', '',
+              'Seconds between consecutive completed Takes with continuous roles and no observed disruption.',
+              'This measures recorded input-role tenure, not a stable composition or subject hold. Missing shot metadata can prevent agreement scoring while input roles still support this interval.',
+              'First/last censored holds and missing intervals are excluded; this is not downstream presentation.', '']
     for key, values in sorted(data['dwell'].items(), key=lambda kv: repr(kv[0])):
         phase = f' / phase {key[-1]}' if len(key) == 9 else ''
         lines.append(f'- {key[0]} / {key[1]} / {key[2]} / parameters {key[4]}{phase}: n={len(values)}, min={min(values):g}, median={statistics.median(values):g}, max={max(values):g} s')
@@ -705,6 +726,13 @@ def markdown(data, window):
             lines.append(f'- {key}: {value}')
     lines.append('Zero reported loss does not prove complete capture. No source frames or raw rejected content are included.')
     return '\n'.join(lines) + '\n'
+
+
+def fingerprint_lines(source):
+    lines = [f'Records SHA-256: `{source.get("recordsSHA256") or "unavailable"}`.']
+    if source.get('kind') == 'bundle' or 'manifestSHA256' in source:
+        lines.append(f'Manifest SHA-256: `{source.get("manifestSHA256") or "unavailable"}`.')
+    return lines + ['Fingerprints identify consumed bytes, not consent, complete capture or qualification. Partial bounded reads have no full-file fingerprint.', '']
 
 
 def main(argv=None):

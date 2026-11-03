@@ -1,0 +1,246 @@
+{
+  "date": "2026-10-24",
+  "base": "12a2bc5",
+  "branch": "codex/next-ticket-batches-2026-10-24",
+  "sourceFingerprint": "71ff75c4e3973b1866be4e99842715113198c4f97e727673d68b367d3f1ca721",
+  "toolchain": "Xcode 26.3 (17C529)",
+  "host": "Mac mini / Apple M2 Pro / macOS 27.0.1",
+  "swift": {
+    "setup-before": {
+      "result": "Failed",
+      "passedTests": 32,
+      "failedTests": 1,
+      "skippedTests": 0,
+      "totalTestCount": 33,
+      "passedExpanded": 42
+    },
+    "setup-after": {
+      "result": "Passed",
+      "passedTests": 59,
+      "failedTests": 0,
+      "skippedTests": 0,
+      "totalTestCount": 59,
+      "passedExpanded": 88
+    },
+    "take-before": {
+      "result": "Failed",
+      "passedTests": 18,
+      "failedTests": 3,
+      "skippedTests": 0,
+      "totalTestCount": 21,
+      "passedExpanded": 23
+    },
+    "take-after": {
+      "result": "Passed",
+      "passedTests": 42,
+      "failedTests": 0,
+      "skippedTests": 0,
+      "totalTestCount": 42,
+      "passedExpanded": 81
+    },
+    "full-1": {
+      "result": "Passed",
+      "passedTests": 1065,
+      "failedTests": 0,
+      "skippedTests": 4,
+      "totalTestCount": 1069,
+      "passedExpanded": 1660
+    },
+    "full-2": {
+      "result": "Passed",
+      "passedTests": 1069,
+      "failedTests": 0,
+      "skippedTests": 4,
+      "totalTestCount": 1073,
+      "passedExpanded": 1674
+    },
+    "coreml-interop": {
+      "result": "Passed",
+      "passedTests": 1,
+      "failedTests": 0,
+      "skippedTests": 0,
+      "totalTestCount": 1,
+      "passedExpanded": 1
+    },
+    "recording-stop-before": {
+      "result": "Failed",
+      "passedTests": 4,
+      "failedTests": 1,
+      "skippedTests": 0,
+      "totalTestCount": 5,
+      "passedExpanded": 5
+    },
+    "recording-stop-after": {
+      "result": "Passed",
+      "passedTests": 20,
+      "failedTests": 0,
+      "skippedTests": 0,
+      "totalTestCount": 20,
+      "passedExpanded": 24
+    },
+    "full-3": {
+      "result": "Passed",
+      "passedTests": 1071,
+      "failedTests": 0,
+      "skippedTests": 3,
+      "totalTestCount": 1074,
+      "passedExpanded": 1678
+    },
+    "full-4": {
+      "result": "Passed",
+      "passedTests": 1071,
+      "failedTests": 0,
+      "skippedTests": 3,
+      "totalTestCount": 1074,
+      "passedExpanded": 1678
+    },
+    "cert-refusal-before": {
+      "result": "Failed",
+      "passedTests": 15,
+      "failedTests": 1,
+      "skippedTests": 0,
+      "totalTestCount": 16,
+      "passedExpanded": 15
+    },
+    "cert-refusal-after": {
+      "result": "Failed",
+      "passedTests": 83,
+      "failedTests": 1,
+      "skippedTests": 0,
+      "totalTestCount": 84,
+      "passedExpanded": 104
+    },
+    "cert-lifetime-after": {
+      "result": "Passed",
+      "passedTests": 102,
+      "failedTests": 0,
+      "skippedTests": 0,
+      "totalTestCount": 102,
+      "passedExpanded": 160
+    },
+    "full-5": {
+      "result": "Passed",
+      "passedTests": 1076,
+      "failedTests": 0,
+      "skippedTests": 3,
+      "totalTestCount": 1079,
+      "passedExpanded": 1684
+    },
+    "show-standard-before": {
+      "result": "Failed",
+      "passedTests": 0,
+      "failedTests": 1,
+      "skippedTests": 0,
+      "totalTestCount": 1,
+      "passedExpanded": 0
+    },
+    "show-standard-after": {
+      "result": "unknown",
+      "passedTests": 0,
+      "failedTests": 0,
+      "skippedTests": 0,
+      "totalTestCount": 0,
+      "passedExpanded": 0
+    },
+    "show-standard-after-2": {
+      "result": "Passed",
+      "passedTests": 76,
+      "failedTests": 0,
+      "skippedTests": 0,
+      "totalTestCount": 76,
+      "passedExpanded": 99
+    },
+    "full-6": {
+      "result": "Passed",
+      "passedTests": 1081,
+      "failedTests": 0,
+      "skippedTests": 3,
+      "totalTestCount": 1084,
+      "passedExpanded": 1690
+    },
+    "scheduler-before": {
+      "result": "Failed",
+      "passedTests": 9,
+      "failedTests": 1,
+      "skippedTests": 0,
+      "totalTestCount": 10,
+      "passedExpanded": 9
+    },
+    "scheduler-after": {
+      "result": "Passed",
+      "passedTests": 32,
+      "failedTests": 0,
+      "skippedTests": 0,
+      "totalTestCount": 32,
+      "passedExpanded": 39
+    },
+    "full-7": {
+      "result": "Passed",
+      "passedTests": 1082,
+      "failedTests": 0,
+      "skippedTests": 3,
+      "totalTestCount": 1085,
+      "passedExpanded": 1698
+    }
+  },
+  "python": {
+    "scripts": 111,
+    "directorDatasetAndScorer": 14,
+    "failed": 0
+  },
+  "release": {
+    "result": "passed",
+    "codeSigningAllowed": false
+  },
+  "manualUI": "not verified: computer-control selection timed out, including Finder",
+  "rigQualification": false,
+  "artifacts": "/private/tmp/alfie-batches-20261024",
+  "firstBoundarySourceFingerprint": "f88154525504bed0835da664e8e602373ee6113d915e591f0c17dbf42751c35c",
+  "recordingStop": {
+    "ticket": "https://trello.com/c/UUrJrSXP",
+    "fullFinal": "full-4",
+    "releaseLog": "/private/tmp/alfie-batches-20261024/release-recording-stop.log",
+    "coreMLInterop": "configured in full suite",
+    "cameraCapture": "not opened"
+  },
+  "recordingStopSourceFingerprint": "9ade93e3295052a6e876df3cc92b0b3f44b6c724213bdd0b3316686cb69ed15d",
+  "admissionAndLifetime": {
+    "tickets": [
+      "https://trello.com/c/qp95US3G",
+      "https://trello.com/c/P3z9tx7P"
+    ],
+    "fullFinal": "full-5",
+    "releaseLog": "/private/tmp/alfie-batches-20261024/release-admission-lifetime.log",
+    "coreMLInterop": "configured in full suite",
+    "qualification": "unchanged; no hardware test performed"
+  },
+  "admissionAndLifetimeSourceFingerprint": "8e26aa507faf588f8a28c495b48affd4129acba72abf3a4521f2f8a50b20a650",
+  "showFormatLifetime": {
+    "ticket": "https://trello.com/c/oFzfzIib",
+    "fullFinal": "full-6",
+    "releaseLog": "/private/tmp/alfie-batches-20261024/release-show-standard.log",
+    "guideStaticCheck": "unique IDs and local references passed",
+    "nativeWalkthrough": "not performed"
+  },
+  "showFormatSourceFingerprint": "b1c1bcbb20737674fd61f83805076cd7971e6dde1f3cceca95b6731530014796",
+  "schedulerPriority": {
+    "ticket": "https://trello.com/c/XmaaT3MT",
+    "fullFinal": "full-7",
+    "releaseLog": "/private/tmp/alfie-batches-20261024/release-scheduler.log",
+    "maxProgramStreak": "unchanged: 2",
+    "throughputImprovementClaimed": false
+  },
+  "latestCompleteSwiftRun": "full-7",
+  "publication": {
+    "pushedBranch": "codex/next-ticket-batches-2026-10-24",
+    "pullRequest": "not created: integration 403; gh not logged in",
+    "merged": false
+  },
+  "fingerprintedRelease": {
+    "result": "passed",
+    "releaseLog": "/private/tmp/alfie-batches-20261024/release-fingerprinted.log",
+    "identity": "candidate-identity.json",
+    "copiedExecutableAndEmbeddedFingerprintVerified": true
+  },
+  "environment": "environment.json"
+}
