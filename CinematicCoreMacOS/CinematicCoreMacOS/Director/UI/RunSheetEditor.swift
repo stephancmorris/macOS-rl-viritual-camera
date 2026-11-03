@@ -87,6 +87,18 @@ final class RunSheetEditor: ObservableObject {
         return true
     }
 
+    /// Show the Director's current segment as Current (after Advance, or when
+    /// the editor opens). The Director's position is not an edit: the saved
+    /// state and message are left alone. A segment the editor no longer has
+    /// (unsaved removal) leaves the marker where it is.
+    @discardableResult
+    func followDirector(currentSegmentID id: UUID?) -> Bool {
+        guard let id, id != sheet.currentSegmentID, sheet.segments.contains(where: { $0.id == id }),
+              let followed = try? RunSheet(segments: sheet.segments, currentSegmentID: id) else { return false }
+        sheet = followed
+        return true
+    }
+
     /// SU-09 "Use last show's": another show's segments become unsaved edits
     /// here, starting from the first segment.
     @discardableResult

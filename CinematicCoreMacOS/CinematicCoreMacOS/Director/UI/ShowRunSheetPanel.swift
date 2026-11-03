@@ -58,6 +58,9 @@ struct ShowRunSheetPanel: View {
         }
         .padding(24)
         .frame(width: 720, height: 620)
+        // An explicit window background: without it the sheet rendered
+        // transparent in Dark appearance. Follows System/Light/Dark.
+        .background(Color(nsColor: .windowBackgroundColor))
         .confirmationDialog("Start a new show's run sheet?", isPresented: $confirmingNewShow) {
             Button("New show") { model.startNewShow() }
         } message: {
@@ -94,7 +97,10 @@ struct ShowRunSheetPresenter: ViewModifier {
         @ObservedObject var model: ShowRunSheet
 
         func body(content: Content) -> some View {
-            content.sheet(isPresented: $model.isPresented) {
+            content.onChange(of: model.isPresented) { _, presented in
+                if presented { show.syncRunSheetEditorWithDirector() }
+            }
+            .sheet(isPresented: $model.isPresented) {
                 ShowRunSheetPanel(model: model, feel: { show.directorFeelSummary(for: $0) },
                                   isLive: show.isAnyChannelLive) { model.isPresented = false }
             }

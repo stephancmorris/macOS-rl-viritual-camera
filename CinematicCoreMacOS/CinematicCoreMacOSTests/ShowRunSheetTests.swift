@@ -1,4 +1,6 @@
+import AppKit
 import Foundation
+import SwiftUI
 import Testing
 @testable import Alfie
 
@@ -17,6 +19,70 @@ struct ShowRunSheetTests {
         Fixture(directory: FileManager.default.temporaryDirectory
                     .appendingPathComponent("show-run-sheet-\(UUID().uuidString)", isDirectory: true),
                 defaults: UserDefaults(suiteName: "alfie-show-run-sheet-\(UUID().uuidString)")!)
+    }
+
+    // MARK: RUNSHEET-FOLLOWUPS
+
+    @Test func theCurrentMarkerFollowsTheDirectorAfterAdvanceWithoutAnUnsavedEdit() throws {
+        let f = fixture(); defer { try? FileManager.default.removeItem(at: f.directory) }
+        let model = f.launch()
+        #expect(model.editor.add(type: .presenter, name: "Welcome"))
+        #expect(model.editor.add(type: .performance, name: "Band"))
+        #expect(model.editor.add(type: .panel, name: "Q&A"))
+        #expect(model.save())
+        let saved = model.editor.message
+
+        // The Director advances its own copy of the saved sheet (⌘⇧↩).
+        var director = try #require(model.savedSheet)
+        var advanced = director.advance()
+        #expect(advanced)
+        model.followDirector(currentSegmentID: director.currentSegmentID)
+        #expect(model.editor.sheet.currentSegmentID == director.currentSegmentID)
+        #expect(model.editor.sheet.current?.name == "Band")
+        #expect(model.editor.message == saved)          // following is not an edit
+        #expect(model.editor.canSave)
+
+        advanced = director.advance()
+        #expect(advanced)
+        model.followDirector(currentSegmentID: director.currentSegmentID)
+        #expect(model.editor.sheet.current?.name == "Q&A")
+    }
+
+    @Test func aSegmentTheEditorNoLongerHasLeavesTheMarkerAlone() throws {
+        let f = fixture(); defer { try? FileManager.default.removeItem(at: f.directory) }
+        let model = f.launch()
+        #expect(model.editor.add(type: .presenter, name: "Welcome"))
+        #expect(model.editor.add(type: .panel, name: "Q&A"))
+        #expect(model.save())
+        let before = model.editor.sheet
+        model.followDirector(currentSegmentID: UUID())
+        model.followDirector(currentSegmentID: nil)
+        #expect(model.editor.sheet == before)
+    }
+
+    @Test(arguments: [NSAppearance.Name.aqua, .darkAqua])
+    func thePanelIsOpaqueInLightAndDark(_ appearance: NSAppearance.Name) throws {
+        let f = fixture(); defer { try? FileManager.default.removeItem(at: f.directory) }
+        let host = NSHostingView(rootView: ShowRunSheetPanel(model: f.launch(), onDone: {}))
+        host.frame = CGRect(x: 0, y: 0, width: 720, height: 620)
+        let window = NSWindow(contentRect: host.frame, styleMask: [.borderless], backing: .buffered, defer: false)
+        window.isOpaque = false
+        window.backgroundColor = .clear
+        window.appearance = NSAppearance(named: appearance)
+        window.contentView = host
+        host.layoutSubtreeIfNeeded()
+        RunLoop.current.run(until: Date().addingTimeInterval(0.2))
+        let rep = try #require(host.bitmapImageRepForCachingDisplay(in: host.bounds))
+        host.cacheDisplay(in: host.bounds, to: rep)
+        // A corner outside every control: transparent before the fix.
+        let corner = try #require(rep.colorAt(x: 4, y: 4))
+        #expect(corner.alphaComponent > 0.99, "\(appearance.rawValue) corner alpha \(corner.alphaComponent)")
+        if ProcessInfo.processInfo.environment["ALFIE_GALLERY_SNAPSHOTS"] == "1" {
+            let dir = FileManager.default.temporaryDirectory.appendingPathComponent("AlfieMultiviewGallery", isDirectory: true)
+            try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+            let data = try #require(rep.representation(using: .png, properties: [:]))
+            try data.write(to: dir.appendingPathComponent("run-sheet-\(appearance.rawValue).png"))
+        }
     }
 
     @Test func theShowIdentityAndItsSheetSurviveRelaunch() throws {
