@@ -157,7 +157,13 @@ final class LiveConsoleModel: ObservableObject, ConsoleActions {
         return "Waiting for \(show.programChannel.cameraLabel) to reach the output before starting \(pending.cameraLabel)"
     }
 
+    private var refreshTick = 0
+
     func refresh() {
+        // DEGRADE-MODEL: under sustained pressure skip every other refresh
+        // (15 → 7.5 Hz). Program and Take don't depend on this view.
+        refreshTick &+= 1
+        if show.reducesOptionalUI, refreshTick % 2 == 0 { return }
         updateRates()
         measurePairIfUnmeasured()
         logConsoleStatsIfDue()

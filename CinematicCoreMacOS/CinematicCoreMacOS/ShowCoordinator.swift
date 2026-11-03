@@ -90,6 +90,44 @@ final class ShowCoordinator: ObservableObject {
         if pendingPreviewStart != channel { pendingPreviewStart = channel }
     }
 
+    // MARK: Workload (DEGRADE-MODEL)
+
+    /// Nil unless `DeveloperFlags.runtimeWorkloadPolicy` (or a test) enables it.
+    private(set) var workloadPolicy: DegradePolicy?
+    /// The policy's level; changes only on its transitions.
+    @Published private(set) var workloadLevel: DegradePolicy.Level = .normal
+    /// Optional UI may slow down (the console's refresh). Nothing else acts on it.
+    var reducesOptionalUI: Bool { workloadPolicy != nil && workloadLevel >= .optionalUI }
+    private var workloadCPU = ProcessCPUClock()
+
+    private func pipelineWindowClosed(_ row: DiagnosticsWindow) {
+        let preview = previewChannel.flatMap { channels[$0] }
+        let previewAge = preview.map { channel -> Double in
+            guard channel.isRunning, let frame = channel.latestRenderedFrame else { return .infinity }
+            return max(0, clock() - frame.renderedAt)
+        }
+        let context = WorkloadMonitor.Context(
+            twoInputsActive: channels.values.filter(\.isRunning).count > 1,
+            cpuFraction: workloadCPU.sample(),
+            thermalSerious: ProcessInfo.processInfo.thermalState.rawValue >= ProcessInfo.ThermalState.serious.rawValue,
+            showFPS: ShowStandard.activeOrCurrent.frameRate,
+            previewRenderAgeSeconds: previewAge)
+        applyWorkloadWindow(WorkloadMonitor.window(from: row, context: context))
+    }
+
+    /// Feed one measured window. Applies only the optional-UI hint and notes
+    /// level changes; routing, crop, mode and Take are untouched.
+    func applyWorkloadWindow(_ window: DegradePolicy.Window) {
+        guard var policy = workloadPolicy else { return }
+        let decision = policy.update(window)
+        workloadPolicy = policy
+        if let change = decision.transition {
+            programOutput.noteDiagnostics("workload \(change.from) -> \(change.to): "
+                + change.reasons.map(\.rawValue).joined(separator: ","))
+        }
+        if workloadLevel != decision.level { workloadLevel = decision.level }
+    }
+
     /// Wake handoff waiters so they recheck Stop, mode and liveness.
     private func wakeHandoffWaiters() {
         programHandoff = router.handoff
@@ -112,8 +150,10 @@ final class ShowCoordinator: ObservableObject {
     ///   gets the mode saved in standard user defaults.
     init(programOutput: ProgramOutputManager? = nil, admissionRecords: AdmissionRecordStore? = nil,
          qualificationRecords: DirectorQualificationStore? = nil, directorShadowLog: DirectorShadowLog? = nil,
-         directorRunSheet: RunSheet? = nil, operatorModes: OperatorModeStore? = nil) {
+         directorRunSheet: RunSheet? = nil, operatorModes: OperatorModeStore? = nil,
+         workloadPolicyEnabled: Bool = DeveloperFlags.runtimeWorkloadPolicy) {
         self.operatorModes = operatorModes ?? OperatorModeStore()
+        self.workloadPolicy = workloadPolicyEnabled ? DegradePolicy() : nil
         self.initialDirectorShadowLog = directorShadowLog
         self.initialDirectorRunSheet = directorRunSheet
         self.admissionRecords = admissionRecords ?? AdmissionRecordStore()
@@ -133,6 +173,9 @@ final class ShowCoordinator: ObservableObject {
         channels[.a] = a
         observeChannelLiveness(a)
         router.handoffObserver = { [weak self] handoff in self?.programHandoff = handoff }
+        if workloadPolicy != nil {
+            output.pipelineWindowObserver = { [weak self] row in self?.pipelineWindowClosed(row) }
+        }
         self.operatorModes.switchDecision = { [weak self] from, to in
             guard let self else { return .allowed }
             return OperatorModeSwitch.decide(from: from, to: to, state: self.modeSwitchState)

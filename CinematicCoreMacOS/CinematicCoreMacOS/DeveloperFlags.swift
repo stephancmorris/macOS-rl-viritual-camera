@@ -128,6 +128,12 @@ enum DeveloperFlags {
     nonisolated static let allowInjectedQualification = false
     #endif
 
+    /// DEVELOPMENT ONLY, off everywhere (DEGRADE-MODEL). Runs `DegradePolicy`
+    /// on each closed diagnostics window and, under sustained pressure, halves
+    /// the Multiview console's refresh. Never changes crop, mode, camera,
+    /// Program or Take. Thresholds are provisional until MULTI-QA.
+    nonisolated static let runtimeWorkloadPolicy = false
+
     /// DEVELOPMENT ONLY, off everywhere (PAN-EASE-MODEL). Shapes the auto-pan
     /// sweep with eased ends (`AutoPanMotion.eased`) instead of constant speed.
     /// Transit time and dwell are unchanged. Stays off until the owner approves
