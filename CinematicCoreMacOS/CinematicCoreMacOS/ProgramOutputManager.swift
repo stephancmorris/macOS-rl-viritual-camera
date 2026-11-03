@@ -357,6 +357,8 @@ final class ProgramOutputManager: ObservableObject {
     /// never per frame.
     @Published private(set) var pipelineTotals = PipelineCounters()
     @Published private(set) var lastPipelineWindow: DiagnosticsWindow?
+    /// Told once per closed diagnostics window (about every 5 s), never per frame.
+    var pipelineWindowObserver: ((DiagnosticsWindow) -> Void)?
 
     /// Closes diagnostics windows on time even when no frames arrive (a full
     /// stall would otherwise produce no rows at all). 1 Hz, capture-only.
@@ -517,6 +519,7 @@ final class ProgramOutputManager: ObservableObject {
         diagnosticsLog.appendRow(row)
         lastPipelineWindow = row
         pipelineTotals = counters
+        pipelineWindowObserver?(row)
 
         // Second row, second file: the memory-growth investigation. Same window,
         // same cadence, so the two CSVs line up row for row on `elapsed_s`.
