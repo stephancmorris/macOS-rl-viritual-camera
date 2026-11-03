@@ -29,7 +29,9 @@ private final class RouterFakeSink: ProgramOutputSink {
     func connect() {}
     func disconnect() {}
     func updateCaptureStatus(isRunning: Bool) {}
+    var accepts = true
     func sendFrame(pixelBuffer: CVPixelBuffer, timestamp: Double) -> Bool {
+        guard accepts else { return false }
         sent.append((pixelBuffer, timestamp))
         return true
     }
@@ -56,6 +58,63 @@ struct ProgramRouterTests {
         router.port(for: .a).start()
         router.port(for: .a).updateCaptureStatus(isRunning: true)
         return (router, sink, clock)
+    }
+
+    // MARK: PAIR-FIRST-FRAME handoff
+
+    @Test func onlyAnAcceptedNewProgramFrameRecordsTheHandoff() throws {
+        let (router, sink, _) = routedRouter()
+        #expect(router.handoff == nil)
+        sink.accepts = false
+        router.port(for: .a).sendFrame(try buffer(), timestamp: 1, isRepeat: false)
+        #expect(router.state == .routed)          // routed is set before the sink answers…
+        #expect(router.handoff == nil)            // …so it is not the handoff
+        sink.accepts = true
+        router.port(for: .a).sendFrame(try buffer(), timestamp: 2, isRepeat: true)
+        #expect(router.handoff == nil)            // a repeat (render HOLD) is not new picture
+        router.port(for: .a).sendFrame(try buffer(), timestamp: 3, isRepeat: false)
+        let handoff = try #require(router.handoff)
+        #expect(handoff.program == .a && handoff.routeGeneration == router.routeGeneration)
+        #expect(handoff.outputSession == router.outputSession)
+        #expect(router.hasCurrentHandoff(from: .a))
+        #expect(!router.hasCurrentHandoff(from: .b))
+    }
+
+    @Test func nonProgramAndStaleFramesNeverRecordTheHandoff() throws {
+        let (router, _, _) = routedRouter()
+        router.port(for: .b).sendFrame(try buffer(), timestamp: 1, isRepeat: false)
+        let stamped = router.port(for: .a).routeGeneration
+        #expect(router.setProgram(.a, expectedRouteGeneration: stamped))
+        router.port(for: .a).submitFrame(try buffer(), timestamp: 2, isRepeat: false, routeGeneration: stamped)
+        #expect(router.handoff == nil)
+    }
+
+    @Test func noRouteMeansNoHandoff() throws {
+        let router = ProgramRouter(output: ProgramOutputManager(sinks: []))
+        router.port(for: .a).start()
+        router.port(for: .a).updateCaptureStatus(isRunning: true)
+        router.port(for: .a).sendFrame(try buffer(), timestamp: 1, isRepeat: false)
+        #expect(router.handoff == nil)
+    }
+
+    @Test func outputSessionsAndProgramChangesRetireTheHandoff() throws {
+        let (router, _, _) = routedRouter()
+        var events: [ProgramRouter.ProgramHandoff?] = []
+        router.handoffObserver = { events.append($0) }
+        router.port(for: .a).sendFrame(try buffer(), timestamp: 1, isRepeat: false)
+        let first = try #require(router.handoff)
+        router.port(for: .a).stop()
+        #expect(router.handoff == nil && !router.hasCurrentHandoff(from: .a))
+        router.port(for: .a).start()
+        router.port(for: .a).updateCaptureStatus(isRunning: true)
+        #expect(!router.hasCurrentHandoff(from: .a))
+        router.port(for: .a).sendFrame(try buffer(), timestamp: 2, isRepeat: false)
+        let second = try #require(router.handoff)
+        #expect(second.outputSession != first.outputSession)
+        #expect(router.setProgram(.a, expectedRouteGeneration: router.routeGeneration))
+        #expect(router.handoff == nil)
+        // Set, stop, start (even though already nil), set, Program change.
+        #expect(events.count == 5)
     }
 
     @Test func onlyProgramReachesTheOutput() throws {

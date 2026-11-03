@@ -201,6 +201,19 @@ final class LiveShowSetupModel: ObservableObject {
             for await starting in show.channelA.$isStartingSession.values where !starting { break }
             guard !Task.isCancelled, show.stopToken == stopToken, show.operatorModes.mode == .multiCam,
                   show.channelA.isRunning else { return }
+            // PAIR-FIRST-FRAME: and only once a new A frame has been accepted
+            // by the selected output. A running alone is not proof: the router
+            // marks itself routed before the sink answers. No timeout: A stays
+            // usable on its own and the console says what Alfie waits for.
+            show.setPendingPreviewStart(.b)
+            defer { if show.pendingPreviewStart == .b { show.setPendingPreviewStart(nil) } }
+            for await _ in show.$programHandoff.values {
+                guard !Task.isCancelled, show.stopToken == stopToken, show.operatorModes.mode == .multiCam,
+                      show.channelA.isRunning else { return }
+                if show.programChannel == .a, show.hasProgramHandoff(from: .a) { break }
+            }
+            guard !Task.isCancelled, show.stopToken == stopToken, show.operatorModes.mode == .multiCam,
+                  show.channelA.isRunning, show.hasProgramHandoff(from: .a) else { return }
             let channelB = show.addChannel(.b)
             channelB.selectedCamera = b
             startChannelB(channelB)

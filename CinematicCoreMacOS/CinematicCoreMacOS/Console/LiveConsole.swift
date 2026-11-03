@@ -151,6 +151,12 @@ final class LiveConsoleModel: ObservableObject, ConsoleActions {
         timer = nil
     }
 
+    /// PAIR-FIRST-FRAME: why Cam B has not started yet.
+    private var pendingPreviewNote: String? {
+        guard let pending = show.pendingPreviewStart else { return nil }
+        return "Waiting for \(show.programChannel.cameraLabel) to reach the output before starting \(pending.cameraLabel)"
+    }
+
     func refresh() {
         updateRates()
         measurePairIfUnmeasured()
@@ -159,7 +165,7 @@ final class LiveConsoleModel: ObservableObject, ConsoleActions {
         let failure = ChannelID.allCases.compactMap { show.channel($0)?.error?.localizedDescription }.first
         let next = LiveConsoleSnapshot.make(
             show: show, paneView: paneView, rates: rates,
-            note: message ?? target?.controlStatus ?? failure)
+            note: message ?? target?.controlStatus ?? failure ?? pendingPreviewNote)
         if next != snapshot { snapshot = next }
         // A Director-only change must repaint even when camera/Take state did
         // not change. Coalesce equal values rather than observing frame writes.

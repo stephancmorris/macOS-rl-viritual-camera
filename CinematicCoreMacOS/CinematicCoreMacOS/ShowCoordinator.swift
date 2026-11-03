@@ -71,6 +71,30 @@ final class ShowCoordinator: ObservableObject {
     @Published private(set) var controlTarget: ChannelID = .a
     @Published private(set) var editLive = false
 
+    /// PAIR-FIRST-FRAME: the router's first accepted Program frame for this
+    /// output session (nil until then). Published only when it is set and at
+    /// session, Program, mode and Stop boundaries, so waiters recheck; never
+    /// per frame.
+    @Published private(set) var programHandoff: ProgramRouter.ProgramHandoff?
+
+    /// A setup pair start is waiting for Program's handoff before starting
+    /// this channel. The console shows it; nothing else acts on it.
+    @Published private(set) var pendingPreviewStart: ChannelID?
+
+    /// Whether Program on `channel` has a current accepted handoff.
+    func hasProgramHandoff(from channel: ChannelID) -> Bool {
+        router.hasCurrentHandoff(from: channel)
+    }
+
+    func setPendingPreviewStart(_ channel: ChannelID?) {
+        if pendingPreviewStart != channel { pendingPreviewStart = channel }
+    }
+
+    /// Wake handoff waiters so they recheck Stop, mode and liveness.
+    private func wakeHandoffWaiters() {
+        programHandoff = router.handoff
+    }
+
     /// Increments whenever the control target (or Edit Live) changes. A UI
     /// command created under an older revision is rejected, so a gesture
     /// started for one camera can never land on another.
@@ -108,6 +132,7 @@ final class ShowCoordinator: ObservableObject {
         self.operatorModes.apply(to: a)
         channels[.a] = a
         observeChannelLiveness(a)
+        router.handoffObserver = { [weak self] handoff in self?.programHandoff = handoff }
         self.operatorModes.switchDecision = { [weak self] from, to in
             guard let self else { return .allowed }
             return OperatorModeSwitch.decide(from: from, to: to, state: self.modeSwitchState)
@@ -158,6 +183,8 @@ final class ShowCoordinator: ObservableObject {
             programOutput.noteDiagnostics("mode \(from.diagnosticsName) -> \(to.diagnosticsName) while live")
         }
         applyOperatorMode()
+        if !to.allowsMultipleInputs { setPendingPreviewStart(nil) }
+        wakeHandoffWaiters()
     }
 
     /// Bring every channel in line with the operator mode. A single-input
@@ -232,6 +259,8 @@ final class ShowCoordinator: ObservableObject {
         editLive = false
         resetProgramToA()
         retarget()
+        setPendingPreviewStart(nil)
+        wakeHandoffWaiters()
         channelsChangedObserver?(.showStopped)
         stopResultObserver?(action)
     }
