@@ -564,6 +564,9 @@ final class CameraManager: NSObject, ObservableObject {
     private var autoPanLastTick: Double = 0
 
     private static let autoPanPauseDuration: Double = 1.5
+    /// PAN-EASE-MODEL: shape the sweep with `AutoPanMotion.eased`. Follows the
+    /// Debug-only flag (off); tests set it directly.
+    var autoPanEasing = DeveloperFlags.easedAutoPan
 
     // Briefly boost crop smoothing after an operator-driven shot-preset change
     // (and after a Steady Follow band exit) so the camera reaches the new
@@ -1340,7 +1343,7 @@ final class CameraManager: NSObject, ObservableObject {
                 autoPanPhase = 0; autoPanDirection = 1; autoPanPauseUntil = now + Self.autoPanPauseDuration
             }
         }
-        return width / 2 + autoPanPhase * travel
+        return width / 2 + AutoPanMotion.position(autoPanPhase, eased: autoPanEasing) * travel
     }
 
     func selectProgramBuffer(rendered: CVPixelBuffer?, crop: CropEngine.CropRect? = nil) -> CVPixelBuffer? {
