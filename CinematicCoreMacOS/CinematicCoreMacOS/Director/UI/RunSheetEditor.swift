@@ -87,12 +87,21 @@ final class RunSheetEditor: ObservableObject {
         return true
     }
 
-    func save() {
+    /// SU-09 "Use last show's": another show's segments become unsaved edits
+    /// here, starting from the first segment.
+    @discardableResult
+    func adopt(_ other: RunSheet) -> Bool {
+        replace(segments: other.segments, currentID: other.segments.first?.id)
+    }
+
+    @discardableResult
+    func save() -> Bool {
         do {
             try store.save(sheet, showID: showID)
             canSave = true
             hasError = false
             message = "Run sheet saved for this show."
+            return true
         } catch RunSheetStore.Failure.unreadableExistingFile {
             canSave = false
             hasError = true
@@ -101,6 +110,7 @@ final class RunSheetEditor: ObservableObject {
             hasError = true
             message = "This run sheet can't be saved. Your changes are still here."
         }
+        return false
     }
 
     private func replace(segments: [RunSheet.Segment], currentID: UUID?) -> Bool {

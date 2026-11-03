@@ -716,6 +716,22 @@ final class DirectorController: ObservableObject, DirectorConsoleControlling {
         return true
     }
 
+    /// SU-10 (F2): the operator edited the run sheet. The current segment is
+    /// kept while it still exists. Changed segments change the parameters, so
+    /// while directing Alfie pauses until handed back; in Manual it just applies.
+    @discardableResult
+    func runSheetEdited(_ sheet: RunSheet?) -> Bool {
+        var edited = sheet
+        if let sheet, let current = runSheet?.currentSegmentID,
+           sheet.segments.contains(where: { $0.id == current }) {
+            edited = (try? RunSheet(segments: sheet.segments, currentSegmentID: current)) ?? sheet
+        }
+        let segmentsChanged = edited?.segments != runSheet?.segments
+        guard setRunSheet(edited) else { return false }
+        if segmentsChanged { forward(.policyChanged, pause: .runSheetChanged, note: "run sheet edited") }
+        return true
+    }
+
     /// Operator advancement is style-scoped. It cannot grant or pause authority.
     func advanceSegment() {
         let actionID = UUID()

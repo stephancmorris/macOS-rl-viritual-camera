@@ -11,6 +11,10 @@ import SwiftUI
 struct RunSheetEditorView: View {
     @ObservedObject var editor: RunSheetEditor
     var onTextEditingChanged: (Bool) -> Void = { _ in }
+    /// SU-09: the host's save (for example, one that also updates the Director).
+    var onSave: (() -> Void)? = nil
+    /// SU-09: a line under each segment, such as its feel.
+    var segmentNote: (RunSheet.Segment) -> String? = { _ in nil }
 
     @State private var newType: SegmentType = .presenter
     @State private var newName = ""
@@ -71,7 +75,7 @@ struct RunSheetEditorView: View {
 
             Divider()
             HStack(spacing: 12) {
-                Button("Save run sheet") { editor.save() }
+                Button("Save run sheet") { if let onSave { onSave() } else { editor.save() } }
                     .disabled(!editor.canSave || editingID != nil)
                 Button("Reload run sheet") {
                     editor.reload()
@@ -94,6 +98,11 @@ struct RunSheetEditorView: View {
             Text("\(index + 1). \(RunSheetSegmentText.title(segment))")
                 .font(.system(size: 13, weight: .semibold))
                 .fixedSize(horizontal: false, vertical: true)
+            if let note = segmentNote(segment) {
+                Text(note)
+                    .font(.system(size: 11))
+                    .foregroundStyle(.secondary)
+            }
             HStack(spacing: 10) {
                 if segment.id == editor.sheet.currentSegmentID {
                     Text("Current").font(.system(size: 11, weight: .semibold))

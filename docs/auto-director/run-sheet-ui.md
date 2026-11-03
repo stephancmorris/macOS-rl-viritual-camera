@@ -18,4 +18,14 @@ Save run sheet writes the selected show only; Reload run sheet reads its saved v
 
 Load validates the model's version, IDs, authored types and current selection, and rejects unknown storage keys. Missing files are empty. Unreadable/future files, directories and symlink targets produce a visible error and are preserved; save refuses to replace them. After separate repair/removal, Reload can read the corrected state. A failed save retains the in-memory sheet. Valid saves use an atomic write.
 
-These are reusable editor/store/strip components exposed in the Debug gallery. The production host still needs a durable show identity and B-11 controller integration. Segment changes must emit style-scoped policy changes without takeover or new authority; this batch does not install those hooks. The underlying A-13 model is reused from PR #57, and C-06's initial component from PR #23. F3/live rehearsal review remains separate. Synthetic tests and gallery interaction are not live qualification.
+These are reusable editor/store/strip components, also exposed in the Debug gallery.
+
+## In a real show (SU-09, SU-10)
+
+Where the Director runs (Debug builds, `DeveloperFlags.runDirectorShadow`), **Run sheet…** opens the show's sheet from Show setup (Multi Cam), from the standby screen (Single Cam, Webcam) and from **Edit…** beside Advance in the live console header. It is optional: with no segments Alfie uses the Live event feel. Each segment shows its feel from Settings › Director.
+
+- **Show identity.** `ShowRunSheet` keeps one opaque show UUID in defaults (`directorRunSheet.currentShowID`), so the sheet survives relaunch. Sheets live in `~/Library/Application Support/Alfie/RunSheets`. **New show…** starts an empty sheet and keeps the old one as the last show's; **Use last show's** copies its segments as unsaved edits.
+- **Launch.** `startDirectorShadow` gives the Director the saved sheet (never unsaved edits). Launch stays Manual, so this never pauses.
+- **Save.** Saving hands the sheet to `DirectorController.runSheetEdited`. The Director keeps its current segment while that segment still exists. Changed segments are an F2 change: while Alfie is directing it pauses ("Paused: run sheet changed") until Hand to Alfie; in Manual it applies at once. Saving unchanged segments doesn't pause.
+- **Advance** (button or Command Shift Return in the console header) changes the style only: no pause, no cut, no level change, never timed. The editor's own Current marker isn't moved by Advance; the Director's position wins when an edit is saved.
+- Live advance in the Single Cam console is a follow-up. The underlying A-13 model is reused from PR #57, and C-06's initial component from PR #23. F3/live rehearsal review remains separate. Synthetic tests and gallery interaction are not live qualification.

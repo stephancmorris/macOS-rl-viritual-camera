@@ -257,6 +257,9 @@ final class ShowCoordinator: ObservableObject {
     func startDirectorShadow() {
         guard DeveloperFlags.runDirectorShadow else { return }
         loadDirectorStyles()
+        // SU-10: the show's saved run sheet, unless one was supplied. Launch
+        // is Manual, so this is setup and never pauses.
+        if initialDirectorRunSheet == nil { director.setRunSheet(showRunSheet?.savedSheet) }
         director.attach()
         startedDirector = director
     }
@@ -281,6 +284,29 @@ final class ShowCoordinator: ObservableObject {
     func advanceDirectorSegment() {
         guard DeveloperFlags.runDirectorShadow, let startedDirector, startedDirector.isAttached else { return }
         startedDirector.advanceSegment()
+    }
+
+    /// SU-09: the show's run sheet. Created on first use, and only where the
+    /// Director can run, so tests and Release builds never touch its storage.
+    private(set) lazy var showRunSheet: ShowRunSheet? = {
+        guard DeveloperFlags.runDirectorShadow, let model = ShowRunSheet.applicationSupport() else { return nil }
+        model.onSaved = { [weak self] in self?.directorRunSheetEdited($0) }
+        return model
+    }()
+
+    /// SU-10 (F2): a saved run-sheet edit reaches the running Director. While
+    /// Alfie is directing, changed segments pause until handed back.
+    func directorRunSheetEdited(_ sheet: RunSheet) {
+        guard DeveloperFlags.runDirectorShadow, let startedDirector else { return }
+        startedDirector.runSheetEdited(sheet.segments.isEmpty ? nil : sheet)
+    }
+
+    /// The feel a segment type uses, from Settings › Director, for the run-sheet editor.
+    func directorFeelSummary(for type: SegmentType) -> String? {
+        guard let preferences = startedDirector?.preferences, (try? preferences.validated()) != nil else { return nil }
+        guard let style = preferences.style(for: type) else { return nil }
+        let summary = DirectorFeel.matching(style)?.summary ?? "Custom"
+        return preferences.styles[type] == nil && type != .liveEvent ? "\(summary) (same as Live event)" : summary
     }
 
     /// Styles saved in Settings reach the running Director (CR-037). Only

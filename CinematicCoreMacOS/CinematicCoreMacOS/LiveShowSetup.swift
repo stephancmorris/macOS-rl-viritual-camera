@@ -240,8 +240,14 @@ struct LiveShowSetup: View {
         _model = StateObject(wrappedValue: LiveShowSetupModel(show: show, startChannelA: startChannelA))
     }
 
+    private var actions: ShowSetupActions {
+        var actions = model.actions
+        if let runSheet = model.show.showRunSheet { actions.editRunSheet = { runSheet.isPresented = true } }
+        return actions
+    }
+
     var body: some View {
-        ShowSetupView(model: model.setup, actions: model.actions, operatorModes: model.show.operatorModes)
+        ShowSetupView(model: model.setup, actions: actions, operatorModes: model.show.operatorModes)
             #if DEBUG
             .task { [model] in
                 await DebugLaunchHooks.autostartIfRequested(model) { model.show.channelA.availableCameras }
