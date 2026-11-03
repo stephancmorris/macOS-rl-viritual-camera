@@ -327,11 +327,12 @@ final class DirectorController: ObservableObject, DirectorConsoleControlling {
         guard now.isFinite, now >= 0 else { return }
         evidenceRevision &+= 1
         let preview = show.previewChannel
+        let cutMotionLimit = cutReadinessParameters.map { $0.tightened(by: effectiveStyle).maximumCutMotion }
         for id in ChannelID.allCases {
             guard let channel = show.channel(id) else { continue }
             let readings = channel.evidenceReadings(now: now)
             guard var current = adapter else { continue }
-            let events = current.ingest(Self.sample(readings))
+            let events = current.ingest(Self.sample(readings), cutMotionLimit: cutMotionLimit)
             adapter = current
             for event in events { evidenceEvent(event, preview: preview) }
         }
@@ -536,7 +537,7 @@ final class DirectorController: ObservableObject, DirectorConsoleControlling {
     /// tick's cached values. Debounced identity and settled history still come
     /// from the adapter, and stale adapter state cannot authorize a cut.
     static func currentCutInputs(sample: ChannelEvidenceSample, adapter: DirectorEvidenceAdapter,
-                                 take: TakeAvailability, now: TimeInterval) -> DirectorReadiness.Inputs? {
+                                 take: TakeAvailability, now: TimeInterval, cutMotionLimit: Double? = nil) -> DirectorReadiness.Inputs? {
         guard adapter.parameters.isValid, now.isFinite, now >= 0, sample.sampledAt == now,
               let state = adapter.state(for: sample.channel), let sampledAt = state.lastSampleAt,
               state.lockedTargetID == sample.lockedTargetID,
@@ -548,8 +549,10 @@ final class DirectorController: ObservableObject, DirectorConsoleControlling {
         let rawIdentity = IdentityEvidence.classify(sample, maximumObservationAge: adapter.parameters.maximumObservationAge)
         let settled = sample.holdingSteady && sample.cropConverged && sample.subjectSpeed.isFinite &&
             sample.subjectSpeed >= 0 && sample.subjectSpeed <= adapter.parameters.stillSpeed
+        let settledFor = cutMotionLimit.map { adapter.cutSettledFor(sample.channel, motionLimit: $0, now: now) }
+            ?? adapter.settledFor(sample.channel, now: now)
         return .init(take: take, identity: rawIdentity == state.identity ? rawIdentity : .unavailable,
-            framingSettledFor: settled ? adapter.settledFor(sample.channel, now: now) : 0,
+            framingSettledFor: settled ? settledFor : 0,
             motion: sample.subjectSpeed, cropConverged: sample.cropConverged)
     }
 
@@ -575,8 +578,10 @@ final class DirectorController: ObservableObject, DirectorConsoleControlling {
             observedSample = sample
             let availability = TakeAvailability.evaluate(take: inputs, program: show.programChannel,
                 preview: preview, standard: ShowStandard.activeOrCurrent, editLive: show.editLive)
-            if let input = Self.currentCutInputs(sample: sample, adapter: adapter, take: availability, now: now) {
-                ready = DirectorReadiness.evaluate(input, parameters: p.tightened(by: effectiveStyle), bar: .cut)
+            let effective = p.tightened(by: effectiveStyle)
+            if let input = Self.currentCutInputs(sample: sample, adapter: adapter, take: availability, now: now,
+                                                cutMotionLimit: effective.maximumCutMotion) {
+                ready = DirectorReadiness.evaluate(input, parameters: effective, bar: .cut)
                 evaluatedInputs = input; measuredReadiness = ready
                 evidence = IdentityEvidence.classify(sample, maximumObservationAge: adapter.parameters.maximumObservationAge) == .confirmed &&
                     adapter.state(for: preview)?.evidenceAvailable == true
