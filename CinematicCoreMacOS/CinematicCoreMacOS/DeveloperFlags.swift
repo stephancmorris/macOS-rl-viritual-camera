@@ -128,6 +128,12 @@ enum DeveloperFlags {
     nonisolated static let allowInjectedQualification = false
     #endif
 
+    /// DEVELOPMENT ONLY, off everywhere (PAN-EASE-MODEL). Shapes the auto-pan
+    /// sweep with eased ends (`AutoPanMotion.eased`) instead of constant speed.
+    /// Transit time and dwell are unchanged. Stays off until the owner approves
+    /// the curve from a replay.
+    nonisolated static let easedAutoPan = false
+
     /// DEVELOPMENT ONLY for now — on in Debug builds, off in Release until the
     /// owner decides (S3 B-03). Runs the Auto Director in shadow alongside the
     /// show: it watches, logs `[DIRECTOR]` lines and publishes console status,
