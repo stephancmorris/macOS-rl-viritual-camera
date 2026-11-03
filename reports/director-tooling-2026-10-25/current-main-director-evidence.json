@@ -1,0 +1,58 @@
+{
+  "evidenceClass": "synthetic",
+  "executionDate": "2026-10-25",
+  "appProducerCommit": "952d05deac305e1d56e5aabb66c552f3dbe383e9",
+  "analysisToolingCommit": "0eab512b1cdac8d944c921220cba7996326e0a67",
+  "exportTests": {
+    "result": "Passed",
+    "passedDefinitions": 16,
+    "passedExpandedCases": 25,
+    "failedDefinitions": 0,
+    "skippedDefinitions": 0
+  },
+  "newModelCoreMLCPUInterop": {
+    "result": "Passed",
+    "passedDefinitions": 1,
+    "passedExpandedCases": 1,
+    "failedDefinitions": 0,
+    "skippedDefinitions": 0
+  },
+  "phasePlan": "Existing authored phase spans/contexts retained; only session IDs rebound to these new exports, then strictly validated.",
+  "matchingWindowSeconds": 2,
+  "fitParameters": {
+    "hiddenUnits": 4,
+    "epochs": 160,
+    "learningRate": 0.3,
+    "seed": 42,
+    "reliabilityBins": 5
+  },
+  "fileSHA256": {
+    "replay.json": "fbbe869ba9ad3014afcda1413a7800892dc7a08fea59745021bbe4456711139d",
+    "binding-sidecar.json": "7a0a129d291d77a5b40185eb69499c23a0e3e264b1ca42c5c3077340f95b954f",
+    "decision-sidecar.json": "cf7d902a5de6056ca05fd9f9369f572cec3b08ae6b91fdbaa36979ed05a1ccee",
+    "binding-export/records.jsonl": "c6a9a80707e404428924f290e12c202078e1799271a8f27136f28d7cdbd4cda5",
+    "binding-export/manifest.json": "fb395d017164a387d437f5b6bc166662deeb4a47b36290ad3513cd3c43a71828",
+    "binding-evaluation.json": "9bfd57f5d8a523155319bedddd906d460a4d86c0a5f66b08aed062711308d441",
+    "binding-evaluation.md": "404a0b27f7486b5c73e7425aafbb732e578acae3044f44abf922e4c52d10bde6",
+    "binding-parameter-evidence.md": "b1d802ce48b801a090a05a0b031cfbcfa08a41e36d6e2b38ed47ab642d56dbb8",
+    "decision-export/records.jsonl": "67d81fa5861dfb5917dbc166b7ac007c428b26dde64d96006edf92030ab0eff3",
+    "decision-export/manifest.json": "0595bc10ddcbd4fd328e5e1767e51864d1c002f3d7e3f29ebb75725667b5a8d3",
+    "decision-evaluation.json": "23934880de8118c81acc45a1e616c3a96be4eed9052e5b9d7c3880313470ffdc",
+    "decision-evaluation.md": "871fda3cb0703bd2bda4c524d06d404351041d7dac190fb66186190d124f6b63",
+    "decision-parameter-evidence.md": "1b93b98116e0c1e883b9a335f224361367c6c60f3881c9a047fa5a46b80184e7",
+    "scorer-capture/bundle/records.jsonl": "b6ec953043c4584982da30282c0ca151628a1ba2f864af95bd9794221956c8b0",
+    "scorer-capture/bundle/manifest.json": "71116eaa193c8adf5d86f4e17804765f6abd169363828e466603e2c94bdc8cf0",
+    "scorer-capture/labels.json": "c422e56128a112d8a27dbc4489a1d20b15d6c3bbf58dcb0e4b51d239f8783ab3",
+    "scorer-capture/splits.json": "2452f4c90dd6c7ad86895a92081f1e412805415f7d28232e492418d259240ebe",
+    "current-scorer/model.json": "572df57cca7ef803f34bd4c6331968ff2593f5e59799e38a6c46de69cb50f5d5",
+    "current-scorer/report.json": "eb379ca4336a50964f6ec46442c18f4436d63ea3a5c8459434c403855b282421",
+    "current-scorer/report.md": "3ee4ae5a28b7d376103e0dd0167235b7a7cc921365ea5406fc41a4829e065d47",
+    "current-scorer/parity.json": "8a32614992527b3d7b98b0721fd5ae0283199528f70e7e8074b8488b0f23014e",
+    "current-scorer/DirectorScorer.mlmodel": "ee0f9869e9110855e2b2c225f30d784d5d75293874d0c4f15e40f4456e056606"
+  },
+  "limitations": [
+    "Synthetic callbacks and authored labels only; fixed fixture UTC is not collection time",
+    "No cameras, real recordings, physical routes or representative independent opportunities",
+    "No numerical recommendation, promotion, qualification or app installation"
+  ]
+}

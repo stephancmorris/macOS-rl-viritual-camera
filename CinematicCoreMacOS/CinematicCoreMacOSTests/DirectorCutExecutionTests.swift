@@ -14,7 +14,7 @@ import Testing
         var candidate: DirectorShot?
         var contextCalls = 0
     }
-    private final class Scheduler: DirectorCutDeadlineScheduling {
+    @MainActor private final class Scheduler: DirectorCutDeadlineScheduling {
         var deadlines: [TimeInterval] = []
         var callbacks: [@MainActor () -> Void] = []
         var cancellations = 0

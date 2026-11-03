@@ -1,0 +1,50 @@
+{
+  "date": "2026-10-25",
+  "basePullRequest": "https://github.com/stephancmorris/macOS-rl-viritual-camera/pull/82",
+  "baseCommit": "82cca822d191c867c8f5a341b9f3ada43c82949d",
+  "sourceFingerprint": "12606ad5883e6952c742cc9c275e291de6de437c3873370379a462ff91405455",
+  "sourceFileSHA256": {
+    "CinematicCoreMacOS/CinematicCoreMacOS/Director/DirectorController.swift": "8d7c60b0d3ecdfa941921232f95937fb37b8010a99031e75dad2df50596fdbdc",
+    "CinematicCoreMacOS/CinematicCoreMacOS/Director/DirectorEvidenceAdapter.swift": "12f8152897787011f32df44759b4ac23ec093cb5ad950e1ef268baad9298600c",
+    "CinematicCoreMacOS/CinematicCoreMacOSTests/DirectorStyleSettlementEvidenceTests.swift": "a60d5037ee37b9876c4aebfe25e7ebbc00da07304461b42fdc08640a3903c5a7"
+  },
+  "baselineProbe": {
+    "result": "Failed",
+    "failedDefinitions": 1,
+    "observation": "ready.reasons was empty despite the first sample under the stricter style bound",
+    "resultBundle": "/private/tmp/alfie-pr82-evidence-review-20261025.D1bitM/settle-review-detail.xcresult"
+  },
+  "full": {
+    "result": "Passed",
+    "passedDefinitions": 1114,
+    "passedExpandedCases": 1712,
+    "failedDefinitions": 0,
+    "skippedDefinitions": 3
+  },
+  "release": "Unsigned app and extension passed",
+  "appExecutableSHA256": "df3aa06e64de30e75b53ae95ebf2c09c4dd9e77169ab624565b4fcf9359fa6da",
+  "coreMLInterop": "Existing current-main synthetic scorer explicitly configured in the full suite",
+  "limitations": [
+    "Authored evidence sequences, no camera or live-show observations",
+    "No parameter recommendation, model promotion, signed-install or Director qualification",
+    "Stacked follow-up to PR82, independently of PR81; no branch merge performed"
+  ],
+  "evidencePaths": {
+    "focused": "/private/tmp/alfie-style-settle-fix-20261025-focused.xcresult",
+    "full": "/private/tmp/alfie-style-settle-fix-20261025-full-final.xcresult",
+    "releaseLog": "/private/tmp/alfie-style-settle-fix-20261025-release-final.log"
+  },
+  "initialFocused": {
+    "result": "Passed",
+    "passedDefinitions": 50,
+    "passedExpandedCases": 70,
+    "failedDefinitions": 0,
+    "skippedDefinitions": 0
+  },
+  "rawLockReviewBaseline": {
+    "sourceCommit": "be540782a1ca0cda843fe587e618d3d3afe26ca3",
+    "failedDefinitions": 1,
+    "observation": "A brief raw hold retained cut age while debounced identity remained confirmed",
+    "resultBundle": "/private/tmp/alfie-style-settle-fix-20261025-lock-before.xcresult"
+  }
+}

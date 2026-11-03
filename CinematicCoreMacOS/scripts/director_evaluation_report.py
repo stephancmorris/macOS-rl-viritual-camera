@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """D-06 synthetic replay and shadow observations; never issues qualification."""
 import argparse
-from collections import defaultdict
+from collections import Counter, defaultdict
 import copy
 import hashlib
 import io
@@ -167,8 +167,12 @@ def summarize_shadow(path, window, bindings, binding_schema_version=1):
     require(type(binding_schema_version) is int and binding_schema_version in SCHEMA['supportedEvaluationVersions'])
     if binding_schema_version == 2:
         return summarize_shadow_phases(path, window, bindings)
+    validate_evaluation({'evaluationSchemaVersion': 1, 'producer': 'DirectorReplay',
+                         'runs': [], 'shadowBindings': bindings})
     records, issues, source = shadow.load_input(path)
     data = shadow.analyze(records, window, issues, source)
+    blocked_sessions = set(data['captureBlockedSessions'])
+    unscored_sessions = {key[0] for key, counts, _ in data['groups'] if counts['unscored_actions']}
     by_session = defaultdict(list)
     for record in records:
         by_session[record['sessionID']].append(record)
@@ -192,7 +196,8 @@ def summarize_shadow(path, window, bindings, binding_schema_version=1):
         sessions.append({'sessionID': session, 'binding': binding,
                          'actualScopes': [list(s) for s in sorted(scopes)],
                          'judgeModels': [list(m) for m in sorted(models, key=repr)],
-                         'status': 'incomplete' if scope_problem or binding is None else 'observed'})
+                         'status': 'incomplete' if scope_problem or binding is None or
+                                   session in blocked_sessions or session in unscored_sessions else 'observed'})
         parameter_scopes = defaultdict(list)
         for record in records_in_session:
             record_models = tuple(sorted({(j['judgeKind'], j.get('modelVersion')) for j in record['judgements']}, key=repr))
@@ -200,31 +205,7 @@ def summarize_shadow(path, window, bindings, binding_schema_version=1):
         for scope_key, scoped_records in sorted(parameter_scopes.items(), key=lambda item: repr(item[0])):
             scope = {'evidenceClass': scope_key[0], 'level': scope_key[1], 'executionMode': scope_key[2],
                      'judgeModels': [list(model) for model in scope_key[3]]}
-            snapshots = {}
-            speeds, unavailable_speeds, invalid_speeds = [], 0, 0
-            for record in scoped_records:
-                snapshot = {**scope, 'segmentType': record['context']['segmentType'], 'parameters': record['parameters']}
-                snapshots[json.dumps(snapshot, sort_keys=True)] = snapshot
-                for index, evidence in enumerate(record['evidence']):
-                    speed = evidence.get('subjectSpeed')
-                    if speed is not None:
-                        speeds.append(speed)
-                    elif f'evidence[{index}].subjectSpeed' in record['invalidFields']:
-                        invalid_speeds += 1
-                    else:
-                        unavailable_speeds += 1
-            # Multiple judge/model identities on one record cannot be attributed
-            # to a single model. Preserve sample counts but suppress distributions.
-            distribution_available = bool(speeds) and len(scope_key[3]) <= 1
-            distribution_status = ('unavailableMixedModelScope' if len(scope_key[3]) > 1 else
-                                   'observed' if speeds else 'unavailableNoSamples')
-            parameter_evidence.append({'sessionID': session, 'scope': scope, 'snapshots': list(snapshots.values()),
-                                       'subjectSpeed': {'reportedSamples': len(speeds), 'unavailableSamples': unavailable_speeds,
-                                                        'invalidSamples': invalid_speeds, 'distributionStatus': distribution_status,
-                                                        'minimum': min(speeds) if distribution_available else None,
-                                                        'median': statistics.median(speeds) if distribution_available else None,
-                                                        'maximum': max(speeds) if distribution_available else None,
-                                                        'unit': 'normalizedFrameUnitsPerSecond'}})
+            parameter_evidence.extend(summarize_parameter_samples(session, scoped_records, scope))
         for key, counts, blocked in data['groups']:
             if key[0] != session:
                 continue
@@ -238,7 +219,10 @@ def summarize_shadow(path, window, bindings, binding_schema_version=1):
                 row['counts'].update(compared=None, exact=None, unscored_actions=counts['completed_actions'])
             rows.append(row)
     require(set(declared) <= set(by_session))
-    return {'records': data['records'], 'rows': rows, 'gaps': gaps, 'sessions': sessions,
+    return {'records': data['records'], 'matchingWindowSeconds': window,
+            'recordEvidenceCounts': dict(sorted(Counter(r['evidenceClass'] for r in records).items())),
+            'inputFingerprints': input_fingerprints(source),
+            'rows': rows, 'gaps': gaps, 'sessions': sessions,
             'parameterEvidence': parameter_evidence,
             'issues': {k: v for k, v in data['issues'].items() if v},
             'abstentions': [{'stratum': list(k), 'count': v} for k, v in sorted(data['abstentions'].items())],
@@ -251,6 +235,57 @@ def summarize_shadow(path, window, bindings, binding_schema_version=1):
 def canonical_parameter_context(parameters):
     """Absent optional wire values remain unknown; no settings are filled in."""
     return {key: parameters.get(key) for key in shadow.SCHEMA['objects']['ParameterContext']}
+
+
+def input_fingerprints(source):
+    return {key: source.get(key) for key in ('recordsSHA256', 'manifestSHA256')}
+
+
+def summarize_parameter_samples(session, records, scope):
+    """Frame-normalized speeds retain segment, settings and channel attribution."""
+    groups = {}
+    for record in records:
+        context = record['context']
+        actual_models = sorted({(j['judgeKind'], j.get('modelVersion')) for j in record['judgements']}, key=repr)
+        # Even rows without channel evidence retain their actual settings.
+        for index, evidence in enumerate(record['evidence'] or [None]):
+            sample_scope = {**scope, 'segmentType': context['segmentType'],
+                            'judgeModels': [list(model) for model in actual_models],
+                            'segmentToken': context.get('segmentToken'),
+                            'parameterContext': canonical_parameter_context(record['parameters']),
+                            'channel': evidence['channel'] if evidence is not None else None}
+            key = json.dumps(sample_scope, sort_keys=True)
+            group = groups.setdefault(key, {'scope': sample_scope, 'snapshots': {}, 'speeds': [],
+                                             'unavailable': 0, 'invalid': 0})
+            snapshot = {**sample_scope, 'parameters': record['parameters']}
+            group['snapshots'][json.dumps(snapshot, sort_keys=True)] = snapshot
+            if evidence is None:
+                continue
+            speed = evidence.get('subjectSpeed')
+            if speed is not None:
+                group['speeds'].append(speed)
+            elif f'evidence[{index}].subjectSpeed' in record['invalidFields']:
+                group['invalid'] += 1
+            else:
+                group['unavailable'] += 1
+    output = []
+    for key in sorted(groups):
+        group = groups[key]
+        speeds = group['speeds']
+        mixed_model = len(group['scope']['judgeModels']) > 1
+        available = bool(speeds) and not mixed_model
+        output.append({'sessionID': session, 'scope': group['scope'],
+                       'snapshots': list(group['snapshots'].values()),
+                       'subjectSpeed': {'reportedSamples': len(speeds),
+                                        'unavailableSamples': group['unavailable'],
+                                        'invalidSamples': group['invalid'],
+                                        'distributionStatus': 'unavailableMixedModelScope' if mixed_model else
+                                                              'observed' if speeds else 'unavailableNoSamples',
+                                        'minimum': min(speeds) if available else None,
+                                        'median': statistics.median(speeds) if available else None,
+                                        'maximum': max(speeds) if available else None,
+                                        'unit': 'normalizedFrameUnitsPerSecond'}})
+    return output
 
 
 def summarize_shadow_phases(path, window, bindings):
@@ -297,30 +332,13 @@ def summarize_shadow_phases(path, window, bindings):
         phase_id, session = binding['phaseID'], binding['sessionID']
         scoped_records = phase_records[phase_id]
         models = sorted({(j['judgeKind'], j.get('modelVersion')) for r in scoped_records for j in r['judgements']}, key=repr)
-        scope = {key: binding[key] for key in SCHEMA['requiredBindingKeys'] if key != 'sessionID'}
+        scope = {key: binding[key] for key in SCHEMA['requiredBindingKeys']
+                 if key not in ('sessionID', 'judgeKind', 'modelVersion')}
         scope.update(phaseID=phase_id, routeGenerations=binding['routeGenerations'],
+                     declaredJudgeKind=binding['judgeKind'], declaredModelVersion=binding['modelVersion'],
                      judgeModels=[list(model) for model in models])
-        speeds, unavailable_speeds, invalid_speeds, snapshots = [], 0, 0, {}
-        for record in scoped_records:
-            snapshot = {**scope, 'segmentType': record['context']['segmentType'], 'parameters': record['parameters']}
-            snapshots[json.dumps(snapshot, sort_keys=True)] = snapshot
-            for index, evidence in enumerate(record['evidence']):
-                speed = evidence.get('subjectSpeed')
-                if speed is not None:
-                    speeds.append(speed)
-                elif f'evidence[{index}].subjectSpeed' in record['invalidFields']:
-                    invalid_speeds += 1
-                else:
-                    unavailable_speeds += 1
-        parameter_evidence.append({'sessionID': session, 'phaseID': phase_id, 'scope': scope,
-                                   'snapshots': list(snapshots.values()),
-                                   'subjectSpeed': {'reportedSamples': len(speeds), 'unavailableSamples': unavailable_speeds,
-                                                    'invalidSamples': invalid_speeds,
-                                                    'distributionStatus': 'observed' if speeds else 'unavailableNoSamples',
-                                                    'minimum': min(speeds) if speeds else None,
-                                                    'median': statistics.median(speeds) if speeds else None,
-                                                    'maximum': max(speeds) if speeds else None,
-                                                    'unit': 'normalizedFrameUnitsPerSecond'}})
+        parameter_evidence.extend({**item, 'phaseID': phase_id}
+                                  for item in summarize_parameter_samples(session, scoped_records, scope))
         phase_unscored = any(row['phaseID'] == phase_id and row['counts']['unscored_actions'] for row in rows)
         phases.append({'sessionID': session, 'phaseID': phase_id, 'binding': binding,
                        'acceptedRecords': len(scoped_records),
@@ -335,7 +353,10 @@ def summarize_shadow_phases(path, window, bindings):
                          'judgeModels': [list(m) for m in sorted(models, key=repr)],
                          'status': 'incomplete' if session in blocked or
                                    any(p['sessionID'] == session and p['status'] == 'incomplete' for p in phases) else 'observed'})
-    return {'records': data['records'], 'bindingMode': 'explicitPhases', 'rows': rows, 'gaps': [],
+    return {'records': data['records'], 'matchingWindowSeconds': window,
+            'recordEvidenceCounts': dict(sorted(Counter(r['evidenceClass'] for r in records).items())),
+            'inputFingerprints': input_fingerprints(source),
+            'bindingMode': 'explicitPhases', 'rows': rows, 'gaps': [],
             'sessions': sessions, 'phases': phases, 'parameterEvidence': parameter_evidence,
             'issues': {k: v for k, v in data['issues'].items() if v},
             'abstentions': [{'stratum': list(k), 'phaseID': k[-3], 'count': v}
@@ -375,7 +396,7 @@ def negative_shadow_regressions(path, window):
         data = shadow.analyze(accepted, window, row_issues)
         counts = {metric: sum(s[metric] for _, s, _ in data['groups']) for metric in
                   ('predictions', 'completed_actions', 'compared', 'exact', 'unscored_actions', 'unmatched_predictions', 'unmatched_actions')}
-        output.append({'case': name, 'evidenceClass': 'synthetic', 'counts': counts,
+        output.append({'case': name, 'evidenceClass': 'synthetic', 'matchingWindowSeconds': window, 'counts': counts,
                        'dwellSeconds': [v for values in data['dwell'].values() for v in values],
                        'issues': {k: v for k, v in data['issues'].items() if v},
                        'status': 'incomplete' if not accepted or counts['unscored_actions'] or any(b for _, _, b in data['groups']) else 'observed'})
@@ -402,6 +423,8 @@ def evaluate(value, digest=None, shadow_data=None, regressions=None):
                'status': 'incomplete' if any(r['level'] == level for r in runs) else 'notRun',
                'directLiveRoute': 'notRun', 'virtualCameraLiveRoute': 'notRun'} for level in SCHEMA['levels']]
     return {'evaluationSchemaVersion': value['evaluationSchemaVersion'], 'inputSHA256': digest, 'qualified': False,
+            'evidenceInventory': {'replayScenarios': dict(sorted(Counter(r['evidenceClass'] for r in runs).items())),
+                                  'shadowRecords': shadow_data['recordEvidenceCounts'] if shadow_data is not None else {}},
             'qualificationStatus': 'incomplete', 'runs': runs, 'levels': levels,
             'shadow': shadow_data, 'shadowRegressions': regressions or [],
             'missingEvidence': ['ownerFrozenPlanAndBudgets', 'independentEligibleOpportunityLabels',
@@ -415,16 +438,30 @@ def fraction(numerator, denominator):
     return f'{numerator}/{denominator}' if denominator else 'unavailable (0 labelled)'
 
 
+def evidence_inventory_lines(result):
+    lines = ['## Supplied evidence inventory', '',
+             '| Input unit | Declared evidence class | Accepted count |',
+             '| --- | --- | ---: |']
+    inventory = result['evidenceInventory']
+    for key, label in (('replayScenarios', 'Replay scenarios'), ('shadowRecords', 'Shadow records')):
+        for evidence_class, count in sorted(inventory[key].items()):
+            lines.append(f'| {label} | {evidence_class} | {count} |')
+    lines += ['', 'Counts retain their input units and declared classes. They do not authenticate collection, establish exposure or prove complete capture.', '']
+    return lines
+
+
 def markdown(result):
     lines = ['# Director evaluation observations', '',
-             '**Synthetic software evidence. Qualification incomplete; no operating permission or parameter recommendation.**', '',
+             '**Evaluation observations. Qualification incomplete; no operating permission or parameter recommendation.**', '',
              f'Input SHA-256: `{result["inputSHA256"] or "unavailable"}`.', '',
              'Every scenario is kept in its own session, level, evidence, execution, route, configuration, parameter and judge/model partition. Rates are not pooled.', '',
              '| Level | Synthetic scenarios | Assessment | Direct live output | Virtual Camera live output |',
              '| --- | ---: | --- | --- | --- |']
+    if result.get('shadowBindingSHA256'):
+        lines[6:6] = [f'Shadow sidecar SHA-256: `{result["shadowBindingSHA256"]}`.', '']
     for row in result['levels']:
         lines.append(f'| {row["level"]} | {row["syntheticScenarios"]} | {row["status"]} | {row["directLiveRoute"]} | {row["virtualCameraLiveRoute"]} |')
-    lines += ['', '## Actual replay scenario measurements', '',
+    lines += ['', *evidence_inventory_lines(result), '## Actual replay scenario measurements', '',
               'Wrong proposals and attempts are separate from commits. The replay does not label committed subject correctness or independent useful opportunities.', '',
               '| Scenario | Attempted / committed preparations | Wrong / labelled proposals | Wrong / labelled attempts | Stale commits / all commits | Operator cuts / attempts | Overrides honoured | UI latency | Software observation |',
               '| --- | --- | --- | --- | --- | --- | ---: | --- | --- |']
@@ -446,7 +483,9 @@ def markdown(result):
               'Useful-preparation coverage, wrong committed-subject rate, visible override latency and downstream presentation are unavailable. Missing values are never replaced with zero.', '']
     if result['shadow'] is not None:
         data = result['shadow']
+        lines += ['', *shadow.fingerprint_lines(data['inputFingerprints'])]
         lines += ['## C-05 shadow observations', '', f'Accepted records: {data["records"]}. Explicit export validated: {str(data["exportValidated"]).lower()}.', '',
+                  f'Matching window: {shadow.format_window(data["matchingWindowSeconds"])} seconds (supplied). This is an analysis setting, not a directing recommendation.', '',
                   'Agreement describes operator matching, not independent correctness. Bindings are declared evaluation scope, not verified physical-route observations.', '',
                   '| Session | Scope | Exact / compared | Predictions | Unmatched predictions | Unmatched actions | Unscored actions | Status |',
                   '| --- | --- | --- | ---: | ---: | ---: | ---: | --- |']
@@ -468,6 +507,7 @@ def markdown(result):
                 lines.append(f'- Phase `{item["phaseID"]}` / session `{item["sessionID"]}`: original sequences {b["firstSequence"]}–{b["lastSequence"]}, {item["acceptedRecords"]} accepted records; route generations `{json.dumps(b["routeGenerations"])}`; scope {item["status"]}.')
         for item in data['abstentions']:
             lines.append(f'- Abstention reasons {" / ".join(str(x) for x in item["stratum"])}: {item["count"]}. Reasons are not independent opportunities.')
+        lines += ['', 'Interior dwell describes recorded Program input-role tenure. It does not establish a stable composition, subject hold or downstream presentation; unknown shot metadata can leave tenure available while agreement is unscored.', '']
         for item in data['dwell']:
             values = item['seconds']
             phase = f' / phase {item["phaseID"]}' if 'phaseID' in item else ''
@@ -483,6 +523,8 @@ def markdown(result):
         for row in result['shadowRegressions']:
             c = row['counts']
             lines.append(f'| {row["case"]} | {c["predictions"]} | {c["completed_actions"]} | {c["compared"]} | {c["exact"]} | {c["unscored_actions"]} | {", ".join(f"{v:g}" for v in row["dwellSeconds"]) or "unavailable"} | {row["status"]} |')
+        lines += ['', *[f'- {row["case"]}: matching window {shadow.format_window(row["matchingWindowSeconds"])} seconds (supplied).'
+                        for row in result['shadowRegressions']]]
     lines += ['', '## Missing assessment evidence', '']
     lines += [f'- {item}' for item in result['missingEvidence']]
     lines += ['', 'Assist, Auto and Backup remain incomplete without their required real evidence and explicit owner, event-operator and independent-reviewer sign-off. This tool never creates a qualification record.', '']
@@ -491,12 +533,29 @@ def markdown(result):
 
 def parameter_memo(result):
     lines = ['# Observed parameter evidence — AWAITING OWNER', '',
-             'Synthetic fixture settings and observed metadata only. No numeric recommendation, tuning choice, approved bar or qualification is derived here.', '',
+             'Exported replay settings and shadow metadata only. No numeric recommendation, tuning choice, approved bar or qualification is derived here.', '',
              'Configured durations, movement bounds and rates describe test inputs; they are not measured subject speed or measured notice/on-air behavior.', '']
+    lines += evidence_inventory_lines(result)
+    lines += [f'Evaluation input SHA-256: `{result["inputSHA256"] or "unavailable"}`.', '']
+    if result.get('shadowBindingSHA256'):
+        lines += [f'Shadow sidecar SHA-256: `{result["shadowBindingSHA256"]}`.', '']
     for run in result['runs']:
         lines += [f'## {run["scenarioID"]} / {run["configurationID"]}', '',
                   '```json', json.dumps(run['parameters'], sort_keys=True, indent=2), '```', '']
     if result['shadow'] is not None:
+        lines += shadow.fingerprint_lines(result['shadow']['inputFingerprints'])
+        lines += [f'Matching window: {shadow.format_window(result["shadow"]["matchingWindowSeconds"])} seconds (supplied). This is an analysis setting, not a directing recommendation.', '']
+        data = result['shadow']
+        lines += ['## Shadow evidence completeness', '',
+                  f'Completeness issues: `{json.dumps(data["issues"], sort_keys=True)}`.',
+                  f'Scope gaps: `{json.dumps(data["gaps"], sort_keys=True)}`.', '',
+                  'Descriptive settings and sample distributions below do not repair incomplete capture or missing assessment scope. Zero reported loss does not prove full capture.', '']
+        for item in data['sessions']:
+            lines.append(f'- Session `{item["sessionID"]}`: scope {item["status"]}.')
+        for item in data.get('phases', []):
+            binding = item['binding']
+            lines.append(f'- Phase `{item["phaseID"]}` / session `{item["sessionID"]}`: original sequences {binding["firstSequence"]}–{binding["lastSequence"]}; scope {item["status"]}.')
+        lines.append('')
         for item in result['shadow']['parameterEvidence']:
             phase = f' / phase {item["phaseID"]}' if 'phaseID' in item else ''
             lines += [f'## Shadow session {item["sessionID"]}{phase}', '',
@@ -544,7 +603,7 @@ def main(argv=None):
                                 binding_schema_version=value['evaluationSchemaVersion']) if args.shadow_bundle else None
         regressions = negative_shadow_regressions(args.regression_fixture, args.match_window_seconds) if args.regression_fixture else []
         result = evaluate(value, digest, data, regressions)
-        if value['evaluationSchemaVersion'] == 2:
+        if binding_digest is not None or value['evaluationSchemaVersion'] == 2:
             result['shadowBindingSHA256'] = binding_digest
         outputs = []
         if args.output:

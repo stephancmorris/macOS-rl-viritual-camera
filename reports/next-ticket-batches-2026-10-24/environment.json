@@ -1,0 +1,28 @@
+{
+  "observedAt": "2026-10-24",
+  "host": "Mac mini / Apple M2 Pro / macOS 27.0.1",
+  "installedApp": {
+    "path": "/Applications/Alfie.app",
+    "version": "1.0",
+    "build": "1",
+    "sourceFingerprint": null,
+    "matchesCandidate": "not established"
+  },
+  "cameraDiscovery": {
+    "entries": 2,
+    "knownProduct": "Brio 300",
+    "otherCameraName": "omitted",
+    "captureOpened": false,
+    "deliveredFormatOrRateVerified": false
+  },
+  "displayDiscovery": {
+    "onlineEntries": 1,
+    "mainDisplayReportedPixels": "3840 x 2160",
+    "mainDisplayReportedResolution": "1920 x 1080 @ 60.00Hz",
+    "downstreamReceiverVerified": false
+  },
+  "nativeUI": "app selection timed out, including Finder",
+  "guideVisualInspection": "file URL rejected by browser protocol policy; no alternate serving or browser route attempted",
+  "rawInventory": "local temporary file only; personal names and device identifiers omitted here",
+  "qualification": false
+}

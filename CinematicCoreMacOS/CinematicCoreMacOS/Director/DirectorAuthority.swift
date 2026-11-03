@@ -2,7 +2,6 @@ import Foundation
 
 /// Isolated review candidate. No runtime grant is restored from preferences.
 nonisolated struct DirectorAuthority: Equatable, Sendable {
-    enum ReviewPolicy: Sendable { case conservative }
     /// Off (Manual), Suggest (shadow: proposes, never acts), Assist (prepares
     /// Preview), Auto and Backup (may issue one-shot Take permits when qualified).
     enum Level: Equatable, Hashable, Sendable { case off, suggest, assist, auto, backup }
@@ -55,8 +54,8 @@ nonisolated struct DirectorAuthority: Equatable, Sendable {
     private(set) var healthy = true
     private(set) var evidenceAvailable = true
 
-    // No default policy. initialEpoch enables the exhaustion boundary test.
-    init(reviewPolicy: ReviewPolicy, initialEpoch: UInt64 = 0) { epoch = initialEpoch }
+    // initialEpoch enables the exhaustion boundary test.
+    init(initialEpoch: UInt64 = 0) { epoch = initialEpoch }
     var mayPropose: Bool { !exhausted && running && healthy && level != .off && !paused && !editLive && pinnedShot == nil }
     var mayPrepare: Bool { mayPropose && evidenceAvailable && Self.prepares(level) }
     /// Capability to issue a permit, not permission to dispatch a Take.

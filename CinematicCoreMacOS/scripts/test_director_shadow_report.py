@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """C-05 synthetic fixtures; no person/media or live qualifications."""
 import copy
+import hashlib
 import io
 import json
 import os
@@ -80,6 +81,43 @@ def run(rows, window=2):
 
 
 class PredictionSequencePrecedenceTests(unittest.TestCase):
+    def test_displayed_matching_window_round_trips_at_a_comparison_boundary(self):
+        rows = fixture()
+        rows[0]['eventTime'] = 8.99999997
+        window = 1.00000004
+        data = run(rows, window)
+        self.assertEqual(sum(c['compared'] for _, c, _ in data['groups']), 2)
+        displayed = report.markdown(data, window).split('Matching window: ', 1)[1].split(' seconds', 1)[0]
+        self.assertEqual(float(displayed), window)
+        repeated = run(rows, float(displayed))
+        self.assertEqual(sum(c['compared'] for _, c, _ in repeated['groups']), 2)
+
+    def test_input_fingerprints_identify_exact_bytes_and_suppress_partial_reads(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / 'records.jsonl'
+            raw = b''.join((json.dumps(row) + '\n').encode() for row in fixture())
+            for content in (raw, raw.replace(b': ', b':'), raw + b'PRIVATE INVALID ROW\n', b''):
+                path.write_bytes(content)
+                records, issues, source = report.load_input(path)
+                self.assertEqual(source['recordsSHA256'], hashlib.sha256(content).hexdigest())
+                text = report.markdown(report.analyze(records, 2, issues, source), 2)
+                self.assertIn(source['recordsSHA256'], text)
+                self.assertNotIn('PRIVATE', text)
+            path.write_bytes(raw)
+            for limits in ({'maximum_records': 1}, {'maximum_line_bytes': 5}, {'maximum_input_bytes': 5}):
+                with self.subTest(limits=limits):
+                    _, issues, source = report.load_input(path, **limits)
+                    self.assertTrue(issues['input_limit'])
+                    self.assertIsNone(source['recordsSHA256'])
+
+    def test_legacy_unscored_take_is_incomplete_in_markdown(self):
+        rows = fixture()
+        rows[2]['context'].pop('programShot')
+        data = run(rows)
+        self.assertFalse(data['captureBlockedSessions'])
+        self.assertTrue(any(counts['unscored_actions'] for _, counts, _ in data['groups']))
+        self.assertIn('| incomplete |', report.markdown(data, 2))
+
     def assert_matching_in_v1_and_v2(self, rows, expected):
         records, issues = report.load_records(io.BytesIO(('\n'.join(json.dumps(r) for r in rows) + '\n').encode()))
         self.assertEqual(len(records), len(rows))
@@ -537,7 +575,10 @@ class ShadowReportTests(unittest.TestCase):
 
     def test_unknown_shot_and_intervening_manual_edit_exclude_metrics(self):
         rows = fixture(); rows[2]['context'].pop('programShot')
-        self.assertEqual(run(rows)['groups'][0][1]['unscored_actions'], 1)
+        data = run(rows)
+        self.assertEqual(data['groups'][0][1]['unscored_actions'], 1)
+        # Exact roles still establish input tenure, independently of composition.
+        self.assertAlmostEqual(next(iter(data['dwell'].values()))[0], 10)
         rows = fixture(); rows[3]['event'] = action('attempt', kind='setLevel')
         self.assertFalse(run(rows)['dwell'])
         self.assertFalse(run(fixture()[:3])['dwell'])
@@ -691,6 +732,16 @@ class ExportBundleTests(unittest.TestCase):
         data = report.analyze(records, 2, issues, source)
         self.assertFalse(report.blocking_input(issues))
         self.assertEqual(source['manifest'], manifest_for(records))
+        self.assertEqual(source['recordsSHA256'], hashlib.sha256((directory / 'records.jsonl').read_bytes()).hexdigest())
+        self.assertEqual(source['manifestSHA256'], hashlib.sha256((directory / 'manifest.json').read_bytes()).hexdigest())
+        _, limited, partial = report.load_input(directory, maximum_records=1)
+        self.assertTrue(limited['input_limit'])
+        self.assertIsNone(partial['recordsSHA256'])
+        self.assertEqual(partial['manifestSHA256'], source['manifestSHA256'])
+        _, limited, partial = report.load_input(directory, maximum_input_bytes=5)
+        self.assertTrue(limited['input_limit'])
+        self.assertIsNone(partial['manifestSHA256'])
+        self.assertIsNone(partial['recordsSHA256'])
         stats = sum((stats for _, stats, _ in data['groups']), report.Counter())
         self.assertEqual((stats['compared'], stats['exact']), (2, 2))
         self.assertAlmostEqual(next(iter(data['dwell'].values()))[0], 10)
@@ -875,7 +926,9 @@ class ExportBundleTests(unittest.TestCase):
             records, issues, source = report.load_input(directory / 'records.jsonl')
             data = report.analyze(records, 2, issues, source)
             self.assertEqual(sum(stats['exact'] for _, stats, _ in data['groups']), 2)
-            self.assertEqual(source, {'kind': 'unbundled'})
+            self.assertEqual(set(source), {'kind', 'recordsSHA256'})
+            self.assertEqual(source['kind'], 'unbundled')
+            self.assertEqual(source['recordsSHA256'], hashlib.sha256((directory / 'records.jsonl').read_bytes()).hexdigest())
             text = report.markdown(data, 2)
             self.assertIn('unbundled JSONL', text)
             self.assertIn('explicit-export retention is not established', text)

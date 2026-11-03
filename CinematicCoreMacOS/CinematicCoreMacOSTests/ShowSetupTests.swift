@@ -436,6 +436,42 @@ struct ShowSetupTests {
         #expect(requestedB.first === show.channel(.b))
     }
 
+    @Test(arguments: [false, true])
+    func stopWhilePairStartIsSuspendedCannotAttachToANewerSession(restartA: Bool) async {
+        let entered = SetupStartLatch()
+        let release = SetupStartLatch()
+        var requestedB = 0
+        let (show, live) = pairedLiveSetup(startChannelB: { _ in requestedB += 1 }) { show in
+            show.channelA.setStartingForTesting(true)
+            entered.signal()
+            await release.wait()
+        }
+        live.startPair()
+        await entered.wait()
+        show.stopShow(origin: .operatorUI)
+        // A newer single-camera Start can succeed before the old preflight
+        // returns. Its liveness is not permission to finish the old pair.
+        show.channelA.setRunningForTesting(restartA)
+        release.signal()
+        await live.waitForStartForTesting()
+
+        #expect(show.channelA.isRunning == restartA)
+        #expect(show.channel(.b) == nil)
+        #expect(requestedB == 0)
+    }
+
+    @Test(arguments: [false, true])
+    func stopRetiresAQueuedSetupStartBeforeItRuns(pair: Bool) async {
+        var requestsA = 0
+        let (show, live) = pairedLiveSetup { _ in requestsA += 1 }
+        if pair { live.startPair() } else { live.startAOnly() }
+        show.stopShow(origin: .operatorUI)
+        await live.waitForStartForTesting()
+        #expect(requestsA == 0)
+        #expect(!show.isAnyChannelLive)
+        #expect(show.channel(.b) == nil)
+    }
+
     @Test func aRetiredSetupScreenCannotStartCapture() async {
         let (show, live) = pairedLiveSetup { _ in
             Issue.record("a retired setup screen must not start capture")

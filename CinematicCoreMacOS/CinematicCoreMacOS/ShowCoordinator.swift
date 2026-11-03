@@ -28,6 +28,7 @@ final class ShowCoordinator: ObservableObject {
     /// Only liveness changes refresh show-level controls; frame publications
     /// remain local to each camera. Entries exist only for attached channels.
     private var channelLivenessSubscriptions: [ChannelID: Set<AnyCancellable>] = [:]
+    private var ownsShowStandard = false
 
     /// Sole owner of routing: which channel feeds `programOutput`, the output
     /// clock, route generations and source-loss hold / standby.
@@ -97,6 +98,7 @@ final class ShowCoordinator: ObservableObject {
         let output = programOutput
             ?? ProgramOutputManager(sinks: [VirtualCameraOutputSink(), DisplayOutputSink()] + rehearsal)
         self.programOutput = output
+        output.managesShowStandard = false
         self.router = ProgramRouter(output: output, programChannel: .a)
         let router = self.router
         workScheduler.isProgram = { router.isProgram($0) }
@@ -119,6 +121,7 @@ final class ShowCoordinator: ObservableObject {
     }
 
     private func observeChannelLiveness(_ channel: CameraManager) {
+        channel.sessionLivenessDidChange = { [weak self] in self?.updateShowStandardLifetime() }
         var subscriptions: Set<AnyCancellable> = []
         channel.$isRunning.removeDuplicates().dropFirst()
             .sink { [weak self] _ in self?.objectWillChange.send() }
@@ -127,6 +130,21 @@ final class ShowCoordinator: ObservableObject {
             .sink { [weak self] _ in self?.objectWillChange.send() }
             .store(in: &subscriptions)
         channelLivenessSubscriptions[channel.channelID] = subscriptions
+    }
+
+    private func updateShowStandardLifetime() {
+        if isAnyChannelLive {
+            guard !ownsShowStandard else { return }
+            ownsShowStandard = true
+            ShowStandard.beginSession()
+        } else if ownsShowStandard {
+            ownsShowStandard = false
+            ShowStandard.endSession()
+        }
+    }
+
+    isolated deinit {
+        if ownsShowStandard { ShowStandard.endSession() }
     }
 
     /// What the live-switch rule needs to know about the show.
@@ -198,10 +216,16 @@ final class ShowCoordinator: ObservableObject {
     var stopAttemptObserver: ((StopAction) -> Void)?
     var stopResultObserver: ((StopAction) -> Void)?
 
+    /// A setup Start may be waiting for installation or capture. Current
+    /// liveness cannot identify that intent after Stop followed by a new Start.
+    /// Change this token even when no camera has started yet.
+    private(set) var stopToken = UUID()
+
     /// Show-level Stop: retires every channel's generation and epoch. The
     /// result boundary observes this synchronous state change, not completion
     /// of a capture executor's asynchronous stop.
     func stopShow(origin: StopOrigin = .lifecycle) {
+        stopToken = UUID()
         let action = StopAction(id: UUID(), origin: origin)
         stopAttemptObserver?(action)
         for id in ChannelID.allCases { channels[id]?.stopCapture() }
@@ -257,6 +281,9 @@ final class ShowCoordinator: ObservableObject {
     func startDirectorShadow() {
         guard DeveloperFlags.runDirectorShadow else { return }
         loadDirectorStyles()
+        // SU-10: the show's saved run sheet, unless one was supplied. Launch
+        // is Manual, so this is setup and never pauses.
+        if initialDirectorRunSheet == nil { director.setRunSheet(showRunSheet?.savedSheet) }
         director.attach()
         startedDirector = director
     }
@@ -283,6 +310,29 @@ final class ShowCoordinator: ObservableObject {
         startedDirector.advanceSegment()
     }
 
+    /// SU-09: the show's run sheet. Created on first use, and only where the
+    /// Director can run, so tests and Release builds never touch its storage.
+    private(set) lazy var showRunSheet: ShowRunSheet? = {
+        guard DeveloperFlags.runDirectorShadow, let model = ShowRunSheet.applicationSupport() else { return nil }
+        model.onSaved = { [weak self] in self?.directorRunSheetEdited($0) }
+        return model
+    }()
+
+    /// SU-10 (F2): a saved run-sheet edit reaches the running Director. While
+    /// Alfie is directing, changed segments pause until handed back.
+    func directorRunSheetEdited(_ sheet: RunSheet) {
+        guard DeveloperFlags.runDirectorShadow, let startedDirector else { return }
+        startedDirector.runSheetEdited(sheet.segments.isEmpty ? nil : sheet)
+    }
+
+    /// The feel a segment type uses, from Settings › Director, for the run-sheet editor.
+    func directorFeelSummary(for type: SegmentType) -> String? {
+        guard let preferences = startedDirector?.preferences, (try? preferences.validated()) != nil else { return nil }
+        guard let style = preferences.style(for: type) else { return nil }
+        let summary = DirectorFeel.matching(style)?.summary ?? "Custom"
+        return preferences.styles[type] == nil && type != .liveEvent ? "\(summary) (same as Live event)" : summary
+    }
+
     /// Styles saved in Settings reach the running Director (CR-037). Only
     /// while the shadow can run: where the flag is off nothing else creates
     /// the Director, and a save must not.
@@ -302,6 +352,11 @@ final class ShowCoordinator: ObservableObject {
     /// Measured results by configuration fingerprint.
     let admissionRecords: AdmissionRecordStore
 
+    /// A failed live check must veto Take even when the historical store
+    /// preserves a qualification record. One current refusal, bound to the
+    /// exact measured sources/configuration; it never rewrites certification.
+    private var currentAdmissionFailure: (binding: PairAdmissionBinding, reasons: [AdmissionReason])?
+
     /// The configuration as it stands now. Any change to devices, delivered
     /// formats, rates, modes, show standard, route or policy changes it.
     func admissionFingerprint() -> AdmissionFingerprint {
@@ -315,7 +370,12 @@ final class ShowCoordinator: ObservableObject {
     }
 
     var admissionStatus: AdmissionStatus {
-        channels.count < 2 ? .provisional : admissionRecords.status(for: admissionFingerprint())
+        guard channels.count >= 2 else { return .provisional }
+        if let failure = currentAdmissionFailure,
+           currentAdmissionBinding(preview: failure.binding.preview) == failure.binding {
+            return .unsupported(failure.reasons)
+        }
+        return admissionRecords.status(for: admissionFingerprint())
     }
 
     /// What the show may do with the second input right now. A single input
@@ -325,16 +385,23 @@ final class ShowCoordinator: ObservableObject {
     }
 
     func admissionCheckBinding(preview: ChannelID) -> PairAdmissionBinding? {
-        guard previewChannel == preview, let program = channels[programChannel],
+        guard let program = channels[programChannel],
               let previewSource = channels[preview],
               program.isRunning, !program.sourceMissing,
               previewSource.isRunning, !previewSource.sourceMissing else { return nil }
+        return currentAdmissionBinding(preview: preview)
+    }
+
+    /// Health loss does not erase a previously measured refusal. Measuring
+    /// requires healthy live sources above; comparing provenance does not.
+    private func currentAdmissionBinding(preview: ChannelID) -> PairAdmissionBinding? {
+        guard previewChannel == preview else { return nil }
         return PairAdmissionBinding(
             fingerprint: admissionFingerprint(), program: programChannel, preview: preview,
             routeGeneration: router.routeGeneration,
             operatorMode: operatorModes.mode, context: pairAdmissionContext(preview: preview),
             sources: channels.mapValues {
-                .init(instance: ObjectIdentifier($0), generation: $0.revisions.sourceGeneration,
+                .init(instance: $0.lifetimeID, generation: $0.revisions.sourceGeneration,
                       deviceID: $0.selectedCamera?.uniqueID)
             })
     }
@@ -344,6 +411,13 @@ final class ShowCoordinator: ObservableObject {
     @discardableResult
     func recordAdmission(_ result: PairAdmissionResult, for binding: PairAdmissionBinding) -> Bool {
         guard admissionCheckBinding(preview: binding.preview) == binding else { return false }
+        if case .unsupported(let reasons) = result.status {
+            currentAdmissionFailure = (binding, reasons)
+        } else if result.status == .provisional, currentAdmissionFailure?.binding == binding {
+            // Only a complete passing recheck clears this runtime failure.
+            // Missing evidence cannot silently re-admit a failed live pair.
+            currentAdmissionFailure = nil
+        }
         admissionRecords.record(result.status, for: binding.fingerprint)
         return true
     }

@@ -38,7 +38,7 @@ final class DirectorShadowRecorder {
     struct StopActionCapture {
         struct Input {
             let channel: ChannelID
-            let camera: ObjectIdentifier
+            let camera: UUID
             let source: DiagnosticsSessionIdentity.Source
             let active: CameraManager.InputSource
             let preferred: CameraManager.InputSource
@@ -90,7 +90,7 @@ final class DirectorShadowRecorder {
         let inputs = channels.compactMap { camera -> StopActionCapture.Input? in
             guard let kind = Self.sourceKind(camera), let source = camera.sourceIdentity,
                   !camera.isStartingSession else { return nil }
-            return .init(channel: camera.channelID, camera: ObjectIdentifier(camera), source: source,
+            return .init(channel: camera.channelID, camera: camera.lifetimeID, source: source,
                          active: camera.activeInputSource, preferred: camera.preferredInputSource,
                          revisions: camera.revisions, missing: camera.sourceMissing, kind: kind)
         }
@@ -112,7 +112,7 @@ final class DirectorShadowRecorder {
         let inputs = channels.compactMap { camera -> StopActionCapture.Input? in
             guard let kind = Self.sourceKind(camera), let source = camera.sourceIdentity,
                   !camera.isStartingSession else { return nil }
-            return .init(channel: camera.channelID, camera: ObjectIdentifier(camera), source: source,
+            return .init(channel: camera.channelID, camera: camera.lifetimeID, source: source,
                          active: camera.activeInputSource, preferred: camera.preferredInputSource,
                          revisions: camera.revisions, missing: camera.sourceMissing, kind: kind)
         }
@@ -140,7 +140,7 @@ final class DirectorShadowRecorder {
         for input in capture.inputs {
             let generation = input.revisions.sourceGeneration.addingReportingOverflow(1)
             let epoch = input.revisions.controlEpoch.addingReportingOverflow(1)
-            guard let camera = show.channel(input.channel), ObjectIdentifier(camera) == input.camera,
+            guard let camera = show.channel(input.channel), camera.lifetimeID == input.camera,
                   camera.sourceIdentity == input.source, camera.preferredInputSource == input.preferred,
                   !generation.overflow, !epoch.overflow, !camera.isRunning, !camera.isStartingSession,
                   !camera.sourceMissing, camera.activeInputSource == input.preferred,
@@ -161,7 +161,7 @@ final class DirectorShadowRecorder {
               capture.inputs.map(\.channel) == ChannelID.allCases.filter({ show.channel($0) != nil }),
               event.outcome == .accepted || event.outcome == .refused else { return nil }
         for input in capture.inputs {
-            guard let camera = show.channel(input.channel), ObjectIdentifier(camera) == input.camera,
+            guard let camera = show.channel(input.channel), camera.lifetimeID == input.camera,
                   camera.sourceIdentity == input.source, camera.preferredInputSource == input.preferred,
                   !camera.isStartingSession else { return nil }
             if input.channel == capture.channel, event.outcome == .accepted {

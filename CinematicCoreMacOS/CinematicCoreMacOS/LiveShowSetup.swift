@@ -172,9 +172,10 @@ final class LiveShowSetupModel: ObservableObject {
         guard !show.isAnyChannelLive, show.operatorModes.mode == .multiCam,
               setup.canStartAOnly, startTask == nil, let a = camera(for: .a) else { return }
         persistProposals()
+        let stopToken = show.stopToken
         startTask = Task { [self] in
             defer { startTask = nil }
-            guard !Task.isCancelled, !show.isAnyChannelLive,
+            guard !Task.isCancelled, show.stopToken == stopToken, !show.isAnyChannelLive,
                   show.operatorModes.mode == .multiCam else { return }
             show.prepareForNewShow()
             show.channelA.selectedCamera = a
@@ -186,17 +187,19 @@ final class LiveShowSetupModel: ObservableObject {
         guard !show.isAnyChannelLive, show.operatorModes.mode == .multiCam,
               setup.canStartPair, startTask == nil, let a = camera(for: .a), let b = camera(for: .b) else { return }
         persistProposals()
+        let stopToken = show.stopToken
         startTask = Task { [self] in
             defer { startTask = nil }
-            guard !Task.isCancelled, !show.isAnyChannelLive,
+            guard !Task.isCancelled, show.stopToken == stopToken, !show.isAnyChannelLive,
                   show.operatorModes.mode == .multiCam else { return }
             show.prepareForNewShow()
             show.channelA.selectedCamera = a
             await startChannelA()
-            guard !Task.isCancelled, show.operatorModes.mode == .multiCam else { return }
+            guard !Task.isCancelled, show.stopToken == stopToken,
+                  show.operatorModes.mode == .multiCam else { return }
             // B joins only once A (Program, owner of the output) is up.
             for await starting in show.channelA.$isStartingSession.values where !starting { break }
-            guard !Task.isCancelled, show.operatorModes.mode == .multiCam,
+            guard !Task.isCancelled, show.stopToken == stopToken, show.operatorModes.mode == .multiCam,
                   show.channelA.isRunning else { return }
             let channelB = show.addChannel(.b)
             channelB.selectedCamera = b
@@ -240,8 +243,14 @@ struct LiveShowSetup: View {
         _model = StateObject(wrappedValue: LiveShowSetupModel(show: show, startChannelA: startChannelA))
     }
 
+    private var actions: ShowSetupActions {
+        var actions = model.actions
+        if let runSheet = model.show.showRunSheet { actions.editRunSheet = { runSheet.isPresented = true } }
+        return actions
+    }
+
     var body: some View {
-        ShowSetupView(model: model.setup, actions: model.actions, operatorModes: model.show.operatorModes)
+        ShowSetupView(model: model.setup, actions: actions, operatorModes: model.show.operatorModes)
             #if DEBUG
             .task { [model] in
                 await DebugLaunchHooks.autostartIfRequested(model) { model.show.channelA.availableCameras }

@@ -23,8 +23,8 @@ nonisolated enum ShowStandard: String, CaseIterable, Identifiable {
 
     /// Capture sessions must not follow preference changes live: the camera is
     /// configured once at start, while the picker explicitly says changes apply
-    /// to the next capture. Keep that selected standard stable until output
-    /// stops, including if the virtual-camera XPC link reconnects.
+    /// to the next show. Keep that selected standard stable while any channel
+    /// runs or starts, including output reconnects and Program source changes.
     private static let sessionLock = NSLock()
     /// Read and written only while `sessionLock` is held.
     nonisolated(unsafe) private static var sessionStandard: ShowStandard?
@@ -91,7 +91,7 @@ nonisolated enum ShowStandard: String, CaseIterable, Identifiable {
         return .p50
     }
 
-    /// The standard frozen at `ProgramOutputManager.start()`, if any.
+    /// The standard frozen by the live show (or standalone output), if any.
     static var activeSession: ShowStandard? {
         sessionLock.lock()
         defer { sessionLock.unlock() }

@@ -114,7 +114,8 @@ struct ContentView: View {
                         // A is Program and no other channel is kept.
                         show?.prepareForNewShow()
                         Task { await startCamera() }
-                    }
+                    },
+                    onEditRunSheet: show?.showRunSheet.map { runSheet in { runSheet.isPresented = true } }
                 )
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
                 // Hot-plug: re-enumerate so a second camera unlocks Multi Cam
@@ -177,6 +178,7 @@ struct ContentView: View {
         }
         .animation(.easeInOut(duration: 0.36), value: inspectorOpen)
         .frame(minWidth: 1280, minHeight: 800)
+        .modifier(ShowRunSheetPresenter(show: show))
         .background(ConsoleStyle.background)
         .ignoresSafeArea()
         .onAppear {

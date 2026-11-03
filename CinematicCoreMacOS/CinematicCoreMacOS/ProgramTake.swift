@@ -49,8 +49,17 @@ nonisolated enum TakeRules {
                 matchesSourceGeneration: false, matchesShotRevision: false, legalGeometry: false,
                 isHeldFrame: false, takePending: false)
         }
-        let renderFresh = now - frame.renderedAt <= framePeriod * maxRenderAgePeriods
-        let sourceFresh = now - frame.processingStartedAt <= framePeriod * maxSourceAgePeriods
+        // These are host-clock readings, unlike sourceTimestamp (which has
+        // its own media timebase). Future or reversed readings cannot prove
+        // freshness, even when subtracting them produces a small/negative age.
+        let validTimeline = now.isFinite && now >= 0
+            && framePeriod.isFinite && framePeriod > 0
+            && (framePeriod * maxSourceAgePeriods).isFinite
+            && frame.processingStartedAt.isFinite && frame.processingStartedAt >= 0
+            && frame.renderedAt.isFinite && frame.renderedAt >= frame.processingStartedAt
+            && frame.renderedAt <= now
+        let renderFresh = validTimeline && now - frame.renderedAt <= framePeriod * maxRenderAgePeriods
+        let sourceFresh = validTimeline && now - frame.processingStartedAt <= framePeriod * maxSourceAgePeriods
         return ConsoleSnapshot.TakeInputs(
             sourcePresent: !sourceMissing,
             supportedAtStandard: supported,
@@ -67,6 +76,7 @@ nonisolated enum TakeRules {
         let inside = c.origin.x >= -0.0001 && c.origin.y >= -0.0001
             && c.origin.x + c.size.width <= 1.0001 && c.origin.y + c.size.height <= 1.0001
         return inside && c.size.width > 0 && c.size.height > 0
+            && frame.outputSize.width.isFinite && frame.outputSize.height.isFinite
             && frame.outputSize.width > 0 && frame.outputSize.height > 0
     }
 }

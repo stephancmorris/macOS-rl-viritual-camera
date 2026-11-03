@@ -16,6 +16,8 @@ struct StoppedScreen: View {
     let cameras: OperatorModeChoice.Cameras
     let lastSessionEndedAt: Date?
     var onStart: () -> Void
+    /// SU-09: opens the show's run sheet. Nil where the Director doesn't run.
+    var onEditRunSheet: (() -> Void)? = nil
 
     private static let timeFormatter: DateFormatter = {
         let f = DateFormatter()
@@ -62,6 +64,13 @@ struct StoppedScreen: View {
                 }
                 .buttonStyle(.plain)
                 .padding(.top, 6)
+
+                if let onEditRunSheet {
+                    Button("Run sheet…", action: onEditRunSheet)
+                        .buttonStyle(.link)
+                        .font(.system(size: 12, weight: .medium))
+                        .help("Optional. Plan the show's segments; each uses its feel from Settings › Director.")
+                }
             }
             .padding(40)
         }

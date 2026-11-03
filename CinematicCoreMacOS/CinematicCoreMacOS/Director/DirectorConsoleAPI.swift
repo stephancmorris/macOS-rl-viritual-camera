@@ -81,7 +81,7 @@ extension NextShotStatus {
 
         enum PauseReason: Equatable, Sendable {
             case manualMode, operatorTookOver, editLive, sourceLost(ChannelID), outputProblem
-            case setupChanged, subjectLost(ChannelID), afterFallback, styleChanged, subjectChanged, showStopped
+            case setupChanged, subjectLost(ChannelID), afterFallback, styleChanged, runSheetChanged, subjectChanged, showStopped
 
             var text: String {
                 switch self {
@@ -94,6 +94,7 @@ extension NextShotStatus {
                 case .subjectLost(let input): return "Paused: subject lost on \(input.cameraLabel)"
                 case .afterFallback: return "Paused after fallback · Hand to Alfie when ready"
                 case .styleChanged: return "Paused: style changed"
+                case .runSheetChanged: return "Paused: run sheet changed"
                 case .subjectChanged: return "Paused: subject changed"
                 case .showStopped: return "Show stopped"
                 }

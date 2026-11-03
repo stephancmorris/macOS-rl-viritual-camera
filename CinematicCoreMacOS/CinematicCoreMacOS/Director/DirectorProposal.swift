@@ -188,6 +188,21 @@ nonisolated struct DirectorReadiness: Equatable, Sendable {
         let minimumCutSettledTime: TimeInterval
         let maximumCutMotion: Double
 
+        /// SU-4: the segment's style can only make the cut bar stricter. Its
+        /// settle time raises the required settled time; when it doesn't
+        /// allow cutting while moving, its movement limit lowers the motion
+        /// allowed. The prepare bar (settled time, motion, cutOnMotionAllowed)
+        /// is unchanged, so preparation may still move.
+        func tightened(by style: DirectorStyle?) -> Parameters {
+            guard let style, (try? style.validated()) != nil else { return self }
+            return Parameters(
+                minimumSettledTime: minimumSettledTime,
+                maximumMotion: maximumMotion,
+                cutOnMotionAllowed: cutOnMotionAllowed,
+                minimumCutSettledTime: max(minimumCutSettledTime, style.settleTime),
+                maximumCutMotion: style.cutOnMotionAllowed ? maximumCutMotion : min(maximumCutMotion, style.maximumMovement))
+        }
+
         var isValid: Bool {
             minimumSettledTime.isFinite && minimumSettledTime >= 0 &&
             maximumMotion.isFinite && maximumMotion >= 0 &&

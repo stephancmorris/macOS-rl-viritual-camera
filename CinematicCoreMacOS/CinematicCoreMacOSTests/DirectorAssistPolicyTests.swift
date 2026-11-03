@@ -151,7 +151,7 @@ nonisolated struct DirectorAssistPolicyTests {
         #expect(P.AssistAbstention.previewIsSafeWide.activity(input: .b).text == "Preview is the wide camera · nothing to prepare")
         #expect(P.AssistAbstention.learningSubject.activity(input: .b).text.contains("learning the subject"))
         #expect(P.AssistAbstention.judge(.lowConfidence).activity(input: .b) == .abstaining(.notSureEnough))
-        let authority = DirectorAuthority(reviewPolicy: .conservative)
+        let authority = DirectorAuthority()
         #expect(!authority.mayPrepare && !authority.mayTake)
     }
     @Test(arguments: ["negativeHistory", "futureHistory", "reorderedHistory", "duplicateInput", "wrongTenure"])

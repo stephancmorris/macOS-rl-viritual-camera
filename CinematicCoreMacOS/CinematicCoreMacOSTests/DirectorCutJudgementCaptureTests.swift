@@ -46,7 +46,7 @@ nonisolated struct DirectorCutJudgementCaptureTests {
     private func state(ready: Bool = true) -> DirectorTakeState {
         let prerequisites = DirectorAuthority.Prerequisites(nominationsCurrent: true, previewAvailable: true,
             sourcesHealthy: true, outputHealthy: true, admissionCurrent: true, qualifiedLevels: [.auto])
-        var authority = DirectorAuthority(reviewPolicy: .conservative)
+        var authority = DirectorAuthority()
         authority.apply(.enable(.auto), prerequisites: prerequisites)
         return .init(world: .init(authority: authority, program: .a, preview: .b,
             revisions: .init(sourceGeneration: 1, controlEpoch: 2, shotRevision: 3), routeGeneration: 1,
