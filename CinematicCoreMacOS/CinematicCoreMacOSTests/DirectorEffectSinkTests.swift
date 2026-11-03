@@ -4,7 +4,7 @@ import Testing
 
 nonisolated struct DirectorEffectSinkTests {
     private func context() throws -> (DirectorPreparation, DirectorPreparation.Request, DirectorLiveState) {
-        var authority = DirectorAuthority(reviewPolicy: .conservative)
+        var authority = DirectorAuthority()
         authority.apply(.enable(.assist), prerequisites: .init(nominationsCurrent: true,
             previewAvailable: true, sourcesHealthy: true, outputHealthy: true,
             admissionCurrent: true, qualifiedLevels: [.assist]))

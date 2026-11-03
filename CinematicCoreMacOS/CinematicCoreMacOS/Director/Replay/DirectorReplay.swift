@@ -86,7 +86,7 @@ nonisolated struct DirectorReplay {
                     sinkFactory: (Bool) -> any DirectorEffectSink,
                     judge: any DirectorJudge = RuleJudge()) -> Report {
         // Invalid clocks are counted and skipped rather than crashing a replay.
-        var authority = DirectorAuthority(reviewPolicy: .conservative)
+        var authority = DirectorAuthority()
         _ = authority.apply(.enable(.assist), prerequisites: .init(nominationsCurrent: true, previewAvailable: true, sourcesHealthy: true, outputHealthy: true, admissionCurrent: true, qualifiedLevels: [.assist]))
         var channels: [ChannelID: Channel] = [.a: Channel(), .b: Channel()]
         var program: ChannelID = .a
@@ -131,11 +131,8 @@ nonisolated struct DirectorReplay {
             guard rejectedProposalIDs.insert(id).inserted else { return }
             for reason in reasons { stale[reason, default: 0] += 1 }
         }
-        func completeEffect(_ effect: (id: String, due: TimeInterval, proposal: DirectorProposal,
-                                      proposalID: Int, intended: Bool, succeeds: Bool, sequence: Int, request: DirectorPreparation.Request, acknowledgementDelay: TimeInterval), at now: TimeInterval) {
-            guard completedAttemptIDs.insert(effect.id).inserted else { duplicateCallbacks += 1; return }
-            let target = effect.proposal.target
-            let live = DirectorLiveState(authority: authority, program: program,
+        func liveState(for target: ChannelID, at now: TimeInterval) -> DirectorLiveState {
+            DirectorLiveState(authority: authority, program: program,
                 preview: program == .a ? .b : .a, revisions: channels[target]?.revisions,
                 routeGeneration: route, sourceMissing: channels[target]?.missing ?? true,
                 policyRevision: policyRevision, nominationRevision: nominationRevision,
@@ -143,6 +140,12 @@ nonisolated struct DirectorReplay {
                     channels[target]?.lastEvidenceAt.map { now >= $0 && now - $0 <= maximumEvidenceAge } == true &&
                     channels[target]?.movement.isFinite == true && (channels[target]?.movement ?? -1) >= 0 &&
                     channels[target]?.identity == .confirmed && readinessParameters.isValid)
+        }
+        func completeEffect(_ effect: (id: String, due: TimeInterval, proposal: DirectorProposal,
+                                      proposalID: Int, intended: Bool, succeeds: Bool, sequence: Int, request: DirectorPreparation.Request, acknowledgementDelay: TimeInterval), at now: TimeInterval) {
+            guard completedAttemptIDs.insert(effect.id).inserted else { duplicateCallbacks += 1; return }
+            let target = effect.proposal.target
+            let live = liveState(for: target, at: now)
             var sink = sinkFactory(effect.succeeds)
             switch sink.prepare(effect.request, preparation: &preparation, live: live, now: now) {
             case .rejected(let reasons):
@@ -216,16 +219,6 @@ nonisolated struct DirectorReplay {
             let priorEpoch = authority.epoch
             let priorProgram = program
             var operatorAuthorizedChange = false
-            func live(for target: ChannelID) -> DirectorLiveState {
-                DirectorLiveState(authority: authority, program: program,
-                    preview: program == .a ? .b : .a, revisions: channels[target]?.revisions,
-                    routeGeneration: route, sourceMissing: channels[target]?.missing ?? true,
-                policyRevision: policyRevision, nominationRevision: nominationRevision,
-                evidenceAvailable: channels[target]?.present == true && authority.evidenceAvailable &&
-                    channels[target]?.lastEvidenceAt.map { now >= $0 && now - $0 <= maximumEvidenceAge } == true &&
-                    channels[target]?.movement.isFinite == true && (channels[target]?.movement ?? -1) >= 0 &&
-                    channels[target]?.identity == .confirmed && readinessParameters.isValid)
-            }
             switch event.action {
             case .manualCommand:
                 if pending != nil || !effects.isEmpty { overrides += 1 }
@@ -275,7 +268,7 @@ nonisolated struct DirectorReplay {
                     if !delay.isFinite || delay < 0 { clockAnomalies += 1 }
                     rejectedAttempts += 1; break
                 }
-                let result = preparation.validate(request, live: live(for: proposal.target), now: now)
+                let result = preparation.validate(request, live: liveState(for: proposal.target, at: now), now: now)
                 if case .stale(let reasons) = result {
                     recordStale(idOfProposal, reasons)
                     rejectedAttempts += 1; break
@@ -322,13 +315,13 @@ nonisolated struct DirectorReplay {
             if authority.epoch != priorEpoch {
                 if let pendingID, let pending,
                    case .stale(let reasons) = DirectorProposalValidator.validate(pending,
-                       against: live(for: pending.target), now: pending.createdAt, maximumAge: 0, action: .propose) {
+                       against: liveState(for: pending.target, at: now), now: pending.createdAt, maximumAge: 0, action: .propose) {
                     recordStale(pendingID, reasons)
                 }
                 pending = nil; pendingID = nil; activeRequest = nil; preparation.retire()
             }
             if let proposal = pending, preparation.composition == nil, preparation.receipt == nil {
-                let result = DirectorProposalValidator.validate(proposal, against: live(for: proposal.target),
+                let result = DirectorProposalValidator.validate(proposal, against: liveState(for: proposal.target, at: now),
                     now: proposal.createdAt, maximumAge: 0, action: .propose)
                 if case .stale(let reasons) = result {
                     if let pendingID { recordStale(pendingID, reasons) }
@@ -338,7 +331,7 @@ nonisolated struct DirectorReplay {
             if !authority.mayPropose { pending = nil; pendingID = nil; activeRequest = nil; preparation.retire() }
             let preview: ChannelID = program == .a ? .b : .a
             if validClockConfiguration, authority.mayPropose, pending == nil, let channel = channels[preview],
-               live(for: preview).evidenceAvailable,
+               liveState(for: preview, at: now).evidenceAvailable,
                let renderAt = channel.lastRenderAt, now - renderAt <= maximumProposalAge {
                 let candidate = DirectorShotPolicy.Candidate(channel: preview,
                     shot: preview == .b ? shotB : shotA, subjectConfidence: channel.identity == .confirmed ? 1 : 0,
@@ -370,7 +363,7 @@ nonisolated struct DirectorReplay {
                 identity: channel.identity,
                 framingSettledFor: channel.framingReady ? readinessParameters.minimumSettledTime : 0,
                 motion: channel.movement, cropConverged: channel.framingReady)
-            if preparation.refresh(live: live(for: preview), evidence: evidence, parameters: readinessParameters).isReady {
+            if preparation.refresh(live: liveState(for: preview, at: now), evidence: evidence, parameters: readinessParameters).isReady {
                 readyEvaluations += 1
             }
             if authority.paused && pending != nil { pausedProposals += 1 }

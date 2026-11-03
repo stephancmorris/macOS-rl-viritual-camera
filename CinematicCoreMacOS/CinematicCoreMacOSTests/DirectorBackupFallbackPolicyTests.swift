@@ -9,7 +9,7 @@ nonisolated struct DirectorBackupFallbackPolicyTests {
               outputHealthy: true, admissionCurrent: true, qualifiedLevels: [.assist, .auto, .backup])
     }
     private func authority(_ level: DirectorAuthority.Level = .backup) -> DirectorAuthority {
-        var a = DirectorAuthority(reviewPolicy: .conservative)
+        var a = DirectorAuthority()
         a.apply(.enable(level), prerequisites: prerequisites)
         return a
     }
