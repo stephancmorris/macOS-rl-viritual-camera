@@ -9,8 +9,6 @@ permissions:
 jobs:
   gates:
     uses: ./.github/workflows/ci.yml
-    with:
-      timing: false
 
   dmg:
     name: Notarize and staple
