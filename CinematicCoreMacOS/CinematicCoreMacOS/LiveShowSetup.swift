@@ -31,6 +31,9 @@ final class LiveShowSetupModel: ObservableObject {
     let show: ShowCoordinator
     private let defaults: UserDefaults
     private let cameras: () -> [CameraManager.CameraDevice]
+    /// A supplied provider (tests, previews) stays authoritative: live
+    /// discovery on channel A then refreshes from it instead of replacing it.
+    private let usesSuppliedCameras: Bool
     private let startChannelA: @MainActor () async -> Void
     private let startChannelB: (CameraManager) -> Void
     private var cancellables = Set<AnyCancellable>()
@@ -48,6 +51,7 @@ final class LiveShowSetupModel: ObservableObject {
          startChannelB: ((CameraManager) -> Void)? = nil,
          startChannelA: @escaping @MainActor () async -> Void) {
         let defaults = defaults ?? .standard
+        self.usesSuppliedCameras = cameras != nil
         let cameras = cameras ?? { show.channelA.availableCameras }
         self.show = show
         self.defaults = defaults
@@ -92,7 +96,13 @@ final class LiveShowSetupModel: ObservableObject {
             .store(in: &cancellables)
         channelA.$availableCameras
             .dropFirst()
-            .sink { [weak self] cameras in self?.setup.updateDevices(cameras.map(Self.device)) }
+            .sink { [weak self] discovered in
+                guard let self else { return }
+                // Published sends before the new value is stored, so the
+                // default path uses the emitted list.
+                let devices = self.usesSuppliedCameras ? self.cameras() : discovered
+                self.setup.updateDevices(devices.map(Self.device))
+            }
             .store(in: &cancellables)
         // ShowCoordinator forwards only channel lifecycle changes. Deliver
         // after @Published's willSet signal so the authoritative all-channel

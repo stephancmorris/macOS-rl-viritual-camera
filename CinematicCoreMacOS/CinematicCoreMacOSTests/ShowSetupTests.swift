@@ -351,6 +351,33 @@ struct ShowSetupTests {
         return (show, live)
     }
 
+    /// SETUP-TEST-FLAKE: live discovery on channel A (a hot-plug elsewhere
+    /// on the Mac) must not replace a supplied camera list.
+    @Test func suppliedCamerasSurviveLiveRediscovery() {
+        let (show, live) = pairedLiveSetup { _ in }
+        #expect(live.setup.canStartPair)
+        let real = CameraManager.CameraDevice(id: "real", name: "MacBook Pro Camera", modelID: "builtin",
+                                              uniqueID: "real-builtin", maxResolution: "1920×1080",
+                                              supports4K: false, formatCount: 1)
+        show.channelA.setAvailableCamerasForTesting([real])
+        #expect(live.setup.canStartPair)
+        #expect(live.setup.device(for: .a)?.uniqueID == wide.uniqueID)
+        #expect(live.setup.device(for: .b)?.uniqueID == side.uniqueID)
+    }
+
+    @Test func defaultCamerasFollowLiveRediscovery() {
+        let defaults = UserDefaults(suiteName: "alfie-setup-discovery-\(UUID().uuidString)")!
+        let show = ShowCoordinator(programOutput: ProgramOutputManager(sinks: []),
+                                   admissionRecords: AdmissionRecordStore(defaults: defaults),
+                                   operatorModes: OperatorModeStore(defaults: defaults, multiviewEnabled: true))
+        let live = LiveShowSetupModel(show: show, defaults: defaults, machine: machine) { }
+        let found = CameraManager.CameraDevice(id: "found", name: "Stage wide", modelID: "fx3",
+                                               uniqueID: "found-fx3", maxResolution: "3840×2160",
+                                               supports4K: true, formatCount: 1)
+        show.channelA.setAvailableCamerasForTesting([found])
+        #expect(live.setup.devices.map(\.uniqueID) == ["found-fx3"])
+    }
+
     @Test(arguments: [
         (OperatorMode.singleCam, true), (.webcam, true),
         (.singleCam, false), (.webcam, false)
