@@ -119,7 +119,7 @@ nonisolated enum ShowStandard: String, CaseIterable, Identifiable {
 
 /// Connection-scoped acknowledgement; a reply from a retired connection cannot
 /// authorize frames on a new one.
-struct PlayoutRateHandshake {
+nonisolated struct PlayoutRateHandshake {
     private(set) var generation: UInt64 = 0
     private(set) var acknowledgedRate: Double?
     private var pendingRate: Double?

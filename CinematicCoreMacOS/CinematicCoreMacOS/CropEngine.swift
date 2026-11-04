@@ -329,7 +329,7 @@ final class CropEngine: ObservableObject {
     ///
     /// This is the single source of truth for the floor; `CinematicAgent`
     /// delegates to it.
-    struct QualityFloor: Sendable, Equatable {
+    nonisolated struct QualityFloor: Sendable, Equatable {
         /// Smallest allowed normalized crop *height* (0–1).
         var minCropHeightFraction: CGFloat
 
@@ -467,7 +467,7 @@ final class CropEngine: ObservableObject {
         }
     }
 
-    deinit {
+    isolated deinit {
         displayMirrorTimer?.invalidate()
     }
 
@@ -504,7 +504,7 @@ final class CropEngine: ObservableObject {
     /// and does not touch it again until the render returns (the capture gate
     /// keeps one frame in flight), and the box's reference keeps the capture
     /// pool from reclaiming it meanwhile.
-    private struct RenderSource: @unchecked Sendable {
+    private nonisolated struct RenderSource: @unchecked Sendable {
         let pixelBuffer: CVPixelBuffer
     }
 

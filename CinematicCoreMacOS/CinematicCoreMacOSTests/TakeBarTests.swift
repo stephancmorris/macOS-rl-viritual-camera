@@ -55,7 +55,7 @@ struct TakeBarTests {
         \Inputs.matchesShotRevision,
         \Inputs.legalGeometry,
     ])
-    func everyFailedRenderCheckReadsAsPreparing(check: WritableKeyPath<Inputs, Bool>) {
+    func everyFailedRenderCheckReadsAsPreparing(check: WritableKeyPath<Inputs, Bool> & Sendable) {
         var take = Inputs.ready
         take[keyPath: check] = false
         let availability = evaluate(take)

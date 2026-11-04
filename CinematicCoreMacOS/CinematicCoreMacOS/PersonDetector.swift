@@ -381,7 +381,7 @@ final class PersonDetector: ObservableObject {
         }
     }
 
-    deinit {
+    isolated deinit {
         displayMirrorTimer?.invalidate()
     }
     
@@ -480,7 +480,7 @@ final class PersonDetector: ObservableObject {
 
     /// `CVPixelBuffer` is not `Sendable`. Detection reads the buffer on
     /// `processingQueue` and does not write it.
-    private struct SendablePixelBuffer: @unchecked Sendable {
+    private nonisolated struct SendablePixelBuffer: @unchecked Sendable {
         let value: CVPixelBuffer
     }
 
@@ -970,13 +970,13 @@ final class PersonDetector: ObservableObject {
     // MARK: - Locked-track resolution (pure, unit-tested)
 
     /// Probation state for a discontinuous locked-track candidate.
-    struct LockProbation: Equatable {
+    nonisolated struct LockProbation: Equatable {
         var candidateBox: CGRect
         var framesAgreed: Int
     }
 
     /// Outcome of one frame of locked-track matching.
-    struct LockedResolution: Equatable {
+    nonisolated struct LockedResolution: Equatable {
         /// Detection index the lock accepted this frame; nil while coasting.
         let assignedIndex: Int?
         /// Probation state to carry into the next frame.

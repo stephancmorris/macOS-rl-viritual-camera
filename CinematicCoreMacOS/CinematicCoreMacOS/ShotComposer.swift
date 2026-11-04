@@ -22,7 +22,7 @@ import OSLog
 /// Sendable wrapper for handing a CVPixelBuffer across actor boundaries.
 /// Declared at file scope so it doesn't inherit ShotComposer's main-actor
 /// isolation — needed because `.value` is accessed from detached tasks.
-fileprivate struct SendablePixelBuffer: @unchecked Sendable {
+fileprivate nonisolated struct SendablePixelBuffer: @unchecked Sendable {
     let value: CVPixelBuffer
 }
 
@@ -176,7 +176,7 @@ final class ShotComposer: ObservableObject {
         }
     }
 
-    deinit {
+    isolated deinit {
         displayMirrorTimer?.invalidate()
     }
 
@@ -821,18 +821,30 @@ final class ShotComposer: ObservableObject {
     /// Pure non-isolated extraction worker — no `self`, so no actor
     /// isolation is inherited. Performs the Vision request and returns
     /// the print + timing for the main-actor wrapper to apply.
-    private static func runSignatureCapture(
+    /// A captured print crossing back to the main actor. Vision feature
+    /// prints are immutable after capture (see `FaceSignature`).
+    private nonisolated struct SignatureCaptureResult: @unchecked Sendable {
+        let print: VNFeaturePrintObservation?
+        let elapsedMs: Double
+    }
+
+    /// The gallery's prints handed to a detached scoring task; immutable.
+    private nonisolated struct ReferencePrints: @unchecked Sendable {
+        let entries: [(print: VNFeaturePrintObservation, landmarks: LandmarkRatios?)]
+    }
+
+    private nonisolated static func runSignatureCapture(
         extractor: FaceSignatureExtractor,
         bufferBox: SendablePixelBuffer,
         faceBox: CGRect
-    ) async -> (print: VNFeaturePrintObservation?, elapsedMs: Double) {
+    ) async -> SignatureCaptureResult {
         let started = CACurrentMediaTime()
         let print = await extractor.extractSignature(
             from: bufferBox.value,
             faceBoundingBox: faceBox
         )
         let elapsedMs = (CACurrentMediaTime() - started) * 1000
-        return (print, elapsedMs)
+        return SignatureCaptureResult(print: print, elapsedMs: elapsedMs)
     }
 
     /// Main-actor side of signature application — runs the stale-state
@@ -917,7 +929,7 @@ final class ShotComposer: ObservableObject {
         reacquisitionBatchInFlight = true
         let generation = lockGeneration
         let visibilityRevision = recoveryVisibilityRevision
-        let referenceEntries = gallery.entries.map { (print: $0.featurePrint, landmarks: $0.landmarkVector) }
+        let references = ReferencePrints(entries: gallery.entries.map { (print: $0.featurePrint, landmarks: $0.landmarkVector) })
         let bufferBox = SendablePixelBuffer(value: pixelBuffer)
         let extractor = signatureExtractor
         Task.detached(priority: .userInitiated) { [weak self] in
@@ -925,7 +937,7 @@ final class ShotComposer: ObservableObject {
             for candidate in candidates {
                 let result = await Self.runReacquisitionScoring(extractor: extractor,
                     bufferBox: bufferBox, faceBox: candidate.faceBoundingBox!,
-                    candidateLandmarks: candidate.faceLandmarkRatios, referenceEntries: referenceEntries)
+                    candidateLandmarks: candidate.faceLandmarkRatios, referenceEntries: references.entries)
                 scores.append(ReacquisitionScore(id: candidate.id,
                     printDistance: result?.printDistance, landmarkDistance: result?.landmarkDistance))
             }
@@ -946,7 +958,7 @@ final class ShotComposer: ObservableObject {
     /// print, finds the gallery entry with the lowest print distance,
     /// then returns BOTH that print distance and the landmark distance
     /// against the *same* gallery entry. No `self`.
-    private static func runReacquisitionScoring(
+    private nonisolated static func runReacquisitionScoring(
         extractor: FaceSignatureExtractor,
         bufferBox: SendablePixelBuffer,
         faceBox: CGRect,
