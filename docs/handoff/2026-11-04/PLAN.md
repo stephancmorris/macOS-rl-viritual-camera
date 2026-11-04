@@ -3,7 +3,7 @@
 Order (rev 2, after Claude's second pass): **Claude (done) → Sol 6.1 → Gemini Argon → Grok 4.7 → Claude** (after the 12:20 reset).
 Each agent finishes its group, merges to `main`, then writes the next agent's prompt from this plan.
 
-## State of main at handoff (rev 2)
+## Claude's starting handoff (rev 2; see Sol results below)
 
 Claude merged 11 PRs on 4 November:
 
@@ -21,7 +21,7 @@ Claude merged 11 PRs on 4 November:
 | #94 | GUIDE-RENDERS: 7 labelled synthetic figures in the user guide | 1,172, 0 failed |
 | #95 | RELEASE-CHECK: Release build succeeds; 3 isolation warnings fixed; fingerprint note | 1,170, 0 failed |
 
-Every number is an unsigned local run: 4 opt-in skips each time, and none of it is GitHub Actions. Still open on GitHub: #29 (CI draft, Sol's group).
+At Claude's handoff, every number above was an unsigned local run with 4 opt-in skips; none was GitHub Actions evidence. The only open PR then was #29 (CI draft, Sol's group). See Sol results below for the newer main and hosted CI evidence.
 
 ## Groups (rev 2; all cards are in 🤖 Agent Queue)
 
@@ -29,7 +29,7 @@ Every number is an unsigned local run: 4 opt-in skips each time, and none of it 
 |---|---|---|---|
 | S | Sol 6.1 | [CI-GATES](https://trello.com/c/D2VGtAGU) | finish PR #29 (GitHub Actions) |
 | S | Sol 6.1 | [WORKLOAD-INSPECTOR](https://trello.com/c/CWN4G0nA) | small read-only UI |
-| G | Gemini Argon | [PR-REVIEW-1104](https://trello.com/c/0U0ZMxZl) | independent review of #85–#95 and Sol's PRs; fix confirmed findings |
+| G | Gemini Argon | [PR-REVIEW-1104](https://trello.com/c/0U0ZMxZl) | independent review of #85–#96 and Sol's PRs; fix confirmed findings |
 | K | Grok 4.7 | [RIG-RUNBOOK-UPDATE](https://trello.com/c/SS7mZhnQ) | docs |
 | K | Grok 4.7 | Review Argon's fixes | the same rules as PR-REVIEW, applied to Argon's PRs |
 
@@ -70,3 +70,11 @@ Each card holds its full scope and "done when". An agent that finishes early may
 7. **PR** per card with what changed, why, tests and verification totals. End the PR body with your agent's attribution line. Merge with a merge commit once the full suite is green. Don't force-push `main` or rewrite others' branches.
 8. **Trello** (Alfie Coding Board): comment on the card with the PR link, the merge commit and the test totals, then move it to 👀 Human Review. Never move a card to ✅ Done, and never mark a rig, release, privacy or qualification gate as passed from software tests.
 9. **Handoff:** when your group is done, write `docs/handoff/2026-11-04/<NEXT-AGENT>.md`. Base it on this plan and on `SOL-6.1.md` as the template: update the "state of main", add your results, and note anything the next agent must know. Commit it to main. Then tell the owner the prompt to paste (one line pointing at that file).
+
+
+## Sol results (4 November 2026)
+
+- **CI-GATES:** [PR #29](https://github.com/stephancmorris/macOS-rl-viritual-camera/pull/29), merge `2ecd621d7f7bb25bf89bce0196b114195b745e48`. Hosted Xcode 26.2 [CI passed](https://github.com/stephancmorris/macOS-rl-viritual-camera/actions/runs/41747416904): 1,172 Swift tests, 0 failed, 4 opt-in skips, plus 127 Python report and 16 Director dataset/training tests. The [first main run also passed](https://github.com/stephancmorris/macOS-rl-viritual-camera/actions/runs/41748495747). Fresh unsigned Debug/Release builds, bounded tests, xcresult/summary upload and consistency checks are active. Fixed the pre-existing gallery host shrinking its 1000 pt canvas to 989 pt; no tests or size assertions were dropped. README CI paragraph added. Signing/notarization/Store workflows remain manual unconfigured placeholders; no credentials or branch-protection changes.
+- **WORKLOAD-INSPECTOR:** [PR #97](https://github.com/stephancmorris/macOS-rl-viritual-camera/pull/97), merge `3f92f72e76cd428ba7e32e73fe5335c26ce7fa6e`. Read-only Workload level and latest-transition reasons inside the existing 2 Hz Inspector timeline; nil policy hides it. VoiceOver label/value, six-level/nine-reason copy tests, recovery/persistence and 1280 pt disabled/enabled render evidence in `reports/workload-inspector-2026-11/README.md`. Default flags, frame publishing, routing, Take and qualification behavior are unchanged.
+- **Current source main:** `3f92f72e76cd428ba7e32e73fe5335c26ce7fa6e`, before this documentation-only handoff. Full local Xcode 27.1 and [hosted Xcode 26.2 CI](https://github.com/stephancmorris/macOS-rl-viritual-camera/actions/runs/41748905461): **1,179 Swift tests, 1,175 passed, 0 failed, 4 opt-in skips**, plus **127 + 16 Python tests passed**. Unsigned Release passed. The local Xcode 26.x assumption was stale: local is 27.1 (27A9275), CI pins 26.2 (17C52), documented in `docs/ci/README.md`.
+- Both Sol cards are in **👀 Human Review**, never Done. **No carry-over.** Gemini Argon's prompt is [ARGON.md](ARGON.md): independently review #85–#96, #29 and #97, report severity/file:line/reproduction and fix confirmed findings with tests. All owner/rig decisions and gates above remain open.
