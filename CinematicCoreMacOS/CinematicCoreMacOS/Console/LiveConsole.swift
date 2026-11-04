@@ -139,7 +139,7 @@ final class LiveConsoleModel: ObservableObject, ConsoleActions {
     func startRefreshing() {
         stopRefreshing()
         let timer = Timer(timeInterval: Self.refreshInterval, repeats: true) { [weak self] _ in
-            MainActor.assumeIsolated { self?.refresh() }
+            MainActor.assumeIsolated { self?.timerTick() }
         }
         RunLoop.main.add(timer, forMode: .common)
         self.timer = timer
@@ -159,11 +159,17 @@ final class LiveConsoleModel: ObservableObject, ConsoleActions {
 
     private var refreshTick = 0
 
-    func refresh() {
-        // DEGRADE-MODEL: under sustained pressure skip every other refresh
-        // (15 → 7.5 Hz). Program and Take don't depend on this view.
+    /// The periodic refresh. DEGRADE-MODEL: under sustained pressure skip
+    /// every other tick (15 → 7.5 Hz). Program and Take don't depend on this
+    /// view. Only the timer is thinned: a refresh an operator action asks
+    /// for (Take, Edit Live, pane view, Advance) always runs.
+    func timerTick() {
         refreshTick &+= 1
         if show.reducesOptionalUI, refreshTick % 2 == 0 { return }
+        refresh()
+    }
+
+    func refresh() {
         updateRates()
         measurePairIfUnmeasured()
         logConsoleStatsIfDue()
