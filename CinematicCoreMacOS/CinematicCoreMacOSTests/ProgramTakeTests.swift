@@ -38,6 +38,7 @@ private final class TakeFakeSink: ProgramOutputSink {
 struct ProgramTakeTests {
     private final class Clock { var now: TimeInterval = 1000 }
 
+    @MainActor
     private struct Rig {
         let show: ShowCoordinator
         let sink: TakeFakeSink
