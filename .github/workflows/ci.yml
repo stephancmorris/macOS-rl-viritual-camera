@@ -1,0 +1,110 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+  workflow_call:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  test:
+    name: Build and unit tests
+    runs-on: macos-26
+    timeout-minutes: 60
+    env:
+      DEVELOPER_DIR: /Applications/Xcode_26.2.app/Contents/Developer
+    steps:
+      - name: Checkout
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Toolchain
+        run: |
+          xcodebuild -version
+          python3 --version
+
+      - name: Build for testing (app and extension, unsigned)
+        run: >
+          xcodebuild build-for-testing
+          -project CinematicCoreMacOS/CinematicCoreMacOS.xcodeproj
+          -scheme CinematicCoreMacOS
+          -configuration Debug
+          -destination 'platform=macOS'
+          -derivedDataPath "${{ runner.temp }}/AlfieDerivedData"
+          CODE_SIGNING_ALLOWED=NO
+
+      - name: Unit tests
+        id: tests
+        timeout-minutes: 50
+        run: >
+          perl -e 'alarm 2700; exec @ARGV' xcodebuild test-without-building
+          -project CinematicCoreMacOS/CinematicCoreMacOS.xcodeproj
+          -scheme CinematicCoreMacOS
+          -destination 'platform=macOS'
+          -derivedDataPath "${{ runner.temp }}/AlfieDerivedData"
+          -only-testing:CinematicCoreMacOSTests
+          -resultBundlePath "${{ runner.temp }}/unit.xcresult"
+          CODE_SIGNING_ALLOWED=NO
+
+      - name: Test summary
+        if: ${{ always() && steps.tests.outcome != 'skipped' }}
+        env:
+          RESULT_PATH: ${{ runner.temp }}/unit.xcresult
+        run: |
+          if [[ -d "$RESULT_PATH" ]]; then
+            xcrun xcresulttool get test-results summary --path "$RESULT_PATH" | tee "${{ runner.temp }}/unit-summary.json"
+            python3 - <<'PY'
+          import json, os
+          from pathlib import Path
+          summary = json.loads(Path(os.environ['RUNNER_TEMP'], 'unit-summary.json').read_text())
+          with open(os.environ['GITHUB_STEP_SUMMARY'], 'a') as output:
+              output.write('## Swift unit tests\n\n')
+              for key in ('result', 'totalTestCount', 'passedTests', 'failedTests', 'skippedTests'):
+                  output.write(f"- {key}: {summary.get(key, 'unavailable')}\n")
+          PY
+          fi
+
+      - name: Upload test results
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: unit-xcresult
+          path: |
+            ${{ runner.temp }}/unit.xcresult
+            ${{ runner.temp }}/unit-summary.json
+          if-no-files-found: warn
+          retention-days: 14
+
+      - name: Diagnostics and Director report tests
+        working-directory: CinematicCoreMacOS/scripts
+        run: python3 -m unittest
+
+      - name: Director dataset and training tests
+        working-directory: training
+        run: python3 -m unittest discover -p 'test_director_*.py'
+
+      - name: Release build (unsigned)
+        run: >
+          xcodebuild build
+          -project CinematicCoreMacOS/CinematicCoreMacOS.xcodeproj
+          -scheme CinematicCoreMacOS
+          -configuration Release
+          -destination 'platform=macOS'
+          -derivedDataPath "${{ runner.temp }}/AlfieReleaseDerivedData"
+          CODE_SIGNING_ALLOWED=NO
+
+      - name: Consistency
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.before }}
+          ALLOW_ENTITLEMENT_CHANGE: ${{ contains(github.event.pull_request.labels.*.name, 'allow-entitlement-change') && '1' || '0' }}
+        run: bash scripts/ci/check_consistency.sh

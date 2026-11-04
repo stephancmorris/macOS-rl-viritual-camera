@@ -35,6 +35,10 @@ Session diagnostics are automatic. The separate [explicit metrics exporter](docs
 
 The [subject-tools software report](reports/auto-director/subject-tools-2026-10-21/README.md) and [execution-boundary report](reports/auto-director/execution-sinks-2026-10-21/README.md) describe the preceding Director candidate evidence. Current PRIVACY/DOCS software changes need human review; live permission/install/output and operator walkthrough acceptance remain open.
 
+## CI
+
+[GitHub Actions CI](.github/workflows/ci.yml) runs on pull requests and pushes to `main` using the macOS 26 runner and Xcode 26.2 (17C52). It builds the app and CMIO extension unsigned with `build-for-testing`, runs the full Swift unit suite using `test-without-building`, uploads the `.xcresult` and test summary, runs the Python diagnostics/Director report and Director dataset/training tests, and checks the unsigned Release build and project consistency. The job has a 60-minute limit and the test process a 45-minute alarm. Signing, notarization and App Store workflows remain manual, unconfigured placeholders; branch protection is the owner's decision. See [CI setup and local commands](docs/ci/README.md).
+
 ## License
 
 Proprietary / Internal Use Only
