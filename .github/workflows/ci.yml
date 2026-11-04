@@ -62,7 +62,7 @@ jobs:
           RESULT_PATH: ${{ runner.temp }}/unit.xcresult
         run: |
           if [[ -d "$RESULT_PATH" ]]; then
-            xcrun xcresulttool get test-results summary --path "$RESULT_PATH" > "${{ runner.temp }}/unit-summary.json"
+            xcrun xcresulttool get test-results summary --path "$RESULT_PATH" | tee "${{ runner.temp }}/unit-summary.json"
             python3 - <<'PY'
           import json, os
           from pathlib import Path
