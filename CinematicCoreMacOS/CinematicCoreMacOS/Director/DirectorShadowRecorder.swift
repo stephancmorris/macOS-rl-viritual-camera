@@ -397,7 +397,7 @@ final class DirectorShadowRecorder {
             reasons: [reason], actionID: nil, action: nil, phase: nil, targetScope: nil, outcome: nil,
             programAfter: nil, previewAfter: nil)
     }
-    private static func alias(_ id: ChannelID) -> String {
+    private nonisolated static func alias(_ id: ChannelID) -> String {
         "input-\((ChannelID.allCases.firstIndex(of: id) ?? 0) + 1)"
     }
     static func command(_ command: OperatorCommand, outcome: R.ActionOutcome? = nil) -> R.Event {
