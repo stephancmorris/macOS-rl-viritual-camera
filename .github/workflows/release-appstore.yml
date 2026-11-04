@@ -1,0 +1,49 @@
+name: App Store validate
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  gates:
+    uses: ./.github/workflows/ci.yml
+    with:
+      timing: false
+
+  validate:
+    name: Validate only
+    needs: gates
+    runs-on: macos-26
+    environment: appstore
+    timeout-minutes: 90
+    steps:
+      - name: Checkout
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+
+      - name: Stop before upload
+        env:
+          KEY_ID: ${{ secrets.APPLE_API_KEY_ID }}
+          ISSUER: ${{ secrets.APPLE_API_ISSUER_ID }}
+          P8: ${{ secrets.APPLE_API_KEY_P8 }}
+          CERT: ${{ secrets.APPLE_DISTRIBUTION_P12 }}
+          CERT_PASSWORD: ${{ secrets.APPLE_DISTRIBUTION_PASSWORD }}
+          APP_PROFILE: ${{ secrets.MACOS_APPSTORE_PROFILE }}
+          EXT_PROFILE: ${{ secrets.MACOS_APPSTORE_EXTENSION_PROFILE }}
+        run: |
+          echo "Upload and TestFlight are not enabled."
+          echo "StoreKit, a basic tier and a paid tier are AWAITING OWNER."
+          missing=0
+          for name in KEY_ID ISSUER P8 CERT CERT_PASSWORD APP_PROFILE EXT_PROFILE; do
+            if [[ -z "${!name}" ]]; then
+              echo "missing secret ${name}" >&2
+              missing=1
+            fi
+          done
+          if [[ "$missing" != 0 ]]; then
+            echo "App Store validation is not configured. See docs/ci/README.md." >&2
+            exit 1
+          fi
+          echo "Secrets are present, but this workflow still does not upload."
+          exit 1
