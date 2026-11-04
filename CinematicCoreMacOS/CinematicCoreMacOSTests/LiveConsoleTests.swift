@@ -29,6 +29,26 @@ struct LiveConsoleTests {
         LiveConsoleSnapshot.make(show: show, paneView: .shot, rates: rates, note: nil)
     }
 
+    /// PR-REVIEW-1104: under workload pressure only the periodic refresh is
+    /// thinned; an operator action's own refresh always runs.
+    @Test func reducedWorkloadNeverDropsAnActionsRefresh() {
+        let defaults = UserDefaults(suiteName: "alfie-live-workload-\(UUID().uuidString)")!
+        let show = ShowCoordinator(programOutput: ProgramOutputManager(sinks: []),
+                                   admissionRecords: AdmissionRecordStore(defaults: defaults),
+                                   operatorModes: OperatorModeStore(defaults: defaults, multiviewEnabled: true),
+                                   workloadPolicyEnabled: true)
+        var pressure = DegradePolicy.Window(); pressure.cpuFraction = 0.95; pressure.candidateAgeSeconds = 0.05
+        for _ in 0..<3 { show.applyWorkloadWindow(pressure) }
+        #expect(show.reducesOptionalUI)
+        let model = LiveConsoleModel(show: show)
+
+        // Every action refresh lands, whatever the tick parity.
+        for view in [ConsoleSnapshot.PaneView.source, .shot, .source, .shot] {
+            model.setPaneView(view)
+            #expect(model.snapshot.paneView == view)
+        }
+    }
+
     @Test func singleInputShowsProgramOnlyWithNoPreview() {
         let show = show()
         show.channelA.setRunningForTesting(true)
