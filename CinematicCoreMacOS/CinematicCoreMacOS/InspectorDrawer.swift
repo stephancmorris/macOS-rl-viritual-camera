@@ -89,6 +89,9 @@ struct InspectorDrawer: View {
                     .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
+            // VoiceOver would otherwise read the symbol name.
+            .accessibilityLabel(InspectorHandle.accessibilityLabel(isOpen: true))
+            .help(InspectorHandle.accessibilityLabel(isOpen: true))
         }
         .padding(.horizontal, 22)
         .padding(.top, 18)
@@ -697,6 +700,12 @@ struct SetupCheckSection: View {
 struct InspectorHandle: View {
     @Binding var isOpen: Bool
 
+    /// What VoiceOver and the tooltip say. The visible face is "⌥", which
+    /// VoiceOver would otherwise read as "option".
+    nonisolated static func accessibilityLabel(isOpen: Bool) -> String {
+        isOpen ? "Close Inspector" : "Open Inspector"
+    }
+
     var body: some View {
         Button {
             withAnimation(.easeInOut(duration: 0.36)) { isOpen.toggle() }
@@ -720,6 +729,8 @@ struct InspectorHandle: View {
                 .shadow(color: .black.opacity(0.4), radius: 12, y: 4)
         }
         .buttonStyle(.plain)
+        .accessibilityLabel(Self.accessibilityLabel(isOpen: isOpen))
+        .help(Self.accessibilityLabel(isOpen: isOpen))
     }
 }
 
