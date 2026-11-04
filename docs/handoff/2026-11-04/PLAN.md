@@ -85,3 +85,11 @@ Each card holds its full scope and "done when". An agent that finishes early may
 The owner requested a complete handoff prompt for **Claude Opus 5.5** after Sol finished. [CLAUDE-OPUS-5.5.md](CLAUDE-OPUS-5.5.md) is the active next-agent prompt and replaces the Argon session assignment, without expanding the review card's scope. `ARGON.md` remains historical context. PR-REVIEW-1104 was still in Agent Queue and there were no open PRs when this update was prepared. Grok's runbook card and subsequent review of the review-fix PR remain next.
 
 Verified starting main is `8c9f43833b171faa00b3ceadb672e97370e28479`: [final main CI passed](https://github.com/stephancmorris/macOS-rl-viritual-camera/actions/runs/41750126842), with 1,179 Swift tests (1,175 passed, 0 failed, 4 opt-in skips), 127 Python report tests and 16 Director training tests passed, plus unsigned Debug/Release and consistency. This prompt update changes documentation only; it does not claim a fresh software or hardware qualification.
+
+## Claude Opus 5.5 results (4 November 2026)
+
+- **PR-REVIEW-1104:** [PR #98](https://github.com/stephancmorris/macOS-rl-viritual-camera/pull/98), merge `3d7f4712154f5c9a8683dc89b1a7cdc317875a2d`. Reviewed #85–#96, #29 and #97 at `823a0c3`; report in `reports/pr-review-2026-11-04/README.md`.
+  - One confirmed low-severity defect, fixed with a regression test. F1: under workload pressure the console dropped action-driven refreshes; only timer ticks are thinned now.
+  - Two concerns disproved; three recorded and not fixed (a #92 calibration question, the first CPU sample, the #97 copy).
+- **Verification:** local Xcode 27.1 and hosted Xcode 26.2 CI on the PR head: **1,180 Swift tests, 1,176 passed, 0 failed, 4 opt-in skips**. Python: 127 + 16 passed.
+- The card is in 👀 Human Review. No carry-over. Next: [GROK-4.7.md](GROK-4.7.md), which covers RIG-RUNBOOK-UPDATE and an independent review of F1.
