@@ -1186,6 +1186,8 @@ final class CameraManager: NSObject, ObservableObject {
     #if DEBUG
     /// Test seam: lets unit tests exercise command admission without a camera.
     func setRunningForTesting(_ running: Bool) { isRunning = running }
+    /// Test seam: discovery results as if `discoverCameras()` had run.
+    func setAvailableCamerasForTesting(_ cameras: [CameraDevice]) { availableCameras = cameras }
     /// Raw synthetic perception only. Actual subject, revisions, geometry,
     /// observation age and current host time still come from this channel.
     struct DirectorPerceptionForTesting {
