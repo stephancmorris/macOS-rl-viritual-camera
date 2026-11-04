@@ -17,7 +17,7 @@ There is no unfinished agent card. Grok's review and the optional gallery card a
 ## State of main when you start
 
 - Main is at **`3b71903`** (merge of PR #110, the gallery captures), on top of **`086ff74`** (merge of PR #109, the review). Fetch and check the actual HEAD and its CI: `gh run list --branch main --limit 3`.
-- The gallery merge's main CI was still running when this file was written: [run 41783290384](https://github.com/stephancmorris/macOS-rl-viritual-camera/actions/runs/41783290384). Confirm it passed. The review merge's [main CI passed](https://github.com/stephancmorris/macOS-rl-viritual-camera/actions/runs/41781006486).
+- [Main CI on `3b71903`](https://github.com/stephancmorris/macOS-rl-viritual-camera/actions/runs/41783290384) passed, and the review merge's [main CI passed](https://github.com/stephancmorris/macOS-rl-viritual-camera/actions/runs/41781006486). This handoff is docs on top of that. Confirm the handoff merge's own main CI before treating the new HEAD as green.
 - Local Xcode 27.1, unsigned, serial full suite on the gallery branch: **1,188 tests, 1,184 passed, 0 failed, 4 opt-in skips**. Python: 127 + 16 passed. Hosted Xcode 26.2 CI passed on PR #109 and PR #110 before merge.
 - A parallel local run can still hit the existing one-minute limit on `DirectorSubjectDiscoveryIntegrationTests` (`cancellingDiscoveryWaiterPreservesRenderWaiterAndRunningPermits`, `detectorExecutorSkipsRetiredPendingCallAndRejectsRunningCompletion`). Those 7 tests pass alone in a few seconds, and hosted CI's parallel run passed. Do not treat one local timeout as a new product bug.
 - **No open PRs** and an empty 🤖 Agent Queue when this handoff was written. Confirm the queue before assuming that is still true.
@@ -39,7 +39,7 @@ Review conclusions Claude should not reopen:
 
 ## Your work
 
-1. Fetch `origin/main` and confirm HEAD and the latest main CI. If the gallery main run is still going, wait for it. If it failed, fix only that failure.
+1. Fetch `origin/main` and confirm HEAD and the latest main CI. `3b71903` was already green. If a later main run failed, fix only that failure.
 2. Read the Agent Queue. If it is still empty, stop. Tell the owner that the remaining work is the owner and rig list in `PLAN.md`, and do not start it.
 3. If the owner has added a card to Agent Queue since this file was written, do that card under the rules in `PLAN.md`. One PR per card. Merge with a merge commit after the full suite and hosted CI are green. Comment the PR link, merge SHA and exact totals, then move the card to 👀 Human Review. Never to ✅ Done.
 
