@@ -1,64 +1,56 @@
-# Grok 4.7: Alfie handoff (4 November 2026)
+# Grok 4.7: Alfie handoff (4 November 2026, rev 2)
 
 You are **Grok 4.7**, taking over from **Claude Opus 5.5** on **Alfie**, a macOS camera app for live events. Alfie auto-frames stage cameras and sends **one Program feed** through a CMIO virtual-camera extension or direct HDMI/USB-C output. It has three operator modes: **Single Cam**, **Multi Cam** (Preview/Program Multiview with Take; two running inputs ship now) and **Webcam**. The Debug-only Auto Director's effects are gated by qualification records, and Release disables Director execution.
 
 The relay so far: Claude → Sol 6.1 → Claude Opus 5.5 → **you** → Claude.
 
+**What changed since rev 1.** Claude Opus 5.5 had budget left and did your original card, RIG-RUNBOOK-UPDATE (PR #100), plus six small owner-free cards. **Your job is now one thing: an independent review of everything Claude Opus 5.5 merged on 4 November.** Claude reviewed its own work only as the author; that is not an independent review.
+
 ## Repository and tools
 
 - Repository: `/Users/stephanmorris/Documents/macOS-rl-viritual-camera`. GitHub: `stephancmorris/macOS-rl-viritual-camera` (use the `gh` CLI).
 - Xcode project `CinematicCoreMacOS/CinematicCoreMacOS.xcodeproj`, scheme `CinematicCoreMacOS`. Test target `CinematicCoreMacOSTests` (Swift Testing, `@testable import Alfie`).
-- Trello: **Alfie Coding Board**. The lists are 🤖 Agent Queue → 👀 Human Review. Never move a card to ✅ Done.
+- Trello: **Alfie Coding Board**. The lists are 🤖 Agent Queue → 🚧 In Progress → 👀 Human Review. Never move a card to ✅ Done.
 - Read `docs/handoff/2026-11-04/PLAN.md` (rules, owner-only work) and `docs/ALFIE_MULTICAMERA_SPEC.md` (Operator modes, lifecycle).
-- Work in your own fresh worktree from `origin/main`. Never edit the owner's checkout, another agent's worktree, `.claude/`, `research_notes/` or other untracked owner files.
+- Work in your own fresh worktree from `origin/main`. Never edit the owner's checkout, another agent's worktree (Claude's are under `/private/tmp/alfie-*`), `.claude/`, `research_notes/` or other untracked owner files.
 
 ## State of main when you start
 
-- Main is at **`3d7f471`** (merge of PR #98), plus this documentation-only handoff on top. Fetch and check the actual HEAD.
-- Hosted CI on PR #98's head (Xcode 26.2, `macos-26`): **1,180 Swift tests, 1,176 passed, 0 failed, 4 opt-in skips** (xcresult declaration counts). The Release build and consistency checks passed.
-- Locally on Xcode 27.1 (27A9275): the same 1,180 / 1,176 / 0 / 4. Python: 127 diagnostics/Director report tests and 16 Director dataset/training tests passed.
-- Check main's CI run for `3d7f471` and this commit: `gh run list --branch main --limit 3`.
+- Main's code is at **`3349cd0`** (merge of PR #105), plus this documentation-only handoff on top. Fetch and check the actual HEAD and its CI: `gh run list --branch main --limit 3`.
+- [Main CI on `3349cd0`](https://github.com/stephancmorris/macOS-rl-viritual-camera/actions/runs/41763826300) (hosted Xcode 26.2): **1,183 Swift tests, 1,179 passed, 0 failed, 4 opt-in skips**, plus the unsigned Release build. Hosted CI also passed on every PR below before merge. Python: 127 diagnostics/Director report tests and 16 Director dataset/training tests passed.
+- A clean Debug build-for-testing has **0 Swift warnings** in app and test sources. The remaining CMIO placement and AppIntents tool warnings are expected.
 - **No open PRs** at handoff and no unfinished Claude Opus 5.5 work.
 
-## What Claude Opus 5.5 did
+## What Claude Opus 5.5 merged (review all of these)
 
-[PR #98](https://github.com/stephancmorris/macOS-rl-viritual-camera/pull/98), merge `3d7f4712154f5c9a8683dc89b1a7cdc317875a2d`, card [PR-REVIEW-1104](https://trello.com/c/0U0ZMxZl), now in 👀 Human Review.
+| PR | Card | Merge | What |
+|---|---|---|---|
+| [#98](https://github.com/stephancmorris/macOS-rl-viritual-camera/pull/98) | [PR-REVIEW-1104](https://trello.com/c/0U0ZMxZl) | `3d7f471` | Review of #85–#96, #29, #97. **F1 fix:** `LiveConsoleModel.timerTick()` thins only timer refreshes under workload pressure; `refresh()` always runs. Test `LiveConsoleTests.reducedWorkloadNeverDropsAnActionsRefresh`. |
+| [#99](https://github.com/stephancmorris/macOS-rl-viritual-camera/pull/99) | | `4db9295` | Handoff rev 1 (docs). |
+| [#100](https://github.com/stephancmorris/macOS-rl-viritual-camera/pull/100) | [RIG-RUNBOOK-UPDATE](https://trello.com/c/SS7mZhnQ) | `1dd3dc1` | `reports/director-study-evidence-2026-10-22/next-group.md`: "What changed since 22 October", 12-step MODE-QA checklist, PAN-EASE replay step, workload notes, `build_release.sh` candidate setup. Procedure only. |
+| [#101](https://github.com/stephancmorris/macOS-rl-viritual-camera/pull/101) | [ISOLATION-WARNINGS](https://trello.com/c/88MKLWt4) | `c8c3e34` | 71 → 0 Swift warnings: `nonisolated` on `FramingCapability.Reason` and `CropEngine.CropRect`; `@MainActor` on the `ProgramTakeTests.Rig` helper. |
+| [#102](https://github.com/stephancmorris/macOS-rl-viritual-camera/pull/102) | [SPEC-TRUTH](https://trello.com/c/71EkTIfa) | `0e6f6fd` | `docs/ALFIE_MULTICAMERA_SPEC.md`: picker location and camera-based availability, first-frame rule implemented (#86), degraded-operation note. Docs only. |
+| [#103](https://github.com/stephancmorris/macOS-rl-viritual-camera/pull/103) | [A11Y-INSPECTOR](https://trello.com/c/CfoiPs0x) | `15d012e` | `InspectorDrawer`: "Open Inspector" / "Close Inspector" accessibility labels and tooltips on the "⌥" handle and chevron close button. Test file `InspectorAccessibilityTests.swift`. |
+| [#104](https://github.com/stephancmorris/macOS-rl-viritual-camera/pull/104) | [SWIFT6-READINESS](https://trello.com/c/zkEGV4H4) | `5d435c2` | Compiles under `SWIFT_VERSION=6`; project setting stays Swift 5. `nonisolated` boxes and pure types, `isolated deinit` in ShotComposer/CropEngine/PersonDetector, `nonisolated static` signature workers with `@unchecked Sendable` result boxes. Report `reports/swift6-readiness-2026-11/README.md`. |
+| [#105](https://github.com/stephancmorris/macOS-rl-viritual-camera/pull/105) | [SETUP-TEST-FLAKE](https://trello.com/c/iHwZAJGm) | `3349cd0` | `LiveShowSetupModel` keeps a supplied camera provider authoritative over live rediscovery (a hot-plug overwrote test fixtures). DEBUG seam `CameraManager.setAvailableCamerasForTesting`. Tests `suppliedCamerasSurviveLiveRediscovery`, `defaultCamerasFollowLiveRediscovery`. |
 
-- Reviewed #85–#96, #29 and #97 at main `823a0c3`. The report is `reports/pr-review-2026-11-04/README.md`.
-- **F1 (low, confirmed, fixed):** with `DeveloperFlags.runtimeWorkloadPolicy` on and the level at `optionalUI` or above, the Multiview console skipped every other `refresh()`. That included the immediate refreshes Take, Edit Live, pane view and Advance ask for. The skip now lives in `LiveConsoleModel.timerTick()` (`Console/LiveConsole.swift`), and `refresh()` always runs. Regression test: `LiveConsoleTests.reducedWorkloadNeverDropsAnActionsRefresh`. It failed on the old code and passes now.
-- **Disproved:**
-  - #86, that a route change could strand Cam B: the session route is frozen while capture runs.
-  - #92, that pacing repeats count as misses: only HOLD and standby repeat.
-- **Recorded, not fixed:**
-  - #92's miss fraction under-reports frames that are never produced (a MULTI-QA calibration question).
-  - The first CPU sample spans the time since launch.
-  - #97's "Recovering after pressure" text stays shown after recovery (the owner's copy call).
+## Your work: CLAUDE-REVIEW-1104
 
-## Your work
+Card: [CLAUDE-REVIEW-1104](https://trello.com/c/C9cMNLBm), in 🤖 Agent Queue. Read the live card first. Move it to 🚧 In Progress when you start and to 👀 Human Review when merged. Use the same standard as `reports/pr-review-2026-11-04/README.md`: every finding gets severity, file:line, a reproduction, and either a fix with a regression test or a reason it is not fixed. **Don't manufacture findings.** "No finding" is a valid result for a PR.
 
-### 1. RIG-RUNBOOK-UPDATE (https://trello.com/c/SS7mZhnQ)
+Write your report to `reports/claude-review-2026-11-04/README.md`, with a per-PR table like the existing review's.
 
-Read the live card first and follow it, not this summary. As of handoff it asks:
+Questions worth answering, in priority order:
 
-- Update the attended rig runbook from commit `30ec212` ("Prepare the next attended rig validation group"; `git show 30ec212 --stat` shows the files), and MODE-QA's checklist, so each step says what to look for now. That covers:
-  - the three modes, and the mode picker on the stopped screens;
-  - the refusal when leaving Multi Cam;
-  - Cam B waiting for Cam A's first accepted frame, with the console note (#86);
-  - the run-sheet Current marker (#89);
-  - the eased pan and workload flags, both off by default (#91, #92), and how to turn them on in a Debug build.
-- Add a PAN-EASE replay step: record constant and eased sweeps at each speed, compare them against `reports/pan-ease-2026-11/*.csv`, and note the owner's verdict.
-- Make no claims of results; the runbook is a procedure.
-- **Done when:** the runbook is merged, and [MODE-QA](https://trello.com/c/bHd5ACBW) has a comment linking it.
-
-### 2. Independently review Claude Opus 5.5's fix (PR #98)
-
-Claude reviewed its own fix only as its author; that is **not** an independent review. Apply the same standard as PR-REVIEW-1104 to F1's change and test:
-
-- Can `timerTick()` and the action refreshes still interleave badly?
-- Is anything else that depends on refresh parity broken?
-- Does the test truly fail without the fix?
-
-Record your result in `reports/pr-review-2026-11-04/README.md` under a new "Independent review of F1 (Grok 4.7)" section. Fix any confirmed defect with a regression test. Don't manufacture findings.
+1. **#104, Swift 6 readiness (highest risk).**
+   - `isolated deinit` now invalidates each 15 Hz UI-mirror `Timer` on the main actor. Can any of the three objects be released off the main actor, and does `isolated deinit` then defer teardown in a way that matters (a frame callback firing on a half-torn-down object)?
+   - `ShotComposer.runSignatureCapture` / `runReacquisitionScoring` are now `nonisolated static`. Check every value they read or return. Is `@unchecked Sendable` on `SignatureCaptureResult` and `ReferencePrints` justified (are the Vision prints really never mutated after capture)?
+   - `FaceSignatureExtractor` is now `nonisolated`. Confirm nothing in it touches main-actor state.
+   - Optional: build with `SWIFT_VERSION=6` yourself and confirm it still succeeds on main.
+2. **#105, setup flake.** In the app, `cameras` is never supplied, so the production path should be unchanged. Confirm that. Is there any preview or caller that supplies `cameras` and expects live discovery to replace it?
+3. **#98, F1.** Can `timerTick()` and action refreshes still interleave badly? Does anything else depend on refresh parity? Does the test truly fail without the fix (revert the fix locally and run it)?
+4. **#101, #103.** Quick checks: no behaviour change in #101; the #103 labels match the visible state.
+5. **#100, #102 (docs).** Spot-check claims against the source: the MODE-QA checklist steps, the mode-picker location, the availability rules, and the degraded-operation note. Fix wrong copy in the same PR.
 
 ## Build and test
 
@@ -75,27 +67,31 @@ xcrun xcresulttool get test-results summary --path "$A/unit.xcresult"
 (cd training && python3 -m unittest discover -p 'test_director_*.py')
 ```
 
-Always use the time limit. In zsh, pass multiple `-only-testing:` flags as an array. Docs-only changes still need hosted CI green before merging.
+- For the Swift 6 check, add `SWIFT_VERSION=6` to the build-for-testing line and use a separate DerivedData path.
+- Always use the time limit. In zsh, pass multiple `-only-testing:` flags as an array.
+- Docs-only changes still need hosted CI green before merging.
 
 ## Rules and hard limits
 
 - One PR per card, ending with your agent attribution line. Merge with a merge commit after the full suite and hosted CI are green. Never force-push `main` or rewrite another agent's branch. Leave branch protection unchanged.
 - Comment the PR link, merge SHA and exact totals on each card, then move it to 👀 Human Review.
 - Don't change Director authority levels, qualification records or `DeveloperFlags` release behaviour. Never add an automatic Take path. Keep the eased pan and workload policy off by default.
+- **Don't switch the project to Swift 6** (`SWIFT_VERSION` stays 5.0) and don't add a Swift 6 CI job. Both are owner decisions; see `reports/swift6-readiness-2026-11/README.md`.
 - Never certify a rig, release, privacy review or qualification gate from software tests.
 - Owner-only work stays with the owner:
-  - Human Review triage
-  - the T2, P3, A2/A4 and T1/T3 decisions
-  - the G-02…G-08 sign-offs
-  - approving the eased pan
-  - DegradePolicy calibration
-  - Single Cam Director placement
+  - Human Review triage;
+  - the T2, P3, A2/A4 and T1/T3 decisions;
+  - the G-02…G-08 sign-offs;
+  - approving the eased pan;
+  - DegradePolicy calibration, and the C1–C3 notes from PR-REVIEW-1104;
+  - Single Cam Director placement;
+  - the Swift 6 switch;
   - the MODE-QA → DISPLAY-QA → ZOOM-QA → PAN-HITCH → SOAK → INSTALL rig runs.
 
 ## When you finish
 
 1. Make sure everything is merged and main is green.
-2. Write `docs/handoff/2026-11-04/CLAUDE-NEXT.md` for Claude, after the usage reset. Use this file's structure, add a "Grok results" section to `PLAN.md`, and commit both to main.
+2. Write `docs/handoff/2026-11-04/CLAUDE-NEXT.md` for Claude, after the usage reset. Use this file's structure, add a "Grok results" section to `PLAN.md`, and merge both.
 3. For anything unfinished: put it at the top of that handoff, comment on the card, and leave it in 🤖 Agent Queue.
 4. Give the owner a short summary and the prompt:
    `Read docs/handoff/2026-11-04/CLAUDE-NEXT.md in /Users/stephanmorris/Documents/macOS-rl-viritual-camera and do it.`
