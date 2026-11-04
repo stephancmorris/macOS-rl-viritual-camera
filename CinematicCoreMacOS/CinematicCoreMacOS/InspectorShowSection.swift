@@ -6,7 +6,7 @@
 //  follow-ups). The console keeps this out of the panes and the next-shot
 //  panel on purpose: roles and router state, per-input health and revisions,
 //  the Take readiness reason code, Preview freshness age, and admission
-//  reasons. Shown only while a second input exists.
+//  reasons. Workload is visible only when its developer policy is enabled.
 //
 //  - `InspectorShowDetail` is a pure value built from the live show, so the
 //    wording is unit-testable without a view.
@@ -232,6 +232,54 @@ struct InspectorShowDetail: Equatable {
     }
 }
 
+// MARK: - Workload copy
+
+/// A sampled, read-only projection. Reasons describe the latest transition,
+/// even when later windows have not yet crossed the policy's hysteresis.
+nonisolated struct InspectorWorkloadDetail: Equatable {
+    let levelText: String
+    let reasonsText: String?
+
+    init?(policy: DegradePolicy?) {
+        guard let policy else { return nil }
+        levelText = Self.levelText(policy.level)
+        let reasons = policy.transitions.last?.reasons.map(Self.reasonText) ?? []
+        reasonsText = reasons.isEmpty ? nil : reasons.joined(separator: ", ")
+    }
+
+    var accessibilityValue: String {
+        guard let reasonsText else { return levelText }
+        return "\(levelText). Last change: \(reasonsText)"
+    }
+
+    static func levelText(_ level: DegradePolicy.Level) -> String {
+        switch level {
+        case .normal: return "Normal"
+        case .optionalUI: return "Reducing optional UI"
+        // Only optional UI refresh currently acts on the runtime hints. Higher
+        // policy levels request further reductions; they do not prove them.
+        case .optionalPoseFace: return "Reduce optional pose and face refresh"
+        case .previewPerception: return "Reduce Preview analysis"
+        case .previewRender: return "Reduce Preview picture refresh"
+        case .unsupported: return "Camera pair unsupported"
+        }
+    }
+
+    static func reasonText(_ reason: DegradePolicy.Reason) -> String {
+        switch reason {
+        case .thermalPressure: return "Heat pressure"
+        case .cpuPressure: return "CPU pressure"
+        case .previewStale: return "Preview picture delayed"
+        case .programDeadlineMiss: return "Program deadline misses"
+        case .sourceIngestFailed: return "Camera input cannot keep up"
+        case .programBudgetFailed: return "Program work exceeds budget"
+        case .candidateStale: return "Next shot is not fresh"
+        case .invalidMeasurement: return "Workload measurement not usable"
+        case .recovering: return "Recovering after pressure"
+        }
+    }
+}
+
 // MARK: - Rate sampling
 
 /// Measured fps per channel for the inspector, from plain counters — a
@@ -266,7 +314,8 @@ final class InspectorRateSampler {
 
 // MARK: - View
 
-/// The inspector's "Show" section. Renders nothing for a single input.
+/// The inspector's "Show" section. Single-input detail remains hidden unless
+/// the optional workload policy is enabled.
 struct InspectorShowSection: View {
     @ObservedObject var show: ShowCoordinator
     @State private var sampler = InspectorRateSampler()
@@ -276,61 +325,84 @@ struct InspectorShowSection: View {
     static let refreshInterval: TimeInterval = 0.5
 
     var body: some View {
-        if show.channel(.b) != nil {
+        if show.channel(.b) != nil || show.workloadPolicy != nil {
             TimelineView(.periodic(from: .now, by: Self.refreshInterval)) { _ in
                 let now = CACurrentMediaTime()
                 let rates = sampler.sample(show: show, now: now)
-                if let detail = InspectorShowDetail.make(show: show, now: now, rates: rates) {
-                    content(detail)
-                }
+                let detail = InspectorShowDetail.make(show: show, now: now, rates: rates)
+                let workload = InspectorWorkloadDetail(policy: show.workloadPolicy)
+                content(detail, workload: workload)
             }
         }
     }
 
     // MARK: Layout
 
-    private func content(_ detail: InspectorShowDetail) -> some View {
+    private func content(_ detail: InspectorShowDetail?, workload: InspectorWorkloadDetail?) -> some View {
         VStack(alignment: .leading, spacing: 4) {
             InspectorShowSectionStyle.eyebrow("Show")
                 .padding(.bottom, 6)
 
-            ForEach(detail.roles) { line in
-                InspectorShowSectionStyle.row(line.role) {
-                    InspectorShowSectionStyle.value("\(line.channel.cameraLabel) · \(line.device)")
-                        .lineLimit(1).truncationMode(.middle)
-                }
-            }
-            InspectorShowSectionStyle.row("Control target") {
-                HStack(spacing: 8) {
-                    if detail.editLive {
-                        InspectorShowSectionStyle.pill("Editing live", color: ConsoleStyle.programRed)
+            if let detail {
+                ForEach(detail.roles) { line in
+                    InspectorShowSectionStyle.row(line.role) {
+                        InspectorShowSectionStyle.value("\(line.channel.cameraLabel) · \(line.device)")
+                            .lineLimit(1).truncationMode(.middle)
                     }
-                    InspectorShowSectionStyle.value(detail.controlTarget)
+                }
+                InspectorShowSectionStyle.row("Control target") {
+                    HStack(spacing: 8) {
+                        if detail.editLive {
+                            InspectorShowSectionStyle.pill("Editing live", color: ConsoleStyle.programRed)
+                        }
+                        InspectorShowSectionStyle.value(detail.controlTarget)
+                    }
+                }
+                InspectorShowSectionStyle.row("Router") {
+                    InspectorShowSectionStyle.value(detail.routerState)
+                        .multilineTextAlignment(.trailing)
+                        .fixedSize(horizontal: false, vertical: true)
                 }
             }
-            InspectorShowSectionStyle.row("Router") {
-                InspectorShowSectionStyle.value(detail.routerState)
-                    .multilineTextAlignment(.trailing)
-                    .fixedSize(horizontal: false, vertical: true)
-            }
+            if let workload { workloadRow(workload) }
+            if let detail {
+                subhead("Inputs")
+                ForEach(detail.inputs) { inputRow($0) }
+                if let reconnectError {
+                    Text(reconnectError)
+                        .font(.system(size: 11))
+                        .foregroundStyle(ConsoleStyle.amber)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
 
-            subhead("Inputs")
-            ForEach(detail.inputs) { inputRow($0) }
-            if let reconnectError {
-                Text(reconnectError)
-                    .font(.system(size: 11))
-                    .foregroundStyle(ConsoleStyle.amber)
-                    .fixedSize(horizontal: false, vertical: true)
-            }
+                if let next = detail.nextShot {
+                    subhead("Next shot")
+                    nextShotRows(next)
+                }
 
-            if let next = detail.nextShot {
-                subhead("Next shot")
-                nextShotRows(next)
+                subhead("Admission")
+                admissionRows(detail.admission)
             }
-
-            subhead("Admission")
-            admissionRows(detail.admission)
         }
+    }
+
+    private func workloadRow(_ workload: InspectorWorkloadDetail) -> some View {
+        InspectorShowSectionStyle.row("Workload") {
+            VStack(alignment: .trailing, spacing: 3) {
+                InspectorShowSectionStyle.value(workload.levelText)
+                if let reasons = workload.reasonsText {
+                    Text("Last change: \(reasons)")
+                        .font(.system(size: 11))
+                        .foregroundStyle(AlfieColor.ink.opacity(0.7))
+                }
+            }
+            .multilineTextAlignment(.trailing)
+            .fixedSize(horizontal: false, vertical: true)
+        }
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel("Workload")
+        .accessibilityValue(workload.accessibilityValue)
+        .accessibilityIdentifier("inspector.workload")
     }
 
     private func subhead(_ text: String) -> some View {
