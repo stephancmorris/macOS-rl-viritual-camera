@@ -93,3 +93,22 @@ Verified starting main is `8c9f43833b171faa00b3ceadb672e97370e28479`: [final mai
   - Two concerns disproved; three recorded and not fixed (a #92 calibration question, the first CPU sample, the #97 copy).
 - **Verification:** local Xcode 27.1 and hosted Xcode 26.2 CI on the PR head: **1,180 Swift tests, 1,176 passed, 0 failed, 4 opt-in skips**. Python: 127 + 16 passed.
 - The card is in 👀 Human Review. No carry-over. Next: [GROK-4.7.md](GROK-4.7.md), which covers RIG-RUNBOOK-UPDATE and an independent review of F1.
+
+## Claude Opus 5.5 second pass (4 November 2026)
+
+The owner asked Claude Opus 5.5 to keep going while usage allowed. It took Grok's runbook card as an early finish and did five more owner-free cards:
+
+| PR | Card | Merge | Full suite (local Xcode 27.1) |
+|---|---|---|---|
+| [#100](https://github.com/stephancmorris/macOS-rl-viritual-camera/pull/100) | RIG-RUNBOOK-UPDATE (from Grok's group) | `1dd3dc1` | docs; MODE-QA has a comment linking the checklist |
+| [#101](https://github.com/stephancmorris/macOS-rl-viritual-camera/pull/101) | ISOLATION-WARNINGS: 71 → 0 Swift warnings | `c8c3e34` | 1,180 tests, 0 failed, 4 skips |
+| [#102](https://github.com/stephancmorris/macOS-rl-viritual-camera/pull/102) | SPEC-TRUTH: multi-camera spec matches main | `0e6f6fd` | docs |
+| [#103](https://github.com/stephancmorris/macOS-rl-viritual-camera/pull/103) | A11Y-INSPECTOR: spoken names for the Inspector controls | `15d012e` | 1,181 tests, 0 failed, 4 skips |
+| [#104](https://github.com/stephancmorris/macOS-rl-viritual-camera/pull/104) | SWIFT6-READINESS: compiles under `SWIFT_VERSION=6` (setting stays 5) | `5d435c2` | Swift 6 mode: 1,180, 0 failed. Swift 5: one flaky failure, fixed by #105 |
+| [#105](https://github.com/stephancmorris/macOS-rl-viritual-camera/pull/105) | SETUP-TEST-FLAKE: supplied cameras survive live rediscovery | `3349cd0` | 1,182 tests, 1,178 passed, 0 failed, 4 skips |
+
+Hosted Xcode 26.2 CI passed on every PR before merge. [Main CI on `3349cd0`](https://github.com/stephancmorris/macOS-rl-viritual-camera/actions/runs/41763826300), with all six merged: **1,183 Swift tests, 1,179 passed, 0 failed, 4 opt-in skips**. All cards are in 👀 Human Review.
+
+- **New owner decision:** switch the project to Swift 6, or add a non-blocking Swift 6 CI job (`reports/swift6-readiness-2026-11/README.md`). Neither is done.
+- **No owner-free cards remain** in 🤖 Agent Queue. Spec Ready holds only attended rig runs and the Stage 3 plan.
+- **Routing change:** Grok 4.7's group is now one card, [CLAUDE-REVIEW-1104](https://trello.com/c/C9cMNLBm): an independent review of #98 and #100–#105. See [GROK-4.7.md](GROK-4.7.md) (rev 2).
