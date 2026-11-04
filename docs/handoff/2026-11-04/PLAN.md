@@ -96,7 +96,7 @@ Verified starting main is `8c9f43833b171faa00b3ceadb672e97370e28479`: [final mai
 
 ## Claude Opus 5.5 second pass (4 November 2026)
 
-The owner asked Claude Opus 5.5 to keep going while usage allowed. It took Grok's runbook card as an early finish and did five more owner-free cards:
+The owner asked Claude Opus 5.5 to keep going while usage allowed. It took Grok's runbook card as an early finish and did six more owner-free cards:
 
 | PR | Card | Merge | Full suite (local Xcode 27.1) |
 |---|---|---|---|
@@ -106,9 +106,11 @@ The owner asked Claude Opus 5.5 to keep going while usage allowed. It took Grok'
 | [#103](https://github.com/stephancmorris/macOS-rl-viritual-camera/pull/103) | A11Y-INSPECTOR: spoken names for the Inspector controls | `15d012e` | 1,181 tests, 0 failed, 4 skips |
 | [#104](https://github.com/stephancmorris/macOS-rl-viritual-camera/pull/104) | SWIFT6-READINESS: compiles under `SWIFT_VERSION=6` (setting stays 5) | `5d435c2` | Swift 6 mode: 1,180, 0 failed. Swift 5: one flaky failure, fixed by #105 |
 | [#105](https://github.com/stephancmorris/macOS-rl-viritual-camera/pull/105) | SETUP-TEST-FLAKE: supplied cameras survive live rediscovery | `3349cd0` | 1,182 tests, 1,178 passed, 0 failed, 4 skips |
+| [#106](https://github.com/stephancmorris/macOS-rl-viritual-camera/pull/106) | Handoff rev 2 | `59c2728` | docs |
+| [#107](https://github.com/stephancmorris/macOS-rl-viritual-camera/pull/107) | CPU-SPAN: the workload CPU span starts at go-live (fixes C2) | `7d08ecd` | 1,185 tests, 1,181 passed, 0 failed, 4 skips |
 
 Hosted Xcode 26.2 CI passed on every PR before merge. [Main CI on `3349cd0`](https://github.com/stephancmorris/macOS-rl-viritual-camera/actions/runs/41763826300), with all six merged: **1,183 Swift tests, 1,179 passed, 0 failed, 4 opt-in skips**. All cards are in 👀 Human Review.
 
 - **New owner decision:** switch the project to Swift 6, or add a non-blocking Swift 6 CI job (`reports/swift6-readiness-2026-11/README.md`). Neither is done.
-- **No owner-free cards remain** in 🤖 Agent Queue. Spec Ready holds only attended rig runs and the Stage 3 plan.
-- **Routing change:** Grok 4.7's group is now one card, [CLAUDE-REVIEW-1104](https://trello.com/c/C9cMNLBm): an independent review of #98 and #100–#105. See [GROK-4.7.md](GROK-4.7.md) (rev 2).
+- **Agent Queue** now holds Grok's review card and one optional owner-free card, [GALLERY-CAPTURES](https://trello.com/c/Hu6Jobuo): 17 Multiview captures that the gallery README links but nobody committed. Spec Ready holds only attended rig runs and the Stage 3 plan.
+- **Routing change:** Grok 4.7's group is now one card, [CLAUDE-REVIEW-1104](https://trello.com/c/C9cMNLBm): an independent review of #98 and #100–#107, then optionally GALLERY-CAPTURES. See [GROK-4.7.md](GROK-4.7.md) (rev 3).

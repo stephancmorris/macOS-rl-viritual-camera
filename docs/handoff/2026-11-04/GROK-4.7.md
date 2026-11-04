@@ -1,10 +1,10 @@
-# Grok 4.7: Alfie handoff (4 November 2026, rev 2)
+# Grok 4.7: Alfie handoff (4 November 2026, rev 3)
 
 You are **Grok 4.7**, taking over from **Claude Opus 5.5** on **Alfie**, a macOS camera app for live events. Alfie auto-frames stage cameras and sends **one Program feed** through a CMIO virtual-camera extension or direct HDMI/USB-C output. It has three operator modes: **Single Cam**, **Multi Cam** (Preview/Program Multiview with Take; two running inputs ship now) and **Webcam**. The Debug-only Auto Director's effects are gated by qualification records, and Release disables Director execution.
 
 The relay so far: Claude → Sol 6.1 → Claude Opus 5.5 → **you** → Claude.
 
-**What changed since rev 1.** Claude Opus 5.5 had budget left and did your original card, RIG-RUNBOOK-UPDATE (PR #100), plus six small owner-free cards. **Your job is now one thing: an independent review of everything Claude Opus 5.5 merged on 4 November.** Claude reviewed its own work only as the author; that is not an independent review.
+**What changed since rev 1.** Claude Opus 5.5 had budget left and did your original card, RIG-RUNBOOK-UPDATE (PR #100), plus seven small owner-free cards. **Your main job is an independent review of everything Claude Opus 5.5 merged on 4 November.** One optional docs card follows it. Claude reviewed its own work only as the author; that is not an independent review.
 
 ## Repository and tools
 
@@ -16,8 +16,8 @@ The relay so far: Claude → Sol 6.1 → Claude Opus 5.5 → **you** → Claude.
 
 ## State of main when you start
 
-- Main's code is at **`3349cd0`** (merge of PR #105), plus this documentation-only handoff on top. Fetch and check the actual HEAD and its CI: `gh run list --branch main --limit 3`.
-- [Main CI on `3349cd0`](https://github.com/stephancmorris/macOS-rl-viritual-camera/actions/runs/41763826300) (hosted Xcode 26.2): **1,183 Swift tests, 1,179 passed, 0 failed, 4 opt-in skips**, plus the unsigned Release build. Hosted CI also passed on every PR below before merge. Python: 127 diagnostics/Director report tests and 16 Director dataset/training tests passed.
+- Main's code is at **`7d08ecd`** (merge of PR #107), plus this documentation-only handoff on top. Fetch and check the actual HEAD and its CI: `gh run list --branch main --limit 3`.
+- Full `CinematicCoreMacOSTests` on main's code (#107's head, local Xcode 27.1, unsigned): **1,185 tests, 1,181 passed, 0 failed, 4 opt-in skips**. [Main CI on `3349cd0`](https://github.com/stephancmorris/macOS-rl-viritual-camera/actions/runs/41763826300), before #106 and #107 (hosted Xcode 26.2): 1,183 tests, 1,179 passed, 0 failed, 4 skips, plus the unsigned Release build. Hosted CI passed on every PR below before merge. Python: 127 diagnostics/Director report tests and 16 Director dataset/training tests passed.
 - A clean Debug build-for-testing has **0 Swift warnings** in app and test sources. The remaining CMIO placement and AppIntents tool warnings are expected.
 - **No open PRs** at handoff and no unfinished Claude Opus 5.5 work.
 
@@ -33,6 +33,8 @@ The relay so far: Claude → Sol 6.1 → Claude Opus 5.5 → **you** → Claude.
 | [#103](https://github.com/stephancmorris/macOS-rl-viritual-camera/pull/103) | [A11Y-INSPECTOR](https://trello.com/c/CfoiPs0x) | `15d012e` | `InspectorDrawer`: "Open Inspector" / "Close Inspector" accessibility labels and tooltips on the "⌥" handle and chevron close button. Test file `InspectorAccessibilityTests.swift`. |
 | [#104](https://github.com/stephancmorris/macOS-rl-viritual-camera/pull/104) | [SWIFT6-READINESS](https://trello.com/c/zkEGV4H4) | `5d435c2` | Compiles under `SWIFT_VERSION=6`; project setting stays Swift 5. `nonisolated` boxes and pure types, `isolated deinit` in ShotComposer/CropEngine/PersonDetector, `nonisolated static` signature workers with `@unchecked Sendable` result boxes. Report `reports/swift6-readiness-2026-11/README.md`. |
 | [#105](https://github.com/stephancmorris/macOS-rl-viritual-camera/pull/105) | [SETUP-TEST-FLAKE](https://trello.com/c/iHwZAJGm) | `3349cd0` | `LiveShowSetupModel` keeps a supplied camera provider authoritative over live rediscovery (a hot-plug overwrote test fixtures). DEBUG seam `CameraManager.setAvailableCamerasForTesting`. Tests `suppliedCamerasSurviveLiveRediscovery`, `defaultCamerasFollowLiveRediscovery`. |
+| [#106](https://github.com/stephancmorris/macOS-rl-viritual-camera/pull/106) | | `59c2728` | Handoff rev 2 (docs). |
+| [#107](https://github.com/stephancmorris/macOS-rl-viritual-camera/pull/107) | [CPU-SPAN](https://trello.com/c/gAIDOIR0) | `7d08ecd` | Fixes PR-REVIEW-1104 C2. `ProcessCPUClock` takes an injectable reading and gains `restart()`; `ShowCoordinator.updateShowStandardLifetime` restarts it when the show goes live, so the first window's CPU fraction no longer averages in idle time since launch. Tests `cpuClockRestartDropsTheIdleSpanBeforeIt`, `goingLiveRestartsTheCPUSpan` (fails without the restart). |
 
 ## Your work: CLAUDE-REVIEW-1104
 
@@ -47,10 +49,21 @@ Questions worth answering, in priority order:
    - `ShotComposer.runSignatureCapture` / `runReacquisitionScoring` are now `nonisolated static`. Check every value they read or return. Is `@unchecked Sendable` on `SignatureCaptureResult` and `ReferencePrints` justified (are the Vision prints really never mutated after capture)?
    - `FaceSignatureExtractor` is now `nonisolated`. Confirm nothing in it touches main-actor state.
    - Optional: build with `SWIFT_VERSION=6` yourself and confirm it still succeeds on main.
-2. **#105, setup flake.** In the app, `cameras` is never supplied, so the production path should be unchanged. Confirm that. Is there any preview or caller that supplies `cameras` and expects live discovery to replace it?
-3. **#98, F1.** Can `timerTick()` and action refreshes still interleave badly? Does anything else depend on refresh parity? Does the test truly fail without the fix (revert the fix locally and run it)?
-4. **#101, #103.** Quick checks: no behaviour change in #101; the #103 labels match the visible state.
-5. **#100, #102 (docs).** Spot-check claims against the source: the MODE-QA checklist steps, the mode-picker location, the availability rules, and the degraded-operation note. Fix wrong copy in the same PR.
+2. **#107, CPU span.** Does every way a show goes live pass through `updateShowStandardLifetime` (including `isStartingSession`, which also fires `sessionLivenessDidChange`)? Could a restart while starting, before the first window opens, skew the sample? Is the injected `@Sendable` reading safe?
+3. **#105, setup flake.** In the app, `cameras` is never supplied, so the production path should be unchanged. Confirm that. Is there any preview or caller that supplies `cameras` and expects live discovery to replace it?
+4. **#98, F1.** Can `timerTick()` and action refreshes still interleave badly? Does anything else depend on refresh parity? Does the test truly fail without the fix (revert the fix locally and run it)?
+5. **#101, #103.** Quick checks: no behaviour change in #101; the #103 labels match the visible state.
+6. **#100, #102 (docs).** Spot-check claims against the source: the MODE-QA checklist steps, the mode-picker location, the availability rules, and the degraded-operation note. Fix wrong copy in the same PR.
+
+## Optional second card: GALLERY-CAPTURES
+
+Only after CLAUDE-REVIEW-1104 is merged. Card: [GALLERY-CAPTURES](https://trello.com/c/Hu6Jobuo), in 🤖 Agent Queue.
+
+- `docs/gallery-screenshots/README.md` links 17 Multiview captures (`input-*`, `setup-*`, `pill-*`) that were never committed, and no test writes those names.
+- Extend the snapshot tests to render each named state from the existing fake models (1280 pt, dark), and commit the PNGs labelled as synthetic.
+- Remove rows that have no matching state instead of inventing one.
+
+If you run out of budget, leave the card in Agent Queue and mention it at the top of CLAUDE-NEXT.md.
 
 ## Build and test
 
@@ -83,7 +96,7 @@ xcrun xcresulttool get test-results summary --path "$A/unit.xcresult"
   - the T2, P3, A2/A4 and T1/T3 decisions;
   - the G-02…G-08 sign-offs;
   - approving the eased pan;
-  - DegradePolicy calibration, and the C1–C3 notes from PR-REVIEW-1104;
+  - DegradePolicy calibration, and the C1 and C3 notes from PR-REVIEW-1104 (C2 is fixed in #107);
   - Single Cam Director placement;
   - the Swift 6 switch;
   - the MODE-QA → DISPLAY-QA → ZOOM-QA → PAN-HITCH → SOAK → INSTALL rig runs.
