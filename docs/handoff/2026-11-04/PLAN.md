@@ -1,6 +1,6 @@
 # Agent relay, 4 November 2026
 
-Order (rev 2, after Claude's second pass): **Claude (done) → Sol 6.1 → Gemini Argon → Grok 4.7 → Claude** (after the 12:20 reset).
+Order (owner-requested handoff update after Sol): **Claude (earlier pass) → Sol 6.1 (done) → Claude Opus 5.5 (review, replacing the Argon session) → Grok 4.7 → Claude**.
 Each agent finishes its group, merges to `main`, then writes the next agent's prompt from this plan.
 
 ## Claude's starting handoff (rev 2; see Sol results below)
@@ -23,15 +23,15 @@ Claude merged 11 PRs on 4 November:
 
 At Claude's handoff, every number above was an unsigned local run with 4 opt-in skips; none was GitHub Actions evidence. The only open PR then was #29 (CI draft, Sol's group). See Sol results below for the newer main and hosted CI evidence.
 
-## Groups (rev 2; all cards are in 🤖 Agent Queue)
+## Groups (current routing; Sol's work is complete)
 
 | Group | Agent | Card | Kind |
 |---|---|---|---|
 | S | Sol 6.1 | [CI-GATES](https://trello.com/c/D2VGtAGU) | finish PR #29 (GitHub Actions) |
 | S | Sol 6.1 | [WORKLOAD-INSPECTOR](https://trello.com/c/CWN4G0nA) | small read-only UI |
-| G | Gemini Argon | [PR-REVIEW-1104](https://trello.com/c/0U0ZMxZl) | independent review of #85–#96 and Sol's PRs; fix confirmed findings |
+| G | Claude Opus 5.5 | [PR-REVIEW-1104](https://trello.com/c/0U0ZMxZl) | independent review of #85–#96 and Sol's PRs; fix confirmed findings |
 | K | Grok 4.7 | [RIG-RUNBOOK-UPDATE](https://trello.com/c/SS7mZhnQ) | docs |
-| K | Grok 4.7 | Review Argon's fixes | the same rules as PR-REVIEW, applied to Argon's PRs |
+| K | Grok 4.7 | Review Claude Opus 5.5's fixes | the same rules as PR-REVIEW, applied to the review-fix PR |
 
 Rev 1's cards (B13, RUNSHEET-FOLLOWUPS, AD-RECONCILE, DEGRADE-MODEL, PAN-EASE-MODEL, HR-DIGEST, GUIDE-RENDERS, RELEASE-CHECK) are done and in 👀 Human Review.
 
@@ -59,7 +59,7 @@ Each card holds its full scope and "done when". An agent that finishes early may
    xcodebuild build-for-testing -project CinematicCoreMacOS.xcodeproj -scheme CinematicCoreMacOS -destination 'platform=macOS' -derivedDataPath <dd> CODE_SIGNING_ALLOWED=NO
    xcodebuild test-without-building ... -only-testing:CinematicCoreMacOSTests -resultBundlePath <x>.xcresult CODE_SIGNING_ALLOWED=NO
    ```
-   Wrap the test run in a time limit (`perl -e 'alarm 3000; exec @ARGV' xcodebuild …`): an awaited Task that never resumes hangs the whole run. Read the totals with `xcrun xcresulttool get test-results summary --path <x>.xcresult`. The baseline is about 1,172 tests, 0 failed, 4 opt-in skips (check the last PR in the table). Python: `python3 -m unittest` in `CinematicCoreMacOS/scripts`.
+   Wrap the test run in a time limit (`perl -e 'alarm 3000; exec @ARGV' xcodebuild …`): an awaited Task that never resumes hangs the whole run. Read the totals with `xcrun xcresulttool get test-results summary --path <x>.xcresult`. The verified Sol baseline is 1,179 tests, 0 failed, 4 opt-in skips (see Sol results below; refresh the baseline if main has advanced). Python: `python3 -m unittest` in `CinematicCoreMacOS/scripts`.
 4. **Swift 6 project flags:** `default-isolation=MainActor`, `NonisolatedNonsendingByDefault`, `MemberImportVisibility`.
    - Pure value types used off the main actor are `nonisolated`.
    - A default argument that constructs a MainActor type fails in tests; use an optional and `??` instead.
@@ -78,3 +78,10 @@ Each card holds its full scope and "done when". An agent that finishes early may
 - **WORKLOAD-INSPECTOR:** [PR #97](https://github.com/stephancmorris/macOS-rl-viritual-camera/pull/97), merge `3f92f72e76cd428ba7e32e73fe5335c26ce7fa6e`. Read-only Workload level and latest-transition reasons inside the existing 2 Hz Inspector timeline; nil policy hides it. VoiceOver label/value, six-level/nine-reason copy tests, recovery/persistence and 1280 pt disabled/enabled render evidence in `reports/workload-inspector-2026-11/README.md`. Default flags, frame publishing, routing, Take and qualification behavior are unchanged.
 - **Current source main:** `3f92f72e76cd428ba7e32e73fe5335c26ce7fa6e`, before this documentation-only handoff. Full local Xcode 27.1 and [hosted Xcode 26.2 CI](https://github.com/stephancmorris/macOS-rl-viritual-camera/actions/runs/41748905461): **1,179 Swift tests, 1,175 passed, 0 failed, 4 opt-in skips**, plus **127 + 16 Python tests passed**. Unsigned Release passed. The local Xcode 26.x assumption was stale: local is 27.1 (27A9275), CI pins 26.2 (17C52), documented in `docs/ci/README.md`.
 - Both Sol cards are in **👀 Human Review**, never Done. **No carry-over.** Gemini Argon's prompt is [ARGON.md](ARGON.md): independently review #85–#96, #29 and #97, report severity/file:line/reproduction and fix confirmed findings with tests. All owner/rig decisions and gates above remain open.
+
+
+## Claude Opus 5.5 prompt update (4 November 2026)
+
+The owner requested a complete handoff prompt for **Claude Opus 5.5** after Sol finished. [CLAUDE-OPUS-5.5.md](CLAUDE-OPUS-5.5.md) is the active next-agent prompt and replaces the Argon session assignment, without expanding the review card's scope. `ARGON.md` remains historical context. PR-REVIEW-1104 was still in Agent Queue and there were no open PRs when this update was prepared. Grok's runbook card and subsequent review of the review-fix PR remain next.
+
+Verified starting main is `8c9f43833b171faa00b3ceadb672e97370e28479`: [final main CI passed](https://github.com/stephancmorris/macOS-rl-viritual-camera/actions/runs/41750126842), with 1,179 Swift tests (1,175 passed, 0 failed, 4 opt-in skips), 127 Python report tests and 16 Director training tests passed, plus unsigned Debug/Release and consistency. This prompt update changes documentation only; it does not claim a fresh software or hardware qualification.
