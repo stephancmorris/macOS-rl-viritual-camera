@@ -1,6 +1,6 @@
 # Multiview UI gallery captures
 
-These are 1280-point offscreen SwiftUI captures of the INPUT-STRIP, SHOW-SETUP and PILL-TARGET gallery states. Input scenarios use `FakeConsoleModel`; setup results use the fake `ShowSetupModel.PairCheckResult` sequence. Tiles intentionally have no rendered camera pictures until the channel image provider is integrated.
+The input, setup and pill files below are **synthetic**. They are 1280-point offscreen SwiftUI renders of the gallery's fake models, not photographs of a live show, a camera, or a receiver. `MultiviewGallerySnapshotTests` draws each named state on its own (the on-screen demos show every state at once) and writes these names when `ALFIE_GALLERY_SNAPSHOTS=1`. Input rows use `FakeConsoleModel`. Setup rows use `ShowSetupModel.gallery`. Pill rows use `PillDemo` with that fake console. Tiles have no camera pictures.
 
 ## Input strip
 
