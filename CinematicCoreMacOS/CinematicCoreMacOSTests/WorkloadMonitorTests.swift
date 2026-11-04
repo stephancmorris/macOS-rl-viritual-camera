@@ -51,6 +51,30 @@ struct WorkloadMonitorMappingTests {
         let fraction = clock.sample()
         #expect(fraction >= 0 && fraction <= 1)
     }
+
+    /// PR-REVIEW-1104 C2: a span that starts before the window would
+    /// average in idle time. `restart()` begins a new span.
+    @Test func cpuClockRestartDropsTheIdleSpanBeforeIt() {
+        let source = FakeCPUSource(cores: 4)
+        var clock = ProcessCPUClock(read: source.read)
+        source.advance(wall: 100, busyCores: 0)        // idle before the show
+        clock.restart()
+        source.advance(wall: 2, busyCores: 3.6)        // 90% of 4 cores
+        #expect(abs(clock.sample() - 0.9) < 1e-9)
+        source.advance(wall: 2, busyCores: 1)
+        #expect(abs(clock.sample() - 0.25) < 1e-9)     // consecutive spans line up
+    }
+}
+
+/// Deterministic process CPU and wall clock for `ProcessCPUClock`.
+nonisolated final class FakeCPUSource: @unchecked Sendable {
+    private var reading: ProcessCPUClock.Reading
+    init(cores: Int) { reading = .init(cpuSeconds: 0, wallSeconds: 0, cores: cores) }
+    var read: @Sendable () -> ProcessCPUClock.Reading { { self.reading } }
+    func advance(wall: Double, busyCores: Double) {
+        reading.wallSeconds += wall
+        reading.cpuSeconds += wall * busyCores
+    }
 }
 
 @MainActor
@@ -61,6 +85,22 @@ struct WorkloadPolicyShowTests {
                                admissionRecords: AdmissionRecordStore(defaults: defaults),
                                operatorModes: OperatorModeStore(defaults: defaults, multiviewEnabled: true),
                                workloadPolicyEnabled: enabled)
+    }
+
+    /// PR-REVIEW-1104 C2: the first window after go-live measures only
+    /// the show, not the idle time since the coordinator was created.
+    @Test func goingLiveRestartsTheCPUSpan() {
+        let defaults = UserDefaults(suiteName: "alfie-workload-cpu-\(UUID().uuidString)")!
+        let source = FakeCPUSource(cores: 4)
+        let show = ShowCoordinator(programOutput: ProgramOutputManager(sinks: []),
+                                   admissionRecords: AdmissionRecordStore(defaults: defaults),
+                                   operatorModes: OperatorModeStore(defaults: defaults, multiviewEnabled: true),
+                                   workloadPolicyEnabled: true, workloadCPUReading: source.read)
+        source.advance(wall: 600, busyCores: 0.04)     // ten idle minutes
+        show.channelA.setRunningForTesting(true)
+        defer { show.channelA.setRunningForTesting(false) }
+        source.advance(wall: 2, busyCores: 3.6)
+        #expect(abs(show.sampleWorkloadCPUForTesting() - 0.9) < 1e-9)
     }
 
     private var overloaded: DegradePolicy.Window {

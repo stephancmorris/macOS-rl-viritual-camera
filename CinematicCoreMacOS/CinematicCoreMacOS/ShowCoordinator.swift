@@ -99,6 +99,10 @@ final class ShowCoordinator: ObservableObject {
     /// Optional UI may slow down (the console's refresh). Nothing else acts on it.
     var reducesOptionalUI: Bool { workloadPolicy != nil && workloadLevel >= .optionalUI }
     private var workloadCPU = ProcessCPUClock()
+    #if DEBUG
+    /// Test seam: the CPU fraction the next closed window would carry.
+    func sampleWorkloadCPUForTesting() -> Double { workloadCPU.sample() }
+    #endif
 
     private func pipelineWindowClosed(_ row: DiagnosticsWindow) {
         let preview = previewChannel.flatMap { channels[$0] }
@@ -151,9 +155,11 @@ final class ShowCoordinator: ObservableObject {
     init(programOutput: ProgramOutputManager? = nil, admissionRecords: AdmissionRecordStore? = nil,
          qualificationRecords: DirectorQualificationStore? = nil, directorShadowLog: DirectorShadowLog? = nil,
          directorRunSheet: RunSheet? = nil, operatorModes: OperatorModeStore? = nil,
-         workloadPolicyEnabled: Bool = DeveloperFlags.runtimeWorkloadPolicy) {
+         workloadPolicyEnabled: Bool = DeveloperFlags.runtimeWorkloadPolicy,
+         workloadCPUReading: (@Sendable () -> ProcessCPUClock.Reading)? = nil) {
         self.operatorModes = operatorModes ?? OperatorModeStore()
         self.workloadPolicy = workloadPolicyEnabled ? DegradePolicy() : nil
+        if let workloadCPUReading { self.workloadCPU = ProcessCPUClock(read: workloadCPUReading) }
         self.initialDirectorShadowLog = directorShadowLog
         self.initialDirectorRunSheet = directorRunSheet
         self.admissionRecords = admissionRecords ?? AdmissionRecordStore()
@@ -204,6 +210,8 @@ final class ShowCoordinator: ObservableObject {
         if isAnyChannelLive {
             guard !ownsShowStandard else { return }
             ownsShowStandard = true
+            // The first diagnostics window starts now, not at init.
+            workloadCPU.restart()
             ShowStandard.beginSession()
         } else if ownsShowStandard {
             ownsShowStandard = false

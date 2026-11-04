@@ -54,12 +54,24 @@ nonisolated enum WorkloadMonitor {
 
 /// Process CPU time against wall time between two samples.
 nonisolated struct ProcessCPUClock {
-    private var lastCPU: Double
-    private var lastWall: Double
+    struct Reading: Equatable, Sendable {
+        var cpuSeconds: Double
+        var wallSeconds: Double
+        var cores: Int
+    }
 
-    init() {
-        lastCPU = Self.processCPUSeconds()
-        lastWall = ProcessInfo.processInfo.systemUptime
+    private let read: @Sendable () -> Reading
+    private var last: Reading
+
+    /// `read` is injectable for tests; the default reads this process.
+    init(read: @escaping @Sendable () -> Reading = ProcessCPUClock.now) {
+        self.read = read
+        last = read()
+    }
+
+    static func now() -> Reading {
+        Reading(cpuSeconds: processCPUSeconds(), wallSeconds: ProcessInfo.processInfo.systemUptime,
+                cores: ProcessInfo.processInfo.activeProcessorCount)
     }
 
     static func processCPUSeconds() -> Double {
@@ -68,13 +80,17 @@ nonisolated struct ProcessCPUClock {
         return Double(spec.tv_sec) + Double(spec.tv_nsec) / 1e9
     }
 
+    /// Start a new span now. The show calls this when it goes live, so the
+    /// first window's CPU fraction doesn't average in idle time before it.
+    mutating func restart() { last = read() }
+
     /// Fraction of the machine's cores this process used since the last call.
     mutating func sample() -> Double {
-        let cpu = Self.processCPUSeconds(), wall = ProcessInfo.processInfo.systemUptime
-        defer { lastCPU = cpu; lastWall = wall }
-        let cores = Double(max(1, ProcessInfo.processInfo.activeProcessorCount))
-        let elapsed = wall - lastWall
+        let now = read()
+        defer { last = now }
+        let cores = Double(max(1, now.cores))
+        let elapsed = now.wallSeconds - last.wallSeconds
         guard elapsed > 0 else { return 0 }
-        return min(1, max(0, (cpu - lastCPU) / elapsed / cores))
+        return min(1, max(0, (now.cpuSeconds - last.cpuSeconds) / elapsed / cores))
     }
 }
