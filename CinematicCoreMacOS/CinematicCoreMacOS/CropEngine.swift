@@ -349,7 +349,7 @@ final class CropEngine: ObservableObject {
 
     // MARK: - Crop Rectangle Model
 
-    struct CropRect: Equatable, Sendable {
+    nonisolated struct CropRect: Equatable, Sendable {
         /// Normalized coordinates (0-1)
         var origin: CGPoint  // Bottom-left corner (Vision coordinate system)
         var size: CGSize     // Width and height
