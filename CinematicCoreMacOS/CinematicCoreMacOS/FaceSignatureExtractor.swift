@@ -33,7 +33,7 @@ import OSLog
 /// Its only state is immutable: a `CIContext`, which is safe to share, and
 /// the serial `processingQueue` that every Vision request runs on. It reads
 /// the caller's pixel buffer and does not mutate it.
-final class FaceSignatureExtractor: @unchecked Sendable {
+nonisolated final class FaceSignatureExtractor: @unchecked Sendable {
     private nonisolated static let logger = Logger(subsystem: "com.alfie", category: "Vision")
 
     private let processingQueue = DispatchQueue(
@@ -72,8 +72,8 @@ final class FaceSignatureExtractor: @unchecked Sendable {
     /// face bbox (Vision bottom-left origin, 0..1).
     ///
     /// Returns nil if the face crop is empty or the feature-print request
-    /// fails for any reason. Caller is expected to be on the main actor;
-    /// the work runs on a background queue and awaits the result.
+    /// fails for any reason. Callable from any context; the work runs on a
+    /// background queue and awaits the result.
     func extractSignature(
         from pixelBuffer: CVPixelBuffer,
         faceBoundingBox: CGRect

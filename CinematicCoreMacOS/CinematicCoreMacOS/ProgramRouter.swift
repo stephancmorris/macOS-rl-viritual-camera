@@ -327,7 +327,7 @@ final class ProgramRouter {
     }
 
     /// Carries a finished standby frame back to the main actor.
-    private struct StandbyFrameBox: @unchecked Sendable { let buffer: CVPixelBuffer? }
+    private nonisolated struct StandbyFrameBox: @unchecked Sendable { let buffer: CVPixelBuffer? }
 
     /// Build the standby frame off the main thread while the router holds, so
     /// the hold → standby tick does not pay for a full-frame fill (CR-014).

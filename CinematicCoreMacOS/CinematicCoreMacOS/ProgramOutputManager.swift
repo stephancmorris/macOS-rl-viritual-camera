@@ -161,7 +161,7 @@ final class ProgramOutputManager: ObservableObject {
         }
     }
 
-    enum Route: String, CaseIterable, Identifiable {
+    nonisolated enum Route: String, CaseIterable, Identifiable {
         case virtualCamera
         case display
         /// Development only: frames are accepted and sent nowhere, so Take can

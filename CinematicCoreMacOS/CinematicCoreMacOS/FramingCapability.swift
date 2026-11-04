@@ -8,7 +8,7 @@ import Foundation
 
 /// Pixel geometry for a requested program crop. This describes resampling,
 /// not perceived sharpness or whether a subject can be detected or tracked.
-struct FramingCapability: Sendable {
+nonisolated struct FramingCapability: Sendable {
     nonisolated enum Reason: Hashable, Sendable {
         case nativeOrDownsampled
         case enlargedImage
