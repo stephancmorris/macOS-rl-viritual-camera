@@ -58,15 +58,25 @@ struct MultiviewGallerySnapshotTests {
     private func render<V: View>(_ view: V, size: CGSize) -> NSBitmapImageRep? {
         let host = NSHostingView(rootView: view.environment(\.colorScheme, .dark))
         host.frame = CGRect(origin: .zero, size: size)
-        let window = NSWindow(
+        let window = GallerySnapshotWindow(
             contentRect: host.frame, styleMask: [.borderless], backing: .buffered, defer: false)
         window.appearance = NSAppearance(named: .darkAqua)
         window.contentView = host
+        #expect(host.bounds.size == size)
         host.layoutSubtreeIfNeeded()
         RunLoop.current.run(until: Date().addingTimeInterval(0.05))
         guard let rep = host.bitmapImageRepForCachingDisplay(in: host.bounds) else { return nil }
         host.cacheDisplay(in: host.bounds, to: rep)
         return rep
+    }
+}
+
+/// Snapshot canvases may exceed a hosted runner's virtual screen. AppKit's
+/// default constraint shrinks the 1000 pt canvas to 989 pt there; keep the
+/// requested offscreen size rather than weakening the image-size assertions.
+private final class GallerySnapshotWindow: NSWindow {
+    override func constrainFrameRect(_ frameRect: NSRect, to screen: NSScreen?) -> NSRect {
+        frameRect
     }
 }
 
