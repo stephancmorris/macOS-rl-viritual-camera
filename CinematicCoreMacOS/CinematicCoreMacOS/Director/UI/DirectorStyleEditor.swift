@@ -108,7 +108,7 @@ struct DirectorStyleDraft: Equatable, Sendable {
 }
 
 extension SegmentType {
-    var styleTitle: String {
+    nonisolated var styleTitle: String {
         switch self {
         case .presenter: "Presenter"
         case .panel: "Panel"
