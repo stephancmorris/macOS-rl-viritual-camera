@@ -1,0 +1,16 @@
+{
+  "date": "2026-11-04",
+  "source": "origin/main 3ea830e plus the RELEASE-CHECK isolation fixes (this PR)",
+  "command": "xcodebuild build -project CinematicCoreMacOS.xcodeproj -scheme CinematicCoreMacOS -configuration Release -destination platform=macOS CODE_SIGNING_ALLOWED=NO",
+  "result": "BUILD SUCCEEDED",
+  "swiftWarningsInAppSources": 0,
+  "bundleVersion": "1.0 (4)",
+  "embeddedExtension": "Contents/Library/SystemExtensions/Morris.CinematicCoreMacOS.CinematicCoreExtension.systemextension",
+  "sha256": {
+    "Alfie.app/Contents/MacOS/Alfie": "7867f2aa0cb39116f023e49b181fa52467d90301b9498b475280cffac1e7e759",
+    "CinematicCoreExtension binary": "d712a6fe5890286f5dbb687217463a6c069b9cf3dd4fbfe2d4bc6031286b9ef8"
+  },
+  "AlfieSourceFingerprint": "",
+  "signed": false,
+  "notarized": false
+}

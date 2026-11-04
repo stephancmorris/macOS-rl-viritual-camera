@@ -18,7 +18,7 @@ nonisolated enum RunSheetSegmentText {
 }
 
 extension RunSheet.PositionHint {
-    var title: String {
+    nonisolated var title: String {
         switch self {
         case .lectern: "Lectern"
         case .centre: "Centre"
