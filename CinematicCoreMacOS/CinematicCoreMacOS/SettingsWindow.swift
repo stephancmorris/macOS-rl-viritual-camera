@@ -144,6 +144,8 @@ struct SettingsWindow: View {
                 }
             }
             .listStyle(.sidebar)
+            .scrollContentBackground(.hidden)
+            .background(AlfieColor.sidebar)
             .searchable(text: $searchText, placement: .sidebar, prompt: "Search settings")
             .navigationSplitViewColumnWidth(min: 200, ideal: 220, max: 260)
         } detail: {

@@ -158,8 +158,8 @@ struct InputTileView: View {
 
     private var badgeColor: Color {
         switch model.role {
-        case .program: ConsoleStyle.programRed
-        case .preview: ConsoleStyle.previewGreen
+        case .program: AlfieColor.tally.programChip
+        case .preview: AlfieColor.tally.previewChip
         case .none: .clear
         }
     }

@@ -31,15 +31,36 @@ struct StateGallerySnapshotTests {
         #expect(image.pixelsHigh >= Int(Self.size.height))
 
         // The sheet's padding is bare background.
-        let sample = try #require(image.colorAt(x: 4, y: 4)?.usingColorSpace(.sRGB))
-        let expected = AlfieColorContrastTests.flatten(AlfieColor.background, over: nil, look)
-        let tolerance = 0.03
-        #expect(abs(Double(sample.redComponent) - expected.r) < tolerance
-                && abs(Double(sample.greenComponent) - expected.g) < tolerance
-                && abs(Double(sample.blueComponent) - expected.b) < tolerance,
-                "ground \(sample) is not \(expected) in \(look)")
+        let sample = try #require(image.colorAt(x: 4, y: 4))
+        #expect(Self.isBackground(sample, of: look), "ground \(sample) is not the \(look) background")
 
         try Self.write(image, name: "states-\(look.rawValue).png")
+    }
+
+    /// D2: the live Multiview console is dark even when the system is Light;
+    /// every other screen follows the operator's appearance.
+    @Test(arguments: [true, false])
+    func liveConsoleIsForcedDarkInLight(isLive: Bool) throws {
+        let sample = AlfieColor.background.modifier(LiveConsoleAppearance(isLive: isLive))
+        let image = try #require(Self.render(sample, look: .light))
+        let pixel = try #require(image.colorAt(x: 40, y: 40))
+        let look: AlfieColorContrastTests.Look = isLive ? .dark : .light
+        #expect(Self.isBackground(pixel, of: look), "isLive \(isLive): \(pixel) is not the \(look) background")
+    }
+
+    /// The offscreen render goes through the display's colour management, so
+    /// a saturated navy lands a few levels off its token. What matters is
+    /// that the ground is clearly this appearance's background and not the
+    /// other one's.
+    private static func isBackground(_ color: NSColor, of look: AlfieColorContrastTests.Look) -> Bool {
+        guard let c = color.usingColorSpace(.sRGB) else { return false }
+        func distance(_ other: AlfieColorContrastTests.Look) -> Double {
+            let e = AlfieColorContrastTests.flatten(AlfieColor.background, over: nil, other)
+            return max(abs(Double(c.redComponent) - e.r), abs(Double(c.greenComponent) - e.g),
+                       abs(Double(c.blueComponent) - e.b))
+        }
+        let other: AlfieColorContrastTests.Look = look == .dark ? .light : .dark
+        return distance(look) < 0.08 && distance(look) < distance(other) / 4
     }
 
     @Test func refusedTakeKeepsItsReason() {
