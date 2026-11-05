@@ -67,22 +67,22 @@ struct ShowSetupView: View {
 
             HStack(spacing: 12) {
                 Button(action: actions.startAOnly) {
-                    Text("Start with Camera A only")
+                    setupLabel("Start with Camera A only")
                 }
-                .buttonStyle(SetupButtonStyle(isPrimary: false))
+                .alfieButtonStyle(.secondary, cornerRadius: 10)
                 .disabled(!model.canStartAOnly)
 
                 Button(action: actions.startPair) {
-                    Text("Start show · A Program, B Preview")
+                    setupLabel("Start show · A Program, B Preview")
                 }
-                .buttonStyle(SetupButtonStyle(isPrimary: true))
+                .alfieButtonStyle(.primary, cornerRadius: 10)
                 .disabled(!model.canStartPair)
                 Spacer()
                 if let editRunSheet = actions.editRunSheet {
                     Button(action: editRunSheet) {
-                        Text("Run sheet…")
+                        setupLabel("Run sheet…")
                     }
-                    .buttonStyle(SetupButtonStyle(isPrimary: false))
+                    .alfieButtonStyle(.secondary, cornerRadius: 10)
                     .help("Optional. Plan the show's segments; each uses its feel from Settings › Director.")
                 }
             }
@@ -267,30 +267,11 @@ struct ShowSetupView: View {
     }
 }
 
-/// Start buttons: filled blue for the pair start, neutral for A only.
-private struct SetupButtonStyle: ButtonStyle {
-    let isPrimary: Bool
-    @Environment(\.isEnabled) private var isEnabled
-
-    func makeBody(configuration: Configuration) -> some View {
-        configuration.label
-            .font(.system(size: 13, weight: .semibold))
-            .foregroundStyle(isPrimary && isEnabled ? AlfieColor.onAccent
-                             : isEnabled ? AlfieColor.text : AlfieColor.disabledText)
-            .padding(.horizontal, 18)
-            .padding(.vertical, 10)
-            .background {
-                RoundedRectangle(cornerRadius: 10, style: .continuous)
-                    .fill(fill.opacity(configuration.isPressed ? 0.8 : 1))
-            }
-            .overlay {
-                RoundedRectangle(cornerRadius: 10, style: .continuous)
-                    .strokeBorder(AlfieColor.ink.opacity(isPrimary ? 0.18 : 0.2), lineWidth: 1)
-            }
-    }
-
-    private var fill: Color {
-        guard isEnabled else { return ConsoleStyle.disabledFill }
-        return isPrimary ? AlfieColor.accent : AlfieColor.ink.opacity(0.08)
-    }
+/// The face of a Start or Run sheet button in Show setup; the shared
+/// family draws its states.
+private func setupLabel(_ title: String) -> some View {
+    Text(title)
+        .font(.system(size: 13, weight: .semibold))
+        .padding(.horizontal, 18)
+        .padding(.vertical, 10)
 }

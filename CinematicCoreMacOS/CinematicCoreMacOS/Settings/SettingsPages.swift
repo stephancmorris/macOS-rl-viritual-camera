@@ -103,7 +103,7 @@ private struct AppearanceTile: View {
                                   lineWidth: isSelected ? 2 : 1)
             )
         }
-        .buttonStyle(.plain)
+        .alfieButtonStyle(.quiet, cornerRadius: 12)
         .accessibilityLabel("\(option.title) appearance")
         .accessibilityAddTraits(isSelected ? .isSelected : [])
     }
@@ -451,10 +451,9 @@ struct FramingSettingsPage: View {
                 Text("· changing these sets Feel to Custom")
                     .font(.system(size: 12))
             }
-            .foregroundStyle(AlfieColor.tertiaryText)
-            .contentShape(Rectangle())
+            .foregroundStyle(AlfieColor.secondaryText)
         }
-        .buttonStyle(.plain)
+        .alfieButtonStyle(.quiet, cornerRadius: 6)
         .padding(.leading, 4)
         .padding(.top, 26)
         .padding(.bottom, 8)
@@ -553,17 +552,14 @@ private struct FeelPresetButton: View {
                 .minimumScaleFactor(0.8)
                 .frame(maxWidth: .infinity, minHeight: 44)
                 .padding(.horizontal, 6)
-                .background(
-                    RoundedRectangle(cornerRadius: 10, style: .continuous)
-                        .fill(isSelected ? AlfieColor.accentSoft : AlfieColor.controlFill)
-                )
                 .overlay(
                     RoundedRectangle(cornerRadius: 10, style: .continuous)
                         .strokeBorder(isSelected ? AlfieColor.accent : Color.clear, lineWidth: 1.5)
                 )
-                .contentShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
         }
-        .buttonStyle(.plain)
+        .alfieButtonStyle(.quiet, cornerRadius: 10)
+        .background(isSelected ? AlfieColor.accentSoft : AlfieColor.controlFill,
+                    in: RoundedRectangle(cornerRadius: 10, style: .continuous))
         .help(preset.detail)
         .accessibilityAddTraits(isSelected ? .isSelected : [])
     }
@@ -683,10 +679,9 @@ struct DirectorSettingsPage: View {
             }
             .padding(.horizontal, 16)
             .frame(minHeight: 44)
-            .background(isSelected ? AlfieColor.accentSoft : Color.clear)
-            .contentShape(Rectangle())
         }
-        .buttonStyle(.plain)
+        .alfieButtonStyle(.quiet, cornerRadius: 6)
+        .background(isSelected ? AlfieColor.accentSoft : Color.clear)
         .accessibilityLabel("\(kind.styleTitle), \(editor.summary(for: kind))")
         .accessibilityAddTraits(isSelected ? .isSelected : [])
     }
@@ -715,10 +710,9 @@ struct DirectorSettingsPage: View {
                 Text("· editing these makes the feel Custom")
                     .font(.system(size: 12))
             }
-            .foregroundStyle(AlfieColor.tertiaryText)
-            .contentShape(Rectangle())
+            .foregroundStyle(AlfieColor.secondaryText)
         }
-        .buttonStyle(.plain)
+        .alfieButtonStyle(.quiet, cornerRadius: 6)
         .padding(.leading, 4)
         .padding(.top, 26)
         .padding(.bottom, 8)
@@ -840,17 +834,14 @@ private struct ChoiceTile: View {
             .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
             .padding(.horizontal, 12)
             .padding(.vertical, 10)
-            .background(
-                RoundedRectangle(cornerRadius: 10, style: .continuous)
-                    .fill(isSelected ? AlfieColor.accentSoft : AlfieColor.card)
-            )
             .overlay(
                 RoundedRectangle(cornerRadius: 10, style: .continuous)
                     .strokeBorder(isSelected ? AlfieColor.accent : AlfieColor.border, lineWidth: isSelected ? 1.5 : 1)
             )
-            .contentShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
         }
-        .buttonStyle(.plain)
+        .alfieButtonStyle(.quiet, cornerRadius: 10)
+        .background(isSelected ? AlfieColor.accentSoft : AlfieColor.card,
+                    in: RoundedRectangle(cornerRadius: 10, style: .continuous))
         .accessibilityLabel("\(title). \(detail)")
         .accessibilityAddTraits(isSelected ? .isSelected : [])
     }

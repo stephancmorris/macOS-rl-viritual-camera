@@ -63,7 +63,7 @@ struct InputTileView: View {
             // empty tile is a placeholder and follows the app's appearance.
             .environment(\.colorScheme, model.isAssigned ? .dark : colorScheme)
         }
-        .buttonStyle(.plain)
+        .alfieButtonStyle(.tallyTile, cornerRadius: 10)
         .disabled(!model.isAssigned)
         .accessibilityElement(children: .ignore)
         .accessibilityLabel(accessibilityLabel)

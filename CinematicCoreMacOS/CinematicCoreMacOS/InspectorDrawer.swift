@@ -86,9 +86,8 @@ struct InspectorDrawer: View {
                     .font(.system(size: 14, weight: .semibold))
                     .foregroundStyle(AlfieColor.tertiaryText)
                     .frame(width: 28, height: 28)
-                    .contentShape(Rectangle())
             }
-            .buttonStyle(.plain)
+            .alfieButtonStyle(.quiet, cornerRadius: 6)
             // VoiceOver would otherwise read the symbol name.
             .accessibilityLabel(InspectorHandle.accessibilityLabel(isOpen: true))
             .help(InspectorHandle.accessibilityLabel(isOpen: true))
@@ -153,20 +152,11 @@ struct InspectorDrawer: View {
                     .lineLimit(1)
                     .fixedSize(horizontal: true, vertical: false)
             }
-            .foregroundStyle(AlfieColor.text)
             .padding(.horizontal, 12)
             .padding(.vertical, 7)
             .frame(maxWidth: equalWidth ? .infinity : nil)
-            .background(
-                RoundedRectangle(cornerRadius: 9, style: .continuous)
-                    .fill(AlfieColor.ink.opacity(0.08))
-            )
-            .overlay(
-                RoundedRectangle(cornerRadius: 9, style: .continuous)
-                    .strokeBorder(AlfieColor.ink.opacity(0.12), lineWidth: 0.5)
-            )
         }
-        .buttonStyle(.plain)
+        .alfieButtonStyle(.secondary, cornerRadius: 9)
     }
 
     private func statusPill(_ text: String, color: Color, filled: Bool = false) -> some View {
@@ -444,14 +434,13 @@ struct InspectorDrawer: View {
                     }
                     Text(description)
                         .font(.system(size: 11.5, weight: .medium))
-                        .foregroundStyle(AlfieColor.tertiaryText)
+                        .foregroundStyle(AlfieColor.secondaryText)
                 }
                 Spacer()
             }
             .padding(.vertical, 9)
-            .contentShape(Rectangle())
         }
-        .buttonStyle(.plain)
+        .alfieButtonStyle(.quiet, cornerRadius: 6)
         .overlay(
             Rectangle()
                 .fill(AlfieColor.ink.opacity(0.06))
@@ -712,23 +701,11 @@ struct InspectorHandle: View {
         } label: {
             Text("⌥")
                 .font(.system(size: 16, weight: .semibold, design: .rounded))
-                .foregroundStyle(AlfieColor.secondaryText)
                 .frame(width: 36, height: 36)
-                .background(
-                    RoundedRectangle(cornerRadius: 12, style: .continuous)
-                        .fill(AlfieColor.ink.opacity(0.10))
-                )
-                .background(
-                    .ultraThinMaterial,
-                    in: RoundedRectangle(cornerRadius: 12, style: .continuous)
-                )
-                .overlay(
-                    RoundedRectangle(cornerRadius: 12, style: .continuous)
-                        .strokeBorder(AlfieColor.ink.opacity(0.16), lineWidth: 0.5)
-                )
-                .shadow(color: .black.opacity(0.4), radius: 12, y: 4)
         }
-        .buttonStyle(.plain)
+        .alfieButtonStyle(.secondary, cornerRadius: 12)
+        .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+        .shadow(color: .black.opacity(0.4), radius: 12, y: 4)
         .accessibilityLabel(Self.accessibilityLabel(isOpen: isOpen))
         .help(Self.accessibilityLabel(isOpen: isOpen))
     }

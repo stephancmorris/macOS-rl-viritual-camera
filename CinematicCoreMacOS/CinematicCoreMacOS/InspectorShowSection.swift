@@ -579,13 +579,9 @@ private enum InspectorShowSectionStyle {
                     .lineLimit(1)
                     .fixedSize(horizontal: true, vertical: false)
             }
-            .foregroundStyle(AlfieColor.text)
             .padding(.horizontal, 12)
             .padding(.vertical, 7)
-            .background(RoundedRectangle(cornerRadius: 9, style: .continuous).fill(AlfieColor.ink.opacity(0.08)))
-            .overlay(RoundedRectangle(cornerRadius: 9, style: .continuous)
-                .strokeBorder(AlfieColor.ink.opacity(0.12), lineWidth: 0.5))
         }
-        .buttonStyle(.plain)
+        .alfieButtonStyle(.secondary, cornerRadius: 9)
     }
 }
