@@ -77,11 +77,43 @@ struct AlfieColorContrastTests {
             ("onBrightFill on tracking.acquiring", AlfieColor.onBrightFill, AlfieColor.tracking.acquiring),
             ("onBrightFill on tracking.locked", AlfieColor.onBrightFill, AlfieColor.tracking.locked),
             ("onBrightFill on the AUTO badge", AlfieColor.onBrightFill, AlfieColor.tally.preview),
-            ("secondaryText on the refused TAKE", AlfieColor.secondaryText, ConsoleStyle.disabledFill)
+            ("secondaryText on the refused TAKE", AlfieColor.secondaryText, ConsoleStyle.disabledFill),
+            ("onAccent on primary hover", AlfieColor.onAccent, AlfieColor.control.primaryHover),
+            ("onAccent on primary pressed", AlfieColor.onAccent, AlfieColor.control.primaryPressed),
+            ("onFill on TAKE hover", AlfieColor.onFill, AlfieColor.control.programHover),
+            ("onFill on TAKE pressed", AlfieColor.onFill, AlfieColor.control.programPressed),
         ]
         for (name, fore, fill) in pairs {
             let ratio = Self.contrast(Self.flatten(fore, over: nil, look), Self.flatten(fill, over: nil, look))
             #expect(ratio >= 4.5, "\(name) in \(look): \(Self.format(ratio))")
+        }
+    }
+
+    /// Text inside a control stays readable under the hover and pressed
+    /// washes on every surface (UX F3).
+    @Test(arguments: Look.allCases)
+    func textPassesUnderHoverAndPressedWashes(look: Look) {
+        for (surfaceName, surface, under) in Self.surfaces(look) {
+            let ground = Self.flatten(surface, over: under, look)
+            for (washName, wash) in [("hover", AlfieColor.control.hoverWash), ("pressed", AlfieColor.control.pressWash)] {
+                let washed = Self.composite(wash, over: ground, look)
+                for (roleName, role) in [("text", AlfieColor.text), ("secondaryText", AlfieColor.secondaryText),
+                                         ("accentText", AlfieColor.accentText)] {
+                    let ratio = Self.contrast(Self.flatten(role, over: nil, look), washed)
+                    #expect(ratio >= 4.5, "\(roleName) on \(washName) \(surfaceName) in \(look): \(Self.format(ratio))")
+                }
+            }
+        }
+    }
+
+    /// Pill controls: selected and pressed fills on the glass.
+    @Test func onVideoTextPassesOnSelectedAndPressedFills() {
+        let glass = Self.flatten(AlfieColor.onVideo.glass, over: AlfieColor.videoWell, .dark)
+        for (name, fill) in [("selected", AlfieColor.control.videoSelectedFill),
+                             ("pressed", AlfieColor.control.videoPressWash)] {
+            let ground = Self.composite(fill, over: glass, .dark)
+            let ratio = Self.contrast(Self.flatten(AlfieColor.onVideo.emphasis, over: nil, .dark), ground)
+            #expect(ratio >= 4.5, "onVideo.emphasis on \(name) glass: \(Self.format(ratio))")
         }
     }
 
@@ -204,6 +236,14 @@ struct AlfieColorContrastTests {
         return RGB(r: top.r * alpha + bottom.r * (1 - alpha),
                    g: top.g * alpha + bottom.g * (1 - alpha),
                    b: top.b * alpha + bottom.b * (1 - alpha))
+    }
+
+    /// `color` composited over an already flattened ground.
+    static func composite(_ color: Color, over ground: RGB, _ look: Look) -> RGB {
+        let (top, alpha) = resolve(color, look)
+        return RGB(r: top.r * alpha + ground.r * (1 - alpha),
+                   g: top.g * alpha + ground.g * (1 - alpha),
+                   b: top.b * alpha + ground.b * (1 - alpha))
     }
 
     static func resolve(_ color: Color, _ look: Look) -> (RGB, Double) {

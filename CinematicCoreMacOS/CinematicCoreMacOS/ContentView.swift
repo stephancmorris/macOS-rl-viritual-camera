@@ -425,10 +425,10 @@ struct CameraRowView: View {
                 }
             }
             .padding(12)
-            .background(isSelected ? Color.blue.opacity(0.1) : Color.clear)
-            .cornerRadius(8)
         }
-        .buttonStyle(.plain)
+        .alfieButtonStyle(.quiet)
+        .background(isSelected ? AlfieColor.accentSoft : Color.clear,
+                    in: RoundedRectangle(cornerRadius: 8, style: .continuous))
     }
 }
 

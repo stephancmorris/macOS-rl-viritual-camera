@@ -49,16 +49,11 @@ struct TakeBarView: View {
                     .animation(.easeInOut(duration: 0.18).repeatCount(3, autoreverses: true),
                                value: refusalFlash)
             }
-            // The reason must stay readable: it says why TAKE was refused.
-            .foregroundStyle(availability.isEligible ? AlfieColor.onFill : AlfieColor.secondaryText)
             .frame(maxWidth: .infinity, maxHeight: .infinity)
-            .background(
-                RoundedRectangle(cornerRadius: 10, style: .continuous)
-                    .fill(availability.isEligible ? AlfieColor.programFill : ConsoleStyle.disabledFill)
-            )
-            .contentShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
         }
-        .buttonStyle(.plain)
+        // Never `.disabled`: an ineligible TAKE refuses, and its reason stays
+        // readable in secondaryText on the control fill.
+        .alfieButtonStyle(availability.isEligible ? .destructive : .refusing, cornerRadius: 10)
         .accessibilityLabel(availability.takeAccessibilityLabel)
         .accessibilityValue(availability.isEligible ? "Ready" : availability.subtitle)
     }
@@ -84,20 +79,12 @@ struct TakeBarView: View {
             Text(availability.editLiveTitle)
                 .font(.system(size: 13, weight: .semibold))
                 .multilineTextAlignment(.center)
-                .foregroundStyle(availability.editLive ? AlfieColor.onFill : ConsoleStyle.programRed)
                 .padding(.horizontal, 10)
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
-                .background(
-                    RoundedRectangle(cornerRadius: 10, style: .continuous)
-                        .fill(availability.editLive ? AlfieColor.programFill : Color.clear)
-                )
-                .overlay(
-                    RoundedRectangle(cornerRadius: 10, style: .continuous)
-                        .strokeBorder(ConsoleStyle.programRed, lineWidth: 1)
-                )
-                .contentShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
         }
-        .buttonStyle(.plain)
+        // Solid red only while editing Program; a navy outline at rest, so
+        // TAKE is the only red control in the bar.
+        .alfieButtonStyle(availability.editLive ? .destructive : .secondary, cornerRadius: 10)
         .accessibilityLabel(availability.editLiveAccessibilityLabel)
         .accessibilityValue(availability.editLive ? "On" : "Off")
     }

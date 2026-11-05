@@ -104,6 +104,43 @@ nonisolated enum AlfieColor {
     /// control still says why it is disabled, in `secondaryText`.
     static let disabledText = dynamic(light: 0x6E7C91, dark: 0x7B8796)
 
+    // MARK: Control states (UX F3)
+
+    /// Hover, pressed and selected fills for `AlfieButtonStyle`. Hover is one
+    /// step lighter, pressed one step darker, with no scaling. `text` and
+    /// `secondaryText` pass 4.5:1 under every wash; text inside a control
+    /// never uses `tertiaryText`, which a wash would push below it.
+    static let control = Control(
+        hoverWash: dynamic(light: 0x0C2340, dark: 0xE8EDF4, lightAlpha: 0.06, darkAlpha: 0.08),
+        pressWash: dynamic(light: 0x0C2340, dark: 0x000000, lightAlpha: 0.12, darkAlpha: 0.20),
+        primaryHover: dynamic(light: 0x1B3A63, dark: 0xF7F9FC),
+        primaryPressed: dynamic(light: 0x081A30, dark: 0xCDD6E0),
+        programHover: dynamic(light: 0xC40021, dark: 0xE0101F),
+        programPressed: dynamic(light: 0x94001A, dark: 0xB3001B),
+        outline: dynamic(light: 0x0C2340, dark: 0xE8EDF4, lightAlpha: 0.40, darkAlpha: 0.40),
+        videoRestFill: fixed(0xFFFFFF, alpha: 0.07),
+        videoHoverWash: fixed(0xFFFFFF, alpha: 0.08),
+        videoPressWash: fixed(0xFFFFFF, alpha: 0.20),
+        videoSelectedFill: fixed(0xFFFFFF, alpha: 0.14))
+
+    nonisolated struct Control: Sendable {
+        /// Quiet, secondary and segment buttons under the pointer.
+        let hoverWash: Color
+        let pressWash: Color
+        let primaryHover: Color
+        let primaryPressed: Color
+        /// TAKE and Stop session.
+        let programHover: Color
+        let programPressed: Color
+        /// A secondary button's outline at rest.
+        let outline: Color
+        /// Controls on the pill's glass over footage.
+        let videoRestFill: Color
+        let videoHoverWash: Color
+        let videoPressWash: Color
+        let videoSelectedFill: Color
+    }
+
     // MARK: On footage
     // Drawn on video or on the dark glass over it, so identical in both
     // appearances.

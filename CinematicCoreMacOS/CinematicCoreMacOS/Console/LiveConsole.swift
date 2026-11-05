@@ -534,7 +534,7 @@ struct LiveConsoleHeader: View {
             }
             // Show-level stop (every input), in the pill's familiar style.
             Button { model.stopShow() } label: { StopSessionLabel() }
-                .buttonStyle(.plain)
+                .alfieButtonStyle(.destructive, cornerRadius: 14)
                 .accessibilityLabel("Stop session")
                 .accessibilityHint("Stops every camera")
         }

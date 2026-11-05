@@ -49,27 +49,21 @@ struct StoppedScreen: View {
                 Button(action: onStart) {
                     Text("Start session")
                         .font(.system(size: 14, weight: .semibold))
-                        .foregroundStyle(AlfieColor.onAccent)
                         .padding(.horizontal, 22)
                         .padding(.vertical, 11)
-                        .background(
-                            RoundedRectangle(cornerRadius: 12, style: .continuous)
-                                .fill(AlfieColor.accent)
-                        )
-                        .overlay(
-                            RoundedRectangle(cornerRadius: 12, style: .continuous)
-                                .strokeBorder(Color.white.opacity(0.18), lineWidth: 0.5)
-                        )
-                        .shadow(color: AlfieColor.accent.opacity(0.45), radius: 24, y: 6)
                 }
-                .buttonStyle(.plain)
+                .alfieButtonStyle(.primary, cornerRadius: 12)
                 .padding(.top, 6)
 
                 if let onEditRunSheet {
-                    Button("Run sheet…", action: onEditRunSheet)
-                        .buttonStyle(.link)
-                        .font(.system(size: 12, weight: .medium))
-                        .help("Optional. Plan the show's segments; each uses its feel from Settings › Director.")
+                    Button(action: onEditRunSheet) {
+                        Text("Run sheet…")
+                            .font(.system(size: 12, weight: .medium))
+                            .padding(.horizontal, 10)
+                            .padding(.vertical, 5)
+                    }
+                    .alfieButtonStyle(.quiet, cornerRadius: 6)
+                    .help("Optional. Plan the show's segments; each uses its feel from Settings › Director.")
                 }
             }
             .padding(40)

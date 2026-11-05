@@ -23,6 +23,7 @@ import Testing
 @MainActor
 struct StateGallerySnapshotTests {
     private static let size = CGSize(width: 1100, height: 760)
+    private static let buttonSheetSize = CGSize(width: 1100, height: 900)
 
     @Test(arguments: AlfieColorContrastTests.Look.allCases)
     func rendersEveryStateInEachAppearance(look: AlfieColorContrastTests.Look) throws {
@@ -35,6 +36,16 @@ struct StateGallerySnapshotTests {
         #expect(Self.isBackground(sample, of: look), "ground \(sample) is not the \(look) background")
 
         try Self.write(image, name: "states-\(look.rawValue).png")
+    }
+
+    /// Every member of the shared button family in every state (UX F3), and
+    /// the hold-to-stop phases (D3), on each appearance's background.
+    @Test(arguments: AlfieColorContrastTests.Look.allCases)
+    func rendersButtonStatesInEachAppearance(look: AlfieColorContrastTests.Look) throws {
+        let image = try #require(Self.render(ButtonStatesSheet(), look: look, size: Self.buttonSheetSize))
+        let sample = try #require(image.colorAt(x: 4, y: 4))
+        #expect(Self.isBackground(sample, of: look), "ground \(sample) is not the \(look) background")
+        try Self.write(image, name: "buttons-\(look.rawValue).png")
     }
 
     /// D2: the live Multiview console is dark even when the system is Light;
@@ -73,7 +84,8 @@ struct StateGallerySnapshotTests {
 
     // MARK: Rendering
 
-    private static func render<V: View>(_ view: V, look: AlfieColorContrastTests.Look) -> NSBitmapImageRep? {
+    private static func render<V: View>(_ view: V, look: AlfieColorContrastTests.Look,
+                                        size: CGSize = size) -> NSBitmapImageRep? {
         let scheme: ColorScheme = look == .dark ? .dark : .light
         let host = NSHostingView(rootView: view.environment(\.colorScheme, scheme)
             .frame(width: size.width, height: size.height))
@@ -114,6 +126,115 @@ private final class StateGalleryWindow: NSWindow {
     }
 }
 
+/// The shared button family: a row per member, a column per state, then the
+/// same members on the pill's glass, then the hold-to-stop phases.
+private struct ButtonStatesSheet: View {
+    private enum Column: String, CaseIterable {
+        case rest = "Rest", hover = "Hover", pressed = "Pressed", focus = "Focus", disabled = "Disabled"
+
+        var forced: AlfieForcedControlState? {
+            switch self {
+            case .rest, .disabled: return nil
+            case .hover: return .hover
+            case .pressed: return .pressed
+            case .focus: return .focus
+            }
+        }
+    }
+
+    private struct Member: Identifiable {
+        let id: String
+        let title: String
+        let role: AlfieButtonStyle.Role
+        var isSelected = false
+    }
+
+    private static let chrome: [Member] = [
+        Member(id: "primary", title: "Start session", role: .primary),
+        Member(id: "secondary", title: "Check pair", role: .secondary),
+        Member(id: "quiet", title: "Run sheet…", role: .quiet),
+        Member(id: "destructive", title: "TAKE", role: .destructive),
+        Member(id: "refusing", title: "TAKE · no Preview", role: .refusing),
+        Member(id: "segment", title: "Multi Cam", role: .segment),
+        Member(id: "segment-selected", title: "Single Cam", role: .segment, isSelected: true)
+    ]
+
+    private static let video: [Member] = [
+        Member(id: "v-quiet", title: "Detect", role: .quiet),
+        Member(id: "v-segment", title: "Waist Up", role: .segment, isSelected: true),
+        Member(id: "v-toggle-on", title: "Manual", role: .toggle(isOn: true)),
+        Member(id: "v-toggle-off", title: "Auto Pan", role: .toggle(isOn: false)),
+        Member(id: "v-secondary", title: "+ Push in", role: .secondary),
+        Member(id: "v-destructive", title: "Stop session", role: .destructive)
+    ]
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            header
+            ForEach(Self.chrome) { member in
+                stateRow(member, surface: .chrome)
+            }
+            VStack(alignment: .leading, spacing: 10) {
+                ForEach(Self.video) { member in
+                    stateRow(member, surface: .video)
+                }
+            }
+            .padding(12)
+            .background(AlfieColor.onVideo.glass, in: RoundedRectangle(cornerRadius: 18))
+            .background(AlfieColor.videoWell, in: RoundedRectangle(cornerRadius: 18))
+            .environment(\.colorScheme, .dark)
+            HStack(spacing: 18) {
+                AlfieHoldToStopButton(previewPhase: .resting) {}
+                AlfieHoldToStopButton(previewPhase: .holding(since: 0), previewProgress: 0.5) {}
+                AlfieHoldToStopButton(previewPhase: .needsHold) {}
+                AlfieHoldToStopButton(previewPhase: .stopping, previewProgress: 1) {}
+                AlfieHoldToStopButton(previewPhase: .failed) {}
+            }
+            .padding(12)
+            .background(AlfieColor.onVideo.glass, in: RoundedRectangle(cornerRadius: 18))
+            .background(AlfieColor.videoWell, in: RoundedRectangle(cornerRadius: 18))
+            .environment(\.colorScheme, .dark)
+        }
+        .padding(28)
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+        .background(AlfieColor.background)
+    }
+
+    private var header: some View {
+        HStack(spacing: 12) {
+            Text("").frame(width: 130, alignment: .leading)
+            ForEach(Column.allCases, id: \.self) { column in
+                Text(column.rawValue.uppercased())
+                    .font(ConsoleStyle.label(10))
+                    .foregroundStyle(AlfieColor.tertiaryText)
+                    .frame(width: 150)
+            }
+        }
+    }
+
+    private func stateRow(_ member: Member, surface: AlfieButtonStyle.Surface) -> some View {
+        HStack(spacing: 12) {
+            Text(member.id)
+                .font(ConsoleStyle.label(10))
+                .foregroundStyle(surface == .video ? AlfieColor.onVideo.secondary : AlfieColor.tertiaryText)
+                .frame(width: 130, alignment: .leading)
+            ForEach(Column.allCases, id: \.self) { column in
+                Button {} label: {
+                    Text(member.title)
+                        .font(.system(size: 12, weight: .semibold))
+                        .padding(.horizontal, 12)
+                        .padding(.vertical, 7)
+                }
+                .alfieButtonStyle(member.role, surface: surface, isSelected: member.isSelected,
+                                  cornerRadius: 8)
+                .disabled(column == .disabled && member.role != .refusing && member.role != .destructive)
+                .environment(\.alfieForcedControlState, column.forced)
+                .frame(width: 150)
+            }
+        }
+    }
+}
+
 /// One sheet of every stateful control, on the appearance's background.
 private struct StateGallerySheet: View {
     private let twoCameras = OperatorModeChoice.Cameras(devices: [(uniqueID: "a", isBuiltIn: false),
@@ -146,7 +267,8 @@ private struct StateGallerySheet: View {
                                 .foregroundStyle(state.labelColor)
                         }
                     }
-                    StopSessionLabel()
+                    Button {} label: { StopSessionLabel() }
+                        .alfieButtonStyle(.destructive, surface: .video, cornerRadius: 14)
                 }
                 .padding(12)
                 .background(AlfieColor.onVideo.glass, in: RoundedRectangle(cornerRadius: 22))
