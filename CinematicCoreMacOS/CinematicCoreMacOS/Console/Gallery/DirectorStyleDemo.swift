@@ -24,7 +24,7 @@ struct DirectorStyleDemo: View {
         VStack(alignment: .leading, spacing: 12) {
             Text("Synthetic style editor. Saves use a unique temporary gallery file. Live preferences and rig qualification are unchanged.")
                 .font(.system(size: 12))
-                .foregroundStyle(.white.opacity(0.55))
+                .foregroundStyle(AlfieColor.tertiaryText)
                 .fixedSize(horizontal: false, vertical: true)
             HStack(spacing: 12) {
                 Button("Load synthetic example") {

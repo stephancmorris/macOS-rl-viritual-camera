@@ -70,7 +70,7 @@ struct DirectorSubjectPickView: View {
                 if selected {
                     Text(recovering ? "LAST POSITION" : presentation.owner)
                         .font(.system(size: 10, weight: .semibold))
-                        .foregroundStyle(.black)
+                        .foregroundStyle(AlfieColor.onBrightFill)
                         .padding(.horizontal, 6)
                         .padding(.vertical, 3)
                         .background(color)
@@ -115,7 +115,7 @@ struct DirectorSubjectPickCaption: View {
                 Text(presentation.instruction).font(.system(size: 10))
             }
         }
-        .foregroundStyle(.white)
+        .foregroundStyle(AlfieColor.onVideo.emphasis)
         .padding(.horizontal, 8)
         .padding(.vertical, 5)
         .background(.black.opacity(0.75), in: RoundedRectangle(cornerRadius: 4))

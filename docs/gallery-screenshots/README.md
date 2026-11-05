@@ -26,6 +26,15 @@ The input, setup and pill files below are **synthetic**. They are 1280-point off
 | Pass · trial | [setup-pass.png](setup-pass.png) |
 | Unsupported | [setup-unsupported.png](setup-unsupported.png) |
 
+## Control states
+
+`StateGallerySnapshotTests` draws the controls whose states carry meaning in both appearances, from the `AlfieColor` roles: mode picker (all available, Multi Cam disabled), TAKE (eligible, refused with its reason, Edit Live on), the pill's lock states and Stop, tracking and tally chips on footage, and the text roles. `AlfieColorContrastTests` holds each pair to contrast.
+
+| Appearance | Capture |
+| --- | --- |
+| Light | [states-light.png](states-light.png) |
+| Dark | [states-dark.png](states-dark.png) |
+
 ## Operator pill
 
 | Target | Capture |

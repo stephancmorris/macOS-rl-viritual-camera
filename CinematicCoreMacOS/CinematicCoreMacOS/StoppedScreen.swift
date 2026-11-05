@@ -32,15 +32,15 @@ struct StoppedScreen: View {
                 Text("\(operatorModes.mode.title.uppercased()) · SESSION STOPPED")
                     .font(.system(size: 10, weight: .semibold, design: .monospaced))
                     .tracking(2.0)
-                    .foregroundStyle(AlfieColor.ink.opacity(0.5))
+                    .foregroundStyle(AlfieColor.tertiaryText)
 
                 Text("Alfie is standing by.")
                     .font(.system(size: 32, weight: .semibold))
-                    .foregroundStyle(AlfieColor.ink.opacity(0.96))
+                    .foregroundStyle(AlfieColor.text)
 
                 Text(subtitle)
                     .font(.system(size: 14, weight: .medium))
-                    .foregroundStyle(AlfieColor.ink.opacity(0.6))
+                    .foregroundStyle(AlfieColor.tertiaryText)
                     .multilineTextAlignment(.center)
 
                 OperatorModePicker(store: operatorModes, cameras: cameras, style: .stoppedScreen)
@@ -49,7 +49,7 @@ struct StoppedScreen: View {
                 Button(action: onStart) {
                     Text("Start session")
                         .font(.system(size: 14, weight: .semibold))
-                        .foregroundStyle(.white)
+                        .foregroundStyle(AlfieColor.onAccent)
                         .padding(.horizontal, 22)
                         .padding(.vertical, 11)
                         .background(

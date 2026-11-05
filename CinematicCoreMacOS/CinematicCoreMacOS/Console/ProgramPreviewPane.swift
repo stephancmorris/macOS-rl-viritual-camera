@@ -136,7 +136,7 @@ struct ProgramPreviewPane<Picture: View>: View {
         HStack(alignment: .top, spacing: 8) {
             Text(model.label.uppercased())
                 .font(ConsoleStyle.label(11))
-                .foregroundStyle(.white)
+                .foregroundStyle(AlfieColor.onVideo.emphasis)
                 .lineLimit(1)
                 .truncationMode(.middle)
                 .padding(.horizontal, 8)
@@ -149,7 +149,7 @@ struct ProgramPreviewPane<Picture: View>: View {
             if let status = model.status {
                 Text(status)
                     .font(.system(size: 11, weight: .medium))
-                    .foregroundStyle(.white.opacity(0.9))
+                    .foregroundStyle(AlfieColor.onVideo.primary)
                     .padding(.horizontal, 8)
                     .padding(.vertical, 4)
                     .background(.black.opacity(0.55), in: RoundedRectangle(cornerRadius: 4))
@@ -175,7 +175,7 @@ struct ProgramPreviewPane<Picture: View>: View {
         HStack {
             Text(model.editLiveBannerText)
                 .font(ConsoleStyle.label(12))
-                .foregroundStyle(.white)
+                .foregroundStyle(AlfieColor.onVideo.emphasis)
                 .lineLimit(1)
             Spacer()
             Button("Done", action: onDoneEditing)
@@ -204,12 +204,12 @@ struct ProgramPreviewPane<Picture: View>: View {
                     if let title = state.title {
                         Text(title)
                             .font(.system(size: 17, weight: .semibold))
-                            .foregroundStyle(.white)
+                            .foregroundStyle(AlfieColor.onVideo.emphasis)
                     }
                     if let detail = state.detail {
                         Text(detail)
                             .font(.system(size: 13))
-                            .foregroundStyle(.white.opacity(0.75))
+                            .foregroundStyle(AlfieColor.onVideo.secondary)
                             .multilineTextAlignment(.center)
                             .frame(maxWidth: 440)
                     }
@@ -228,7 +228,7 @@ struct ProgramPreviewPane<Picture: View>: View {
                 Color.black.opacity(0.35)
                 Text(title)
                     .font(.system(size: 13, weight: .medium))
-                    .foregroundStyle(.white)
+                    .foregroundStyle(AlfieColor.onVideo.emphasis)
                     .padding(.horizontal, 12)
                     .padding(.vertical, 6)
                     .background(.black.opacity(0.7), in: Capsule())
@@ -276,12 +276,12 @@ struct PanePlaceholderPicture: View {
                                       y: geo.size.height * crop.midY)
                         Text("SOURCE · \(model.channel?.cameraLabel.uppercased() ?? "")")
                             .font(ConsoleStyle.label(11))
-                            .foregroundStyle(.white.opacity(0.5))
+                            .foregroundStyle(AlfieColor.onVideo.tertiary)
                             .position(x: geo.size.width / 2, y: geo.size.height - 24)
                     } else {
                         Text("\(input.name) · \(input.shot)")
                             .font(.system(size: 15, weight: .medium))
-                            .foregroundStyle(.white.opacity(0.35))
+                            .foregroundStyle(AlfieColor.onVideo.disabled)
                     }
                 }
             }

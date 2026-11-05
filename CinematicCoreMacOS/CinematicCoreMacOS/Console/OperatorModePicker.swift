@@ -71,7 +71,7 @@ struct OperatorModePicker: View {
                 segments(palette: .console, showsNotes: true)
                 Text(refusal ?? store.mode.detail)
                     .font(.system(size: 12))
-                    .foregroundStyle(refusal == nil ? AlfieColor.ink.opacity(0.55) : AlfieColor.warning)
+                    .foregroundStyle(refusal == nil ? AlfieColor.tertiaryText : AlfieColor.warning)
                     .multilineTextAlignment(.center)
             }
 
@@ -79,7 +79,7 @@ struct OperatorModePicker: View {
             VStack(alignment: .leading, spacing: 5) {
                 Text("Mode")
                     .font(.system(size: 11, weight: .medium))
-                    .foregroundStyle(AlfieColor.ink.opacity(0.6))
+                    .foregroundStyle(AlfieColor.tertiaryText)
                 segments(palette: .console, showsNotes: false)
                 if let refusal {
                     Text(refusal)
@@ -121,7 +121,7 @@ struct OperatorModePicker: View {
                 }
             }
             .lineLimit(1)
-            .foregroundStyle(isSelected ? Color.white
+            .foregroundStyle(isSelected ? AlfieColor.onAccent
                              : choice.isEnabled ? palette.text : palette.disabledText)
             .frame(minWidth: showsNotes ? 132 : 84)
             .padding(.horizontal, 12)
@@ -158,8 +158,8 @@ struct OperatorModePicker: View {
         /// The console screens: the same roles on the console's backdrop.
         static let console = Palette(track: AlfieColor.ink.opacity(0.08),
                                      selected: AlfieColor.accent,
-                                     text: AlfieColor.ink.opacity(0.92),
-                                     disabledText: AlfieColor.ink.opacity(0.42))
+                                     text: AlfieColor.text,
+                                     disabledText: AlfieColor.disabledText)
     }
 }
 

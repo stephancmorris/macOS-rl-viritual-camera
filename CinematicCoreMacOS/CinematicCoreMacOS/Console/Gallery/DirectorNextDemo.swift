@@ -35,7 +35,7 @@ struct DirectorNextDemo: View {
         VStack(alignment: .leading, spacing: 8) {
             Text(title.uppercased())
                 .font(ConsoleStyle.label(11))
-                .foregroundStyle(.white.opacity(0.55))
+                .foregroundStyle(AlfieColor.tertiaryText)
             content()
         }
     }

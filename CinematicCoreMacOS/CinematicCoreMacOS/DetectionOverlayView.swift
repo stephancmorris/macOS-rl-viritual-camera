@@ -164,31 +164,31 @@ struct BoundingBoxView: View {
     private var currentStyle: BoxStyle {
         if isAcquiring {
             return BoxStyle(
-                color: Color(red: 1.0, green: 0.74, blue: 0.23),
-                labelColor: .black.opacity(0.85),
+                color: AlfieColor.tracking.acquiring,
+                labelColor: AlfieColor.onBrightFill,
                 label: "ACQUIRING",
                 isPulsing: true
             )
         }
         if isRecovering {
             return BoxStyle(
-                color: Color(red: 1.0, green: 0.72, blue: 0.24),
-                labelColor: .black.opacity(0.85),
+                color: AlfieColor.tracking.acquiring,
+                labelColor: AlfieColor.onBrightFill,
                 label: "RECOVERING · LAST POSITION",
                 isPulsing: true
             )
         }
         if isLocked || isActive {
             return BoxStyle(
-                color: Color(red: 0.22, green: 1.0, blue: 0.08),
-                labelColor: .black.opacity(0.85),
+                color: AlfieColor.tracking.locked,
+                labelColor: AlfieColor.onBrightFill,
                 label: "SUBJECT · \(framingTitle.uppercased())",
                 isPulsing: false
             )
         }
         return BoxStyle(
-            color: Color(red: 0.47, green: 0.86, blue: 1.0),
-            labelColor: .black.opacity(0.85),
+            color: AlfieColor.tracking.candidate,
+            labelColor: AlfieColor.onBrightFill,
             label: "PERSON · \(Int(person.confidence * 100))%",
             isPulsing: false
         )

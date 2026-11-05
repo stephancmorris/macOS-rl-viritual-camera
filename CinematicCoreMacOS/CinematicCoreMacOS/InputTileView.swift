@@ -45,7 +45,7 @@ struct InputTileView: View {
                         Text("Add a camera in Setup")
                             .font(.system(size: 11))
                     }
-                    .foregroundStyle(AlfieColor.ink.opacity(0.6))
+                    .foregroundStyle(AlfieColor.tertiaryText)
                     .padding(12)
                     .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottomLeading)
                 }
@@ -86,7 +86,7 @@ struct InputTileView: View {
             Spacer(minLength: 4)
             directorBadgeSlot
         }
-        .foregroundStyle(.white)
+        .foregroundStyle(AlfieColor.onVideo.emphasis)
         .shadow(color: .black.opacity(0.6), radius: 2)
         .padding(10)
     }
@@ -107,7 +107,7 @@ struct InputTileView: View {
                 .lineLimit(1)
                 .layoutPriority(1)
         }
-        .foregroundStyle(.white)
+        .foregroundStyle(AlfieColor.onVideo.emphasis)
         .padding(.horizontal, 10)
         .padding(.vertical, 8)
         .frame(maxWidth: .infinity, alignment: .leading)
@@ -117,7 +117,7 @@ struct InputTileView: View {
     private var background: some View {
         ZStack {
             if model.isAssigned {
-                Color(red: 0.08, green: 0.09, blue: 0.11)
+                AlfieColor.onVideo.tileGround
             } else {
                 AlfieColor.ink.opacity(0.05)
             }
@@ -145,7 +145,7 @@ struct InputTileView: View {
                     .padding(.horizontal, 6)
                     .padding(.vertical, 3)
                     .background(ConsoleStyle.previewGreen, in: RoundedRectangle(cornerRadius: 4))
-                    .foregroundStyle(.black)
+                    .foregroundStyle(AlfieColor.onBrightFill)
             }
         }
         .frame(width: Self.directorBadgeReserve, alignment: .trailing)
@@ -172,7 +172,7 @@ struct InputTileView: View {
 private extension InputTileModel {
     var healthColor: Color {
         switch health {
-        case .rate: .white.opacity(0.85)
+        case .rate: AlfieColor.onVideo.primary
         case .unsupported, .noSignal: ConsoleStyle.amber
         }
     }

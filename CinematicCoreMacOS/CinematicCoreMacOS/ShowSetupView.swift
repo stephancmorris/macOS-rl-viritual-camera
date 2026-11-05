@@ -47,7 +47,7 @@ struct ShowSetupView: View {
                         .help("Stop all cameras before changing built-in camera testing.")
                     Text(ShowSetupModel.builtInCameraTestDetail)
                         .font(.system(size: 11))
-                        .foregroundStyle(AlfieColor.ink.opacity(0.65))
+                        .foregroundStyle(AlfieColor.secondaryText)
                         .fixedSize(horizontal: false, vertical: true)
                 }
                 .padding(.bottom, 14)
@@ -91,7 +91,7 @@ struct ShowSetupView: View {
 
             Text("Nothing goes to the ATEM until you press Start. Alfie never restores a Program/Preview state from the last show.")
                 .font(.system(size: 11))
-                .foregroundStyle(AlfieColor.ink.opacity(0.55))
+                .foregroundStyle(AlfieColor.tertiaryText)
         }
         .padding(.horizontal, Self.sidePadding)
         .padding(.top, 32)
@@ -109,7 +109,7 @@ struct ShowSetupView: View {
                 Text("SESSION STOPPED")
                     .font(ConsoleStyle.label(10))
                     .tracking(2)
-                    .foregroundStyle(AlfieColor.ink.opacity(0.5))
+                    .foregroundStyle(AlfieColor.tertiaryText)
                 Text("Show setup")
                     .font(.system(size: 27, weight: .semibold))
             }
@@ -148,7 +148,7 @@ struct ShowSetupView: View {
                 }
             }
             .font(.system(size: 11, weight: .medium))
-            .foregroundStyle(AlfieColor.ink.opacity(0.6))
+            .foregroundStyle(AlfieColor.tertiaryText)
             picker()
                 .labelsHidden()
                 .pickerStyle(.menu)
@@ -167,7 +167,7 @@ struct ShowSetupView: View {
                     .font(ConsoleStyle.label(12))
                 Text(slot == .a ? "Program at Start" : "Preview at Start")
                     .font(.system(size: 11))
-                    .foregroundStyle(AlfieColor.ink.opacity(0.5))
+                    .foregroundStyle(AlfieColor.tertiaryText)
                 Spacer()
                 devicePicker(slot)
             }
@@ -178,7 +178,7 @@ struct ShowSetupView: View {
                     // channels (Settings → Framing); no per-slot choice yet.
                     Text("Capture profile · \(model.captureProfile)")
                     Text(model.deliveryTitle)
-                        .foregroundStyle(AlfieColor.ink.opacity(0.6))
+                        .foregroundStyle(AlfieColor.tertiaryText)
                     Spacer(minLength: 0)
                 }
                 .font(.system(size: 11))
@@ -231,14 +231,14 @@ struct ShowSetupView: View {
             VStack(spacing: 8) {
                 Image(systemName: device == nil ? "video.slash" : "video")
                     .font(.system(size: 26, weight: .light))
-                    .foregroundStyle(AlfieColor.ink.opacity(0.35))
+                    .foregroundStyle(AlfieColor.tertiaryText)
                 Text(device?.name ?? "No camera")
                     .font(.system(size: 14, weight: .semibold))
-                    .foregroundStyle(AlfieColor.ink.opacity(device == nil ? 0.4 : 0.8))
+                    .foregroundStyle(device == nil ? AlfieColor.tertiaryText : AlfieColor.secondaryText)
                     .lineLimit(1)
                 Text("The camera opens when the show starts")
                     .font(.system(size: 11))
-                    .foregroundStyle(AlfieColor.ink.opacity(0.4))
+                    .foregroundStyle(AlfieColor.tertiaryText)
             }
             .padding(.horizontal, 16)
         }
@@ -251,10 +251,10 @@ struct ShowSetupView: View {
         HStack(spacing: 10) {
             Text("CAM \(slot.letter)")
                 .font(ConsoleStyle.label(12))
-                .foregroundStyle(AlfieColor.ink.opacity(0.45))
+                .foregroundStyle(AlfieColor.tertiaryText)
             Text("not assigned")
                 .font(.system(size: 12))
-                .foregroundStyle(AlfieColor.ink.opacity(0.45))
+                .foregroundStyle(AlfieColor.tertiaryText)
             Spacer()
         }
         .padding(.horizontal, 12)
@@ -275,7 +275,8 @@ private struct SetupButtonStyle: ButtonStyle {
     func makeBody(configuration: Configuration) -> some View {
         configuration.label
             .font(.system(size: 13, weight: .semibold))
-            .foregroundStyle(isPrimary && isEnabled ? Color.white : AlfieColor.ink.opacity(isEnabled ? 1 : 0.4))
+            .foregroundStyle(isPrimary && isEnabled ? AlfieColor.onAccent
+                             : isEnabled ? AlfieColor.text : AlfieColor.disabledText)
             .padding(.horizontal, 18)
             .padding(.vertical, 10)
             .background {

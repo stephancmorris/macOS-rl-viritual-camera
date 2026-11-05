@@ -16,7 +16,7 @@ struct DirectorControlDemo: View {
         VStack(alignment: .leading, spacing: 16) {
             Text("Shortcut \(DirectorHandShortcut.title) hands control to Alfie, or takes over. Esc is reserved for the next-cut notice.")
                 .font(.system(size: 12))
-                .foregroundStyle(.white.opacity(0.55))
+                .foregroundStyle(AlfieColor.tertiaryText)
                 .fixedSize(horizontal: false, vertical: true)
             Picker("Synthetic qualification", selection: $scenario) {
                 ForEach(DirectorControlScenario.allCases) { scenario in
@@ -27,7 +27,7 @@ struct DirectorControlDemo: View {
             .accessibilityHint("Resets the gallery control to Manual. This does not qualify a real rig.")
             Text("Synthetic controls only. No camera, live authority or saved qualification is used. Changing the scenario resets to Manual.")
                 .font(.system(size: 12))
-                .foregroundStyle(.white.opacity(0.55))
+                .foregroundStyle(AlfieColor.tertiaryText)
                 .fixedSize(horizontal: false, vertical: true)
             DirectorInteractiveControl(scenario: scenario)
                 .id(scenario)
@@ -35,7 +35,7 @@ struct DirectorControlDemo: View {
                 VStack(alignment: .leading, spacing: 8) {
                     Text(card.title.uppercased())
                         .font(ConsoleStyle.label(11))
-                        .foregroundStyle(.white.opacity(0.55))
+                        .foregroundStyle(AlfieColor.tertiaryText)
                     DirectorModeControl(controller: card.controller, ownsShortcut: false, refusal: card.refusal)
                 }
             }

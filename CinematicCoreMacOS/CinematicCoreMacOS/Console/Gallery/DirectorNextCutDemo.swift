@@ -54,10 +54,10 @@ struct DirectorNextCutDemo: View {
         VStack(alignment: .leading, spacing: 16) {
             Text("Synthetic examples only: no capture, permits or cuts. The supplied 2 s notice is a fixture, not a product default.")
                 .font(.system(size: 12))
-                .foregroundStyle(.white.opacity(0.55))
+                .foregroundStyle(AlfieColor.tertiaryText)
             Text("INTERACTIVE EXAMPLE · ESC CANCELS")
                 .font(ConsoleStyle.label(11))
-                .foregroundStyle(.white.opacity(0.55))
+                .foregroundStyle(AlfieColor.tertiaryText)
             HStack(spacing: 12) {
                 Button("Restore Auto notice") { live.show(DirectorNextCutGallery.auto) }
                 Button("Show Backup notice") { live.show(DirectorNextCutGallery.backup) }
@@ -66,13 +66,13 @@ struct DirectorNextCutDemo: View {
             DirectorNextCutNotice(controller: live)
             Text("Cancelled examples: \(live.cancelCount)")
                 .font(.system(size: 12))
-                .foregroundStyle(.white.opacity(0.7))
+                .foregroundStyle(AlfieColor.secondaryText)
                 .accessibilityIdentifier("director.cancelCount")
             ForEach(DirectorNextCutGallery.cards) { card in
                 VStack(alignment: .leading, spacing: 8) {
                     Text(card.title.uppercased())
                         .font(ConsoleStyle.label(11))
-                        .foregroundStyle(.white.opacity(0.55))
+                        .foregroundStyle(AlfieColor.tertiaryText)
                     DirectorNextCutNotice(controller: card.controller, ownsShortcut: false)
                 }
             }

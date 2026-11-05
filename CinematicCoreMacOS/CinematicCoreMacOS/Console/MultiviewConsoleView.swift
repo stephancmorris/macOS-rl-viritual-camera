@@ -111,7 +111,7 @@ struct MultiviewConsoleView<Strip: View, Pill: View>: View {
                 .foregroundStyle(AlfieColor.ink)
             Text("MULTIVIEW · \(snapshot.showStandard.title)")
                 .font(ConsoleStyle.label(11))
-                .foregroundStyle(AlfieColor.ink.opacity(0.55))
+                .foregroundStyle(AlfieColor.tertiaryText)
             Spacer()
             if let headerTrailing { headerTrailing }
         }
@@ -144,7 +144,7 @@ struct ConsoleSlotPlaceholder: View {
     var body: some View {
         Text(title)
             .font(ConsoleStyle.label(11))
-            .foregroundStyle(AlfieColor.ink.opacity(0.4))
+            .foregroundStyle(AlfieColor.tertiaryText)
             .frame(maxWidth: width ?? .infinity, maxHeight: height ?? .infinity)
             .frame(width: width, height: height)
             .background(
