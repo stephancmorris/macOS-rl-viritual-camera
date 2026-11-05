@@ -4,11 +4,11 @@ S1 specification · 5 November 2026. Uses [Sol's feasibility note](webcam-in-use
 
 ## First use
 
-On the first selection of Webcam, show the nonmodal note beside its Start/output area:
+After the first successful Start in Webcam, show the nonmodal note on the preview (owner clarification, 6 November 2026):
 
 **“In Zoom, Meet or FaceTime, choose Alfie as your camera.”**
 
-Action **Got it**, accessible name **“Dismiss camera selection tip”**. VoiceOver reads the full note on first presentation without moving focus away from the mode picker. Remember dismissal per local user; no repeated modal on Start. Keep the same instruction available as output help after dismissal, and as persistent guidance when the stream is not in use. Selecting Webcam or displaying this note never opens a camera. Readiness and the explicit Preview cameras opt-in still apply.
+Action **Got it**, accessible name **“Dismiss camera selection tip”**. VoiceOver reads the full note on first presentation without moving focus away from the current operator control. Remember dismissal per local user; no repeated modal on Start. Keep the same instruction available as output help after dismissal, and as persistent guidance when the stream is not in use. Selecting Webcam or displaying this note never opens a camera. Readiness and the explicit Preview cameras opt-in still apply.
 
 ## Exact states
 
