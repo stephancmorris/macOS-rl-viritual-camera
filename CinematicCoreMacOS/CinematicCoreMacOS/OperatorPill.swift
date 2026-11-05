@@ -160,7 +160,10 @@ struct OperatorPill: View {
 
     private var targetChip: some View {
         Text((chipStyle == .full ? controlTarget.chipTitle : controlTarget.compactChipTitle) ?? "")
-        .font(.system(size: 11, weight: .bold, design: .monospaced))
+        // 11 pt floor: a proportional face keeps the chip's width where the
+        // 10 pt monospaced one had it, so the widest pill still fits 1280.
+        .font(.system(size: 11, weight: .bold))
+        .tracking(0.2)
         .foregroundStyle(AlfieColor.onFill)
         .lineLimit(1)
         .padding(.horizontal, 4)
@@ -389,6 +392,8 @@ struct OperatorPill: View {
         Button(action: action) {
             Text(title)
                 .font(.system(size: 12, weight: isOn ? .semibold : .medium))
+                .lineLimit(1)
+                .fixedSize()
                 .padding(.horizontal, 12)
                 .padding(.vertical, 6)
         }
