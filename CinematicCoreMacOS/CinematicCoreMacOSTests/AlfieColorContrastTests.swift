@@ -139,8 +139,49 @@ struct AlfieColorContrastTests {
     @Test func rolesResolvePerColourScheme() {
         let light = Self.flatten(AlfieColor.background, over: nil, .light)
         let dark = Self.flatten(AlfieColor.background, over: nil, .dark)
-        #expect(abs(light.r - 0xF5 / 255) < 0.01 && abs(light.b - 0xF7 / 255) < 0.01, "light background: \(light)")
-        #expect(abs(dark.r - 0x0E / 255) < 0.01 && abs(dark.b - 0x15 / 255) < 0.01, "dark background: \(dark)")
+        #expect(light.description == "#E4EAF1", "light background: \(light)")
+        #expect(dark.description == "#0A1A2E", "dark background: \(dark)")
+    }
+
+    /// UX F2 (owner decision D1): Mist in Light, Navy night in Dark. Pins every
+    /// surface and text role so a palette change is deliberate and reviewed.
+    /// Navy night danger is FF6961: FF453A falls to 3.8:1 on the control fill.
+    @Test(arguments: Look.allCases)
+    func paletteMatchesMistAndNavyNight(look: Look) {
+        let table: [(String, Color, String, String)] = [
+            ("background", AlfieColor.background, "#E4EAF1", "#0A1A2E"),
+            ("sidebar", AlfieColor.sidebar, "#DCE3EB", "#071526"),
+            ("card", AlfieColor.card, "#F4F7F9", "#0C2340"),
+            ("controlFill", AlfieColor.controlFill, "#D6DDE5", "#173252"),
+            ("text", AlfieColor.text, "#0C2340", "#E8EDF4"),
+            ("accent", AlfieColor.accent, "#0C2340", "#E8EDF4"),
+            ("ink", AlfieColor.ink, "#0C2340", "#E8EDF4"),
+            ("onAccent", AlfieColor.onAccent, "#E8EDF4", "#0C2340"),
+            ("secondaryText", AlfieColor.secondaryText, "#3E4F66", "#ACB4BF"),
+            ("tertiaryText", AlfieColor.tertiaryText, "#536174", "#919BA7"),
+            ("accentText", AlfieColor.accentText, "#1D4F91", "#9CC0EE"),
+            ("live", AlfieColor.live, "#12672C", "#30D158"),
+            ("warning", AlfieColor.warning, "#9C4600", "#FF9F0A"),
+            ("danger", AlfieColor.danger, "#B3001B", "#FF6961"),
+            ("nextStart", AlfieColor.nextStart, "#7A5400", "#FFD60A"),
+            ("programFill", AlfieColor.programFill, "#B3001B", "#D70015"),
+            ("disabledText", AlfieColor.disabledText, "#6E7C91", "#7B8796"),
+            ("videoWell", AlfieColor.videoWell, "#08080A", "#08080A")
+        ]
+        for (name, role, light, dark) in table {
+            let (value, alpha) = Self.resolve(role, look)
+            #expect(value.description == (look == .light ? light : dark), "\(name) in \(look): \(value)")
+            #expect(alpha > 0.999, "\(name) in \(look) should be opaque")
+        }
+        let (drawer, drawerAlpha) = Self.resolve(AlfieColor.drawer, look)
+        #expect(drawer.description == (look == .light ? "#F0F3F7" : "#0A1D35"), "drawer in \(look): \(drawer)")
+        #expect(abs(drawerAlpha - (look == .light ? 0.96 : 0.94)) < 0.005, "drawer alpha in \(look)")
+        for (name, role, lightAlpha, darkAlpha) in [("separator", AlfieColor.separator, 0.10, 0.10),
+                                                    ("border", AlfieColor.border, 0.18, 0.16)] {
+            let (value, alpha) = Self.resolve(role, look)
+            #expect(value.description == (look == .light ? "#0C2340" : "#E8EDF4"), "\(name) in \(look): \(value)")
+            #expect(abs(alpha - (look == .light ? lightAlpha : darkAlpha)) < 0.005, "\(name) alpha in \(look)")
+        }
     }
 
     // MARK: Colour maths
@@ -165,7 +206,7 @@ struct AlfieColorContrastTests {
                    b: top.b * alpha + bottom.b * (1 - alpha))
     }
 
-    private static func resolve(_ color: Color, _ look: Look) -> (RGB, Double) {
+    static func resolve(_ color: Color, _ look: Look) -> (RGB, Double) {
         var environment = EnvironmentValues()
         environment.colorScheme = look == .dark ? .dark : .light
         let resolved = color.resolve(in: environment)

@@ -181,15 +181,15 @@ struct ProgramPreviewPane<Picture: View>: View {
             Button("Done", action: onDoneEditing)
                 .buttonStyle(.plain)
                 .font(.system(size: 12, weight: .semibold))
-                .foregroundStyle(ConsoleStyle.programRed)
+                .foregroundStyle(AlfieColor.programFill)
                 .padding(.horizontal, 12)
                 .padding(.vertical, 5)
-                .background(.white, in: Capsule())
+                .background(AlfieColor.onFill, in: Capsule())
                 .accessibilityLabel("Done editing \(model.channel?.cameraLabel ?? "Program") live")
         }
         .padding(.horizontal, 12)
         .frame(height: Self.bannerHeight)
-        .background(ConsoleStyle.programRed)
+        .background(AlfieColor.programFill)
     }
 
     // MARK: - Overlays

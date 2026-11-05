@@ -67,6 +67,11 @@ struct ContentView: View {
     }
 
     private var content: some View {
+        contentStack
+            .modifier(LiveConsoleAppearance(isLive: screen == .multiviewConsole))
+    }
+
+    private var contentStack: some View {
         ZStack {
             // Layer 0: backdrop
             LiquidGlassBackdrop()
@@ -427,47 +432,29 @@ struct CameraRowView: View {
     }
 }
 
+/// The standby backdrop: a flat Mist (or Navy night) gradient from the
+/// background to the sidebar tone. No tinted glows, so the brand palette
+/// reads as one surface.
 struct LiquidGlassBackdrop: View {
+    var body: some View {
+        LinearGradient(
+            colors: AlfieColor.backdropStops,
+            startPoint: .topLeading,
+            endPoint: .bottomTrailing
+        )
+        .ignoresSafeArea()
+    }
+}
+
+/// D2 (5 Nov 2026): while the Multiview console is live it is dark whatever
+/// the system appearance, so a live room never flips to a bright surface.
+/// Everywhere else the operator's appearance applies.
+struct LiveConsoleAppearance: ViewModifier {
+    let isLive: Bool
     @Environment(\.colorScheme) private var colorScheme
 
-    var body: some View {
-        let isDark = colorScheme == .dark
-        ZStack {
-            LinearGradient(
-                colors: AlfieColor.backdropStops,
-                startPoint: .topLeading,
-                endPoint: .bottomTrailing
-            )
-
-            RadialGradient(
-                colors: [
-                    Color.cyan.opacity(isDark ? 0.22 : 0.12),
-                    Color.cyan.opacity(isDark ? 0.05 : 0.03),
-                    .clear
-                ],
-                center: .topTrailing,
-                startRadius: 80,
-                endRadius: 520
-            )
-
-            RadialGradient(
-                colors: [
-                    Color.mint.opacity(isDark ? 0.18 : 0.10),
-                    Color.mint.opacity(isDark ? 0.04 : 0.02),
-                    .clear
-                ],
-                center: .bottomLeading,
-                startRadius: 60,
-                endRadius: 460
-            )
-
-            LinearGradient(
-                colors: [AlfieColor.ink.opacity(0.05), .clear, .clear],
-                startPoint: .top,
-                endPoint: .bottom
-            )
-        }
-        .ignoresSafeArea()
+    func body(content: Content) -> some View {
+        content.environment(\.colorScheme, isLive ? .dark : colorScheme)
     }
 }
 
