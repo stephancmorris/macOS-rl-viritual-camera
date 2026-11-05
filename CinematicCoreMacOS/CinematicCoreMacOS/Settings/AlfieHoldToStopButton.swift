@@ -123,12 +123,15 @@ struct AlfieHoldToStopButton: View {
     @State private var ticker: Task<Void, Never>?
     @FocusState private var isFocused: Bool
     @Environment(\.alfieForcedControlState) private var forced
+    private let display = AlfieDisplay()
 
     private static let cornerRadius: CGFloat = 14
 
     var body: some View {
         let phase = previewPhase ?? hold.phase
-        let shownProgress = previewPhase == nil ? progress : previewProgress
+        let rawProgress = previewPhase == nil ? progress : previewProgress
+        // Reduce Motion: the fill moves in quarters rather than sweeping.
+        let shownProgress = display.reduceMotion ? (rawProgress * 4).rounded(.down) / 4 : rawProgress
         let shape = RoundedRectangle(cornerRadius: Self.cornerRadius, style: .continuous)
         face(phase: phase)
             .background {
@@ -144,9 +147,9 @@ struct AlfieHoldToStopButton: View {
             }
             .overlay {
                 if isFocused || forced == .focus {
-                    RoundedRectangle(cornerRadius: Self.cornerRadius + 4, style: .continuous)
-                        .strokeBorder(AlfieColor.accentText, lineWidth: 2)
-                        .padding(-4)
+                    RoundedRectangle(cornerRadius: Self.cornerRadius + 2 + display.focusRingWidth, style: .continuous)
+                        .strokeBorder(AlfieColor.accentText, lineWidth: display.focusRingWidth)
+                        .padding(-(2 + display.focusRingWidth))
                 }
             }
             .contentShape(shape)

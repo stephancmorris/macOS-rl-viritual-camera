@@ -20,7 +20,7 @@ import Testing
 struct ColorRoleLintTests {
     private static let tokenFile = "Settings/AlfieAppearance.swift"
 
-    private static var appSources: URL {
+    static var appSources: URL {
         URL(fileURLWithPath: #filePath)
             .deletingLastPathComponent().deletingLastPathComponent()
             .appendingPathComponent("CinematicCoreMacOS", isDirectory: true)
@@ -127,7 +127,7 @@ struct ColorRoleLintTests {
     }
 
     /// Drops `//` comments that are not inside a string literal.
-    private static func stripLineComments(_ source: String) -> String {
+    static func stripLineComments(_ source: String) -> String {
         source.split(separator: "\n", omittingEmptySubsequences: false).map { line -> Substring in
             var inString = false
             var previous: Character = " "
@@ -145,7 +145,7 @@ struct ColorRoleLintTests {
         }.joined(separator: "\n")
     }
 
-    private static func swiftFiles(in root: URL) throws -> [(String, URL)] {
+    static func swiftFiles(in root: URL) throws -> [(String, URL)] {
         guard let enumerator = FileManager.default.enumerator(at: root, includingPropertiesForKeys: nil) else {
             return []
         }

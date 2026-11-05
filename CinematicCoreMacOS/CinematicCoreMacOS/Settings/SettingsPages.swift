@@ -443,7 +443,7 @@ struct FramingSettingsPage: View {
         } label: {
             HStack(spacing: 8) {
                 Image(systemName: "chevron.right")
-                    .font(.system(size: 10, weight: .bold))
+                    .font(.system(size: 11, weight: .bold))
                     .rotationEffect(.degrees(showFineTune ? 90 : 0))
                 Text("FINE-TUNE")
                     .font(.system(size: 11, weight: .semibold, design: .monospaced))
@@ -702,7 +702,7 @@ struct DirectorSettingsPage: View {
         } label: {
             HStack(spacing: 8) {
                 Image(systemName: "chevron.right")
-                    .font(.system(size: 10, weight: .bold))
+                    .font(.system(size: 11, weight: .bold))
                     .rotationEffect(.degrees(showExactValues ? 90 : 0))
                 Text("EXACT VALUES")
                     .font(.system(size: 11, weight: .semibold, design: .monospaced))

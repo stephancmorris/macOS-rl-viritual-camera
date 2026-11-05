@@ -39,7 +39,7 @@ struct CinematicAgentSettingsView: View {
 
                     if let lastError = cameraManager.cinematicAgent.lastInferenceErrorDescription {
                         Text(lastError)
-                            .font(.caption)
+                            .font(.subheadline)
                             .foregroundStyle(.secondary)
                             .fixedSize(horizontal: false, vertical: true)
                     }
@@ -65,19 +65,19 @@ struct CinematicAgentSettingsView: View {
                 Section {
                     VStack(alignment: .leading, spacing: 8) {
                         Text("To enable the RL agent:")
-                            .font(.caption)
+                            .font(.subheadline)
                             .fontWeight(.medium)
                         Text("1. Run the training pipeline (see training/TRAINING_GUIDE.md)")
-                            .font(.caption)
+                            .font(.subheadline)
                             .foregroundStyle(.secondary)
                         Text("2. Export: python export_coreml.py --model models/ppo_final.zip")
-                            .font(.caption)
+                            .font(.subheadline)
                             .foregroundStyle(.secondary)
                         Text("3. Drag CinematicFraming.mlpackage into Xcode project navigator")
-                            .font(.caption)
+                            .font(.subheadline)
                             .foregroundStyle(.secondary)
                         Text("4. Rebuild the app")
-                            .font(.caption)
+                            .font(.subheadline)
                             .foregroundStyle(.secondary)
                     }
                     .padding(.vertical, 4)

@@ -30,7 +30,7 @@ struct StoppedScreen: View {
         ZStack {
             VStack(spacing: 22) {
                 Text("\(operatorModes.mode.title.uppercased()) · SESSION STOPPED")
-                    .font(.system(size: 10, weight: .semibold, design: .monospaced))
+                    .font(.system(size: 11, weight: .semibold, design: .monospaced))
                     .tracking(2.0)
                     .foregroundStyle(AlfieColor.tertiaryText)
 

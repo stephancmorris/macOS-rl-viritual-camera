@@ -493,9 +493,9 @@ struct LiveConsoleHeader: View {
         HStack(spacing: 12) {
             if let sheet = model.directorSection?.runSheet {
                 VStack(alignment: .leading, spacing: 2) {
-                    Text("Current: \(sheet.current)").font(ConsoleStyle.label(10)).lineLimit(1)
+                    Text("Current: \(sheet.current)").font(ConsoleStyle.label(11)).lineLimit(1)
                     Text(sheet.next.map { "Next: \($0)" } ?? "End of run sheet")
-                        .font(ConsoleStyle.label(10)).foregroundStyle(.secondary).lineLimit(1)
+                        .font(ConsoleStyle.label(11)).foregroundStyle(.secondary).lineLimit(1)
                 }
                 Button("Advance") { model.advanceDirectorSegment() }
                     .controlSize(.small)
@@ -513,7 +513,7 @@ struct LiveConsoleHeader: View {
             }
             if let text = model.pairCheckText ?? model.admissionTitle {
                 Text(text)
-                    .font(ConsoleStyle.label(10))
+                    .font(ConsoleStyle.label(11))
                     .foregroundStyle(AlfieColor.tertiaryText)
                     .lineLimit(1)
             }

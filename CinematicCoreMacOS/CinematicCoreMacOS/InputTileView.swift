@@ -78,7 +78,7 @@ struct InputTileView: View {
                 .font(.system(size: 13, weight: .semibold))
             if let badge = model.role.badge {
                 Text(badge)
-                    .font(.system(size: 10, weight: .bold, design: .monospaced))
+                    .font(.system(size: 11, weight: .bold, design: .monospaced))
                     .padding(.horizontal, 6)
                     .padding(.vertical, 3)
                     .background(badgeColor, in: RoundedRectangle(cornerRadius: 4))
@@ -102,7 +102,7 @@ struct InputTileView: View {
                 .truncationMode(.tail)
             Spacer(minLength: 4)
             Text(model.health.title)
-                .font(.system(size: 10, weight: .semibold, design: .monospaced))
+                .font(.system(size: 11, weight: .semibold, design: .monospaced))
                 .foregroundStyle(model.healthColor)
                 .lineLimit(1)
                 .layoutPriority(1)
@@ -141,7 +141,7 @@ struct InputTileView: View {
         Group {
             if let directorBadge {
                 Text(directorBadge)
-                    .font(.system(size: 10, weight: .bold, design: .monospaced))
+                    .font(.system(size: 11, weight: .bold, design: .monospaced))
                     .padding(.horizontal, 6)
                     .padding(.vertical, 3)
                     .background(ConsoleStyle.previewGreen, in: RoundedRectangle(cornerRadius: 4))

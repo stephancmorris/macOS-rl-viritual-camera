@@ -31,7 +31,7 @@ struct IdentityStackOverlay: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
             Text("INPUT · WIDE")
-                .font(.system(size: 10, weight: .semibold, design: .monospaced))
+                .font(.system(size: 11, weight: .semibold, design: .monospaced))
                 .tracking(1.6)
                 .foregroundStyle(AlfieColor.onVideo.secondary)
 
@@ -41,15 +41,10 @@ struct IdentityStackOverlay: View {
                 .foregroundStyle(AlfieColor.onVideo.emphasis)
 
             HStack(spacing: 8) {
-                TimelineView(.animation) { timeline in
-                    Circle()
-                        .fill(AlfieColor.onVideo.live)
-                        .frame(width: 6, height: 6)
-                        .opacity(Self.statusPulseOpacity(at: timeline.date, low: 0.55))
-                }
+                AlfieStatusDot(color: AlfieColor.onVideo.live, size: 6, low: 0.55)
 
                 Text(liveLine)
-                    .font(.system(size: 10, weight: .medium, design: .monospaced))
+                    .font(.system(size: 11, weight: .medium, design: .monospaced))
                     .tracking(1.4)
                     .foregroundStyle(AlfieColor.onVideo.secondary)
             }
@@ -144,7 +139,7 @@ struct TelemetryOverlay: View {
     ) -> some View {
         VStack(alignment: .trailing, spacing: 4) {
             Text(label)
-                .font(.system(size: 9, weight: .semibold, design: .monospaced))
+                .font(.system(size: 11, weight: .semibold, design: .monospaced))
                 .tracking(1.4)
                 .foregroundStyle(AlfieColor.onVideo.tertiary)
             Text(value)
@@ -180,20 +175,36 @@ struct ProgramOnAirBadgeAnchor: View {
     }
 }
 
+/// A live status dot that breathes, or holds steady under Reduce Motion.
+struct AlfieStatusDot: View {
+    let color: Color
+    let size: CGFloat
+    let low: Double
+    private let display = AlfieDisplay()
+
+    var body: some View {
+        if display.reduceMotion {
+            Circle().fill(color).frame(width: size, height: size)
+        } else {
+            TimelineView(.animation) { timeline in
+                Circle()
+                    .fill(color)
+                    .frame(width: size, height: size)
+                    .opacity(IdentityStackOverlay.statusPulseOpacity(at: timeline.date, low: low))
+            }
+        }
+    }
+}
+
 struct ProgramOnAirBadge: View {
     var body: some View {
         HStack(spacing: 7) {
             // Time-derived pulse (see IdentityStackOverlay.statusPulseOpacity):
             // stops with the view, nothing to arm or stack.
-            TimelineView(.animation) { timeline in
-                Circle()
-                    .fill(AlfieColor.tally.program)
-                    .frame(width: 7, height: 7)
-                    .opacity(IdentityStackOverlay.statusPulseOpacity(at: timeline.date, low: 0.5))
-            }
+            AlfieStatusDot(color: AlfieColor.tally.program, size: 7, low: 0.5)
 
             Text("PROGRAM · ON AIR")
-                .font(.system(size: 10, weight: .semibold, design: .monospaced))
+                .font(.system(size: 11, weight: .semibold, design: .monospaced))
                 .tracking(1.6)
                 .foregroundStyle(AlfieColor.onVideo.primary)
         }

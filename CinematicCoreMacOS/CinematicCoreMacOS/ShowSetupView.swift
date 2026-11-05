@@ -107,7 +107,7 @@ struct ShowSetupView: View {
         HStack(alignment: .bottom, spacing: 24) {
             VStack(alignment: .leading, spacing: 4) {
                 Text("SESSION STOPPED")
-                    .font(ConsoleStyle.label(10))
+                    .font(ConsoleStyle.label(11))
                     .tracking(2)
                     .foregroundStyle(AlfieColor.tertiaryText)
                 Text("Show setup")

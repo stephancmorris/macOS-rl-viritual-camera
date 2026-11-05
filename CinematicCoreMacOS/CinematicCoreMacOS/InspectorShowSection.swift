@@ -407,7 +407,7 @@ struct InspectorShowSection: View {
 
     private func subhead(_ text: String) -> some View {
         Text(text.uppercased())
-            .font(.system(size: 9, weight: .semibold, design: .monospaced))
+            .font(.system(size: 11, weight: .semibold, design: .monospaced))
             .tracking(1.6)
             .foregroundStyle(AlfieColor.tertiaryText)
             .padding(.top, 14)
@@ -431,7 +431,7 @@ struct InspectorShowSection: View {
                     .font(.system(size: 13, weight: .semibold))
                     .foregroundStyle(AlfieColor.text)
                 Text(row.role.rawValue.uppercased())
-                    .font(.system(size: 9, weight: .semibold, design: .monospaced))
+                    .font(.system(size: 11, weight: .semibold, design: .monospaced))
                     .tracking(1.2)
                     .foregroundStyle(AlfieColor.tertiaryText)
                 Spacer(minLength: 8)
@@ -501,7 +501,7 @@ struct InspectorShowSection: View {
                             .font(.system(size: 11.5, weight: .semibold, design: .monospaced))
                             .foregroundStyle(ConsoleStyle.amber)
                         Text(reason.bottleneck.uppercased())
-                            .font(.system(size: 9, weight: .semibold, design: .monospaced))
+                            .font(.system(size: 11, weight: .semibold, design: .monospaced))
                             .tracking(1.2)
                             .foregroundStyle(AlfieColor.tertiaryText)
                     }
@@ -533,7 +533,7 @@ struct InspectorShowSection: View {
 private enum InspectorShowSectionStyle {
     static func eyebrow(_ text: String) -> some View {
         Text(text.uppercased())
-            .font(.system(size: 9, weight: .semibold, design: .monospaced))
+            .font(.system(size: 11, weight: .semibold, design: .monospaced))
             .tracking(1.6)
             .foregroundStyle(AlfieColor.tertiaryText)
     }
@@ -562,7 +562,7 @@ private enum InspectorShowSectionStyle {
 
     static func pill(_ text: String, color: Color) -> some View {
         Text(text.uppercased())
-            .font(.system(size: 9.5, weight: .semibold, design: .monospaced))
+            .font(.system(size: 11, weight: .semibold, design: .monospaced))
             .tracking(1.2)
             .foregroundStyle(color)
             .padding(.horizontal, 9)

@@ -75,6 +75,7 @@ struct BoundingBoxView: View {
     let isRecovering: Bool
     let framingTitle: String
     var onSelect: ((UUID) -> Void)?
+    private let display = AlfieDisplay()
 
     var body: some View {
         let rect = calculateDisplayRect()
@@ -88,7 +89,8 @@ struct BoundingBoxView: View {
             // the state exits or the view disappears, and repeated state
             // entries can't stack animations — there is no imperative
             // animation to arm.
-            if style.isPulsing {
+            // Reduce Motion: a steady outline; the chip's words carry the state.
+            if style.isPulsing && !display.reduceMotion {
                 TimelineView(.animation) { timeline in
                     Rectangle()
                         .stroke(
@@ -145,7 +147,7 @@ struct BoundingBoxView: View {
 
     private func label(style: BoxStyle) -> some View {
         Text(style.label)
-            .font(.system(size: 9.5, weight: .semibold, design: .monospaced))
+            .font(.system(size: 11, weight: .semibold, design: .monospaced))
             .tracking(1.3)
             .foregroundStyle(style.labelColor)
             .padding(.horizontal, 8)

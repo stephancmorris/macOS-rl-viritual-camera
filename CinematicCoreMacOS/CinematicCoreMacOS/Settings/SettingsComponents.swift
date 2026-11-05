@@ -33,7 +33,7 @@ struct SettingsTimingChip: View {
                 Circle().frame(width: 6, height: 6)
             }
             Text(timing.title.uppercased())
-                .font(.system(size: 10, weight: .semibold, design: .monospaced))
+                .font(.system(size: 11, weight: .semibold, design: .monospaced))
                 .tracking(0.6)
         }
         .foregroundStyle(timing == .live ? AlfieColor.live : AlfieColor.nextStart)
@@ -50,7 +50,7 @@ struct SettingsTag: View {
 
     var body: some View {
         Text(text.uppercased())
-            .font(.system(size: 10, weight: .semibold, design: .monospaced))
+            .font(.system(size: 11, weight: .semibold, design: .monospaced))
             .tracking(0.6)
             .foregroundStyle(AlfieColor.secondaryText)
             .padding(.horizontal, 8)

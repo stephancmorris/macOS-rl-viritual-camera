@@ -35,6 +35,27 @@ The input, setup and pill files below are **synthetic**. They are 1280-point off
 | Light | [states-light.png](states-light.png) |
 | Dark | [states-dark.png](states-dark.png) |
 
+### Button family
+
+Every member of `AlfieButtonStyle` (UX F3) appears in five states: rest, hover, pressed, focus and disabled. They're drawn on the window chrome and on the pill's glass, and the sheet ends with the hold-to-stop phases. Hover, pressed and focus are forced with `alfieForcedControlState`.
+
+| Appearance | Capture |
+| --- | --- |
+| Mist | [buttons-light.png](buttons-light.png) |
+| Navy night | [buttons-dark.png](buttons-dark.png) |
+
+### Display settings
+
+There is one capture per macOS display setting (UX F4), forced with `alfieDisplayOverride`. Each shows the same elements: the text roles, an outline, a focused button, hold-to-stop at 60%, and the pill's lock dot and the drawer over a bright stripe. Increase Contrast's token values (stronger tertiary text and borders) switch only with the real system setting. `AlfieColorContrastTests` checks them; this capture shows the 2 pt outline and 3 pt focus ring.
+
+| Setting | Mist | Navy night |
+| --- | --- | --- |
+| Standard | [light](a11y-standard-light.png) | [dark](a11y-standard-dark.png) |
+| Increase Contrast | [light](a11y-increase-contrast-light.png) | [dark](a11y-increase-contrast-dark.png) |
+| Reduce Transparency | [light](a11y-reduce-transparency-light.png) | [dark](a11y-reduce-transparency-dark.png) |
+| Reduce Motion | [light](a11y-reduce-motion-light.png) | [dark](a11y-reduce-motion-dark.png) |
+| Differentiate Without Colour | [light](a11y-differentiate-without-colour-light.png) | [dark](a11y-differentiate-without-colour-dark.png) |
+
 ## Operator pill
 
 | Target | Capture |

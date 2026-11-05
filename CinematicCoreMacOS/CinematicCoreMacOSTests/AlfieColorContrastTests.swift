@@ -29,7 +29,8 @@ struct AlfieColorContrastTests {
          ("sidebar", AlfieColor.sidebar, nil),
          ("card", AlfieColor.card, nil),
          ("controlFill", AlfieColor.controlFill, nil),
-         ("drawer", AlfieColor.drawer, AlfieColor.background)]
+         ("drawer", AlfieColor.drawer, AlfieColor.background),
+         ("drawerOpaque", AlfieColor.drawerOpaque, nil)]
     }
 
     private static let textRoles: [(String, Color)] = [
@@ -132,7 +133,8 @@ struct AlfieColorContrastTests {
         ]
         for (name, role, minimum) in text {
             let value = Self.flatten(role, over: nil, .dark)
-            for (groundName, ground) in [("glass", glass), ("video well", well)] {
+            let opaque = Self.flatten(AlfieColor.onVideo.glassOpaque, over: nil, .dark)
+            for (groundName, ground) in [("glass", glass), ("video well", well), ("opaque glass", opaque)] {
                 let ratio = Self.contrast(value, ground)
                 #expect(ratio >= minimum, "onVideo.\(name) on \(groundName): \(Self.format(ratio))")
             }
@@ -214,6 +216,34 @@ struct AlfieColorContrastTests {
             #expect(value.description == (look == .light ? "#0C2340" : "#E8EDF4"), "\(name) in \(look): \(value)")
             #expect(abs(alpha - (look == .light ? lightAlpha : darkAlpha)) < 0.005, "\(name) alpha in \(look)")
         }
+    }
+
+    /// Increase Contrast (UX F4): tertiary text takes the secondary value;
+    /// borders, separators and outlines double. macOS won't build the
+    /// high-contrast appearance by name, so this checks the resolver and the
+    /// values it is given.
+    @Test func increaseContrastStrengthensTertiaryAndBorders() {
+        let tertiary = AlfieColor.IncreasedContrast.tertiaryText
+        for isDark in [false, true] {
+            let (hex, _) = AlfieColor.resolve(light: 0x536174, dark: 0x919BA7, increased: tertiary,
+                                              isDark: isDark, isIncreased: true)
+            #expect(hex == (isDark ? 0xACB4BF : 0x3E4F66), "tertiary under Increase Contrast, dark: \(isDark)")
+            let (normal, _) = AlfieColor.resolve(light: 0x536174, dark: 0x919BA7, increased: tertiary,
+                                                 isDark: isDark, isIncreased: false)
+            #expect(normal == (isDark ? 0x919BA7 : 0x536174))
+        }
+        // The secondary values the tertiary role takes: keep them in step.
+        #expect(Self.flatten(AlfieColor.secondaryText, over: nil, .light).description == "#3E4F66")
+        #expect(Self.flatten(AlfieColor.secondaryText, over: nil, .dark).description == "#ACB4BF")
+        for (name, increased, light, dark) in [("separator", AlfieColor.IncreasedContrast.separator, 0.10, 0.10),
+                                               ("border", AlfieColor.IncreasedContrast.border, 0.18, 0.16),
+                                               ("outline", AlfieColor.IncreasedContrast.outline, 0.40, 0.40)] {
+            #expect(abs(Double(increased.lightAlpha) - light * 2) < 0.001, "\(name) light")
+            #expect(abs(Double(increased.darkAlpha) - dark * 2) < 0.001, "\(name) dark")
+        }
+        let (base, _) = AlfieColor.resolve(light: 0x0C2340, dark: 0xE8EDF4, increased: nil,
+                                           isDark: false, isIncreased: true)
+        #expect(base == 0x0C2340, "roles without an increased value keep theirs")
     }
 
     // MARK: Colour maths

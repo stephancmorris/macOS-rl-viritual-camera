@@ -58,11 +58,16 @@ nonisolated enum AlfieColor {
     static let sidebar = dynamic(light: 0xDCE3EB, dark: 0x071526)
     static let card = dynamic(light: 0xF4F7F9, dark: 0x0C2340)
     static let controlFill = dynamic(light: 0xD6DDE5, dark: 0x173252)
-    static let separator = dynamic(light: 0x0C2340, dark: 0xE8EDF4, lightAlpha: 0.10, darkAlpha: 0.10)
-    static let border = dynamic(light: 0x0C2340, dark: 0xE8EDF4, lightAlpha: 0.18, darkAlpha: 0.16)
+    /// Separators and borders double under Increase Contrast (UX F4).
+    static let separator = dynamic(light: 0x0C2340, dark: 0xE8EDF4, lightAlpha: 0.10, darkAlpha: 0.10,
+                                   increased: IncreasedContrast.separator)
+    static let border = dynamic(light: 0x0C2340, dark: 0xE8EDF4, lightAlpha: 0.18, darkAlpha: 0.16,
+                                increased: IncreasedContrast.border)
     static let text = dynamic(light: 0x0C2340, dark: 0xE8EDF4)
     static let secondaryText = dynamic(light: 0x3E4F66, dark: 0xACB4BF)
-    static let tertiaryText = dynamic(light: 0x536174, dark: 0x919BA7)
+    /// Takes the secondary value under Increase Contrast.
+    static let tertiaryText = dynamic(light: 0x536174, dark: 0x919BA7,
+                                      increased: IncreasedContrast.tertiaryText)
     /// Primary and selected fills under `onAccent` text: navy in Light, Mist
     /// in Navy night.
     static let accent = dynamic(light: 0x0C2340, dark: 0xE8EDF4)
@@ -85,6 +90,8 @@ nonisolated enum AlfieColor {
     static let ink = dynamic(light: 0x0C2340, dark: 0xE8EDF4)
     /// The drawer that slides over the console (Inspector).
     static let drawer = dynamic(light: 0xF0F3F7, dark: 0x0A1D35, lightAlpha: 0.96, darkAlpha: 0.94)
+    /// The drawer under Reduce Transparency.
+    static let drawerOpaque = dynamic(light: 0xF0F3F7, dark: 0x0A1D35)
     /// Camera previews and Program/Preview panes stay neutral black in both
     /// appearances so footage reads true. Never tinted.
     static let videoWell = fixed(0x08080A)
@@ -117,7 +124,8 @@ nonisolated enum AlfieColor {
         primaryPressed: dynamic(light: 0x081A30, dark: 0xCDD6E0),
         programHover: dynamic(light: 0xC40021, dark: 0xE0101F),
         programPressed: dynamic(light: 0x94001A, dark: 0xB3001B),
-        outline: dynamic(light: 0x0C2340, dark: 0xE8EDF4, lightAlpha: 0.40, darkAlpha: 0.40),
+        outline: dynamic(light: 0x0C2340, dark: 0xE8EDF4, lightAlpha: 0.40, darkAlpha: 0.40,
+                         increased: IncreasedContrast.outline),
         videoRestFill: fixed(0xFFFFFF, alpha: 0.07),
         videoHoverWash: fixed(0xFFFFFF, alpha: 0.08),
         videoPressWash: fixed(0xFFFFFF, alpha: 0.20),
@@ -157,7 +165,8 @@ nonisolated enum AlfieColor {
                                  secondary: fixed(0xB4B4B8), tertiary: fixed(0x8E8E93),
                                  disabled: fixed(0x6C6C70), live: fixed(0x30D158),
                                  warning: fixed(0xFFBD3B), modeOn: fixed(0x4FEDC7),
-                                 glass: fixed(0x1C1C1F, alpha: 0.55), tileGround: fixed(0x14171C))
+                                 glass: fixed(0x1C1C1F, alpha: 0.55), glassOpaque: fixed(0x1C1C1F),
+                                 tileGround: fixed(0x14171C))
 
     /// The standby backdrop: a flat background-to-sidebar gradient, top
     /// leading to bottom trailing.
@@ -193,6 +202,8 @@ nonisolated enum AlfieColor {
         let modeOn: Color
         /// The pill's tint over its material.
         let glass: Color
+        /// The pill's ground under Reduce Transparency: no material.
+        let glassOpaque: Color
         /// An assigned tile before its first frame.
         let tileGround: Color
     }
@@ -201,12 +212,47 @@ nonisolated enum AlfieColor {
         Color(nsColor: NSColor(hex: hex, alpha: alpha))
     }
 
+    /// What Increase Contrast changes: tertiary text takes the secondary
+    /// value; borders, separators and control outlines double.
+    nonisolated enum IncreasedContrast {
+        static let tertiaryText = Increased(light: 0x3E4F66, dark: 0xACB4BF)
+        static let separator = Increased(light: 0x0C2340, dark: 0xE8EDF4, lightAlpha: 0.20, darkAlpha: 0.20)
+        static let border = Increased(light: 0x0C2340, dark: 0xE8EDF4, lightAlpha: 0.36, darkAlpha: 0.32)
+        static let outline = Increased(light: 0x0C2340, dark: 0xE8EDF4, lightAlpha: 0.80, darkAlpha: 0.80)
+    }
+
+    /// The value a role takes when Increase Contrast is on.
+    nonisolated struct Increased: Sendable {
+        let light: UInt32
+        let dark: UInt32
+        var lightAlpha: CGFloat = 1
+        var darkAlpha: CGFloat = 1
+    }
+
     private static func dynamic(light: UInt32, dark: UInt32,
-                                lightAlpha: CGFloat = 1, darkAlpha: CGFloat = 1) -> Color {
+                                lightAlpha: CGFloat = 1, darkAlpha: CGFloat = 1,
+                                increased: Increased? = nil) -> Color {
         Color(nsColor: NSColor(name: nil) { appearance in
-            let isDark = appearance.bestMatch(from: [.aqua, .darkAqua]) == .darkAqua
-            return NSColor(hex: isDark ? dark : light, alpha: isDark ? darkAlpha : lightAlpha)
+            let match = appearance.bestMatch(from: [.aqua, .darkAqua, .accessibilityHighContrastAqua,
+                                                    .accessibilityHighContrastDarkAqua])
+            let isDark = match == .darkAqua || match == .accessibilityHighContrastDarkAqua
+            let isIncreased = match == .accessibilityHighContrastAqua || match == .accessibilityHighContrastDarkAqua
+                || NSWorkspace.shared.accessibilityDisplayShouldIncreaseContrast
+            let (hex, alpha) = resolve(light: light, dark: dark, lightAlpha: lightAlpha, darkAlpha: darkAlpha,
+                                       increased: increased, isDark: isDark, isIncreased: isIncreased)
+            return NSColor(hex: hex, alpha: alpha)
         })
+    }
+
+    /// The value a role resolves to. Increase Contrast reaches AppKit as the
+    /// high-contrast appearances and as the workspace flag; the appearance
+    /// can't be constructed by name, so tests call this directly.
+    static func resolve(light: UInt32, dark: UInt32, lightAlpha: CGFloat = 1, darkAlpha: CGFloat = 1,
+                        increased: Increased?, isDark: Bool, isIncreased: Bool) -> (UInt32, CGFloat) {
+        if isIncreased, let increased {
+            return (isDark ? increased.dark : increased.light, isDark ? increased.darkAlpha : increased.lightAlpha)
+        }
+        return (isDark ? dark : light, isDark ? darkAlpha : lightAlpha)
     }
 }
 

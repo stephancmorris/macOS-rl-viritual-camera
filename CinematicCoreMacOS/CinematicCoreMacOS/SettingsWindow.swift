@@ -136,7 +136,7 @@ struct SettingsWindow: View {
                             }
                         } header: {
                             Text(group.rawValue.uppercased())
-                                .font(.system(size: 10.5, weight: .semibold, design: .monospaced))
+                                .font(.system(size: 11, weight: .semibold, design: .monospaced))
                                 .tracking(1.5)
                                 .foregroundStyle(AlfieColor.tertiaryText)
                         }

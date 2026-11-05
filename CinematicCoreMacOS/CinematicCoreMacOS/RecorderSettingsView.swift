@@ -84,7 +84,7 @@ struct RecorderSettingsView: View {
 
                 if let lastError = recorder.lastErrorDescription {
                     Text(lastError)
-                        .font(.caption)
+                        .font(.subheadline)
                         .foregroundStyle(AlfieColor.danger)
                         .fixedSize(horizontal: false, vertical: true)
                 }

@@ -38,6 +38,8 @@ struct OperatorModePicker: View {
         OperatorModeChoice.choices(available: store.available, current: store.mode, cameras: cameras)
     }
 
+    private let display = AlfieDisplay()
+
     private var isMultiCamEnabled: Bool {
         choices.first { $0.mode == .multiCam }?.isEnabled ?? false
     }
@@ -47,10 +49,10 @@ struct OperatorModePicker: View {
             .onChange(of: store.mode) { _, _ in refusal = nil }
             .onChange(of: isMultiCamEnabled) { wasEnabled, isEnabled in
                 guard !wasEnabled, isEnabled, store.mode != .multiCam else { return }
-                withAnimation(.easeOut(duration: 0.25)) { isHighlightingMultiCam = true }
+                withAnimation(display.reduceMotion ? nil : .easeOut(duration: 0.25)) { isHighlightingMultiCam = true }
                 Task {
                     try? await Task.sleep(for: .seconds(1.6))
-                    withAnimation(.easeIn(duration: 0.4)) { isHighlightingMultiCam = false }
+                    withAnimation(display.reduceMotion ? nil : .easeIn(duration: 0.4)) { isHighlightingMultiCam = false }
                 }
             }
     }
@@ -62,7 +64,7 @@ struct OperatorModePicker: View {
             VStack(alignment: .leading, spacing: 8) {
                 segments(palette: .appearance, showsNotes: true)
                 Text(refusal ?? store.mode.detail)
-                    .font(.caption)
+                    .font(.subheadline)
                     .foregroundStyle(refusal == nil ? AlfieColor.secondaryText : AlfieColor.warning)
             }
 

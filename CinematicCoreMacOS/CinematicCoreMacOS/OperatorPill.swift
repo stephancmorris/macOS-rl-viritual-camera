@@ -160,7 +160,10 @@ struct OperatorPill: View {
 
     private var targetChip: some View {
         Text((chipStyle == .full ? controlTarget.chipTitle : controlTarget.compactChipTitle) ?? "")
-        .font(.system(size: 10, weight: .bold, design: .monospaced))
+        // 11 pt floor: a proportional face keeps the chip's width where the
+        // 10 pt monospaced one had it, so the widest pill still fits 1280.
+        .font(.system(size: 11, weight: .bold))
+        .tracking(0.2)
         .foregroundStyle(AlfieColor.onFill)
         .lineLimit(1)
         .padding(.horizontal, 4)
@@ -174,9 +177,7 @@ struct OperatorPill: View {
     }
 
     private var pillBackground: some View {
-        RoundedRectangle(cornerRadius: 22, style: .continuous)
-            .fill(AlfieColor.onVideo.glass)
-            .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 22, style: .continuous))
+        OperatorPillBackground()
     }
 
     private var divider: some View {
@@ -194,10 +195,7 @@ struct OperatorPill: View {
         return Button(action: lockStateAction) {
             ZStack {
                 HStack(spacing: 8) {
-                    Circle()
-                        .fill(state.dotColor)
-                        .frame(width: 7, height: 7)
-                        .shadow(color: state.dotColor.opacity(0.8), radius: state.hasGlow ? 6 : 0)
+                    PillLockIndicator(state: state)
                     Text(label)
                         .font(.system(size: 12, weight: .medium))
                         .foregroundStyle(state.labelColor)
@@ -394,6 +392,8 @@ struct OperatorPill: View {
         Button(action: action) {
             Text(title)
                 .font(.system(size: 12, weight: isOn ? .semibold : .medium))
+                .lineLimit(1)
+                .fixedSize()
                 .padding(.horizontal, 12)
                 .padding(.vertical, 6)
         }
@@ -509,6 +509,47 @@ struct OperatorPill: View {
             StopSessionLabel()
         }
         .alfieButtonStyle(.destructive, surface: .video, cornerRadius: 14)
+    }
+}
+
+/// The pill's lock dot. Under Differentiate Without Colour a lock glyph joins
+/// it for Locked, so the state is a shape as well as a colour (UX F4). The
+/// word beside it is what VoiceOver reads.
+struct PillLockIndicator: View {
+    let state: OperatorPill.LockState
+    private let display = AlfieDisplay()
+
+    var body: some View {
+        HStack(spacing: 6) {
+            Circle()
+                .fill(state.dotColor)
+                .frame(width: 7, height: 7)
+                .shadow(color: state.dotColor.opacity(0.8), radius: state.hasGlow ? 6 : 0)
+            if display.differentiateWithoutColor && state == .locked {
+                Image(systemName: "lock.fill")
+                    .font(.system(size: 11, weight: .semibold))
+                    .foregroundStyle(state.dotColor)
+                    .accessibilityHidden(true)
+            }
+        }
+    }
+}
+
+/// The pill's glass over footage; opaque under Reduce Transparency (UX F4)
+/// so its labels read the same over bright and dark pictures.
+struct OperatorPillBackground: View {
+    var cornerRadius: CGFloat = 22
+    private let display = AlfieDisplay()
+
+    var body: some View {
+        let shape = RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
+        if display.reduceTransparency {
+            shape.fill(AlfieColor.onVideo.glassOpaque)
+        } else {
+            shape
+                .fill(AlfieColor.onVideo.glass)
+                .background(.ultraThinMaterial, in: shape)
+        }
     }
 }
 
