@@ -1,16 +1,12 @@
 import AppKit
 import Combine
 
-/// Bare cue keys deliberately have no SwiftUI menu key equivalent: an
+/// Bare character keys deliberately have no SwiftUI menu key equivalent: an
 /// equivalent can consume a digit before a text editor gets to insert it.
 /// The menu lists the keys, while this monitor either cues or returns the
 /// original event untouched for normal AppKit dispatch.
 @MainActor
 final class AlfiePlainKeyRouter: ObservableObject {
-    private static let cueIDs: [AlfieCommandCatalog.ID] = [
-        .cuePreview1, .cuePreview2, .cuePreview3, .cuePreview4
-    ]
-
     private let keyWindow: @MainActor () -> NSWindow?
     private let modalWindow: @MainActor () -> NSWindow?
     private var actions: AlfieCommandActions?
@@ -56,13 +52,13 @@ final class AlfiePlainKeyRouter: ObservableObject {
               modalWindow() == nil, !window.isSheet, window.attachedSheet == nil,
               !Self.ownsTextInput(window.firstResponder),
               let characters = event.charactersIgnoringModifiers,
-              let id = Self.cueIDs.first(where: { id in
-                  let shortcut = AlfieCommandCatalog.definition(for: id).shortcut
+              let definition = AlfieCommandCatalog.definitions.first(where: { definition in
+                  let shortcut = definition.shortcut
                   guard let shortcut, shortcut.modifiers.isEmpty,
                         case .character(let character) = shortcut.key else { return false }
                   return characters == String(character)
               }),
-              let action = actions?[id] else { return event }
+              let action = actions?[definition.id] else { return event }
 
         action.perform()
         return nil
