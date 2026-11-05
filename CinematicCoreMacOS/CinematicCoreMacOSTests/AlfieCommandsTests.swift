@@ -4,6 +4,18 @@ import Testing
 
 @MainActor
 struct AlfieCommandsTests {
+    @Test func tracksCanPublishCommandsThroughDistinctWritableFocusKeys() {
+        let keys: [WritableKeyPath<FocusedValues, AlfieCommandAction?>] = [
+            \.alfieSingleCam, \.alfieMultiCam, \.alfieWebcam, \.alfieDetect,
+            \.alfieCancel, \.alfieStopSession, \.alfieWide, \.alfieFullBody,
+            \.alfieWaistUp, \.alfiePushIn, \.alfiePullOut,
+            \.alfieCuePreview1, \.alfieCuePreview2, \.alfieCuePreview3, \.alfieCuePreview4,
+            \.alfieTake, \.alfieShowInspector, \.alfieDirectorHand, \.alfieDirectorAdvance
+        ]
+        #expect(keys.count == AlfieCommandCatalog.ID.allCases.count)
+        #expect(Set(keys).count == keys.count)
+    }
+
     @Test func absentFocusedActionsAreDisabledByConstruction() {
         let actions = AlfieCommandActions()
         for id in AlfieCommandCatalog.ID.allCases { #expect(actions[id] == nil) }

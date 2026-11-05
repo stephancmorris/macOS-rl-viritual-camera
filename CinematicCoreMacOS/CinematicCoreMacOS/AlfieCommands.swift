@@ -1,38 +1,45 @@
 import SwiftUI
 
-/// A screen publishes only the actions that are valid for its current state.
-/// For Escape, publish the matching label (Cancel Detect / Done Editing Live).
-@MainActor
-struct AlfieCommandAction {
-    var title: String? = nil
-    let perform: @MainActor () -> Void
-}
-
-@MainActor
-struct AlfieCommandActions {
-    var actions: [AlfieCommandCatalog.ID: AlfieCommandAction] = [:]
-
-    subscript(_ id: AlfieCommandCatalog.ID) -> AlfieCommandAction? { actions[id] }
-}
-
-private struct AlfieCommandActionsKey: FocusedValueKey {
-    typealias Value = AlfieCommandActions
-}
-
-extension FocusedValues {
-    /// Publish with `.focusedSceneValue(\.alfieCommands, actions)` so commands
-    /// follow the active scene, including while a control inside it has focus.
-    var alfieCommands: AlfieCommandActions? {
-        get { self[AlfieCommandActionsKey.self] }
-        set { self[AlfieCommandActionsKey.self] = newValue }
-    }
-}
-
 /// Wave 1 defines the menus; Wave 2 screens publish their focused actions.
 /// With no publisher every item is disabled, including the retained Stop key.
 struct AlfieCommands: Commands {
-    @FocusedValue(\.alfieCommands) private var actions
+    @FocusedValue(\.alfieSingleCam) private var singleCam
+    @FocusedValue(\.alfieMultiCam) private var multiCam
+    @FocusedValue(\.alfieWebcam) private var webcam
+    @FocusedValue(\.alfieDetect) private var detect
+    @FocusedValue(\.alfieCancel) private var cancel
+    @FocusedValue(\.alfieStopSession) private var stopSession
+    @FocusedValue(\.alfieWide) private var wide
+    @FocusedValue(\.alfieFullBody) private var fullBody
+    @FocusedValue(\.alfieWaistUp) private var waistUp
+    @FocusedValue(\.alfiePushIn) private var pushIn
+    @FocusedValue(\.alfiePullOut) private var pullOut
+    @FocusedValue(\.alfieCuePreview1) private var cuePreview1
+    @FocusedValue(\.alfieCuePreview2) private var cuePreview2
+    @FocusedValue(\.alfieCuePreview3) private var cuePreview3
+    @FocusedValue(\.alfieCuePreview4) private var cuePreview4
+    @FocusedValue(\.alfieTake) private var take
+    @FocusedValue(\.alfieShowInspector) private var showInspector
+    @FocusedValue(\.alfieDirectorHand) private var directorHand
+    @FocusedValue(\.alfieDirectorAdvance) private var directorAdvance
     @StateObject private var plainKeys = AlfiePlainKeyRouter()
+
+    /// Independent keys let Track B's console and Track C's Inspector publish
+    /// from their own views without one replacing the other's action set.
+    private var actions: AlfieCommandActions? {
+        let entries: [(AlfieCommandCatalog.ID, AlfieCommandAction?)] = [
+            (.singleCam, singleCam), (.multiCam, multiCam), (.webcam, webcam),
+            (.detect, detect), (.cancel, cancel), (.stopSession, stopSession),
+            (.wide, wide), (.fullBody, fullBody), (.waistUp, waistUp),
+            (.pushIn, pushIn), (.pullOut, pullOut),
+            (.cuePreview1, cuePreview1), (.cuePreview2, cuePreview2),
+            (.cuePreview3, cuePreview3), (.cuePreview4, cuePreview4), (.take, take),
+            (.showInspector, showInspector), (.directorHand, directorHand),
+            (.directorAdvance, directorAdvance)
+        ]
+        let available = entries.compactMap { id, action in action.map { (id, $0) } }
+        return available.isEmpty ? nil : AlfieCommandActions(actions: Dictionary(uniqueKeysWithValues: available))
+    }
 
     var body: some Commands {
         // This is plain routing storage, not a published state mutation.
