@@ -206,8 +206,8 @@ struct CropIndicatorView: View {
             let cropHeight = cropRect.size.height * imageSize.height * scale
 
             let strokeColor = isRecovering
-                ? Color(red: 1.0, green: 0.72, blue: 0.24)
-                : Color.white.opacity(0.98)
+                ? AlfieColor.tracking.acquiring
+                : AlfieColor.onVideo.emphasis
 
             ZStack(alignment: .topLeading) {
                 Rectangle()
@@ -218,7 +218,7 @@ struct CropIndicatorView: View {
                 Text(chipLabel)
                     .font(.system(size: 9.5, weight: .semibold, design: .monospaced))
                     .tracking(1.3)
-                    .foregroundStyle(.black.opacity(0.85))
+                    .foregroundStyle(AlfieColor.onBrightFill)
                     .padding(.horizontal, 8)
                     .padding(.vertical, 4)
                     .background(Capsule(style: .continuous).fill(strokeColor))

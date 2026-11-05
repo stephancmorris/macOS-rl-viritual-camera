@@ -514,7 +514,7 @@ struct LiveConsoleHeader: View {
             if let text = model.pairCheckText ?? model.admissionTitle {
                 Text(text)
                     .font(ConsoleStyle.label(10))
-                    .foregroundStyle(AlfieColor.ink.opacity(0.6))
+                    .foregroundStyle(AlfieColor.tertiaryText)
                     .lineLimit(1)
             }
             if model.hasSecondInput {

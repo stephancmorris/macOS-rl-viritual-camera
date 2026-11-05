@@ -33,17 +33,17 @@ struct IdentityStackOverlay: View {
             Text("INPUT · WIDE")
                 .font(.system(size: 10, weight: .semibold, design: .monospaced))
                 .tracking(1.6)
-                .foregroundStyle(.white.opacity(0.7))
+                .foregroundStyle(AlfieColor.onVideo.secondary)
 
             Text("Alfie")
                 .font(.system(size: 28, weight: .semibold))
                 .tracking(-0.6)
-                .foregroundStyle(.white.opacity(0.96))
+                .foregroundStyle(AlfieColor.onVideo.emphasis)
 
             HStack(spacing: 8) {
                 TimelineView(.animation) { timeline in
                     Circle()
-                        .fill(Color(red: 0.19, green: 0.82, blue: 0.35))
+                        .fill(AlfieColor.onVideo.live)
                         .frame(width: 6, height: 6)
                         .opacity(Self.statusPulseOpacity(at: timeline.date, low: 0.55))
                 }
@@ -51,7 +51,7 @@ struct IdentityStackOverlay: View {
                 Text(liveLine)
                     .font(.system(size: 10, weight: .medium, design: .monospaced))
                     .tracking(1.4)
-                    .foregroundStyle(.white.opacity(0.72))
+                    .foregroundStyle(AlfieColor.onVideo.secondary)
             }
         }
         .shadow(color: .black.opacity(0.7), radius: 8, x: 0, y: 1)
@@ -83,14 +83,14 @@ struct TelemetryOverlay: View {
                     label: "ACQUIRING",
                     value: "\(Int(progress * 100))%",
                     monospaced: true,
-                    valueColor: Color(red: 1.0, green: 0.74, blue: 0.23)
+                    valueColor: AlfieColor.tracking.acquiring
                 )
             } else if cameraManager.tapPending {
                 telemetryBlock(
                     label: "SUBJECT",
                     value: "FINDING",
                     monospaced: true,
-                    valueColor: Color(red: 0.47, green: 0.86, blue: 1.0)
+                    valueColor: AlfieColor.tracking.candidate
                 )
             }
             if programOutput.measuredInputFPS > 0 {
@@ -131,22 +131,22 @@ struct TelemetryOverlay: View {
     private var inputRateColor: Color {
         if let playoutRate = programOutput.activePlayoutFrameRate,
            abs(programOutput.measuredInputFPS - playoutRate) > 0.5 {
-            return Color(red: 1.0, green: 0.74, blue: 0.23)
+            return AlfieColor.onVideo.warning
         }
-        return .white.opacity(0.92)
+        return AlfieColor.onVideo.primary
     }
 
     private func telemetryBlock(
         label: String,
         value: String,
         monospaced: Bool,
-        valueColor: Color = .white.opacity(0.92)
+        valueColor: Color = AlfieColor.onVideo.primary
     ) -> some View {
         VStack(alignment: .trailing, spacing: 4) {
             Text(label)
                 .font(.system(size: 9, weight: .semibold, design: .monospaced))
                 .tracking(1.4)
-                .foregroundStyle(.white.opacity(0.5))
+                .foregroundStyle(AlfieColor.onVideo.tertiary)
             Text(value)
                 .font(.system(
                     size: 14,
@@ -187,7 +187,7 @@ struct ProgramOnAirBadge: View {
             // stops with the view, nothing to arm or stack.
             TimelineView(.animation) { timeline in
                 Circle()
-                    .fill(Color(red: 1.0, green: 0.27, blue: 0.23))
+                    .fill(AlfieColor.tally.program)
                     .frame(width: 7, height: 7)
                     .opacity(IdentityStackOverlay.statusPulseOpacity(at: timeline.date, low: 0.5))
             }
@@ -195,7 +195,7 @@ struct ProgramOnAirBadge: View {
             Text("PROGRAM · ON AIR")
                 .font(.system(size: 10, weight: .semibold, design: .monospaced))
                 .tracking(1.6)
-                .foregroundStyle(.white.opacity(0.9))
+                .foregroundStyle(AlfieColor.onVideo.primary)
         }
         .shadow(color: .black.opacity(0.7), radius: 8, x: 0, y: 1)
     }

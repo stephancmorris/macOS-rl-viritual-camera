@@ -128,23 +128,21 @@ private struct MiniWindow: View {
     let isDark: Bool
 
     var body: some View {
-        // Fixed colours: each tile shows its own appearance whatever the
-        // window's current one is.
-        let sidebar = isDark ? Color(red: 0.07, green: 0.08, blue: 0.10) : Color(red: 0.93, green: 0.93, blue: 0.94)
-        let ground = isDark ? Color(red: 0.055, green: 0.063, blue: 0.082) : Color(red: 0.96, green: 0.96, blue: 0.97)
-        let card = isDark ? Color(red: 0.094, green: 0.106, blue: 0.129) : .white
-        let accent = isDark ? Color(red: 0.04, green: 0.52, blue: 1.0) : Color(red: 0.0, green: 0.4, blue: 0.84)
+        // Drawn from the real roles under a forced colour scheme, so each
+        // tile shows its own appearance whatever the window's current one is
+        // and follows any palette change.
         HStack(spacing: 0) {
-            sidebar.frame(width: 26)
+            AlfieColor.sidebar.frame(width: 26)
             VStack(alignment: .leading, spacing: 6) {
-                RoundedRectangle(cornerRadius: 3).fill(card).frame(height: 14)
-                RoundedRectangle(cornerRadius: 3).fill(card).frame(height: 14)
-                RoundedRectangle(cornerRadius: 3).fill(accent).frame(width: 26, height: 6)
+                RoundedRectangle(cornerRadius: 3).fill(AlfieColor.card).frame(height: 14)
+                RoundedRectangle(cornerRadius: 3).fill(AlfieColor.card).frame(height: 14)
+                RoundedRectangle(cornerRadius: 3).fill(AlfieColor.accent).frame(width: 26, height: 6)
             }
             .padding(8)
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-            .background(ground)
+            .background(AlfieColor.background)
         }
+        .environment(\.colorScheme, isDark ? .dark : .light)
     }
 }
 

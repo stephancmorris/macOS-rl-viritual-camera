@@ -18,7 +18,7 @@ struct DirectorDemo: View {
         VStack(alignment: .leading, spacing: 16) {
             Text("Recommended layout. Live placement, notice length and run-sheet format are still open. Controls are shown, not wired.")
                 .font(.system(size: 12))
-                .foregroundStyle(.white.opacity(0.55))
+                .foregroundStyle(AlfieColor.tertiaryText)
                 .fixedSize(horizontal: false, vertical: true)
             ForEach(model.directorStates) { item in
                 DirectorStateCard(item: item)
@@ -38,7 +38,7 @@ struct DirectorStateCard: View {
         VStack(alignment: .leading, spacing: 12) {
             Text(item.title.uppercased())
                 .font(ConsoleStyle.label(11))
-                .foregroundStyle(.white.opacity(0.55))
+                .foregroundStyle(AlfieColor.tertiaryText)
 
             modeRow
             handRow
@@ -80,7 +80,7 @@ struct DirectorStateCard: View {
                     .font(.system(size: 9, weight: .medium))
             }
         }
-        .foregroundStyle(.white.opacity(chip.unqualifiedCaption == nil ? 1 : 0.38))
+        .foregroundStyle(chip.unqualifiedCaption == nil ? AlfieColor.text : AlfieColor.disabledText)
         .padding(.horizontal, 12)
         .padding(.vertical, 8)
         .frame(minWidth: 88, minHeight: 44)
@@ -110,7 +110,7 @@ struct DirectorStateCard: View {
     private func handSegment(_ title: String, selected: Bool) -> some View {
         Text(title)
             .font(.system(size: 14, weight: .semibold))
-            .foregroundStyle(selected ? .white : .white.opacity(0.45))
+            .foregroundStyle(selected ? AlfieColor.text : AlfieColor.secondaryText)
             .frame(maxWidth: .infinity, minHeight: 36)
             .background(selected ? Color.white.opacity(0.10) : Color.clear)
             .overlay(
@@ -124,10 +124,10 @@ struct DirectorStateCard: View {
             HStack(spacing: 10) {
                 Text(NextShotStatus.label)
                     .font(ConsoleStyle.label(11))
-                    .foregroundStyle(.white.opacity(0.55))
+                    .foregroundStyle(AlfieColor.tertiaryText)
                 Text(section.preparedLine)
                     .font(.system(size: 13, weight: .semibold))
-                    .foregroundStyle(.white)
+                    .foregroundStyle(AlfieColor.text)
                     .lineLimit(1)
             }
             HStack(spacing: 8) {
@@ -136,13 +136,13 @@ struct DirectorStateCard: View {
                     .frame(width: 8, height: 8)
                 Text(section.statusLine)
                     .font(.system(size: 12))
-                    .foregroundStyle(.white.opacity(0.85))
+                    .foregroundStyle(AlfieColor.text)
                     .fixedSize(horizontal: false, vertical: true)
             }
             if let next = section.nextCut?.line {
                 Text(next)
                     .font(.system(size: 13, weight: .semibold))
-                    .foregroundStyle(.white)
+                    .foregroundStyle(AlfieColor.text)
                     .accessibilityLabel(next)
             }
         }
@@ -171,14 +171,14 @@ struct DirectorStateCard: View {
         return VStack(alignment: .leading, spacing: 6) {
             Text("RUN SHEET")
                 .font(ConsoleStyle.label(11))
-                .foregroundStyle(.white.opacity(0.55))
+                .foregroundStyle(AlfieColor.tertiaryText)
             HStack(spacing: 16) {
                 sheetColumn("Now", sheet?.current ?? "")
                 sheetColumn("Next", sheet?.next ?? "None")
                 Spacer(minLength: 8)
                 Text("Advance")
                     .font(.system(size: 13, weight: .semibold))
-                    .foregroundStyle(.white)
+                    .foregroundStyle(AlfieColor.text)
                     .padding(.horizontal, 14)
                     .padding(.vertical, 8)
                     .background(
@@ -196,10 +196,10 @@ struct DirectorStateCard: View {
         VStack(alignment: .leading, spacing: 2) {
             Text(label.uppercased())
                 .font(ConsoleStyle.label(10))
-                .foregroundStyle(.white.opacity(0.45))
+                .foregroundStyle(AlfieColor.tertiaryText)
             Text(value)
                 .font(.system(size: 13, weight: .semibold))
-                .foregroundStyle(.white)
+                .foregroundStyle(AlfieColor.text)
         }
     }
 

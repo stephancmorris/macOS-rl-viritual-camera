@@ -140,14 +140,14 @@ struct OperatorPill: View {
         .background(pillBackground)
         .overlay(
             RoundedRectangle(cornerRadius: 22, style: .continuous)
-                .strokeBorder(controlTarget.isEditingLive ? Color(red: 1, green: 0.27, blue: 0.23) : Color.white.opacity(0.12),
+                .strokeBorder(controlTarget.isEditingLive ? AlfieColor.tally.program : Color.white.opacity(0.12),
                               lineWidth: controlTarget.isEditingLive ? 1 : 0.5)
         )
         .overlay(alignment: .top) {
             if let feedback = operatorFeedback {
                 Text(feedback)
                     .font(.callout)
-                    .foregroundStyle(.white)
+                    .foregroundStyle(AlfieColor.onVideo.emphasis)
                     .padding(10)
                     .background(.black.opacity(0.8), in: RoundedRectangle(cornerRadius: 8))
                     .offset(y: -55)
@@ -161,13 +161,13 @@ struct OperatorPill: View {
     private var targetChip: some View {
         Text((chipStyle == .full ? controlTarget.chipTitle : controlTarget.compactChipTitle) ?? "")
         .font(.system(size: 10, weight: .bold, design: .monospaced))
-        .foregroundStyle(.white)
+        .foregroundStyle(AlfieColor.onFill)
         .lineLimit(1)
         .padding(.horizontal, 4)
         .padding(.vertical, 7)
         .background(controlTarget.isEditingLive
-                    ? Color(red: 0.6, green: 0.1, blue: 0.1)
-                    : Color(red: 0.1, green: 0.38, blue: 0.25),
+                    ? AlfieColor.tally.programChip
+                    : AlfieColor.tally.previewChip,
                     in: RoundedRectangle(cornerRadius: 8))
         .padding(.horizontal, 2)
         .accessibilityLabel(controlTarget.chipTitle ?? "")
@@ -175,7 +175,7 @@ struct OperatorPill: View {
 
     private var pillBackground: some View {
         RoundedRectangle(cornerRadius: 22, style: .continuous)
-            .fill(Color(red: 0.11, green: 0.11, blue: 0.12).opacity(0.55))
+            .fill(AlfieColor.onVideo.glass)
             .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 22, style: .continuous))
     }
 
@@ -200,7 +200,7 @@ struct OperatorPill: View {
                         .shadow(color: state.dotColor.opacity(0.8), radius: state.hasGlow ? 6 : 0)
                     Text(label)
                         .font(.system(size: 12, weight: .medium))
-                        .foregroundStyle(.white.opacity(state.labelOpacity))
+                        .foregroundStyle(state.labelColor)
                 }
                 HStack(spacing: 8) {
                     Circle()
@@ -265,7 +265,7 @@ struct OperatorPill: View {
         }
     }
 
-    private enum LockState: CaseIterable, Hashable {
+    enum LockState: CaseIterable, Hashable {
         case idle, awaitingTap, tapPending, acquiring, locked, recovering, waiting
 
         var label: String {
@@ -282,22 +282,19 @@ struct OperatorPill: View {
 
         var dotColor: Color {
             switch self {
-            case .idle: return Color(.sRGB, white: 1, opacity: 0.3)
-            case .awaitingTap: return Color(red: 0.47, green: 0.86, blue: 1.0)
-            case .tapPending: return Color(red: 0.47, green: 0.86, blue: 1.0)
-            case .acquiring: return Color(red: 1.0, green: 0.74, blue: 0.23)
-            case .recovering, .waiting: return .orange
-            case .locked: return Color(red: 0.04, green: 0.52, blue: 1.0)
+            case .idle: return AlfieColor.onVideo.disabled
+            case .awaitingTap, .tapPending: return AlfieColor.tracking.candidate
+            case .acquiring, .recovering, .waiting: return AlfieColor.tracking.acquiring
+            // The same green as the SUBJECT box on the footage.
+            case .locked: return AlfieColor.tracking.locked
             }
         }
 
-        var labelOpacity: Double {
+        var labelColor: Color {
             switch self {
-            case .idle: return 0.45
-            case .awaitingTap: return 0.78
-            case .tapPending: return 0.85
-            case .acquiring: return 0.85
-            case .locked, .recovering, .waiting: return 0.92
+            case .idle: return AlfieColor.onVideo.tertiary
+            case .awaitingTap: return AlfieColor.onVideo.secondary
+            case .tapPending, .acquiring, .locked, .recovering, .waiting: return AlfieColor.onVideo.primary
             }
         }
 
@@ -342,10 +339,12 @@ struct OperatorPill: View {
                 HStack(spacing: 7) {
                     Image(systemName: isDiscovering ? "xmark.circle" : "viewfinder")
                         .font(.system(size: 12, weight: .semibold))
-                        .foregroundStyle(.white.opacity(highlighted ? 1.0 : (enabled ? 0.86 : 0.32)))
+                        .foregroundStyle(highlighted ? AlfieColor.onVideo.emphasis
+                                         : enabled ? AlfieColor.onVideo.primary : AlfieColor.onVideo.disabled)
                     Text(label)
                         .font(.system(size: 12, weight: highlighted ? .semibold : .medium))
-                        .foregroundStyle(.white.opacity(highlighted ? 1.0 : (enabled ? 0.86 : 0.32)))
+                        .foregroundStyle(highlighted ? AlfieColor.onVideo.emphasis
+                                         : enabled ? AlfieColor.onVideo.primary : AlfieColor.onVideo.disabled)
                 }
                 HStack(spacing: 7) {
                     ZStack {
@@ -405,7 +404,7 @@ struct OperatorPill: View {
         Button(action: action) {
             Text(title)
                 .font(.system(size: 12, weight: isOn ? .semibold : .medium))
-                .foregroundStyle(.white.opacity(isOn ? 1.0 : 0.62))
+                .foregroundStyle(isOn ? AlfieColor.onVideo.emphasis : AlfieColor.onVideo.secondary)
                 .padding(.horizontal, 12)
                 .padding(.vertical, 6)
                 .background(
@@ -446,7 +445,8 @@ struct OperatorPill: View {
         } label: {
             Text(returnToWideTitle)
                 .font(.system(size: 12, weight: isOn ? .semibold : .medium))
-                .foregroundStyle(.white.opacity(isOn ? 1.0 : (enabled ? 0.86 : 0.32)))
+                .foregroundStyle(isOn ? AlfieColor.onVideo.emphasis
+                                 : enabled ? AlfieColor.onVideo.primary : AlfieColor.onVideo.disabled)
                 .padding(.horizontal, 10)
                 .padding(.vertical, 9)
                 .background(
@@ -468,12 +468,13 @@ struct OperatorPill: View {
         HStack(spacing: 7) {
             Circle()
                 .fill(isOn
-                      ? Color(red: 0.31, green: 0.93, blue: 0.78)
+                      ? AlfieColor.onVideo.modeOn
                       : Color.white.opacity(0.3))
                 .frame(width: 6, height: 6)
             Text(title)
                 .font(.system(size: 12, weight: isOn ? .semibold : .medium))
-                .foregroundStyle(.white.opacity(isOn ? 1.0 : (enabled ? 0.86 : 0.32)))
+                .foregroundStyle(isOn ? AlfieColor.onVideo.emphasis
+                                 : enabled ? AlfieColor.onVideo.primary : AlfieColor.onVideo.disabled)
         }
         .padding(.horizontal, 10)
         .padding(.vertical, 9)
@@ -555,13 +556,13 @@ struct StopSessionLabel: View {
                 .frame(width: 9, height: 9)
             Text("Stop session")
                 .font(.system(size: 12, weight: .semibold))
-                .foregroundStyle(.white)
+                .foregroundStyle(AlfieColor.onFill)
         }
         .padding(.horizontal, 10)
         .padding(.vertical, 9)
         .background(
             RoundedRectangle(cornerRadius: 14, style: .continuous)
-                .fill(Color(red: 1.0, green: 0.27, blue: 0.23).opacity(0.92))
+                .fill(AlfieColor.programFill)
         )
     }
 }
@@ -584,7 +585,8 @@ private struct ZoomShotButton: View {
         } label: {
             Text(title)
                 .font(.system(size: 12, weight: .semibold))
-                .foregroundStyle(.white.opacity(enabled || cameraManager.zoomMoveDirection == direction ? 0.95 : 0.32))
+                .foregroundStyle(enabled || cameraManager.zoomMoveDirection == direction
+                                 ? AlfieColor.onVideo.emphasis : AlfieColor.onVideo.disabled)
                 .frame(width: 88, height: 36)
                 .background(.white.opacity(cameraManager.zoomMoveDirection == direction ? 0.2 : 0.07),
                             in: RoundedRectangle(cornerRadius: 11))

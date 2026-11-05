@@ -49,11 +49,12 @@ struct TakeBarView: View {
                     .animation(.easeInOut(duration: 0.18).repeatCount(3, autoreverses: true),
                                value: refusalFlash)
             }
-            .foregroundStyle(availability.isEligible ? Color.white : AlfieColor.ink.opacity(0.45))
+            // The reason must stay readable: it says why TAKE was refused.
+            .foregroundStyle(availability.isEligible ? AlfieColor.onFill : AlfieColor.secondaryText)
             .frame(maxWidth: .infinity, maxHeight: .infinity)
             .background(
                 RoundedRectangle(cornerRadius: 10, style: .continuous)
-                    .fill(availability.isEligible ? ConsoleStyle.programRed : ConsoleStyle.disabledFill)
+                    .fill(availability.isEligible ? AlfieColor.programFill : ConsoleStyle.disabledFill)
             )
             .contentShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
         }
@@ -83,12 +84,12 @@ struct TakeBarView: View {
             Text(availability.editLiveTitle)
                 .font(.system(size: 13, weight: .semibold))
                 .multilineTextAlignment(.center)
-                .foregroundStyle(availability.editLive ? Color.white : ConsoleStyle.programRed)
+                .foregroundStyle(availability.editLive ? AlfieColor.onFill : ConsoleStyle.programRed)
                 .padding(.horizontal, 10)
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
                 .background(
                     RoundedRectangle(cornerRadius: 10, style: .continuous)
-                        .fill(availability.editLive ? ConsoleStyle.programRed : Color.clear)
+                        .fill(availability.editLive ? AlfieColor.programFill : Color.clear)
                 )
                 .overlay(
                     RoundedRectangle(cornerRadius: 10, style: .continuous)

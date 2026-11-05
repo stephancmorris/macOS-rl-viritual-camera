@@ -21,7 +21,7 @@ struct PairCheckPanel: View {
                 Text("PAIR CHECK")
                     .font(ConsoleStyle.label(11))
                     .tracking(1)
-                    .foregroundStyle(AlfieColor.ink.opacity(0.55))
+                    .foregroundStyle(AlfieColor.tertiaryText)
                 Text(model.pairCheckTitle)
                     .font(.system(size: 15, weight: .semibold))
                     .foregroundStyle(statusColor)
@@ -36,7 +36,7 @@ struct PairCheckPanel: View {
 
             Text(model.pairCheckDetail)
                 .font(.system(size: 12))
-                .foregroundStyle(AlfieColor.ink.opacity(0.7))
+                .foregroundStyle(AlfieColor.secondaryText)
                 .fixedSize(horizontal: false, vertical: true)
 
             HStack(alignment: .top, spacing: 12) {
@@ -93,7 +93,7 @@ struct PairCheckPanel: View {
 
     private func color(_ state: ShowSetupModel.RowState) -> Color {
         switch state {
-        case .notMeasured: return AlfieColor.ink.opacity(0.45)
+        case .notMeasured: return AlfieColor.tertiaryText
         case .checking: return ConsoleStyle.amber
         case .passed: return ConsoleStyle.previewGreen
         case .failed: return ConsoleStyle.amber
@@ -102,14 +102,14 @@ struct PairCheckPanel: View {
 
     private func stateTextColor(_ state: ShowSetupModel.RowState) -> Color {
         if case .failed = state { return ConsoleStyle.amber }
-        return AlfieColor.ink.opacity(0.6)
+        return AlfieColor.tertiaryText
     }
 
     private var statusColor: Color {
         switch model.pairCheck {
-        case .notRun: return AlfieColor.ink.opacity(0.85)
+        case .notRun: return AlfieColor.text
         case .checking: return ConsoleStyle.amber
-        case .pass: return AlfieColor.ink.opacity(0.85)
+        case .pass: return AlfieColor.text
         case .unsupported: return ConsoleStyle.amber
         }
     }

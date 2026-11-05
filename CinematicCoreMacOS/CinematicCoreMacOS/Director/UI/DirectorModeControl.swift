@@ -52,7 +52,7 @@ struct DirectorModeControl<Controller: DirectorConsoleControlling & ObservableOb
             }
             Text(section.statusLine)
                 .font(.system(size: 12))
-                .foregroundStyle(AlfieColor.ink.opacity(0.85))
+                .foregroundStyle(AlfieColor.text)
                 .accessibilityLabel(section.statusLine)
         }
         .padding(16)
@@ -89,7 +89,7 @@ struct DirectorModeControl<Controller: DirectorConsoleControlling & ObservableOb
                         .font(.system(size: 9, weight: .medium))
                 }
             }
-            .foregroundStyle(AlfieColor.ink.opacity(allowed ? 1 : 0.38))
+            .foregroundStyle(allowed ? AlfieColor.text : AlfieColor.disabledText)
             .padding(.horizontal, 12)
             .padding(.vertical, 8)
             .frame(minWidth: 88, minHeight: 44)
@@ -143,7 +143,7 @@ struct DirectorModeControl<Controller: DirectorConsoleControlling & ObservableOb
         Button(action: action) {
             Text(title)
                 .font(.system(size: 14, weight: .semibold))
-                .foregroundStyle(selected ? AlfieColor.ink : AlfieColor.ink.opacity(0.45))
+                .foregroundStyle(selected ? AlfieColor.text : AlfieColor.secondaryText)
                 .frame(maxWidth: .infinity, minHeight: 36)
                 .background(selected ? AlfieColor.ink.opacity(0.10) : Color.clear)
                 .overlay(

@@ -22,10 +22,10 @@ struct StripDemo: View {
             InputStripView(snapshot: model.snapshot, actions: model)
                 .frame(width: 1232, height: MultiviewLayout.stripLabelHeight + 168)
             Text(model.actionLog.last ?? "Tap a tile to cue Preview")
-                .font(.caption).foregroundStyle(.white.opacity(0.7))
+                .font(.caption).foregroundStyle(AlfieColor.onVideo.secondary)
         }
         .padding(24)
-        .background(Color(red: 0.055, green: 0.06, blue: 0.07))
+        .background(AlfieColor.videoWell)
     }
 
 }

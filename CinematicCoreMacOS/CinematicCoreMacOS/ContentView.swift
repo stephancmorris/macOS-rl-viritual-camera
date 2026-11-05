@@ -388,7 +388,7 @@ struct CameraRowView: View {
             HStack(spacing: 12) {
                 Image(systemName: "camera.fill")
                     .font(.title2)
-                    .foregroundStyle(isSelected ? .blue : .secondary)
+                    .foregroundStyle(isSelected ? AlfieColor.accentText : .secondary)
                     .frame(width: 32)
                 
                 VStack(alignment: .leading, spacing: 4) {
@@ -403,7 +403,7 @@ struct CameraRowView: View {
                         if camera.supports4K {
                             Label("4K", systemImage: "checkmark.circle.fill")
                                 .font(.caption)
-                                .foregroundStyle(.green)
+                                .foregroundStyle(AlfieColor.live)
                         }
                         
                         Text("\(camera.formatCount) formats")
@@ -416,7 +416,7 @@ struct CameraRowView: View {
                 
                 if isSelected {
                     Image(systemName: "checkmark.circle.fill")
-                        .foregroundStyle(.blue)
+                        .foregroundStyle(AlfieColor.accentText)
                 }
             }
             .padding(12)
@@ -434,13 +434,7 @@ struct LiquidGlassBackdrop: View {
         let isDark = colorScheme == .dark
         ZStack {
             LinearGradient(
-                colors: isDark
-                    ? [Color(red: 0.06, green: 0.08, blue: 0.13),
-                       Color(red: 0.03, green: 0.05, blue: 0.09),
-                       Color.black]
-                    : [Color(red: 0.97, green: 0.97, blue: 0.98),
-                       Color(red: 0.95, green: 0.95, blue: 0.97),
-                       Color(red: 0.92, green: 0.93, blue: 0.95)],
+                colors: AlfieColor.backdropStops,
                 startPoint: .topLeading,
                 endPoint: .bottomTrailing
             )
