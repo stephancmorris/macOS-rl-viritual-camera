@@ -216,7 +216,7 @@ struct CropIndicatorView: View {
                     .position(x: cropX + cropWidth / 2, y: cropY + cropHeight / 2)
 
                 Text(chipLabel)
-                    .font(.system(size: 9.5, weight: .semibold, design: .monospaced))
+                    .font(.system(size: 11, weight: .semibold, design: .monospaced))
                     .tracking(1.3)
                     .foregroundStyle(AlfieColor.onBrightFill)
                     .padding(.horizontal, 8)

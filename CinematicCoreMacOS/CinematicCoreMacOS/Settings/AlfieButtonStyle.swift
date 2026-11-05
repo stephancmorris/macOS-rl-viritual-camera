@@ -11,8 +11,9 @@
 //  - Pressed: one step darker, with no scaling.
 //  - Text inside a control uses `text` or `secondaryText`, never
 //    `tertiaryText`: a hover or press wash would take tertiary below 4.5:1.
-//  - Focus: a 2 pt `accentText` ring, 2 pt outside the control, following
-//    its corner radius. Full Keyboard Access reaches every button.
+//  - Focus: a 2 pt `accentText` ring (3 pt under Increase Contrast), 2 pt
+//    outside the control, following its corner radius. Full Keyboard Access
+//    reaches every button.
 //  - Selected: the `accent` fill with `onAccent` text, so the selected
 //    segment is a filled shape as well as a colour. Toggles add an on/off
 //    indicator whose shape changes (filled dot or ring).
@@ -199,6 +200,7 @@ private struct AlfieButtonFace<Label: View>: View {
     @Environment(\.isFocused) private var isFocused
     @Environment(\.alfieForcedControlState) private var forced
     @State private var isHovering = false
+    private let display = AlfieDisplay()
 
     var body: some View {
         let look = AlfieButtonAppearance.resolve(style, isEnabled: isEnabled,
@@ -232,7 +234,8 @@ private struct AlfieButtonFace<Label: View>: View {
         }
         .overlay {
             if look.outline {
-                shape.strokeBorder(isEnabled ? AlfieColor.control.outline : AlfieColor.border, lineWidth: 1)
+                shape.strokeBorder(isEnabled ? AlfieColor.control.outline : AlfieColor.border,
+                                   lineWidth: display.outlineWidth)
             }
             if look.hairline {
                 shape.strokeBorder(AlfieColor.onVideo.secondary, lineWidth: 1)
@@ -240,9 +243,10 @@ private struct AlfieButtonFace<Label: View>: View {
         }
         .overlay {
             if look.focusRing {
-                RoundedRectangle(cornerRadius: style.cornerRadius + 4, style: .continuous)
-                    .strokeBorder(AlfieColor.accentText, lineWidth: 2)
-                    .padding(-4)
+                // 2 pt outside the control; 3 pt thick under Increase Contrast.
+                RoundedRectangle(cornerRadius: style.cornerRadius + 2 + display.focusRingWidth, style: .continuous)
+                    .strokeBorder(AlfieColor.accentText, lineWidth: display.focusRingWidth)
+                    .padding(-(2 + display.focusRingWidth))
             }
         }
         .contentShape(shape)

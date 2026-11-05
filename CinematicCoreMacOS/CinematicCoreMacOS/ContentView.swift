@@ -51,6 +51,8 @@ struct ContentView: View {
     /// Webcam get the single-camera view (ConsolePresentation.screen). The
     /// kill switch is applied by the store: with it off, Multi Cam is never
     /// the mode.
+    private let display = AlfieDisplay()
+
     private var screen: ConsolePresentation.Screen {
         ConsolePresentation.screen(for: operatorModes.mode, channelA: cameraManager, show: show)
     }
@@ -178,7 +180,8 @@ struct ContentView: View {
                     show: show
                 )
                 .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .trailing)
-                .transition(.move(edge: .trailing))
+                // Reduce Motion: a cross-fade instead of the slide.
+                .transition(display.reduceMotion ? .opacity : .move(edge: .trailing))
             }
         }
         .animation(.easeInOut(duration: 0.36), value: inspectorOpen)
@@ -337,7 +340,7 @@ struct CameraListView: View {
                     Text("No Cameras Found")
                         .font(.headline)
                     Text("Check Xcode Console for diagnostics")
-                        .font(.caption)
+                        .font(.subheadline)
                         .foregroundStyle(.secondary)
                         .multilineTextAlignment(.center)
                     
@@ -403,16 +406,16 @@ struct CameraRowView: View {
                     
                     HStack(spacing: 12) {
                         Label(camera.maxResolution, systemImage: "rectangle.resize")
-                            .font(.caption)
+                            .font(.subheadline)
                         
                         if camera.supports4K {
                             Label("4K", systemImage: "checkmark.circle.fill")
-                                .font(.caption)
+                                .font(.subheadline)
                                 .foregroundStyle(AlfieColor.live)
                         }
                         
                         Text("\(camera.formatCount) formats")
-                            .font(.caption)
+                            .font(.subheadline)
                             .foregroundStyle(.secondary)
                     }
                 }

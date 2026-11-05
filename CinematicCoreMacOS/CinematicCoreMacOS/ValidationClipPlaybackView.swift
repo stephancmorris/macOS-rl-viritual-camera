@@ -23,7 +23,7 @@ struct ValidationClipPlaybackView: View {
                 }
 
                 Text("When Validation Clip is selected, Start Session replays the chosen file through the same detection, compose, crop, and output path as the live camera.")
-                    .font(.caption)
+                    .font(.subheadline)
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
             }
@@ -33,7 +33,7 @@ struct ValidationClipPlaybackView: View {
 
                 if let url = cameraManager.validationClipURL {
                     Text(url.path)
-                        .font(.caption2)
+                        .font(.subheadline)
                         .foregroundStyle(.secondary)
                         .textSelection(.enabled)
                         .fixedSize(horizontal: false, vertical: true)
@@ -57,18 +57,18 @@ struct ValidationClipPlaybackView: View {
                 Toggle("Loop Clip", isOn: $cameraManager.loopValidationClip)
 
                 Text(cameraManager.validationClipStatus)
-                    .font(.caption)
+                    .font(.subheadline)
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
             }
 
             Section("Validation Flow") {
                 Text("Recommended clip set: podium speaker, walking speaker, two-person stage, brief occlusion, and low-motion sermon framing.")
-                    .font(.caption)
+                    .font(.subheadline)
                     .foregroundStyle(.secondary)
 
                 Text("Use Start Session with Crop enabled so the right pane reflects the exact crop behavior you'll tune against.")
-                    .font(.caption)
+                    .font(.subheadline)
                     .foregroundStyle(.secondary)
             }
         }

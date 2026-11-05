@@ -48,6 +48,19 @@ struct StateGallerySnapshotTests {
         try Self.write(image, name: "buttons-\(look.rawValue).png")
     }
 
+    /// One capture per macOS display setting (UX F4), in each appearance.
+    /// The Increase Contrast capture shows the style's 2 pt outline and 3 pt
+    /// focus ring; its token values (tertiary, borders) switch only with the
+    /// system setting and are checked in AlfieColorContrastTests.
+    @Test(arguments: DisplaySetting.allCases, AlfieColorContrastTests.Look.allCases)
+    func rendersEachDisplaySetting(setting: DisplaySetting, look: AlfieColorContrastTests.Look) throws {
+        let sample = DisplaySettingSample().environment(\.alfieDisplayOverride, setting.preferences)
+        let image = try #require(Self.render(sample, look: look, size: DisplaySettingSample.size))
+        let ground = try #require(image.colorAt(x: 4, y: 4))
+        #expect(Self.isBackground(ground, of: look), "ground \(ground) is not the \(look) background")
+        try Self.write(image, name: "a11y-\(setting.rawValue)-\(look.rawValue).png")
+    }
+
     /// D2: the live Multiview console is dark even when the system is Light;
     /// every other screen follows the operator's appearance.
     @Test(arguments: [true, false])
@@ -123,6 +136,88 @@ struct StateGallerySnapshotTests {
 private final class StateGalleryWindow: NSWindow {
     override func constrainFrameRect(_ frameRect: NSRect, to screen: NSScreen?) -> NSRect {
         frameRect
+    }
+}
+
+enum DisplaySetting: String, CaseIterable, Sendable {
+    case standard
+    case increaseContrast = "increase-contrast"
+    case reduceTransparency = "reduce-transparency"
+    case reduceMotion = "reduce-motion"
+    case differentiateWithoutColor = "differentiate-without-colour"
+
+    var preferences: AlfieDisplayPreferences {
+        var p = AlfieDisplayPreferences()
+        switch self {
+        case .standard: break
+        case .increaseContrast: p.increaseContrast = true
+        case .reduceTransparency: p.reduceTransparency = true
+        case .reduceMotion: p.reduceMotion = true
+        case .differentiateWithoutColor: p.differentiateWithoutColor = true
+        }
+        return p
+    }
+}
+
+/// What each display setting changes: text roles, an outline, a focus ring,
+/// hold-to-stop progress, the pill's lock dot and glass, and the drawer, the
+/// last two over a bright stripe so translucency shows.
+private struct DisplaySettingSample: View {
+    static let size = CGSize(width: 900, height: 300)
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 16) {
+            HStack(spacing: 18) {
+                Text("Text").foregroundStyle(AlfieColor.text)
+                Text("Secondary").foregroundStyle(AlfieColor.secondaryText)
+                Text("Tertiary").foregroundStyle(AlfieColor.tertiaryText)
+                Text("Disabled").foregroundStyle(AlfieColor.disabledText)
+                Rectangle().fill(AlfieColor.border).frame(width: 60, height: 1)
+            }
+            .font(.system(size: 13, weight: .medium))
+            .padding(12)
+            .background(AlfieColor.card, in: RoundedRectangle(cornerRadius: 10))
+            HStack(spacing: 22) {
+                Button {} label: { Text("Check pair").font(.system(size: 12, weight: .semibold))
+                    .padding(.horizontal, 12).padding(.vertical, 7) }
+                    .alfieButtonStyle(.secondary)
+                Button {} label: { Text("Start session").font(.system(size: 12, weight: .semibold))
+                    .padding(.horizontal, 12).padding(.vertical, 7) }
+                    .alfieButtonStyle(.primary)
+                    .environment(\.alfieForcedControlState, .focus)
+                AlfieHoldToStopButton(previewPhase: .holding(since: 0), previewProgress: 0.6) {}
+            }
+            .padding(.leading, 6)
+            ZStack(alignment: .leading) {
+                // The bright stripe runs under the pill's right half and the
+                // drawer's left edge.
+                HStack(spacing: 0) {
+                    AlfieColor.videoWell.frame(width: 130)
+                    AlfieColor.onVideo.emphasis.frame(width: 140)
+                    AlfieColor.videoWell
+                }
+                HStack(spacing: 30) {
+                    HStack(spacing: 8) {
+                        PillLockIndicator(state: .locked)
+                        Text("Locked").font(.system(size: 12, weight: .medium))
+                            .foregroundStyle(AlfieColor.onVideo.primary)
+                    }
+                    .padding(.horizontal, 14).padding(.vertical, 10)
+                    .background(OperatorPillBackground(cornerRadius: 18))
+                    .environment(\.colorScheme, .dark)
+                    InspectorDrawerBackground()
+                        .frame(width: 220, height: 70)
+                        .overlay(Text("Inspector").font(.system(size: 13, weight: .semibold))
+                            .foregroundStyle(AlfieColor.text))
+                }
+                .padding(.leading, 60)
+            }
+            .frame(height: 90)
+            .clipShape(RoundedRectangle(cornerRadius: 10))
+        }
+        .padding(24)
+        .frame(width: Self.size.width, height: Self.size.height, alignment: .topLeading)
+        .background(AlfieColor.background)
     }
 }
 
