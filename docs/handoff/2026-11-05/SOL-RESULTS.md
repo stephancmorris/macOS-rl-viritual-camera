@@ -48,7 +48,7 @@ The [feasibility note](../../ux/2026-11-05/webcam-in-use-feasibility.md) records
 - Wave 2 view wiring for readiness/faults and focused commands belongs to the appropriate track. End-to-end SwiftUI TextField/TextEditor focus checks remain necessary when commands are published.
 - Snapshot additions and gallery capture regeneration belong to the upcoming journey PRs; no journey UI changed in M1/M2. The real camera/ATEM rig, consuming apps and accessibility settings have not been checked by this run. No rig, camera pair, release or privacy gate is certified.
 - Console hold-to-stop still depends on the shared Track A StopSessionLabel and Astra's stop spec. No replacement control was invented.
-- Wave 3 review of Astra's Track C is deferred until its PRs exist. 
+- Wave 3 review of Astra's Track C is deferred until its PRs exist.
 
 ## Owner questions
 
