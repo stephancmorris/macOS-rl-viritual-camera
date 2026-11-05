@@ -19,7 +19,7 @@ No new owner decision is required to implement S1. Hardware validation remains o
 
 ## Wave 1 state acceptance contract
 
-Review Opus's actual renders and state gallery against this table; post findings on the PR, without pushing to its branch. Existing Wave 0 captures are a baseline, not proof of Wave 1. Hex values below are visual targets only; code uses roles in Opus's `Settings/AlfieAppearance.swift` and the shared `AlfieButtonStyle` family.
+Review Sol's actual renders and state gallery against this table; post findings on the PR, without pushing to its branch. Existing Wave 0 captures are a baseline, not proof of Wave 1. Hex values below are visual targets only; code uses roles in Sol's `Settings/AlfieAppearance.swift` and the shared `AlfieButtonStyle` family.
 
 | State | Required rendering and behaviour | Accessible state / action |
 | --- | --- | --- |
@@ -38,4 +38,6 @@ Check light and Navy night, a forced-dark live Multiview, enabled/disabled/reaso
 
 ## Programme boundaries
 
-Wave 2 begins only after Opus's Wave 1 foundations merge. Track C owns first run, mode picker, Single Cam faults, Inspector and Settings, using the above specs; Track A/B retain their stated files. Settings already has an Advanced grouping in the baseline: preserve it at the foot, complete per-page confirmed Restore defaults and search coverage rather than adding a duplicate group. A docs-only round hands Track C to Opus explicitly and stops after the available Wave 1 review. No automatic TAKE, authority/qualification/DeveloperFlags changes, rig certification or Trello Done transition is authorised by this programme.
+Wave 1 foundations (UX-F2 palette, UX-F3 shared buttons and hold-to-stop, UX-F4 accessibility) belong to Sol. Astra reviews Sol's UX-KEYS, UX-F2, UX-F3, UX-F4 and UX-M3 PRs. Track C belongs to Astra: first run, mode picker, Single Cam faults, Inspector and Settings. New-file Track C preparation may begin after UX-F3 merges; existing view integration waits for UX-F4 to merge. Track A also belongs to Astra after Track C, unless Sol has already claimed it through a UX-TA PR. Track B belongs to Sol. Each journey gets its own tagged PR; Sol reviews Astra's journeys and Astra reviews Sol's Track B. Claude performs the final review of main after both tracks finish. Settings already has an Advanced grouping in the baseline: preserve it at the foot, complete per-page confirmed Restore defaults and search coverage rather than adding a duplicate group. No automatic TAKE, authority/qualification/DeveloperFlags changes, rig certification or Trello Done transition is authorised by this programme.
+
+Assignment updated by the owner on 6 November 2026. The original D1–D6 decisions and state acceptance criteria remain in force.
