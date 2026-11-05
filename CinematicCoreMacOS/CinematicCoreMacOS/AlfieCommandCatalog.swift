@@ -67,6 +67,13 @@ nonisolated enum AlfieCommandCatalog {
               shortcut: nil, keysPending: true),
         // A screen publishes either Cancel Detect or Done Editing Live here.
         // Sharing one slot keeps Escape unambiguous in the active scene.
+        // Escape remains a native menu equivalent. Publish alfieCancel ONLY
+        // while that operator scene is active and its Detect/Edit action is
+        // valid, with no text/field/secure/custom text client owning focus,
+        // no sheet, alert, modal, popover or other transient UI owning Escape,
+        // and no cancellable Director notice using its own Escape handler.
+        // Withdraw it before presenting such UI and whenever focus, scene or
+        // action validity changes. The callback must recheck validity too.
         .init(id: .cancel, title: "Cancel Detect", category: .session,
               shortcut: .init(key: .escape, modifiers: [])),
         .init(id: .stopSession, title: "Stop Session", category: .session,

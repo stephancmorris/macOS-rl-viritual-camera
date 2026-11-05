@@ -69,4 +69,11 @@ struct AlfieCommandsTests {
         #expect(advance?.key == RunSheetAdvanceShortcut.key)
         #expect(advance?.modifiers == RunSheetAdvanceShortcut.modifiers)
     }
+
+    @Test func stopKeepsItsRebindableMenuTitleEvenWhenTheFocusedActionHasATitle() {
+        let definition = AlfieCommandCatalog.definition(for: .stopSession)
+        #expect(definition.category == .session)
+        #expect(AlfieCommands.menuTitle(for: definition,
+                                      action: AlfieCommandAction(title: "Stop Program", perform: {})) == "Stop Session")
+    }
 }

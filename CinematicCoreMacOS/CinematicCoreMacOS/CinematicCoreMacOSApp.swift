@@ -45,7 +45,10 @@ struct CinematicCoreMacOSApp: App {
         }
         .windowStyle(.hiddenTitleBar)
         .commands {
-            AlfieCommands()
+            AlfieCommands(fallbackStop: show.isAnyChannelLive ? AlfieCommandAction(perform: {
+                cameraManager.programOutput.noteDiagnostics("stopped via hotkey")
+                show.stopShow(origin: .operatorUI)
+            }) : nil)
         }
 
         Settings {
