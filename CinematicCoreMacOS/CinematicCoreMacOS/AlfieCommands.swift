@@ -50,7 +50,7 @@ struct AlfieCommands: Commands {
 
     var body: some Commands {
         // This is plain routing storage, not a published state mutation.
-        // Native digit events use the same focused action set as the menus.
+        // Native bare-key events use the same focused action set as the menus.
         let _ = plainKeys.update(actions: actions)
 
         CommandMenu("Session") {
@@ -100,16 +100,19 @@ struct AlfieCommands: Commands {
         .keyboardShortcut(Self.menuShortcut(for: definition))
     }
 
-    /// Plain digits are listed explicitly and dispatched by the native
+    /// Bare keys are listed explicitly and dispatched by the native
     /// responder-aware router. Registering them with keyboardShortcut would
     /// let a menu consume typing before a text field can receive the event.
     static func menuTitle(for definition: AlfieCommandCatalog.Definition,
                           action: AlfieCommandAction?) -> String {
         // App Shortcuts rebinding uses this exact, stable menu title.
         let title = definition.id == .stopSession ? definition.title : action?.title ?? definition.title
-        if let shortcut = definition.shortcut, shortcut.modifiers.isEmpty,
-           case .character(let character) = shortcut.key {
-            return "\(title) (key \(character))"
+        if let shortcut = definition.shortcut, shortcut.modifiers.isEmpty {
+            switch shortcut.key {
+            case .character(let character): return "\(title) (key \(String(character).uppercased()))"
+            case .escape: return "\(title) (Escape)"
+            case .returnKey: break
+            }
         }
         return title
     }
@@ -117,7 +120,7 @@ struct AlfieCommands: Commands {
     static func menuShortcut(for definition: AlfieCommandCatalog.Definition) -> KeyboardShortcut? {
         guard let shortcut = definition.shortcut else { return nil }
         // Unmodified character shortcuts must preserve text input.
-        if shortcut.modifiers.isEmpty, case .character = shortcut.key { return nil }
+        if shortcut.modifiers.isEmpty { return nil }
         let key: KeyEquivalent
         switch shortcut.key {
         case .character(let character): key = KeyEquivalent(character)
