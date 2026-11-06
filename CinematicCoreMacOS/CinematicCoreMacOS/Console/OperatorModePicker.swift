@@ -38,6 +38,8 @@ struct OperatorModePicker: View {
         OperatorModeChoice.choices(available: store.available, current: store.mode, cameras: cameras)
     }
 
+    private let display = AlfieDisplay()
+
     private var isMultiCamEnabled: Bool {
         choices.first { $0.mode == .multiCam }?.isEnabled ?? false
     }
@@ -47,10 +49,10 @@ struct OperatorModePicker: View {
             .onChange(of: store.mode) { _, _ in refusal = nil }
             .onChange(of: isMultiCamEnabled) { wasEnabled, isEnabled in
                 guard !wasEnabled, isEnabled, store.mode != .multiCam else { return }
-                withAnimation(.easeOut(duration: 0.25)) { isHighlightingMultiCam = true }
+                withAnimation(display.reduceMotion ? nil : .easeOut(duration: 0.25)) { isHighlightingMultiCam = true }
                 Task {
                     try? await Task.sleep(for: .seconds(1.6))
-                    withAnimation(.easeIn(duration: 0.4)) { isHighlightingMultiCam = false }
+                    withAnimation(display.reduceMotion ? nil : .easeIn(duration: 0.4)) { isHighlightingMultiCam = false }
                 }
             }
     }
@@ -62,7 +64,7 @@ struct OperatorModePicker: View {
             VStack(alignment: .leading, spacing: 8) {
                 segments(palette: .appearance, showsNotes: true)
                 Text(refusal ?? store.mode.detail)
-                    .font(.caption)
+                    .font(.subheadline)
                     .foregroundStyle(refusal == nil ? AlfieColor.secondaryText : AlfieColor.warning)
             }
 
@@ -115,28 +117,24 @@ struct OperatorModePicker: View {
                 Text(choice.mode.title)
                     .font(.system(size: 13, weight: .semibold))
                 if showsNotes {
+                    // An unavailable mode's reason stays readable (4.5:1)
+                    // even though its title uses the 3:1 disabled floor.
                     Text(choice.note)
                         .font(.system(size: 11))
-                        .opacity(0.85)
+                        .foregroundStyle(choice.isEnabled || isSelected ? AnyShapeStyle(.foreground)
+                                         : AnyShapeStyle(AlfieColor.secondaryText))
                 }
             }
             .lineLimit(1)
-            .foregroundStyle(isSelected ? AlfieColor.onAccent
-                             : choice.isEnabled ? palette.text : palette.disabledText)
             .frame(minWidth: showsNotes ? 132 : 84)
             .padding(.horizontal, 12)
             .padding(.vertical, showsNotes ? 7 : 5)
-            .background(
-                RoundedRectangle(cornerRadius: 8, style: .continuous)
-                    .fill(isSelected ? palette.selected : Color.clear)
-            )
             .overlay(
                 RoundedRectangle(cornerRadius: 8, style: .continuous)
                     .strokeBorder(palette.selected, lineWidth: highlight ? 1.5 : 0)
             )
-            .contentShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
         }
-        .buttonStyle(.plain)
+        .alfieButtonStyle(.segment, isSelected: isSelected)
         .disabled(!choice.isEnabled)
         .help(choice.isEnabled ? choice.mode.detail : choice.note)
         .accessibilityLabel(choice.mode.title)
@@ -147,19 +145,11 @@ struct OperatorModePicker: View {
     private struct Palette {
         let track: Color
         let selected: Color
-        let text: Color
-        let disabledText: Color
 
         /// Settings: light or dark with the app.
-        static let appearance = Palette(track: AlfieColor.controlFill,
-                                        selected: AlfieColor.accent,
-                                        text: AlfieColor.text,
-                                        disabledText: AlfieColor.tertiaryText)
+        static let appearance = Palette(track: AlfieColor.controlFill, selected: AlfieColor.accent)
         /// The console screens: the same roles on the console's backdrop.
-        static let console = Palette(track: AlfieColor.ink.opacity(0.08),
-                                     selected: AlfieColor.accent,
-                                     text: AlfieColor.text,
-                                     disabledText: AlfieColor.disabledText)
+        static let console = Palette(track: AlfieColor.ink.opacity(0.08), selected: AlfieColor.accent)
     }
 }
 

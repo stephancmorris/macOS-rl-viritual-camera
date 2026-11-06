@@ -160,7 +160,10 @@ struct OperatorPill: View {
 
     private var targetChip: some View {
         Text((chipStyle == .full ? controlTarget.chipTitle : controlTarget.compactChipTitle) ?? "")
-        .font(.system(size: 10, weight: .bold, design: .monospaced))
+        // 11 pt floor: a proportional face keeps the chip's width where the
+        // 10 pt monospaced one had it, so the widest pill still fits 1280.
+        .font(.system(size: 11, weight: .bold))
+        .tracking(0.2)
         .foregroundStyle(AlfieColor.onFill)
         .lineLimit(1)
         .padding(.horizontal, 4)
@@ -174,9 +177,7 @@ struct OperatorPill: View {
     }
 
     private var pillBackground: some View {
-        RoundedRectangle(cornerRadius: 22, style: .continuous)
-            .fill(AlfieColor.onVideo.glass)
-            .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 22, style: .continuous))
+        OperatorPillBackground()
     }
 
     private var divider: some View {
@@ -194,10 +195,7 @@ struct OperatorPill: View {
         return Button(action: lockStateAction) {
             ZStack {
                 HStack(spacing: 8) {
-                    Circle()
-                        .fill(state.dotColor)
-                        .frame(width: 7, height: 7)
-                        .shadow(color: state.dotColor.opacity(0.8), radius: state.hasGlow ? 6 : 0)
+                    PillLockIndicator(state: state)
                     Text(label)
                         .font(.system(size: 12, weight: .medium))
                         .foregroundStyle(state.labelColor)
@@ -220,9 +218,8 @@ struct OperatorPill: View {
             .fixedSize(horizontal: true, vertical: false)
             .padding(.horizontal, 10)
             .padding(.vertical, 9)
-            .contentShape(Rectangle())
         }
-        .buttonStyle(.plain)
+        .alfieButtonStyle(.quiet, surface: .video, cornerRadius: 11)
         .targetLabel(controlTarget, label)
         .disabled(!state.isInteractive || cameraManager.recoveryState.action == .none ||
                   (cameraManager.recoveryState.action == .pickSubject &&
@@ -339,12 +336,8 @@ struct OperatorPill: View {
                 HStack(spacing: 7) {
                     Image(systemName: isDiscovering ? "xmark.circle" : "viewfinder")
                         .font(.system(size: 12, weight: .semibold))
-                        .foregroundStyle(highlighted ? AlfieColor.onVideo.emphasis
-                                         : enabled ? AlfieColor.onVideo.primary : AlfieColor.onVideo.disabled)
                     Text(label)
                         .font(.system(size: 12, weight: highlighted ? .semibold : .medium))
-                        .foregroundStyle(highlighted ? AlfieColor.onVideo.emphasis
-                                         : enabled ? AlfieColor.onVideo.primary : AlfieColor.onVideo.disabled)
                 }
                 HStack(spacing: 7) {
                     ZStack {
@@ -365,13 +358,8 @@ struct OperatorPill: View {
             .fixedSize(horizontal: true, vertical: false)
             .padding(.horizontal, 10)
             .padding(.vertical, 9)
-            .background(
-                RoundedRectangle(cornerRadius: 11, style: .continuous)
-                    .fill(Color.white.opacity(highlighted ? 0.14 : 0.0))
-            )
-            .contentShape(Rectangle())
         }
-        .buttonStyle(.plain)
+        .alfieButtonStyle(.quiet, surface: .video, isSelected: highlighted, cornerRadius: 11)
         .targetLabel(controlTarget, label)
         .disabled(!enabled)
         .help("Detect: tap, then click the subject you want Alfie to follow.")
@@ -404,15 +392,12 @@ struct OperatorPill: View {
         Button(action: action) {
             Text(title)
                 .font(.system(size: 12, weight: isOn ? .semibold : .medium))
-                .foregroundStyle(isOn ? AlfieColor.onVideo.emphasis : AlfieColor.onVideo.secondary)
+                .lineLimit(1)
+                .fixedSize()
                 .padding(.horizontal, 12)
                 .padding(.vertical, 6)
-                .background(
-                    RoundedRectangle(cornerRadius: 11, style: .continuous)
-                        .fill(Color.white.opacity(isOn ? 0.14 : 0.0))
-                )
         }
-        .buttonStyle(.plain)
+        .alfieButtonStyle(.segment, surface: .video, isSelected: isOn, cornerRadius: 11)
         .targetLabel(controlTarget, title)
     }
 
@@ -445,17 +430,10 @@ struct OperatorPill: View {
         } label: {
             Text(returnToWideTitle)
                 .font(.system(size: 12, weight: isOn ? .semibold : .medium))
-                .foregroundStyle(isOn ? AlfieColor.onVideo.emphasis
-                                 : enabled ? AlfieColor.onVideo.primary : AlfieColor.onVideo.disabled)
                 .padding(.horizontal, 10)
                 .padding(.vertical, 9)
-                .background(
-                    RoundedRectangle(cornerRadius: 11, style: .continuous)
-                        .fill(Color.white.opacity(isOn ? 0.14 : 0.0))
-                )
-                .contentShape(Rectangle())
         }
-        .buttonStyle(.plain)
+        .alfieButtonStyle(.quiet, surface: .video, isSelected: isOn, cornerRadius: 11)
         .targetLabel(controlTarget, returnToWideTitle)
         .disabled(!enabled)
     }
@@ -464,25 +442,13 @@ struct OperatorPill: View {
         controlTarget.camera.map { "Return \($0) to Wide" } ?? "Return to Wide"
     }
 
-    private func modeFace(title: String, isOn: Bool, enabled: Bool) -> some View {
-        HStack(spacing: 7) {
-            Circle()
-                .fill(isOn
-                      ? AlfieColor.onVideo.modeOn
-                      : Color.white.opacity(0.3))
-                .frame(width: 6, height: 6)
-            Text(title)
-                .font(.system(size: 12, weight: isOn ? .semibold : .medium))
-                .foregroundStyle(isOn ? AlfieColor.onVideo.emphasis
-                                 : enabled ? AlfieColor.onVideo.primary : AlfieColor.onVideo.disabled)
-        }
-        .padding(.horizontal, 10)
-        .padding(.vertical, 9)
-        .background(
-            RoundedRectangle(cornerRadius: 11, style: .continuous)
-                .fill(Color.white.opacity(isOn ? 0.14 : 0.0))
-        )
-        .contentShape(Rectangle())
+    /// Crop, Manual and Auto Pan are modes: the shared toggle shows on or
+    /// off by shape (a filled dot or a ring) as well as by fill.
+    private func modeFace(title: String, isOn: Bool) -> some View {
+        Text(title)
+            .font(.system(size: 12, weight: isOn ? .semibold : .medium))
+            .padding(.horizontal, 10)
+            .padding(.vertical, 9)
     }
 
     // MARK: - Crop toggle
@@ -494,9 +460,9 @@ struct OperatorPill: View {
         return Button {
             sink.send(.setMode(.autoTracking))
         } label: {
-            modeFace(title: "Crop", isOn: isOn, enabled: enabled)
+            modeFace(title: "Crop", isOn: isOn)
         }
-        .buttonStyle(.plain)
+        .alfieButtonStyle(.toggle(isOn: isOn), surface: .video, cornerRadius: 11)
         .targetLabel(controlTarget, "Crop")
         .disabled(!enabled)
         .help(hasLock ? "Frame the locked subject." : "Tap a person in the preview to lock a subject first.")
@@ -510,9 +476,9 @@ struct OperatorPill: View {
         return Button {
             sink.send(.setMode(.manualCrop))
         } label: {
-            modeFace(title: "Manual", isOn: isOn, enabled: enabled)
+            modeFace(title: "Manual", isOn: isOn)
         }
-        .buttonStyle(.plain)
+        .alfieButtonStyle(.toggle(isOn: isOn), surface: .video, cornerRadius: 11)
         .targetLabel(controlTarget, "Manual")
         .disabled(!enabled)
     }
@@ -526,10 +492,10 @@ struct OperatorPill: View {
         return Button {
             sink.send(.setMode(.autoPan))
         } label: {
-            modeFace(title: "Auto Pan", isOn: isOn, enabled: enabled)
+            modeFace(title: "Auto Pan", isOn: isOn)
             .help("Sweep the program crop across the stage")
         }
-        .buttonStyle(.plain)
+        .alfieButtonStyle(.toggle(isOn: isOn), surface: .video, cornerRadius: 11)
         .targetLabel(controlTarget, "Auto Pan")
         .disabled(!enabled)
     }
@@ -542,28 +508,66 @@ struct OperatorPill: View {
         } label: {
             StopSessionLabel()
         }
-        .buttonStyle(.plain)
+        .alfieButtonStyle(.destructive, surface: .video, cornerRadius: 14)
     }
 }
 
-/// The red "Stop session" button face: the single-camera pill's control, and
+/// The pill's lock dot. Under Differentiate Without Colour a lock glyph joins
+/// it for Locked, so the state is a shape as well as a colour (UX F4). The
+/// word beside it is what VoiceOver reads.
+struct PillLockIndicator: View {
+    let state: OperatorPill.LockState
+    private let display = AlfieDisplay()
+
+    var body: some View {
+        HStack(spacing: 6) {
+            Circle()
+                .fill(state.dotColor)
+                .frame(width: 7, height: 7)
+                .shadow(color: state.dotColor.opacity(0.8), radius: state.hasGlow ? 6 : 0)
+            if display.differentiateWithoutColor && state == .locked {
+                Image(systemName: "lock.fill")
+                    .font(.system(size: 11, weight: .semibold))
+                    .foregroundStyle(state.dotColor)
+                    .accessibilityHidden(true)
+            }
+        }
+    }
+}
+
+/// The pill's glass over footage; opaque under Reduce Transparency (UX F4)
+/// so its labels read the same over bright and dark pictures.
+struct OperatorPillBackground: View {
+    var cornerRadius: CGFloat = 22
+    private let display = AlfieDisplay()
+
+    var body: some View {
+        let shape = RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
+        if display.reduceTransparency {
+            shape.fill(AlfieColor.onVideo.glassOpaque)
+        } else {
+            shape
+                .fill(AlfieColor.onVideo.glass)
+                .background(.ultraThinMaterial, in: shape)
+        }
+    }
+}
+
+/// The "Stop session" button face: the single-camera pill's control, and
 /// the Multiview console header's show-level stop (which stops every input).
+/// The destructive member of the shared family draws its fill and states;
+/// Tracks A and B replace both with `AlfieHoldToStopButton` (D3).
 struct StopSessionLabel: View {
     var body: some View {
         HStack(spacing: 7) {
             RoundedRectangle(cornerRadius: 2, style: .continuous)
-                .fill(Color.white.opacity(0.95))
+                .fill(AlfieColor.onFill)
                 .frame(width: 9, height: 9)
             Text("Stop session")
                 .font(.system(size: 12, weight: .semibold))
-                .foregroundStyle(AlfieColor.onFill)
         }
         .padding(.horizontal, 10)
         .padding(.vertical, 9)
-        .background(
-            RoundedRectangle(cornerRadius: 14, style: .continuous)
-                .fill(AlfieColor.programFill)
-        )
     }
 }
 
@@ -585,13 +589,10 @@ private struct ZoomShotButton: View {
         } label: {
             Text(title)
                 .font(.system(size: 12, weight: .semibold))
-                .foregroundStyle(enabled || cameraManager.zoomMoveDirection == direction
-                                 ? AlfieColor.onVideo.emphasis : AlfieColor.onVideo.disabled)
                 .frame(width: 88, height: 36)
-                .background(.white.opacity(cameraManager.zoomMoveDirection == direction ? 0.2 : 0.07),
-                            in: RoundedRectangle(cornerRadius: 11))
         }
-        .buttonStyle(.plain)
+        .alfieButtonStyle(.secondary, surface: .video,
+                          isSelected: cameraManager.zoomMoveDirection == direction, cornerRadius: 11)
         .targetLabel(controlTarget, direction == .pushIn ? "Push in" : "Pull out")
         .disabled(!enabled)
         .help("Slow zoom to the next shot size.")

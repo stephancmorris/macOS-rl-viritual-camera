@@ -66,9 +66,7 @@ struct InspectorDrawer: View {
     }
 
     private var drawerBackground: some View {
-        Rectangle()
-            .fill(AlfieColor.drawer)
-            .background(.ultraThinMaterial)
+        InspectorDrawerBackground()
     }
 
     // MARK: - Header
@@ -86,9 +84,8 @@ struct InspectorDrawer: View {
                     .font(.system(size: 14, weight: .semibold))
                     .foregroundStyle(AlfieColor.tertiaryText)
                     .frame(width: 28, height: 28)
-                    .contentShape(Rectangle())
             }
-            .buttonStyle(.plain)
+            .alfieButtonStyle(.quiet, cornerRadius: 6)
             // VoiceOver would otherwise read the symbol name.
             .accessibilityLabel(InspectorHandle.accessibilityLabel(isOpen: true))
             .help(InspectorHandle.accessibilityLabel(isOpen: true))
@@ -102,7 +99,7 @@ struct InspectorDrawer: View {
 
     private func eyebrow(_ text: String) -> some View {
         Text(text.uppercased())
-            .font(.system(size: 9, weight: .semibold, design: .monospaced))
+            .font(.system(size: 11, weight: .semibold, design: .monospaced))
             .tracking(1.6)
             .foregroundStyle(AlfieColor.tertiaryText)
     }
@@ -153,25 +150,16 @@ struct InspectorDrawer: View {
                     .lineLimit(1)
                     .fixedSize(horizontal: true, vertical: false)
             }
-            .foregroundStyle(AlfieColor.text)
             .padding(.horizontal, 12)
             .padding(.vertical, 7)
             .frame(maxWidth: equalWidth ? .infinity : nil)
-            .background(
-                RoundedRectangle(cornerRadius: 9, style: .continuous)
-                    .fill(AlfieColor.ink.opacity(0.08))
-            )
-            .overlay(
-                RoundedRectangle(cornerRadius: 9, style: .continuous)
-                    .strokeBorder(AlfieColor.ink.opacity(0.12), lineWidth: 0.5)
-            )
         }
-        .buttonStyle(.plain)
+        .alfieButtonStyle(.secondary, cornerRadius: 9)
     }
 
     private func statusPill(_ text: String, color: Color, filled: Bool = false) -> some View {
         Text(text.uppercased())
-            .font(.system(size: 9.5, weight: .semibold, design: .monospaced))
+            .font(.system(size: 11, weight: .semibold, design: .monospaced))
             .tracking(1.2)
             .foregroundStyle(filled ? AlfieColor.onFill : color)
             .padding(.horizontal, 9)
@@ -219,7 +207,7 @@ struct InspectorDrawer: View {
             }
 
             Text(cameraManager.captureProfileStatus)
-                .font(.caption2)
+                .font(.subheadline)
                 .foregroundStyle(AlfieColor.secondaryText)
                 .fixedSize(horizontal: false, vertical: true)
 
@@ -431,7 +419,7 @@ struct InspectorDrawer: View {
                             .foregroundStyle(AlfieColor.text)
                         if let badge {
                             Text(badge)
-                                .font(.system(size: 9, weight: .bold, design: .monospaced))
+                                .font(.system(size: 11, weight: .bold, design: .monospaced))
                                 .tracking(1.0)
                                 .foregroundStyle(AlfieColor.danger)
                                 .padding(.horizontal, 6)
@@ -444,14 +432,13 @@ struct InspectorDrawer: View {
                     }
                     Text(description)
                         .font(.system(size: 11.5, weight: .medium))
-                        .foregroundStyle(AlfieColor.tertiaryText)
+                        .foregroundStyle(AlfieColor.secondaryText)
                 }
                 Spacer()
             }
             .padding(.vertical, 9)
-            .contentShape(Rectangle())
         }
-        .buttonStyle(.plain)
+        .alfieButtonStyle(.quiet, cornerRadius: 6)
         .overlay(
             Rectangle()
                 .fill(AlfieColor.ink.opacity(0.06))
@@ -528,7 +515,7 @@ struct PipelineStagesSection: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 4) {
             Text("PIPELINE STAGES")
-                .font(.system(size: 9, weight: .semibold, design: .monospaced))
+                .font(.system(size: 11, weight: .semibold, design: .monospaced))
                 .tracking(1.6)
                 .foregroundStyle(AlfieColor.tertiaryText)
                 .padding(.bottom, 6)
@@ -550,7 +537,7 @@ struct PipelineStagesSection: View {
                 stageRow("Handoff refused", count(window.window.handoffRefused), total: totals.handoffRefused)
                 stageRow("No route", count(window.window.noRoute), total: totals.noRoute)
                 Text("Handoff is when the route accepted the frame; when the display or virtual-camera consumer shows it is not reported to Alfie.")
-                    .font(.system(size: 10.5))
+                    .font(.system(size: 11))
                     .foregroundStyle(AlfieColor.tertiaryText)
                     .fixedSize(horizontal: false, vertical: true)
                     .padding(.top, 6)
@@ -597,7 +584,7 @@ struct SetupCheckSection: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
             Text("SETUP CHECK")
-                .font(.system(size: 9, weight: .semibold, design: .monospaced))
+                .font(.system(size: 11, weight: .semibold, design: .monospaced))
                 .tracking(1.6)
                 .foregroundStyle(AlfieColor.tertiaryText)
 
@@ -658,7 +645,7 @@ struct SetupCheckSection: View {
         let m = report.measured
         HStack(spacing: 8) {
             Text(report.verdict.title.uppercased())
-                .font(.system(size: 9.5, weight: .semibold, design: .monospaced))
+                .font(.system(size: 11, weight: .semibold, design: .monospaced))
                 .tracking(1.2)
                 .foregroundStyle(verdictColor(report.verdict))
                 .padding(.horizontal, 9)
@@ -677,7 +664,7 @@ struct SetupCheckSection: View {
         ForEach(report.reasons) { reason in
             HStack(alignment: .firstTextBaseline, spacing: 6) {
                 Image(systemName: icon(reason.kind))
-                    .font(.system(size: 10))
+                    .font(.system(size: 11))
                     .foregroundStyle(reason.kind == .limit ? verdictColor(.limited) : AlfieColor.tertiaryText)
                 Text(reason.message)
                     .font(.system(size: 11.5))
@@ -697,11 +684,29 @@ struct SetupCheckSection: View {
     }
 }
 
+/// The drawer's ground: translucent over the console, opaque under Reduce
+/// Transparency (UX F4).
+struct InspectorDrawerBackground: View {
+    private let display = AlfieDisplay()
+
+    var body: some View {
+        if display.reduceTransparency {
+            Rectangle().fill(AlfieColor.drawerOpaque)
+        } else {
+            Rectangle()
+                .fill(AlfieColor.drawer)
+                .background(.ultraThinMaterial)
+        }
+    }
+}
+
 struct InspectorHandle: View {
     @Binding var isOpen: Bool
 
     /// What VoiceOver and the tooltip say. The visible face is "⌥", which
     /// VoiceOver would otherwise read as "option".
+    private let display = AlfieDisplay()
+
     nonisolated static func accessibilityLabel(isOpen: Bool) -> String {
         isOpen ? "Close Inspector" : "Open Inspector"
     }
@@ -712,23 +717,18 @@ struct InspectorHandle: View {
         } label: {
             Text("⌥")
                 .font(.system(size: 16, weight: .semibold, design: .rounded))
-                .foregroundStyle(AlfieColor.secondaryText)
                 .frame(width: 36, height: 36)
-                .background(
-                    RoundedRectangle(cornerRadius: 12, style: .continuous)
-                        .fill(AlfieColor.ink.opacity(0.10))
-                )
-                .background(
-                    .ultraThinMaterial,
-                    in: RoundedRectangle(cornerRadius: 12, style: .continuous)
-                )
-                .overlay(
-                    RoundedRectangle(cornerRadius: 12, style: .continuous)
-                        .strokeBorder(AlfieColor.ink.opacity(0.16), lineWidth: 0.5)
-                )
-                .shadow(color: .black.opacity(0.4), radius: 12, y: 4)
         }
-        .buttonStyle(.plain)
+        .alfieButtonStyle(.secondary, cornerRadius: 12)
+        .background {
+            let shape = RoundedRectangle(cornerRadius: 12, style: .continuous)
+            if display.reduceTransparency {
+                shape.fill(AlfieColor.card)
+            } else {
+                shape.fill(.ultraThinMaterial)
+            }
+        }
+        .shadow(color: .black.opacity(0.4), radius: 12, y: 4)
         .accessibilityLabel(Self.accessibilityLabel(isOpen: isOpen))
         .help(Self.accessibilityLabel(isOpen: isOpen))
     }
@@ -750,7 +750,7 @@ private struct BuiltInCameraTestControl: View {
                     .disabled(show.isAnyChannelLive)
                     .help("Stop all cameras before changing built-in camera testing.")
                 Text(ShowSetupModel.builtInCameraTestDetail)
-                    .font(.caption2)
+                    .font(.subheadline)
                     .foregroundStyle(AlfieColor.secondaryText)
                     .fixedSize(horizontal: false, vertical: true)
             }

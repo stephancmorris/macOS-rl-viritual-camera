@@ -29,7 +29,8 @@ struct AlfieColorContrastTests {
          ("sidebar", AlfieColor.sidebar, nil),
          ("card", AlfieColor.card, nil),
          ("controlFill", AlfieColor.controlFill, nil),
-         ("drawer", AlfieColor.drawer, AlfieColor.background)]
+         ("drawer", AlfieColor.drawer, AlfieColor.background),
+         ("drawerOpaque", AlfieColor.drawerOpaque, nil)]
     }
 
     private static let textRoles: [(String, Color)] = [
@@ -77,11 +78,43 @@ struct AlfieColorContrastTests {
             ("onBrightFill on tracking.acquiring", AlfieColor.onBrightFill, AlfieColor.tracking.acquiring),
             ("onBrightFill on tracking.locked", AlfieColor.onBrightFill, AlfieColor.tracking.locked),
             ("onBrightFill on the AUTO badge", AlfieColor.onBrightFill, AlfieColor.tally.preview),
-            ("secondaryText on the refused TAKE", AlfieColor.secondaryText, ConsoleStyle.disabledFill)
+            ("secondaryText on the refused TAKE", AlfieColor.secondaryText, ConsoleStyle.disabledFill),
+            ("onAccent on primary hover", AlfieColor.onAccent, AlfieColor.control.primaryHover),
+            ("onAccent on primary pressed", AlfieColor.onAccent, AlfieColor.control.primaryPressed),
+            ("onFill on TAKE hover", AlfieColor.onFill, AlfieColor.control.programHover),
+            ("onFill on TAKE pressed", AlfieColor.onFill, AlfieColor.control.programPressed),
         ]
         for (name, fore, fill) in pairs {
             let ratio = Self.contrast(Self.flatten(fore, over: nil, look), Self.flatten(fill, over: nil, look))
             #expect(ratio >= 4.5, "\(name) in \(look): \(Self.format(ratio))")
+        }
+    }
+
+    /// Text inside a control stays readable under the hover and pressed
+    /// washes on every surface (UX F3).
+    @Test(arguments: Look.allCases)
+    func textPassesUnderHoverAndPressedWashes(look: Look) {
+        for (surfaceName, surface, under) in Self.surfaces(look) {
+            let ground = Self.flatten(surface, over: under, look)
+            for (washName, wash) in [("hover", AlfieColor.control.hoverWash), ("pressed", AlfieColor.control.pressWash)] {
+                let washed = Self.composite(wash, over: ground, look)
+                for (roleName, role) in [("text", AlfieColor.text), ("secondaryText", AlfieColor.secondaryText),
+                                         ("accentText", AlfieColor.accentText)] {
+                    let ratio = Self.contrast(Self.flatten(role, over: nil, look), washed)
+                    #expect(ratio >= 4.5, "\(roleName) on \(washName) \(surfaceName) in \(look): \(Self.format(ratio))")
+                }
+            }
+        }
+    }
+
+    /// Pill controls: selected and pressed fills on the glass.
+    @Test func onVideoTextPassesOnSelectedAndPressedFills() {
+        let glass = Self.flatten(AlfieColor.onVideo.glass, over: AlfieColor.videoWell, .dark)
+        for (name, fill) in [("selected", AlfieColor.control.videoSelectedFill),
+                             ("pressed", AlfieColor.control.videoPressWash)] {
+            let ground = Self.composite(fill, over: glass, .dark)
+            let ratio = Self.contrast(Self.flatten(AlfieColor.onVideo.emphasis, over: nil, .dark), ground)
+            #expect(ratio >= 4.5, "onVideo.emphasis on \(name) glass: \(Self.format(ratio))")
         }
     }
 
@@ -100,7 +133,8 @@ struct AlfieColorContrastTests {
         ]
         for (name, role, minimum) in text {
             let value = Self.flatten(role, over: nil, .dark)
-            for (groundName, ground) in [("glass", glass), ("video well", well)] {
+            let opaque = Self.flatten(AlfieColor.onVideo.glassOpaque, over: nil, .dark)
+            for (groundName, ground) in [("glass", glass), ("video well", well), ("opaque glass", opaque)] {
                 let ratio = Self.contrast(value, ground)
                 #expect(ratio >= minimum, "onVideo.\(name) on \(groundName): \(Self.format(ratio))")
             }
@@ -139,8 +173,77 @@ struct AlfieColorContrastTests {
     @Test func rolesResolvePerColourScheme() {
         let light = Self.flatten(AlfieColor.background, over: nil, .light)
         let dark = Self.flatten(AlfieColor.background, over: nil, .dark)
-        #expect(abs(light.r - 0xF5 / 255) < 0.01 && abs(light.b - 0xF7 / 255) < 0.01, "light background: \(light)")
-        #expect(abs(dark.r - 0x0E / 255) < 0.01 && abs(dark.b - 0x15 / 255) < 0.01, "dark background: \(dark)")
+        #expect(light.description == "#E4EAF1", "light background: \(light)")
+        #expect(dark.description == "#0A1A2E", "dark background: \(dark)")
+    }
+
+    /// UX F2 (owner decision D1): Mist in Light, Navy night in Dark. Pins every
+    /// surface and text role so a palette change is deliberate and reviewed.
+    /// Navy night danger is FF6961: FF453A falls to 3.8:1 on the control fill.
+    @Test(arguments: Look.allCases)
+    func paletteMatchesMistAndNavyNight(look: Look) {
+        let table: [(String, Color, String, String)] = [
+            ("background", AlfieColor.background, "#E4EAF1", "#0A1A2E"),
+            ("sidebar", AlfieColor.sidebar, "#DCE3EB", "#071526"),
+            ("card", AlfieColor.card, "#F4F7F9", "#0C2340"),
+            ("controlFill", AlfieColor.controlFill, "#D6DDE5", "#173252"),
+            ("text", AlfieColor.text, "#0C2340", "#E8EDF4"),
+            ("accent", AlfieColor.accent, "#0C2340", "#E8EDF4"),
+            ("ink", AlfieColor.ink, "#0C2340", "#E8EDF4"),
+            ("onAccent", AlfieColor.onAccent, "#E8EDF4", "#0C2340"),
+            ("secondaryText", AlfieColor.secondaryText, "#3E4F66", "#ACB4BF"),
+            ("tertiaryText", AlfieColor.tertiaryText, "#536174", "#919BA7"),
+            ("accentText", AlfieColor.accentText, "#1D4F91", "#9CC0EE"),
+            ("live", AlfieColor.live, "#12672C", "#30D158"),
+            ("warning", AlfieColor.warning, "#9C4600", "#FF9F0A"),
+            ("danger", AlfieColor.danger, "#B3001B", "#FF6961"),
+            ("nextStart", AlfieColor.nextStart, "#7A5400", "#FFD60A"),
+            ("programFill", AlfieColor.programFill, "#B3001B", "#D70015"),
+            ("disabledText", AlfieColor.disabledText, "#6E7C91", "#7B8796"),
+            ("videoWell", AlfieColor.videoWell, "#08080A", "#08080A")
+        ]
+        for (name, role, light, dark) in table {
+            let (value, alpha) = Self.resolve(role, look)
+            #expect(value.description == (look == .light ? light : dark), "\(name) in \(look): \(value)")
+            #expect(alpha > 0.999, "\(name) in \(look) should be opaque")
+        }
+        let (drawer, drawerAlpha) = Self.resolve(AlfieColor.drawer, look)
+        #expect(drawer.description == (look == .light ? "#F0F3F7" : "#0A1D35"), "drawer in \(look): \(drawer)")
+        #expect(abs(drawerAlpha - (look == .light ? 0.96 : 0.94)) < 0.005, "drawer alpha in \(look)")
+        for (name, role, lightAlpha, darkAlpha) in [("separator", AlfieColor.separator, 0.10, 0.10),
+                                                    ("border", AlfieColor.border, 0.18, 0.16)] {
+            let (value, alpha) = Self.resolve(role, look)
+            #expect(value.description == (look == .light ? "#0C2340" : "#E8EDF4"), "\(name) in \(look): \(value)")
+            #expect(abs(alpha - (look == .light ? lightAlpha : darkAlpha)) < 0.005, "\(name) alpha in \(look)")
+        }
+    }
+
+    /// Increase Contrast (UX F4): tertiary text takes the secondary value;
+    /// borders, separators and outlines double. macOS won't build the
+    /// high-contrast appearance by name, so this checks the resolver and the
+    /// values it is given.
+    @Test func increaseContrastStrengthensTertiaryAndBorders() {
+        let tertiary = AlfieColor.IncreasedContrast.tertiaryText
+        for isDark in [false, true] {
+            let (hex, _) = AlfieColor.resolve(light: 0x536174, dark: 0x919BA7, increased: tertiary,
+                                              isDark: isDark, isIncreased: true)
+            #expect(hex == (isDark ? 0xACB4BF : 0x3E4F66), "tertiary under Increase Contrast, dark: \(isDark)")
+            let (normal, _) = AlfieColor.resolve(light: 0x536174, dark: 0x919BA7, increased: tertiary,
+                                                 isDark: isDark, isIncreased: false)
+            #expect(normal == (isDark ? 0x919BA7 : 0x536174))
+        }
+        // The secondary values the tertiary role takes: keep them in step.
+        #expect(Self.flatten(AlfieColor.secondaryText, over: nil, .light).description == "#3E4F66")
+        #expect(Self.flatten(AlfieColor.secondaryText, over: nil, .dark).description == "#ACB4BF")
+        for (name, increased, light, dark) in [("separator", AlfieColor.IncreasedContrast.separator, 0.10, 0.10),
+                                               ("border", AlfieColor.IncreasedContrast.border, 0.18, 0.16),
+                                               ("outline", AlfieColor.IncreasedContrast.outline, 0.40, 0.40)] {
+            #expect(abs(Double(increased.lightAlpha) - light * 2) < 0.001, "\(name) light")
+            #expect(abs(Double(increased.darkAlpha) - dark * 2) < 0.001, "\(name) dark")
+        }
+        let (base, _) = AlfieColor.resolve(light: 0x0C2340, dark: 0xE8EDF4, increased: nil,
+                                           isDark: false, isIncreased: true)
+        #expect(base == 0x0C2340, "roles without an increased value keep theirs")
     }
 
     // MARK: Colour maths
@@ -165,7 +268,15 @@ struct AlfieColorContrastTests {
                    b: top.b * alpha + bottom.b * (1 - alpha))
     }
 
-    private static func resolve(_ color: Color, _ look: Look) -> (RGB, Double) {
+    /// `color` composited over an already flattened ground.
+    static func composite(_ color: Color, over ground: RGB, _ look: Look) -> RGB {
+        let (top, alpha) = resolve(color, look)
+        return RGB(r: top.r * alpha + ground.r * (1 - alpha),
+                   g: top.g * alpha + ground.g * (1 - alpha),
+                   b: top.b * alpha + ground.b * (1 - alpha))
+    }
+
+    static func resolve(_ color: Color, _ look: Look) -> (RGB, Double) {
         var environment = EnvironmentValues()
         environment.colorScheme = look == .dark ? .dark : .light
         let resolved = color.resolve(in: environment)

@@ -136,7 +136,7 @@ struct SettingsWindow: View {
                             }
                         } header: {
                             Text(group.rawValue.uppercased())
-                                .font(.system(size: 10.5, weight: .semibold, design: .monospaced))
+                                .font(.system(size: 11, weight: .semibold, design: .monospaced))
                                 .tracking(1.5)
                                 .foregroundStyle(AlfieColor.tertiaryText)
                         }
@@ -144,6 +144,8 @@ struct SettingsWindow: View {
                 }
             }
             .listStyle(.sidebar)
+            .scrollContentBackground(.hidden)
+            .background(AlfieColor.sidebar)
             .searchable(text: $searchText, placement: .sidebar, prompt: "Search settings")
             .navigationSplitViewColumnWidth(min: 200, ideal: 220, max: 260)
         } detail: {

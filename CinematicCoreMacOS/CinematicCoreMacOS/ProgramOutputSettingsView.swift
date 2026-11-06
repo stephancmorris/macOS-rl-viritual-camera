@@ -40,13 +40,13 @@ struct ProgramOutputSettingsView<SystemExtensionManager: SystemExtensionStatusPr
                 }
 
                 Text("Must match the ATEM switcher's video standard. Applies after the show stops and starts again.")
-                    .font(.caption)
+                    .font(.subheadline)
                     .foregroundStyle(.secondary)
 
                 LabeledContent("Active Route", value: programOutput.activeRouteTitle)
 
                 Text(programOutput.routingSummary)
-                    .font(.caption)
+                    .font(.subheadline)
                     .foregroundStyle(.secondary)
             }
 
@@ -59,7 +59,7 @@ struct ProgramOutputSettingsView<SystemExtensionManager: SystemExtensionStatusPr
                     }
 
                     Text("Pick the port your HDMI-to-SDI converter or ATEM is plugged into. A picked port is reserved while this output is selected: it shows black until the show starts, then Program. At Start, Alfie switches it to the show standard (e.g. 1080p50) and macOS restores its own setting when you switch output or quit. Turn on Focus / Do Not Disturb so notifications can't reach the feed.")
-                        .font(.caption)
+                        .font(.subheadline)
                         .foregroundStyle(.secondary)
                         .fixedSize(horizontal: false, vertical: true)
                 }
@@ -92,7 +92,7 @@ struct ProgramOutputSettingsView<SystemExtensionManager: SystemExtensionStatusPr
                 )
 
                 Text("A CSV row is written every ~5 s while capture is running: memory, frame timings, dropped frames, and the system thermal state. Open the folder after a session and chart the columns against elapsed_s to see where and why throughput fell off.")
-                    .font(.caption)
+                    .font(.subheadline)
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
             }
@@ -130,7 +130,7 @@ struct ProgramOutputSettingsView<SystemExtensionManager: SystemExtensionStatusPr
 
                 if let lastDropReason = programOutput.lastDropReason {
                     Text(lastDropReason)
-                        .font(.caption)
+                        .font(.subheadline)
                         .foregroundStyle(.secondary)
                         .fixedSize(horizontal: false, vertical: true)
                 }
@@ -184,11 +184,11 @@ struct ProgramOutputSettingsView<SystemExtensionManager: SystemExtensionStatusPr
                         }
 
                         Text(status.summary)
-                            .font(.caption)
+                            .font(.subheadline)
                             .foregroundStyle(.secondary)
 
                         Text(status.detail)
-                            .font(.caption2)
+                            .font(.subheadline)
                             .foregroundStyle(.tertiary)
                     }
                     .padding(.vertical, 4)
@@ -205,11 +205,11 @@ struct ProgramOutputSettingsView<SystemExtensionManager: SystemExtensionStatusPr
 
                     if let reconnectStatus = programOutput.preferredSinkReconnectStatus {
                         Text(reconnectStatus)
-                            .font(.caption)
+                            .font(.subheadline)
                             .foregroundStyle(.secondary)
                     } else {
                         Text("Force the preferred output route to tear down the current XPC connection and reconnect immediately.")
-                            .font(.caption)
+                            .font(.subheadline)
                             .foregroundStyle(.secondary)
                     }
                 }
@@ -235,7 +235,7 @@ struct ProgramOutputSettingsView<SystemExtensionManager: SystemExtensionStatusPr
             }
 
             Text(detail)
-                .font(.caption)
+                .font(.subheadline)
                 .foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
         }

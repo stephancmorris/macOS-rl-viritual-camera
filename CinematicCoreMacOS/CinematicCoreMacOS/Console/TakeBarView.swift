@@ -24,6 +24,9 @@ struct TakeBarView: View {
 
     /// Bumped on every refused click to re-flash the reason.
     @State private var refusalFlash = 0
+    /// Reduce Motion: a refused click holds a steady outline instead.
+    @State private var refusalHighlighted = false
+    private let display = AlfieDisplay()
 
     var body: some View {
         HStack(spacing: Self.spacing) {
@@ -45,20 +48,23 @@ struct TakeBarView: View {
                     .font(.system(size: 12, weight: .medium))
                     .lineLimit(1)
                     .truncationMode(.middle)
-                    .opacity(refusalFlash.isMultiple(of: 2) ? 1 : 0.55)
-                    .animation(.easeInOut(duration: 0.18).repeatCount(3, autoreverses: true),
+                    .opacity(display.reduceMotion || refusalFlash.isMultiple(of: 2) ? 1 : 0.55)
+                    .animation(display.reduceMotion ? nil
+                               : .easeInOut(duration: 0.18).repeatCount(3, autoreverses: true),
                                value: refusalFlash)
             }
-            // The reason must stay readable: it says why TAKE was refused.
-            .foregroundStyle(availability.isEligible ? AlfieColor.onFill : AlfieColor.secondaryText)
             .frame(maxWidth: .infinity, maxHeight: .infinity)
-            .background(
-                RoundedRectangle(cornerRadius: 10, style: .continuous)
-                    .fill(availability.isEligible ? AlfieColor.programFill : ConsoleStyle.disabledFill)
-            )
-            .contentShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
         }
-        .buttonStyle(.plain)
+        // Never `.disabled`: an ineligible TAKE refuses, and its reason stays
+        // readable in secondaryText on the control fill.
+        .alfieButtonStyle(availability.isEligible ? .destructive : .refusing, cornerRadius: 10)
+        .overlay {
+            if refusalHighlighted {
+                RoundedRectangle(cornerRadius: 10, style: .continuous)
+                    .strokeBorder(AlfieColor.warning, lineWidth: 2)
+                    .allowsHitTesting(false)
+            }
+        }
         .accessibilityLabel(availability.takeAccessibilityLabel)
         .accessibilityValue(availability.isEligible ? "Ready" : availability.subtitle)
     }
@@ -67,6 +73,14 @@ struct TakeBarView: View {
         onTake()
         guard !availability.isEligible else { return }
         refusalFlash += 1
+        if display.reduceMotion {
+            refusalHighlighted = true
+            let flash = refusalFlash
+            Task {
+                try? await Task.sleep(for: .seconds(1.5))
+                if flash == refusalFlash { refusalHighlighted = false }
+            }
+        }
         if let reason = availability.reasonText {
             NSAccessibility.post(
                 element: NSApp as Any,
@@ -84,20 +98,12 @@ struct TakeBarView: View {
             Text(availability.editLiveTitle)
                 .font(.system(size: 13, weight: .semibold))
                 .multilineTextAlignment(.center)
-                .foregroundStyle(availability.editLive ? AlfieColor.onFill : ConsoleStyle.programRed)
                 .padding(.horizontal, 10)
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
-                .background(
-                    RoundedRectangle(cornerRadius: 10, style: .continuous)
-                        .fill(availability.editLive ? AlfieColor.programFill : Color.clear)
-                )
-                .overlay(
-                    RoundedRectangle(cornerRadius: 10, style: .continuous)
-                        .strokeBorder(ConsoleStyle.programRed, lineWidth: 1)
-                )
-                .contentShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
         }
-        .buttonStyle(.plain)
+        // Solid red only while editing Program; a navy outline at rest, so
+        // TAKE is the only red control in the bar.
+        .alfieButtonStyle(availability.editLive ? .destructive : .secondary, cornerRadius: 10)
         .accessibilityLabel(availability.editLiveAccessibilityLabel)
         .accessibilityValue(availability.editLive ? "On" : "Off")
     }

@@ -51,6 +51,8 @@ struct ContentView: View {
     /// Webcam get the single-camera view (ConsolePresentation.screen). The
     /// kill switch is applied by the store: with it off, Multi Cam is never
     /// the mode.
+    private let display = AlfieDisplay()
+
     private var screen: ConsolePresentation.Screen {
         ConsolePresentation.screen(for: operatorModes.mode, channelA: cameraManager, show: show)
     }
@@ -67,6 +69,11 @@ struct ContentView: View {
     }
 
     private var content: some View {
+        contentStack
+            .modifier(LiveConsoleAppearance(isLive: screen == .multiviewConsole))
+    }
+
+    private var contentStack: some View {
         ZStack {
             // Layer 0: backdrop
             LiquidGlassBackdrop()
@@ -173,7 +180,8 @@ struct ContentView: View {
                     show: show
                 )
                 .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .trailing)
-                .transition(.move(edge: .trailing))
+                // Reduce Motion: a cross-fade instead of the slide.
+                .transition(display.reduceMotion ? .opacity : .move(edge: .trailing))
             }
         }
         .animation(.easeInOut(duration: 0.36), value: inspectorOpen)
@@ -332,7 +340,7 @@ struct CameraListView: View {
                     Text("No Cameras Found")
                         .font(.headline)
                     Text("Check Xcode Console for diagnostics")
-                        .font(.caption)
+                        .font(.subheadline)
                         .foregroundStyle(.secondary)
                         .multilineTextAlignment(.center)
                     
@@ -398,16 +406,16 @@ struct CameraRowView: View {
                     
                     HStack(spacing: 12) {
                         Label(camera.maxResolution, systemImage: "rectangle.resize")
-                            .font(.caption)
+                            .font(.subheadline)
                         
                         if camera.supports4K {
                             Label("4K", systemImage: "checkmark.circle.fill")
-                                .font(.caption)
+                                .font(.subheadline)
                                 .foregroundStyle(AlfieColor.live)
                         }
                         
                         Text("\(camera.formatCount) formats")
-                            .font(.caption)
+                            .font(.subheadline)
                             .foregroundStyle(.secondary)
                     }
                 }
@@ -420,54 +428,36 @@ struct CameraRowView: View {
                 }
             }
             .padding(12)
-            .background(isSelected ? Color.blue.opacity(0.1) : Color.clear)
-            .cornerRadius(8)
         }
-        .buttonStyle(.plain)
+        .alfieButtonStyle(.quiet)
+        .background(isSelected ? AlfieColor.accentSoft : Color.clear,
+                    in: RoundedRectangle(cornerRadius: 8, style: .continuous))
     }
 }
 
+/// The standby backdrop: a flat Mist (or Navy night) gradient from the
+/// background to the sidebar tone. No tinted glows, so the brand palette
+/// reads as one surface.
 struct LiquidGlassBackdrop: View {
+    var body: some View {
+        LinearGradient(
+            colors: AlfieColor.backdropStops,
+            startPoint: .topLeading,
+            endPoint: .bottomTrailing
+        )
+        .ignoresSafeArea()
+    }
+}
+
+/// D2 (5 Nov 2026): while the Multiview console is live it is dark whatever
+/// the system appearance, so a live room never flips to a bright surface.
+/// Everywhere else the operator's appearance applies.
+struct LiveConsoleAppearance: ViewModifier {
+    let isLive: Bool
     @Environment(\.colorScheme) private var colorScheme
 
-    var body: some View {
-        let isDark = colorScheme == .dark
-        ZStack {
-            LinearGradient(
-                colors: AlfieColor.backdropStops,
-                startPoint: .topLeading,
-                endPoint: .bottomTrailing
-            )
-
-            RadialGradient(
-                colors: [
-                    Color.cyan.opacity(isDark ? 0.22 : 0.12),
-                    Color.cyan.opacity(isDark ? 0.05 : 0.03),
-                    .clear
-                ],
-                center: .topTrailing,
-                startRadius: 80,
-                endRadius: 520
-            )
-
-            RadialGradient(
-                colors: [
-                    Color.mint.opacity(isDark ? 0.18 : 0.10),
-                    Color.mint.opacity(isDark ? 0.04 : 0.02),
-                    .clear
-                ],
-                center: .bottomLeading,
-                startRadius: 60,
-                endRadius: 460
-            )
-
-            LinearGradient(
-                colors: [AlfieColor.ink.opacity(0.05), .clear, .clear],
-                startPoint: .top,
-                endPoint: .bottom
-            )
-        }
-        .ignoresSafeArea()
+    func body(content: Content) -> some View {
+        content.environment(\.colorScheme, isLive ? .dark : colorScheme)
     }
 }
 
