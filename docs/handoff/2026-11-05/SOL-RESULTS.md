@@ -9,7 +9,9 @@
 
 | Stop hotkey fix (UX-STOP) | [#116](https://github.com/stephancmorris/macOS-rl-viritual-camera/pull/116) | `45a6bb0cd7c5c9a75a7ec9b5628b43361ca4364b` | 1,266 passed, 4 skipped, 0 failed; 1,270 total, serial after merging Wave 1 | Passed, [run 42137349027](https://github.com/stephancmorris/macOS-rl-viritual-camera/actions/runs/42137349027) |
 
-Both PRs use merge commits and were merged only after the full local unit suite and all hosted CI checks were green. The hosted workflow also builds Release, runs report/training tests and checks consistency. No known detector-timeout rerun was needed. The four skips are existing opt-in tests.
+| Accepted keys and Escape protection (UX-KEYS) | [#120](https://github.com/stephancmorris/macOS-rl-viritual-camera/pull/120) | `57887769cff93f9476f91a43cc08b590fbfd021e` | 1,272 passed, 4 skipped, 0 failed; 1,276 total, serial | Passed, [run 42138254845](https://github.com/stephancmorris/macOS-rl-viritual-camera/actions/runs/42138254845) |
+
+All merged PRs use merge commits and were merged only after the full local unit suite and all hosted CI checks were green. The hosted workflow also builds Release, runs report/training tests and checks consistency. No known detector-timeout rerun was needed. The four skips are existing opt-in tests.
 
 - M1 CI: [run 42016115097](https://github.com/stephancmorris/macOS-rl-viritual-camera/actions/runs/42016115097).
 - M2 CI: [run 42019057348](https://github.com/stephancmorris/macOS-rl-viritual-camera/actions/runs/42019057348).
@@ -72,3 +74,7 @@ Claude completed F2–F4 in #117–#119 while Sol was unavailable. Sol read `CLA
 UX-KEYS installs D/W/F/U/]/[ before view publication and clears all pending flags. Menu labels show uppercase letters; no bare character or Escape is a SwiftUI menu equivalent. Caps Lock enables the same letter commands; Shift never creates an alias. Tests cover all eleven keys, repeat suppression, actual SwiftUI TextField/TextEditor/SecureField and run-sheet editor, native search/secure fields, marked text and compound text clients, modal/sheet isolation and unavailable actions. The full serial suite passed 1,272 tests with 4 opt-in skips and no failures (1,276 total).
 
 Attended keyboard layout, App Shortcuts rebinding, real window focus, VoiceOver and rig checks remain unverified. No Director production fix was needed for ⌘⇧H or ⌘⇧Return; the four actual Debug view variants passed native key dispatch with disabled menu items.
+
+UX-M3 adds model-only `WebcamUsageObserver` and host-side `CMIOWebcamUsageReader`. Track A activates monitoring with `setMonitoring(mode:isLive:)`; only live Webcam reads metadata, immediately and about once a second. Known values are in use / not in use; unsupported, failed, malformed, missing-device and stale evidence is unknown. Stop/mode exit clears cached evidence; a generation token rejects late prior-session reads. A separate timer expires stale results even during a slow reader. No camera, stream, permission request, receiver identity, extension or XPC change is involved.
+
+The conservative identity match accepts only the fixed extension device UUID as a persistent UID, never a display name. The installed UID format and all consumer transitions still require the owner-rig matrix in the feasibility note. The complete serial local suite on merged UX-KEYS main passed 1,277 tests with 4 opt-in skips and no failures (1,281 total). Five model tests cover the mode/lifecycle gate, stale/error recovery, stopped/restarted completion rejection, slow/overlapping reads and property decoding/identity. No rig signal is certified.
