@@ -1,8 +1,10 @@
 import SwiftUI
 
 /// Wave 1 defines the menus; Wave 2 screens publish their focused actions.
-/// With no publisher every item is disabled, including the retained Stop key.
+/// Stop also has an app-owned fallback, so it works from Settings/Inspector
+/// and before any screen publishes commands.
 struct AlfieCommands: Commands {
+    private let fallbackStop: AlfieCommandAction?
     @FocusedValue(\.alfieSingleCam) private var singleCam
     @FocusedValue(\.alfieMultiCam) private var multiCam
     @FocusedValue(\.alfieWebcam) private var webcam
@@ -24,9 +26,13 @@ struct AlfieCommands: Commands {
     @FocusedValue(\.alfieDirectorAdvance) private var directorAdvance
     @StateObject private var plainKeys = AlfiePlainKeyRouter()
 
+    init(fallbackStop: AlfieCommandAction? = nil) {
+        self.fallbackStop = fallbackStop
+    }
+
     /// Independent keys let Track B's console and Track C's Inspector publish
     /// from their own views without one replacing the other's action set.
-    private var actions: AlfieCommandActions? {
+    private var actions: AlfieCommandActions {
         let entries: [(AlfieCommandCatalog.ID, AlfieCommandAction?)] = [
             (.singleCam, singleCam), (.multiCam, multiCam), (.webcam, webcam),
             (.detect, detect), (.cancel, cancel), (.stopSession, stopSession),
@@ -38,7 +44,8 @@ struct AlfieCommands: Commands {
             (.directorAdvance, directorAdvance)
         ]
         let available = entries.compactMap { id, action in action.map { (id, $0) } }
-        return available.isEmpty ? nil : AlfieCommandActions(actions: Dictionary(uniqueKeysWithValues: available))
+        return AlfieCommandActions.resolve(focused: Dictionary(uniqueKeysWithValues: available),
+                                           fallbackStop: fallbackStop)
     }
 
     var body: some Commands {
@@ -85,7 +92,7 @@ struct AlfieCommands: Commands {
 
     private func command(_ id: AlfieCommandCatalog.ID) -> some View {
         let definition = AlfieCommandCatalog.definition(for: id)
-        let action = actions?[id]
+        let action = actions[id]
         return Button(Self.menuTitle(for: definition, action: action)) {
             action?.perform()
         }
@@ -98,7 +105,8 @@ struct AlfieCommands: Commands {
     /// let a menu consume typing before a text field can receive the event.
     static func menuTitle(for definition: AlfieCommandCatalog.Definition,
                           action: AlfieCommandAction?) -> String {
-        let title = action?.title ?? definition.title
+        // App Shortcuts rebinding uses this exact, stable menu title.
+        let title = definition.id == .stopSession ? definition.title : action?.title ?? definition.title
         if let shortcut = definition.shortcut, shortcut.modifiers.isEmpty,
            case .character(let character) = shortcut.key {
             return "\(title) (key \(character))"
