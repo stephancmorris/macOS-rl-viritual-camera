@@ -99,7 +99,8 @@ struct ContentView: View {
                     framingTitle: cameraManager.framingTitle,
                     onSelectPerson: nil,
                     onTapPoint: tapPointHandler,
-                    onHoldPoint: holdPointHandler
+                    onHoldPoint: holdPointHandler,
+                    tracking: cameraManager.trackingPresentation
                 )
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
                 // Live video and what floats on it stay dark in every
@@ -156,6 +157,13 @@ struct ContentView: View {
                     ProgramOnAirBadgeAnchor()
                         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
                         .allowsHitTesting(false)
+
+                    // J5: the Alfie camera's use status and the one-time
+                    // meeting-app note, under the identity stack.
+                    WebcamCallOverlay(cameraManager: cameraManager)
+                        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+                        .padding(.leading, 24)
+                        .padding(.top, 124)
 
                     OperatorPill(cameraManager: cameraManager)
                     .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottom)

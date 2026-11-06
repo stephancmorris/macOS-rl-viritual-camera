@@ -23,6 +23,8 @@ struct DetectionOverlayView: View {
     let isRecovering: Bool
     let framingTitle: String
     var onSelectPerson: ((UUID) -> Void)? = nil
+    /// J3: the candidate under the pointer while a click would pick them.
+    var hoveredPersonID: UUID? = nil
 
     var body: some View {
         GeometryReader { geometry in
@@ -54,7 +56,8 @@ struct DetectionOverlayView: View {
                         isAcquiring: isAcquiring,
                         isRecovering: isRecovering && (person.id == activeTargetID || person.id == manualLockedTargetID),
                         framingTitle: framingTitle,
-                        onSelect: onSelectPerson
+                        onSelect: onSelectPerson,
+                        isHovered: person.id == hoveredPersonID
                     )
                 }
             }
@@ -75,6 +78,10 @@ struct BoundingBoxView: View {
     let isRecovering: Bool
     let framingTitle: String
     var onSelect: ((UUID) -> Void)?
+    /// A candidate under the pointer: a wash and a heavier outline say a
+    /// click will pick them. Locked, acquiring and recovering boxes keep
+    /// their own look.
+    var isHovered = false
     private let display = AlfieDisplay()
 
     var body: some View {
@@ -102,7 +109,8 @@ struct BoundingBoxView: View {
                 }
             } else {
                 Rectangle()
-                    .stroke(style.color, lineWidth: 1.5)
+                    .fill(showsHover ? style.color.opacity(0.16) : .clear)
+                    .stroke(style.color, lineWidth: showsHover ? 3 : 1.5)
                     .frame(width: rect.width, height: rect.height)
                     .position(x: rect.midX, y: rect.midY)
             }
@@ -163,6 +171,10 @@ struct BoundingBoxView: View {
         CGFloat(text.count) * 6.5 + 16
     }
 
+    private var showsHover: Bool {
+        isHovered && !isLocked && !isActive && !isAcquiring && !isRecovering
+    }
+
     private var currentStyle: BoxStyle {
         if isAcquiring {
             return BoxStyle(
@@ -206,23 +218,7 @@ struct BoundingBoxView: View {
     // MARK: - Geometry
 
     private func calculateDisplayRect() -> CGRect {
-        let pixelRect = CGRect(
-            x: displayBoundingBox.origin.x * imageSize.width,
-            y: (1 - displayBoundingBox.origin.y - displayBoundingBox.height) * imageSize.height,
-            width: displayBoundingBox.width * imageSize.width,
-            height: displayBoundingBox.height * imageSize.height
-        )
-        let scale = min(viewSize.width / imageSize.width, viewSize.height / imageSize.height)
-        let displayWidth = imageSize.width * scale
-        let displayHeight = imageSize.height * scale
-        let offsetX = (viewSize.width - displayWidth) / 2
-        let offsetY = (viewSize.height - displayHeight) / 2
-        return CGRect(
-            x: pixelRect.origin.x * scale + offsetX,
-            y: pixelRect.origin.y * scale + offsetY,
-            width: pixelRect.width * scale,
-            height: pixelRect.height * scale
-        )
+        TrackingGeometry.displayRect(for: displayBoundingBox, imageSize: imageSize, viewSize: viewSize)
     }
 
     private func cornerPoint(_ corner: Corner, rect: CGRect) -> CGPoint {

@@ -44,6 +44,9 @@ struct OperatorPill: View {
     /// single-camera behaviour (Webcam view, non-multiview console).
     let show: ShowCoordinator?
     let chipStyle: ChipStyle
+    /// Set when the lifecycle refuses the on-screen Stop, so it offers
+    /// "Try stopping again".
+    @State private var stopFailed = false
 
     init(cameraManager: CameraManager, controlTarget: ControlTarget = .singleCamera,
          show: ShowCoordinator? = nil, chipStyle: ChipStyle = .full) {
@@ -88,6 +91,61 @@ struct OperatorPill: View {
                       showsStopSession: showsStopSession)
     }
 
+    /// J4: the pill reads as four groups, 12 pt apart: who Alfie follows,
+    /// which shot, how the frame moves, and the session.
+    nonisolated enum Cluster: String, Hashable, Sendable {
+        case subject = "Subject", shot = "Shot", move = "Move", session = "Session"
+    }
+
+    nonisolated struct ClusterGroup: Hashable, Sendable {
+        let cluster: Cluster
+        let sections: [Section]
+    }
+
+    nonisolated static func cluster(of section: Section) -> Cluster {
+        switch section {
+        case .targetChip, .lockState, .detect: return .subject
+        case .stageShots, .webcamShots: return .shot
+        case .crop, .manual, .autoPan, .zoom, .returnToWide: return .move
+        case .stopSession: return .session
+        }
+    }
+
+    /// Consecutive sections of one cluster, in pill order.
+    nonisolated static func clusters(_ sections: [Section]) -> [ClusterGroup] {
+        var groups: [ClusterGroup] = []
+        for section in sections {
+            let cluster = cluster(of: section)
+            if let last = groups.last, last.cluster == cluster {
+                groups[groups.count - 1] = ClusterGroup(cluster: cluster, sections: last.sections + [section])
+            } else {
+                groups.append(ClusterGroup(cluster: cluster, sections: [section]))
+            }
+        }
+        return groups
+    }
+
+    /// Between groups: a hairline centred in 12 pt. Within a group, 4 pt.
+    static let clusterGap: CGFloat = 12
+    static let controlSpacing: CGFloat = 4
+
+    private var commandState: PillCommandState {
+        let operatorGeometry = cameraManager.activeMode == .autoPan || cameraManager.activeMode == .manualCrop
+        return PillCommandState(
+            isRunning: cameraManager.isRunning,
+            isWebcam: isWebcam,
+            isDiscovering: cameraManager.detectionDiscoveryActive,
+            detectEnabled: detectEnabled(operatorGeometry: operatorGeometry),
+            canPushIn: cameraManager.canBeginZoom(.pushIn),
+            canPullOut: cameraManager.canBeginZoom(.pullOut))
+    }
+
+    private func detectEnabled(operatorGeometry: Bool) -> Bool {
+        cameraManager.isRunning && !operatorGeometry
+            && (!cameraManager.isManualTargetLockActive || cameraManager.canDirectlyReacquire)
+            && !cameraManager.shotComposer.isAcquiring
+    }
+
     @ViewBuilder
     private func control(for section: Section) -> some View {
         switch section {
@@ -108,7 +166,7 @@ struct OperatorPill: View {
     private var operatorFeedback: String? {
         if cameraManager.isProgramHolding { return "Holding last good program" }
         if let status = cameraManager.controlStatus { return status }
-        if cameraManager.isZoomLimited { return "ZOOM LIMITED" }
+        if cameraManager.isZoomLimited { return "Zoom limited by the source" }
         if cameraManager.cropEngine?.hasZoomAdjustment == true { return cameraManager.framingTitle }
         return cameraManager.detectionDiscoveryActive
             ? "Tap the subject in the wide frame"
@@ -125,14 +183,16 @@ struct OperatorPill: View {
 
     var body: some View {
         HStack(spacing: 0) {
-            let sections = self.sections
-            ForEach(Array(sections.enumerated()), id: \.element) { index, section in
-                // Every control is divided from the last, except the target
-                // chip, which sits directly against the lock state.
-                if index > 0, sections[index - 1] != .targetChip {
-                    divider
+            let groups = Self.clusters(sections)
+            ForEach(Array(groups.enumerated()), id: \.element.cluster) { index, group in
+                if index > 0 { divider }
+                HStack(spacing: Self.controlSpacing) {
+                    ForEach(group.sections, id: \.self) { section in
+                        control(for: section)
+                    }
                 }
-                control(for: section)
+                .accessibilityElement(children: .contain)
+                .accessibilityLabel(group.cluster.rawValue)
             }
         }
         .padding(.horizontal, 6)
@@ -156,6 +216,7 @@ struct OperatorPill: View {
         }
         .shadow(color: .black.opacity(0.55), radius: 30, x: 0, y: 18)
         .shadow(color: .black.opacity(0.35), radius: 60, x: 0, y: 30)
+        .modifier(SingleCameraCommands(isPublishing: showsStopSession, state: commandState, sink: sink))
     }
 
     private var targetChip: some View {
@@ -184,7 +245,8 @@ struct OperatorPill: View {
         Rectangle()
             .fill(Color.white.opacity(0.12))
             .frame(width: 1, height: 22)
-            .padding(.horizontal, 4)
+            .padding(.horizontal, (Self.clusterGap - 1) / 2)
+            .accessibilityHidden(true)
     }
 
     // MARK: - Lock state
@@ -201,8 +263,9 @@ struct OperatorPill: View {
                         .foregroundStyle(state.labelColor)
                 }
                 HStack(spacing: 8) {
-                    Circle()
-                        .frame(width: 7, height: 7)
+                    // Reserve the widest indicator too (Locked's dot and
+                    // glyph), so locking never moves the rest of the pill.
+                    PillLockIndicator(state: .locked)
                     ZStack {
                         ForEach(LockState.allCases, id: \.self) { state in
                             Text(state.label)
@@ -318,7 +381,10 @@ struct OperatorPill: View {
         let isLocked = cameraManager.isManualTargetLockActive
         // Disabled (but visible) once a subject is locked — unlock via the pill.
         let operatorGeometryMode = cameraManager.activeMode == .autoPan || cameraManager.activeMode == .manualCrop
-        let enabled = cameraManager.isRunning && !operatorGeometryMode && (!isLocked || cameraManager.canDirectlyReacquire) && !isAcquiring
+        let enabled = detectEnabled(operatorGeometry: operatorGeometryMode)
+        let reason = PillUnavailableReason.detect(
+            isRunning: cameraManager.isRunning, operatorGeometry: operatorGeometryMode, isLocked: isLocked,
+            canReacquire: cameraManager.canDirectlyReacquire, isAcquiring: isAcquiring)
         let label: String = {
             if isAcquiring { return "Acquiring…" }
             if isDiscovering { return "Cancel" }
@@ -362,7 +428,8 @@ struct OperatorPill: View {
         .alfieButtonStyle(.quiet, surface: .video, isSelected: highlighted, cornerRadius: 11)
         .targetLabel(controlTarget, label)
         .disabled(!enabled)
-        .help("Detect: tap, then click the subject you want Alfie to follow.")
+        .pillHelp(isDiscovering ? "Cancel Detect (Escape)." : "Detect (key D): click the person you want Alfie to follow.",
+                  unavailable: enabled ? nil : reason)
     }
 
     // MARK: - Shot preset segmented
@@ -436,6 +503,7 @@ struct OperatorPill: View {
         .alfieButtonStyle(.quiet, surface: .video, isSelected: isOn, cornerRadius: 11)
         .targetLabel(controlTarget, returnToWideTitle)
         .disabled(!enabled)
+        .pillHelp("Show the whole stage.", unavailable: enabled ? nil : PillUnavailableReason.notRunning)
     }
 
     private var returnToWideTitle: String {
@@ -465,7 +533,8 @@ struct OperatorPill: View {
         .alfieButtonStyle(.toggle(isOn: isOn), surface: .video, cornerRadius: 11)
         .targetLabel(controlTarget, "Crop")
         .disabled(!enabled)
-        .help(hasLock ? "Frame the locked subject." : "Tap a person in the preview to lock a subject first.")
+        .pillHelp("Frame the locked subject.", unavailable: enabled ? nil
+                  : PillUnavailableReason.crop(isRunning: cameraManager.isRunning, isOn: isOn, hasLock: hasLock))
     }
 
     // MARK: - Manual Crop toggle
@@ -481,6 +550,8 @@ struct OperatorPill: View {
         .alfieButtonStyle(.toggle(isOn: isOn), surface: .video, cornerRadius: 11)
         .targetLabel(controlTarget, "Manual")
         .disabled(!enabled)
+        .pillHelp("Click the wide picture to place the crop yourself.", unavailable: enabled ? nil
+                  : PillUnavailableReason.mode("Manual", isRunning: cameraManager.isRunning, isOn: isOn))
     }
 
     // MARK: - Auto Pan toggle
@@ -493,31 +564,46 @@ struct OperatorPill: View {
             sink.send(.setMode(.autoPan))
         } label: {
             modeFace(title: "Auto Pan", isOn: isOn)
-            .help("Sweep the program crop across the stage")
         }
         .alfieButtonStyle(.toggle(isOn: isOn), surface: .video, cornerRadius: 11)
         .targetLabel(controlTarget, "Auto Pan")
         .disabled(!enabled)
+        .pillHelp("Sweep the program crop across the stage.", unavailable: enabled ? nil
+                  : PillUnavailableReason.mode("Auto Pan", isRunning: cameraManager.isRunning, isOn: isOn))
     }
 
     // MARK: - Stop session
 
+    /// D3 and J12: the on-screen Stop needs a 0.8 s hold, or a confirmation
+    /// from the keyboard or VoiceOver. The menu's ⌘⌥⇧S stays immediate.
     private var stopSessionButton: some View {
-        Button {
-            sink.send(.stopSession)
-        } label: {
-            StopSessionLabel()
+        AlfieHoldToStopButton(
+            confirmationMessage: StopRouteCopy.confirmation(for: cameraManager.programOutput.activeRoute),
+            stopFailed: stopFailed
+        ) {
+            stopFailed = false
+            if !sink.send(.stopSession).wasAccepted {
+                // A later transaction, so a second failure still reads as a change.
+                Task { @MainActor in stopFailed = true }
+            }
         }
-        .alfieButtonStyle(.destructive, surface: .video, cornerRadius: 14)
     }
 }
 
-/// The pill's lock dot. Under Differentiate Without Colour a lock glyph joins
-/// it for Locked, so the state is a shape as well as a colour (UX F4). The
-/// word beside it is what VoiceOver reads.
+extension View {
+    /// The pill's help tag: what the control does, or why it can't right now.
+    /// The reason is also the VoiceOver hint (`alfieUnavailableReason`).
+    func pillHelp(_ help: String, unavailable reason: String?) -> some View {
+        self.help(reason ?? help)
+            .accessibilityHint(reason ?? "")
+    }
+}
+
+/// The pill's lock dot. A lock glyph joins it for Locked (J3), so the state
+/// is a shape and a word as well as a colour; F4 showed it only under
+/// Differentiate Without Colour. The word beside it is what VoiceOver reads.
 struct PillLockIndicator: View {
     let state: OperatorPill.LockState
-    private let display = AlfieDisplay()
 
     var body: some View {
         HStack(spacing: 6) {
@@ -525,7 +611,7 @@ struct PillLockIndicator: View {
                 .fill(state.dotColor)
                 .frame(width: 7, height: 7)
                 .shadow(color: state.dotColor.opacity(0.8), radius: state.hasGlow ? 6 : 0)
-            if display.differentiateWithoutColor && state == .locked {
+            if state == .locked {
                 Image(systemName: "lock.fill")
                     .font(.system(size: 11, weight: .semibold))
                     .foregroundStyle(state.dotColor)
@@ -555,8 +641,9 @@ struct OperatorPillBackground: View {
 
 /// The "Stop session" button face: the single-camera pill's control, and
 /// the Multiview console header's show-level stop (which stops every input).
-/// The destructive member of the shared family draws its fill and states;
-/// Tracks A and B replace both with `AlfieHoldToStopButton` (D3).
+/// The destructive member of the shared family draws its fill and states.
+/// The pill's Stop is now `AlfieHoldToStopButton` (Track A, D3); Track B
+/// replaces the console header's.
 struct StopSessionLabel: View {
     var body: some View {
         HStack(spacing: 7) {
@@ -595,7 +682,11 @@ private struct ZoomShotButton: View {
                           isSelected: cameraManager.zoomMoveDirection == direction, cornerRadius: 11)
         .targetLabel(controlTarget, direction == .pushIn ? "Push in" : "Pull out")
         .disabled(!enabled)
-        .help("Slow zoom to the next shot size.")
+        .pillHelp("Slow zoom to the next shot size.", unavailable: enabled ? nil
+                  : PillUnavailableReason.zoom(direction, isRunning: cameraManager.isRunning,
+                                               canBegin: cameraManager.canBeginZoom(direction),
+                                               movingDirection: cameraManager.zoomMoveDirection,
+                                               isZoomLimited: cameraManager.isZoomLimited))
         .onDisappear {
             // Single camera: leaving the view stops motion, as before. In a
             // show, a target change or Take rebuilds the pill; admitted moves
