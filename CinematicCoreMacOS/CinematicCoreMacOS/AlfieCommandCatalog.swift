@@ -1,5 +1,4 @@
-/// One table for menu titles and key equivalents. Keys are interim until
-/// docs/ux/2026-11-05/keyboard-map.md lands; unspecified keys stay unset.
+/// One table for the accepted docs/ux/2026-11-05/keyboard-map.md assignments.
 /// This value layer has no dependency on a focused scene or SwiftUI.
 nonisolated enum AlfieCommandCatalog {
     enum ID: String, CaseIterable, Hashable, Sendable {
@@ -64,18 +63,21 @@ nonisolated enum AlfieCommandCatalog {
         .init(id: .webcam, title: "Webcam", category: .session,
               shortcut: .init(key: .character("3"), modifiers: .command)),
         .init(id: .detect, title: "Detect", category: .session,
-              shortcut: nil, keysPending: true),
+              shortcut: .init(key: .character("d"), modifiers: [])),
         // A screen publishes either Cancel Detect or Done Editing Live here.
         // Sharing one slot keeps Escape unambiguous in the active scene.
+        // Escape is routed like bare characters, never a menu equivalent.
+        // The native responder owns text, composition and modal cancellation.
+        // Publish only the active Detect/Edit action and recheck its validity.
         .init(id: .cancel, title: "Cancel Detect", category: .session,
               shortcut: .init(key: .escape, modifiers: [])),
         .init(id: .stopSession, title: "Stop Session", category: .session,
               shortcut: .init(key: .character("s"), modifiers: [.command, .option, .shift])),
-        .init(id: .wide, title: "Wide", category: .shot, shortcut: nil, keysPending: true),
-        .init(id: .fullBody, title: "Full Body", category: .shot, shortcut: nil, keysPending: true),
-        .init(id: .waistUp, title: "Waist Up", category: .shot, shortcut: nil, keysPending: true),
-        .init(id: .pushIn, title: "Push In", category: .shot, shortcut: nil, keysPending: true),
-        .init(id: .pullOut, title: "Pull Out", category: .shot, shortcut: nil, keysPending: true),
+        .init(id: .wide, title: "Wide", category: .shot, shortcut: .init(key: .character("w"), modifiers: [])),
+        .init(id: .fullBody, title: "Full Body", category: .shot, shortcut: .init(key: .character("f"), modifiers: [])),
+        .init(id: .waistUp, title: "Waist Up", category: .shot, shortcut: .init(key: .character("u"), modifiers: [])),
+        .init(id: .pushIn, title: "Push In", category: .shot, shortcut: .init(key: .character("]"), modifiers: [])),
+        .init(id: .pullOut, title: "Pull Out", category: .shot, shortcut: .init(key: .character("["), modifiers: [])),
         .init(id: .cuePreview1, title: "Cue Preview 1", category: .multiCam,
               shortcut: .init(key: .character("1"), modifiers: [])),
         .init(id: .cuePreview2, title: "Cue Preview 2", category: .multiCam,

@@ -11,11 +11,21 @@ struct AlfieCommandAction {
 /// A snapshot assembled by the command consumer, rather than a value that a
 /// screen publishes. Independent focus keys let nested screens contribute
 /// actions without replacing commands supplied by another UX track.
-@MainActor
-struct AlfieCommandActions {
+nonisolated struct AlfieCommandActions: Sendable {
     var actions: [AlfieCommandCatalog.ID: AlfieCommandAction] = [:]
 
     subscript(_ id: AlfieCommandCatalog.ID) -> AlfieCommandAction? { actions[id] }
+
+    /// Pure resolution: no action runs here. Stop is the one app-wide safety
+    /// command; the App supplies its fallback only while a channel is live.
+    /// A scene's explicit Stop takes precedence, and every other command
+    /// remains available only when that scene publishes it.
+    static func resolve(focused: [AlfieCommandCatalog.ID: AlfieCommandAction],
+                        fallbackStop: AlfieCommandAction?) -> Self {
+        var resolved = focused
+        if resolved[.stopSession] == nil { resolved[.stopSession] = fallbackStop }
+        return Self(actions: resolved)
+    }
 }
 
 private struct AlfieSingleCamKey: FocusedValueKey { typealias Value = AlfieCommandAction }
@@ -64,8 +74,10 @@ extension FocusedValues {
         set { self[AlfieDetectKey.self] = newValue }
     }
 
-    /// One Escape action per active context. Publish Cancel Detect or Done
-    /// Editing Live only while that action applies, with its matching title.
+    /// One Escape action per active context, with its matching title. The
+    /// native router protects text input, composition and modal cancellation.
+    /// Withdraw when Detect/Edit ends or transient operator UI (for example,
+    /// a cancellable Director notice) owns Escape. Recheck action validity.
     var alfieCancel: AlfieCommandAction? {
         get { self[AlfieCancelKey.self] }
         set { self[AlfieCancelKey.self] = newValue }
