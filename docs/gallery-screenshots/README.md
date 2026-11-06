@@ -84,3 +84,10 @@ C-01 gallery cards for every director state, using `NextShotStatus.DirectorSecti
 | Paused · camera lost | [director-source-lost.png](director-source-lost.png) |
 | Paused · editing Program live | [director-edit-live.png](director-edit-live.png) |
 | Run sheet · panel | [director-run-sheet.png](director-run-sheet.png) |
+
+
+## UX-TC J1 · readiness and stopped sessions
+
+`ReadinessGallerySnapshotTests` writes `readiness-*-light.png` / `readiness-*-dark.png` and `stopped-*-light.png` / `stopped-*-dark.png`. These cover each permission/extension/output row variant, required-row omission, the all-ready disappearance, refusal, Direct/Rehearsal/virtual-camera ended lines, and the complete first-run screen under each of the four display-setting overrides. The helper is `OperatorJourneySnapshot`; captures use injected readiness and never open a camera or install an extension. Increase Contrast's dynamic colour resolution still requires the real system appearance check described above.
+
+The first-run screen shows previews off. Actual preview pictures, camera lights, permission prompts, focus movement and VoiceOver delivery remain attended checks; synthetic captures do not certify them.

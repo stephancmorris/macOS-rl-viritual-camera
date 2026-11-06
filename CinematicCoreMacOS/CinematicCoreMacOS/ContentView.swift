@@ -21,7 +21,15 @@ struct ContentView: View {
 
     @State private var showError = false
     @State private var inspectorOpen = false
-    @State private var showSystemExtensionStatus = false
+    @StateObject private var readiness: ReadinessObserver
+    @StateObject private var stoppedPreview = StoppedCameraPreviewController()
+    @State private var requestingPermission = false
+    @State private var preparingStart = false
+    @State private var readinessRefused = false
+    @State private var readinessFocusRequest = 0
+    @State private var readinessActionError: String?
+    @State private var lastSessionDuration: TimeInterval?
+    @State private var sessionRoute: ProgramOutputManager.Route?
     @State private var elapsedSeconds: Int = 0
     @State private var sessionStartedAt: Date?
     @State private var lastSessionEndedAt: Date?
@@ -42,9 +50,13 @@ struct ContentView: View {
         self.show = show
         // Without a show (previews) there is no Multi Cam: a throwaway store
         // that never touches the saved mode.
-        _operatorModes = ObservedObject(wrappedValue: show?.operatorModes
+        let modes = show?.operatorModes
             ?? OperatorModeStore(defaults: UserDefaults(suiteName: "com.alfie.preview") ?? .standard,
-                                 multiviewEnabled: false))
+                                 multiviewEnabled: false)
+        _operatorModes = ObservedObject(wrappedValue: modes)
+        _readiness = StateObject(wrappedValue: ReadinessObserver(modeStore: modes,
+            cameras: [show?.channelA ?? cameraManager], programOutput: (show?.channelA ?? cameraManager).programOutput,
+            extensionManager: systemExtensionManager))
     }
 
     /// Multiview console and Show setup only in Multi Cam; Single Cam and
@@ -52,6 +64,7 @@ struct ContentView: View {
     /// kill switch is applied by the store: with it off, Multi Cam is never
     /// the mode.
     private let display = AlfieDisplay()
+    @Environment(\.openSettings) private var openSettings
 
     private var screen: ConsolePresentation.Screen {
         ConsolePresentation.screen(for: operatorModes.mode, channelA: cameraManager, show: show)
@@ -119,10 +132,16 @@ struct ContentView: View {
                     onStart: {
                         // A single-camera session is a new show on A alone:
                         // A is Program and no other channel is kept.
-                        show?.prepareForNewShow()
-                        Task { await startCamera() }
+                        Task { await startCamera(prepareNewShow: true) }
                     },
-                    onEditRunSheet: show?.showRunSheet.map { runSheet in { runSheet.isPresented = true } }
+                    onEditRunSheet: show?.showRunSheet.map { runSheet in { runSheet.isPresented = true } },
+                    readiness: readiness, lastSessionDuration: lastSessionDuration, lastSessionRoute: sessionRoute,
+                    requestingPermission: requestingPermission, showsRefusal: readinessRefused,
+                    focusRequest: readinessFocusRequest, actionError: readinessActionError,
+                    isStarting: cameraManager.isStartingSession || preparingStart, onReadinessAction: performReadinessAction,
+                    preview: stoppedPreview,
+                    canPreview: cameraManager.preferredInputSource == .liveCamera,
+                    onPreview: toggleStoppedPreview
                 )
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
                 // Hot-plug: re-enumerate so a second camera unlocks Multi Cam
@@ -197,13 +216,23 @@ struct ContentView: View {
         .onChange(of: cameraManager.isRunning) { _, isRunning in
             if isRunning {
                 sessionStartedAt = Date()
+                sessionRoute = cameraManager.programOutput.activeRoute ?? readiness.inputs.effectiveRoute
                 elapsedSeconds = 0
             } else {
-                lastSessionEndedAt = Date()
+                let ended = Date()
+                lastSessionEndedAt = ended
+                lastSessionDuration = sessionStartedAt.map { ended.timeIntervalSince($0) }
                 sessionStartedAt = nil
+                readiness.refresh()
+                readinessFocusRequest += 1
+                OperatorAnnouncement.say(StoppedSessionCopy.line(endedAt: ended, duration: lastSessionDuration,
+                    route: sessionRoute ?? readiness.inputs.effectiveRoute))
                 elapsedSeconds = 0
             }
         }
+        .onChange(of: operatorModes.mode) { _, _ in Task { await stoppedPreview.stop() } }
+        .onChange(of: cameraManager.selectedCamera?.uniqueID) { _, _ in Task { await stoppedPreview.stop() } }
+        .onDisappear { Task { await stoppedPreview.stop() } }
         .onChange(of: cameraManager.error != nil) { _, hasError in
             if hasError { showError = true }
         }
@@ -216,14 +245,7 @@ struct ContentView: View {
         } message: { error in
             Text(error.localizedDescription)
         }
-        .alert(systemExtensionManager.summaryText, isPresented: $showSystemExtensionStatus) {
-            if let action = systemExtensionManager.primaryActionTitle {
-                Button(action) { Task { await systemExtensionManager.triggerPrimaryAction() } }
-            }
-            Button("OK", role: .cancel) { showSystemExtensionStatus = false }
-        } message: {
-            Text(systemExtensionManager.detailText)
-        }
+
     }
 
     /// Preview tap handler. While discovering a subject (operator tapped
@@ -255,53 +277,97 @@ struct ContentView: View {
         return { point in cameraManager.dispatch(cameraManager.makeCommand(.selectSubject(point, retarget: true))) }
     }
 
-    private func startCamera() async {
-        // Capture intent before any installation UI suspends. A later Stop
-        // must retire this Start rather than letting it restart the session.
-        let command = OperatorCommand(target: .session, epoch: cameraManager.commands.epoch,
-                                      expiry: ProcessInfo.processInfo.systemUptime + 120,
-                                      action: .startSession)
-        // Only the route that needs the virtual camera should invoke its
-        // installer. Direct output and the explicit rehearsal destination can
-        // start without an installed extension, including Xcode-run builds.
-        let directOutputAvailable = ProgramDisplaySelection.resolvedTargetDisplayID()
-            .flatMap(ProgramDisplaySelection.screen(for:)) != nil
-        let needsVirtualCamera = Self.startNeedsVirtualCamera(
-            preferredRoute: cameraManager.programOutput.preferredRoute,
-            directOutputAvailable: directOutputAvailable)
-        if cameraManager.shouldPreflightVirtualCameraInstallation, needsVirtualCamera,
-           !systemExtensionManager.isInstallReady {
-            let extensionReady = await systemExtensionManager.ensureInstalledForSessionStart()
-            if !extensionReady {
-                showSystemExtensionStatus = true
-                // Without the virtual camera, Program would have nowhere to go
-                // unless Direct output is the chosen, connected destination
-                // (CR-036).
-                // Installation UI suspended this request; use the route and
-                // connected displays that are current after it returns.
-                let directOutputAvailable = ProgramDisplaySelection.resolvedTargetDisplayID()
-                    .flatMap(ProgramDisplaySelection.screen(for:)) != nil
-                if Self.startNeedsVirtualCamera(preferredRoute: cameraManager.programOutput.preferredRoute,
-                                                directOutputAvailable: directOutputAvailable) {
-                    return
-                }
-            }
+    private func startCamera(prepareNewShow: Bool = false) async {
+        // Refresh before any session mutation. Permission and installation are
+        // explicit checklist actions; Start never invokes either recovery.
+        guard !preparingStart else { return }
+        guard Self.canStart(readiness: readiness, requestingPermission: requestingPermission) else {
+            readinessRefused = true
+            readinessFocusRequest += 1
+            return
         }
-
+        guard !cameraManager.isStartingSession, !cameraManager.isRunning else { return }
+        preparingStart = true
+        defer { preparingStart = false }
+        let command = OperatorCommand(target: .session, epoch: cameraManager.commands.epoch,
+            expiry: ProcessInfo.processInfo.systemUptime + 120, action: .startSession)
+        let modeAtRequest = operatorModes.mode
+        await stoppedPreview.stop()
+        // Stopping a preview suspends. Recheck prerequisites and intent before
+        // dispatch; never resume a Start into a different selected mode.
+        readiness.refresh()
+        guard operatorModes.mode == modeAtRequest, readiness.readiness.canStart else {
+            readinessRefused = true
+            readinessFocusRequest += 1
+            return
+        }
+        readinessRefused = false
+        if prepareNewShow { show?.prepareForNewShow() }
+        OperatorAnnouncement.say("Starting session.")
+        Self.applyStartRoute(mode: operatorModes.mode, output: cameraManager.programOutput)
         cameraManager.dispatch(command)
     }
 
-    /// Whether Start must wait for the virtual camera. Direct output on a
-    /// connected port, or the development rehearsal route, carries Program
-    /// without it. Anything else resolves to the virtual camera (it is also
-    /// the fallback when the chosen port is missing).
-    static func startNeedsVirtualCamera(preferredRoute: ProgramOutputManager.Route,
-                                        directOutputAvailable: Bool) -> Bool {
-        switch preferredRoute {
-        case .display: return !directOutputAvailable
-        case .rehearsal: return false
-        case .virtualCamera: return true
+    /// Webcam always sends to Alfie camera, including when a stage session
+    /// saved Direct or Rehearsal. Called only after the stopped Start gate.
+    static func applyStartRoute(mode: OperatorMode, output: ProgramOutputManager) {
+        if mode == .webcam { output.preferredRoute = .virtualCamera }
+    }
+
+    private func toggleStoppedPreview() {
+        if stoppedPreview.isPreviewing {
+            Task {
+                await stoppedPreview.stop()
+                OperatorAnnouncement.say("Camera previews are off.")
+            }
+            return
         }
+        readiness.refresh()
+        if readiness.readiness.rows.first(where: { $0.id == .cameraAccess })?.blocksStart == true {
+            readinessRefused = true
+            readinessFocusRequest += 1
+            return
+        }
+        Task { await stoppedPreview.start(deviceID: cameraManager.selectedCamera?.uniqueID) }
+    }
+
+    private func performReadinessAction(_ action: ReadinessModel.Action) {
+        readinessActionError = nil
+        switch action {
+        case .requestCameraAccess:
+            guard !requestingPermission else { return }
+            requestingPermission = true
+            Task { @MainActor in
+                _ = await AVCaptureDevice.requestAccess(for: .video)
+                requestingPermission = false
+                readiness.refresh()
+                readinessFocusRequest += 1
+            }
+        case .openCameraPrivacySettings:
+            let url = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_Camera")!
+            if !NSWorkspace.shared.open(url) {
+                readinessActionError = "System Settings could not be opened. Open System Settings, then Privacy & Security, then Camera."
+            }
+        case .installVirtualCamera:
+            Task { @MainActor in
+                await systemExtensionManager.triggerPrimaryAction()
+                readiness.refresh()
+            }
+        case .openExtensionSettings:
+            if !systemExtensionManager.openSystemSettings() {
+                readinessActionError = "System Settings could not be opened. Open System Settings, then Login Items & Extensions, and approve Alfie camera."
+            }
+        case .chooseOutput:
+            settingsWindowController.open(.output)
+            openSettings()
+        }
+        if let readinessActionError { OperatorAnnouncement.say(readinessActionError) }
+    }
+
+    /// Used by every stopped Start path; refresh before reading canStart.
+    static func canStart(readiness: ReadinessObserver, requestingPermission: Bool = false) -> Bool {
+        readiness.refresh()
+        return readiness.readiness.canStart && !requestingPermission
     }
 
 }
