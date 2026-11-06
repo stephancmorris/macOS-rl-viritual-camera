@@ -4,7 +4,7 @@ Updated 6 November 2026. Programme in progress; this is not final acceptance or 
 
 ## Assignment and isolation
 
-The owner's 6 November assignment supersedes the original docs-only handoff. Sol owns Wave 1 (UX-F2/F3/F4), UX-KEYS, UX-M3 and Track B. Astra owns Track C, then Track A unless Sol has claimed it first. Astra reviews Sol's tagged foundations, observer and Track B PRs; Sol reviews Astra's journey PRs. Claude reviews main at the end.
+The owner's 6 November assignment supersedes the original docs-only handoff. Claude completed Wave 1 (UX-F2/F3/F4) while Sol was out of usage. Sol owns UX-KEYS, UX-M3 and Track B. Astra owns Track C, then Track A unless Sol has claimed it first. Astra reviews Sol's tagged foundations, observer and Track B PRs; Sol reviews Astra's journey PRs. Claude reviews main at the end.
 
 The owner's checkout was not edited. S1 uses an independent clone at `/private/tmp/alfie-astra-source-20261105` and worktree `/private/tmp/alfie-ux-astra-20261105`, branch `astra/ux-s1-specs`, with its own DerivedData. New implementation branches will use separate worktrees and DerivedData.
 
@@ -26,9 +26,13 @@ Detect **D**; Wide **W**; Full Body **F**; Waist Up **U**; Push In **]**; Pull O
 
 ## Reviews and implementation gates
 
-No UX-KEYS, UX-F2, UX-F3, UX-F4, UX-M3 or UX-TB review PR was available at the latest title-based check on 6 November, after merging S1. UX-F3 and UX-F4 are not merged, and no tagged foundation PR is open yet. No findings or approvals are claimed. Review actual PR heads in isolated worktrees, regenerate their galleries into scratch folders, and label each finding Blocking or Follow-up. Record the head, settings and final resolution here.
+Wave 1 is merged and the Track C gates are open. Reviewed isolated heads #117 `23a9c21f8c3579fea47aa14588bf2e0b56ab1828`, #118 `b54b6a56b74caa74a2a7d9024300d15efb18304c` and #119 `c17e40b6e1f98ebc739ce7da3ad59c9cb0e27702`, built each and regenerated State/Multiview galleries into scratch directories. Focused serial review suites passed 16, 34 and 36 tests respectively (zero failures); these are not full-suite totals. Compared light/Navy night, button states and all four display-setting overrides.
 
-Track C new-file preparation waits for merged UX-F3; changes to existing views wait for merged UX-F4. Track A waits for merged Track C and the UX-TA claim check. No Track C or Track A code has been written yet. These are gates, not a docs-only handoff to Opus.
+- [#117 review](https://github.com/stephancmorris/macOS-rl-viritual-camera/pull/117#issuecomment-6673289478): Follow-up for native system pickers within the forced-dark console on a light Mac; attended check.
+- [#118 review](https://github.com/stephancmorris/macOS-rl-viritual-camera/pull/118#issuecomment-6673289918): Follow-up for persistent disabled reasons in journey consumers; actual cursor, focus, hold cancellation and keyboard/VoiceOver confirmation require interaction checks.
+- [#119 review](https://github.com/stephancmorris/macOS-rl-viritual-camera/pull/119#issuecomment-6673290263): Follow-up for actual system accessibility settings and high-contrast dynamic colours. Static overrides do not prove system observation.
+
+No Blocking findings in those three reviews. UX-KEYS #120 review is in progress. Track C J1 adds readiness, explicit preview-only capture and route-aware stopped copy. Track A still waits for merged Track C and the claim check.
 
 The requested persistent 15-minute continuation was rejected by automatic approval review because its recurring edit/push/merge authority was not explicitly approved as an automation. No automation was created. Use the owner's permitted gate-stop/“continue” workflow; do not mistake this closed gate for completion or a docs-only assignment.
 
