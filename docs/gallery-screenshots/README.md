@@ -91,3 +91,8 @@ C-01 gallery cards for every director state, using `NextShotStatus.DirectorSecti
 `ReadinessGallerySnapshotTests` writes `readiness-*-light.png` / `readiness-*-dark.png` and `stopped-*-light.png` / `stopped-*-dark.png`. These cover each permission/extension/output row variant, required-row omission, the all-ready disappearance, refusal, Direct/Rehearsal/virtual-camera ended lines, and the complete first-run screen under each of the four display-setting overrides. The helper is `OperatorJourneySnapshot`; captures use injected readiness and never open a camera or install an extension. Increase Contrast's dynamic colour resolution still requires the real system appearance check described above.
 
 The first-run screen shows previews off. Actual preview pictures, camera lights, permission prompts, focus movement and VoiceOver delivery remain attended checks; synthetic captures do not certify them.
+
+
+## UX-TC J2 · modes and camera choice
+
+`ModePickerGallerySnapshotTests` writes `mode-*-light.png` and `mode-*-dark.png`: Single Cam, Multi Cam and Webcam with zero, one and two discovered cameras. It covers selected segments, readable unavailable reasons, the camera name and Change menu, and no-camera recovery text. The tests also exercise the actual command factory with a retained action across live/discovery changes. Native menu focus and VoiceOver order remain attended checks.
