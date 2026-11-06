@@ -1,5 +1,6 @@
 import AppKit
 import Testing
+import SwiftUI
 @testable import Alfie
 
 @MainActor
@@ -19,13 +20,14 @@ struct AlfiePlainKeyRouterTests {
 
     /// A text client which is neither NSTextField nor NSTextView.
     private final class CustomTextClient: NSView, NSTextInputClient {
+        var marked = false
         override var acceptsFirstResponder: Bool { true }
         func insertText(_ string: Any, replacementRange: NSRange) {}
         func setMarkedText(_ string: Any, selectedRange: NSRange, replacementRange: NSRange) {}
         func unmarkText() {}
         func selectedRange() -> NSRange { NSRange(location: 0, length: 0) }
         func markedRange() -> NSRange { NSRange(location: NSNotFound, length: 0) }
-        func hasMarkedText() -> Bool { false }
+        func hasMarkedText() -> Bool { marked }
         func attributedSubstring(forProposedRange range: NSRange,
                                  actualRange: NSRangePointer?) -> NSAttributedString? { nil }
         func validAttributesForMarkedText() -> [NSAttributedString.Key] { [] }
@@ -41,7 +43,7 @@ struct AlfiePlainKeyRouterTests {
         let router = AlfiePlainKeyRouter(installMonitor: false,
                                         keyWindow: { focus.window }, modalWindow: { focus.modal })
         let calls = Calls()
-        let ids: [AlfieCommandCatalog.ID] = [.cuePreview1, .cuePreview2, .cuePreview3, .cuePreview4]
+        let ids = AlfieCommandCatalog.definitions.filter { $0.shortcut?.modifiers.isEmpty == true }.map(\.id)
         router.update(actions: AlfieCommandActions(actions: Dictionary(uniqueKeysWithValues: ids.map { id in
             (id, AlfieCommandAction(title: nil, perform: { calls.ids.append(id) }))
         })))
@@ -85,7 +87,7 @@ struct AlfiePlainKeyRouterTests {
     }
 
     @Test func ordinaryAndSecureFieldEditorsKeepTheirTypingEvents() throws {
-        for field in [NSTextField(), NSSecureTextField()] {
+        for field in [NSTextField(), NSSecureTextField(), NSSearchField()] {
             let (router, _, window, calls) = fixture()
             field.frame = NSRect(x: 10, y: 10, width: 240, height: 30)
             window.contentView = NSView(frame: NSRect(x: 0, y: 0, width: 320, height: 160))
@@ -93,8 +95,11 @@ struct AlfiePlainKeyRouterTests {
             #expect(window.makeFirstResponder(field))
             let editor = try #require(window.firstResponder as? NSTextView)
             #expect(editor.isFieldEditor)
+            for key in operatorKeys {
+                let original = try event(key, window: window)
+                #expect(router.route(original) === original)
+            }
             let digit = try event(window: window)
-            #expect(router.route(digit) === digit)
             #expect(calls.ids.isEmpty)
             // Returning the original event leaves normal native text input
             // intact; the router must never manually re-dispatch this event.
@@ -145,7 +150,7 @@ struct AlfiePlainKeyRouterTests {
         #expect(router.route(repeated) === repeated)
         let keyUp = try event(window: window, type: .keyUp)
         #expect(router.route(keyUp) === keyUp)
-        for characters in ["", "5", "a", "12", "\u{1b}", "\r"] {
+        for characters in ["", "5", "a", "12", "\r"] {
             let unrelated = try event(characters, window: window)
             #expect(router.route(unrelated) === unrelated)
         }
@@ -173,4 +178,102 @@ struct AlfiePlainKeyRouterTests {
         #expect(router.route(otherDigit) === otherDigit)
         #expect(calls.ids.isEmpty)
     }
+    private var operatorKeys: [String] { ["d", "w", "f", "u", "]", "[", "1", "2", "3", "4", "\u{1b}"] }
+
+    @Test func allBareKeysRouteOnceAndIgnoreRepeats() throws {
+        let (router, _, window, calls) = fixture()
+        for key in operatorKeys {
+            #expect(router.route(try event(key, window: window)) == nil)
+            let repeatEvent = try event(key, window: window, repeated: true)
+            #expect(router.route(repeatEvent) === repeatEvent)
+        }
+        #expect(calls.ids.count == operatorKeys.count)
+        #expect(Set(calls.ids).count == operatorKeys.count)
+    }
+
+    @Test func capsLockNormalizesLettersButShiftNeverCreatesAnAlias() throws {
+        let (router, _, window, calls) = fixture()
+        for key in ["D", "W", "F", "U"] {
+            let ordinaryUppercase = try event(key, window: window)
+            #expect(router.route(ordinaryUppercase) === ordinaryUppercase)
+            #expect(router.route(try event(key, window: window, modifiers: .capsLock)) == nil)
+            let shifted = try event(key, window: window, modifiers: [.capsLock, .shift])
+            #expect(router.route(shifted) === shifted)
+        }
+        #expect(calls.ids == [.detect, .wide, .fullBody, .waistUp])
+    }
+
+    @Test func allKeysLeaveMarkedTextAndCompoundTextClientsAlone() throws {
+        let markedText = NSTextView()
+        markedText.setMarkedText("composing", selectedRange: NSRange(location: 9, length: 0),
+                                 replacementRange: NSRange(location: NSNotFound, length: 0))
+        #expect(markedText.hasMarkedText())
+        let client = CustomTextClient()
+        client.marked = true
+        let child = KeyView()
+        client.addSubview(child)
+        for responder in [markedText, client, child] as [NSView] {
+            let (router, _, window, calls) = fixture()
+            window.contentView = responder === child ? client : responder
+            #expect(window.makeFirstResponder(responder))
+            for key in operatorKeys {
+                let original = try event(key, window: window)
+                #expect(router.route(original) === original)
+            }
+            #expect(calls.ids.isEmpty)
+        }
+        #expect(markedText.hasMarkedText())
+        #expect(markedText.string == "composing")
+    }
+
+    @Test func sheetAndAlertEscapeStayWithTheirNativeOwner() throws {
+        let (router, focus, window, calls) = fixture()
+        let sheet = NSWindow(contentRect: window.frame, styleMask: [.titled], backing: .buffered, defer: false)
+        window.beginSheet(sheet)
+        defer { window.endSheet(sheet) }
+        for key in operatorKeys {
+            let original = try event(key, window: window)
+            #expect(router.route(original) === original)
+        }
+        focus.window = sheet
+        router.update(actions: AlfieCommandActions(actions: [.cancel: .init(perform: { calls.ids.append(.cancel) })]))
+        let sheetEscape = try event("\u{1b}", window: sheet)
+        #expect(router.route(sheetEscape) === sheetEscape)
+        let alert = NSAlert()
+        focus.window = alert.window
+        focus.modal = alert.window
+        router.update(actions: AlfieCommandActions(actions: [.cancel: .init(perform: { calls.ids.append(.cancel) })]))
+        let alertEscape = try event("\u{1b}", window: alert.window)
+        #expect(router.route(alertEscape) === alertEscape)
+        #expect(calls.ids.isEmpty)
+    }
+
+    @Test func swiftUIFieldsAndEditorsKeepAllOperatorKeys() throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let editor = RunSheetEditor(store: RunSheetStore(directory: directory), showID: UUID())
+        let views: [AnyView] = [
+            AnyView(TextField("Run sheet name", text: .constant(""))),
+            AnyView(TextField("Search", text: .constant("")).textFieldStyle(.roundedBorder)),
+            AnyView(SecureField("Password", text: .constant(""))),
+            AnyView(TextEditor(text: .constant(""))),
+            AnyView(RunSheetEditorView(editor: editor))
+        ]
+        func descendants(_ view: NSView) -> [NSView] { [view] + view.subviews.flatMap(descendants) }
+        for view in views {
+            let (router, _, window, calls) = fixture()
+            let host = NSHostingView(rootView: view.frame(width: 300, height: 120))
+            window.contentView = host
+            host.layoutSubtreeIfNeeded()
+            let textControl = try #require(descendants(host).first { $0 is NSTextField || $0 is NSTextView })
+            #expect(window.makeFirstResponder(textControl))
+            #expect(AlfiePlainKeyRouter.ownsTextInput(window.firstResponder))
+            for key in operatorKeys {
+                let original = try event(key, window: window)
+                #expect(router.route(original) === original)
+            }
+            #expect(calls.ids.isEmpty)
+        }
+    }
+
 }

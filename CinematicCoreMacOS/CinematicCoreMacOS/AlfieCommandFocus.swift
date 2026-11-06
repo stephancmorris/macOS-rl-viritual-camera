@@ -75,9 +75,9 @@ extension FocusedValues {
     }
 
     /// One Escape action per active context, with its matching title. The
-    /// publisher must follow the catalogue's Escape ownership contract:
-    /// withdraw for text input, modal/transient UI and a cancellable Director
-    /// notice, as well as when Detect/Edit or the active scene ends.
+    /// native router protects text input, composition and modal cancellation.
+    /// Withdraw when Detect/Edit ends or transient operator UI (for example,
+    /// a cancellable Director notice) owns Escape. Recheck action validity.
     var alfieCancel: AlfieCommandAction? {
         get { self[AlfieCancelKey.self] }
         set { self[AlfieCancelKey.self] = newValue }

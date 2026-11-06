@@ -37,9 +37,9 @@ struct AlfieCommandsTests {
         let definition = AlfieCommandCatalog.definition(for: .cancel)
         for title in ["Cancel Detect", "Done Editing Live"] {
             let action = AlfieCommandAction(title: title, perform: {})
-            #expect(AlfieCommands.menuTitle(for: definition, action: action) == title)
+            #expect(AlfieCommands.menuTitle(for: definition, action: action) == "\(title) (Escape)")
         }
-        #expect(AlfieCommands.menuShortcut(for: definition)?.key == .escape)
+        #expect(AlfieCommands.menuShortcut(for: definition) == nil)
     }
 
     @Test func plainNumberKeysAreListedButNeverRegisteredAsMenuEquivalents() {
@@ -51,6 +51,18 @@ struct AlfieCommandsTests {
         }
         #expect(AlfieCommands.menuShortcut(for: AlfieCommandCatalog.definition(for: .take)) == nil)
         #expect(AlfieCommands.menuTitle(for: AlfieCommandCatalog.definition(for: .take), action: nil) == "TAKE")
+    }
+
+    @Test func acceptedLettersAndBracketsAppearOnlyInMenuLabels() {
+        let keys: [(AlfieCommandCatalog.ID, String)] = [
+            (.detect, "D"), (.wide, "W"), (.fullBody, "F"),
+            (.waistUp, "U"), (.pushIn, "]"), (.pullOut, "[")
+        ]
+        for (id, key) in keys {
+            let definition = AlfieCommandCatalog.definition(for: id)
+            #expect(AlfieCommands.menuShortcut(for: definition) == nil)
+            #expect(AlfieCommands.menuTitle(for: definition, action: nil) == "\(definition.title) (key \(key))")
+        }
     }
 
     @Test func modifiedKeysReachNativeMenusWithExactModifiers() {

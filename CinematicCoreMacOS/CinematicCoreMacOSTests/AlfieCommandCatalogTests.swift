@@ -52,11 +52,14 @@ struct AlfieCommandCatalogTests {
         #expect(!take.keysPending)
     }
 
-    @Test func unspecifiedInterimKeysStayUnassigned() {
-        let pending: Set<Catalog.ID> = [.detect, .wide, .fullBody, .waistUp, .pushIn, .pullOut]
-        #expect(Set(Catalog.definitions.filter(\.keysPending).map(\.id)) == pending)
-        for id in pending {
-            #expect(Catalog.definition(for: id).shortcut == nil)
+    @Test func acceptedBareKeysAreInstalledWithoutPendingAssignments() {
+        let keys: [(Catalog.ID, Character)] = [
+            (.detect, "d"), (.wide, "w"), (.fullBody, "f"),
+            (.waistUp, "u"), (.pushIn, "]"), (.pullOut, "[")
+        ]
+        #expect(Catalog.definitions.allSatisfy { !$0.keysPending })
+        for (id, key) in keys {
+            #expect(Catalog.definition(for: id).shortcut == .init(key: .character(key), modifiers: []))
         }
     }
 

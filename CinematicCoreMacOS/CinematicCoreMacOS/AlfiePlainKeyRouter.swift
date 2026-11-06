@@ -1,7 +1,7 @@
 import AppKit
 import Combine
 
-/// Bare character keys deliberately have no SwiftUI menu key equivalent: an
+/// Bare character and Escape keys have no SwiftUI menu key equivalent: an
 /// equivalent can consume a digit before a text editor gets to insert it.
 /// The menu lists the keys, while this monitor either cues or returns the
 /// original event untouched for normal AppKit dispatch.
@@ -55,8 +55,17 @@ final class AlfiePlainKeyRouter: ObservableObject {
               let definition = AlfieCommandCatalog.definitions.first(where: { definition in
                   let shortcut = definition.shortcut
                   guard let shortcut, shortcut.modifiers.isEmpty,
-                        case .character(let character) = shortcut.key else { return false }
-                  return characters == String(character)
+                        shortcut.key != .returnKey else { return false }
+                  switch shortcut.key {
+                  case .character(let character):
+                      // Caps Lock enables the same ASCII letter commands. Shift
+                      // is rejected above; it never creates extra aliases.
+                      let candidate = event.modifierFlags.contains(.capsLock)
+                          ? characters.lowercased() : characters
+                      return candidate == String(character)
+                  case .escape: return characters == "\u{1b}"
+                  case .returnKey: return false
+                  }
               }),
               let action = actions?[definition.id] else { return event }
 
@@ -75,7 +84,7 @@ final class AlfiePlainKeyRouter: ObservableObject {
         // A compound native text control may focus one of its child views.
         var parent = (responder as? NSView)?.superview
         while let view = parent {
-            if view is NSText || view is NSTextField { return true }
+            if view is NSText || view is NSTextField || view is any NSTextInputClient { return true }
             parent = view.superview
         }
         return false

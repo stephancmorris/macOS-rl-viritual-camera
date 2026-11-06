@@ -51,3 +51,9 @@ Catalogue reservations checked: ⌘Q/W/comma/H/M/N/O/S/P/F/G/A/C/V/X/Z/Space/Tab
 Also checked [Apple's Mac keyboard shortcuts](https://support.apple.com/en-us/102650) and [keyboard guidance](https://developer.apple.com/design/human-interface-guidelines/keyboards): leave Spotlight, app/window switching, Dock, screenshots, Mission Control, accessibility controls, Force Quit, Lock Screen and text editing intact. Finder-only combinations are scoped to Finder; Alfie's bare characters remain scoped to its operator surface. User-assigned global shortcuts and non-US layouts need an attended check, not a universal no-conflicts claim. Neither new shortcuts nor a router should intercept Control–Option VoiceOver commands.
 
 Acceptance evidence: catalogue coverage/uniqueness/reservations; real menu labels; unavailable focused values; typing/composition/secure fields; sheet/modal/window isolation; keyboard layouts; VoiceOver and Full Keyboard Access; explicit proof that 1–4 only cue and TAKE has no key. Check the retained Stop shortcut on the running app after Sol's publisher fix.
+
+## Installed router policy (UX-KEYS, 6 November 2026)
+
+The six assignments are installed before publication; all `keysPending` flags are clear. Letters appear uppercase in menu labels, while the catalogue stores lowercase. Bare keys, including Escape, have no native menu equivalent. The router checks the current responder for every event, including ancestor text clients, and leaves the original event untouched for typing/composition, sheets, alerts, modal windows, absent actions and repeats.
+
+Caps Lock enables the same D/W/F/U actions from uppercase letter events. Shift (with or without Caps Lock) never invokes a bare command; brackets remain character matches with no modifier alias. No hardware-position aliases are added. Publishers withdraw `cancel` when Detect/Edit ends or another operator transient owns Escape, and recheck validity in the action.

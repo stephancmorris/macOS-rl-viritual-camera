@@ -7,6 +7,8 @@
 | M1: readiness, fault recovery, webcam feasibility | [#113](https://github.com/stephancmorris/macOS-rl-viritual-camera/pull/113) | `dd7ee58759a9d992bacf60dc60f9546262161c15` | 1,210 passed, 4 skipped, 0 failed; 1,214 total | 1,210 passed, 4 skipped, 0 failed; 1,214 total |
 | M2: focused commands and text-safe cue keys | [#114](https://github.com/stephancmorris/macOS-rl-viritual-camera/pull/114) | `cf017e947b3ad88f361212afdc59dc0048cea037` | 1,233 passed, 4 skipped, 0 failed; 1,237 total | 1,233 passed, 4 skipped, 0 failed; 1,237 total |
 
+| Stop hotkey fix (UX-STOP) | [#116](https://github.com/stephancmorris/macOS-rl-viritual-camera/pull/116) | `45a6bb0cd7c5c9a75a7ec9b5628b43361ca4364b` | 1,266 passed, 4 skipped, 0 failed; 1,270 total, serial after merging Wave 1 | Passed, [run 42137349027](https://github.com/stephancmorris/macOS-rl-viritual-camera/actions/runs/42137349027) |
+
 Both PRs use merge commits and were merged only after the full local unit suite and all hosted CI checks were green. The hosted workflow also builds Release, runs report/training tests and checks consistency. No known detector-timeout rerun was needed. The four skips are existing opt-in tests.
 
 - M1 CI: [run 42016115097](https://github.com/stephancmorris/macOS-rl-viritual-camera/actions/runs/42016115097).
@@ -33,7 +35,7 @@ Tests include all 1,890 mode/route/input/permission/extension/output combination
 
 `AlfieCommands.swift` defines Session, Shot, Multi Cam, View/Inspector and Debug Director menus. No production view publishes the new keys in Wave 1. Ordinary commands remain disabled until their publishers land. Stop Session has an app-level fallback whenever any channel is running or starting, including when Settings or the Inspector is in front. A published focused Stop takes precedence. The fallback records `stopped via hotkey`, then calls `show.stopShow(origin: .operatorUI)`, matching the original behavior. The menu stays named “Stop Session” in “Session” with ⌘⌥⇧S for App Shortcuts rebinding. PR #114 temporarily removed this availability; the Stop hotkey fix restores it.
 
-Escape remains a native menu key equivalent. A Wave 2 publisher may publish `alfieCancel` only while its operator scene is active and the matching Detect/Edit action is valid, with no text field, field editor, secure editor or custom text client owning focus; no sheet, alert, modal, popover or other transient UI owning Escape; and no cancellable Director notice using its own Escape handler. Publish nil before presenting that UI and whenever focus, active scene or action validity changes. The callback must recheck validity. A focused scene value alone does not establish these conditions. Keep the action title “Cancel Detect” or “Done Editing Live” as appropriate.
+UX-KEYS supersedes the temporary Escape publication restriction from UX-STOP. Escape now has no native menu equivalent and passes through the same responder-aware router as bare characters. Text controls, marked text, secure editors, sheets, alerts and modal windows retain it. Publish `alfieCancel` only for the active Detect/Edit operation; withdraw it when that operation ends or another operator transient owns Escape, and recheck validity in the callback.
 
 Bare character keys are listed explicitly in menu labels and dispatched by one native local event monitor. They are not SwiftUI menu key equivalents, which could consume typing before a text editor receives the event. The router reads the native responder on every event and passes the original event through for text clients, secure field editors, another window, modal/sheet windows, repeated/shortcut-modified events and absent actions. Only a published matching action consumes a key. The final full run includes all 23 M2 tests, including native text insertion and catalog uniqueness/reservations.
 
@@ -61,3 +63,12 @@ The [feasibility note](../../ux/2026-11-05/webcam-in-use-feasibility.md) records
 ## Owner questions
 
 None. The next steps depend on programme deliverables and rig validation, not a new owner decision. Decisions D1–D6 are unchanged. No camera extension, XPC service name, Director authority, qualification record or DeveloperFlags release behavior was changed. TAKE remains an explicit operator action with no key equivalent.
+
+
+## Round two (6 Nov 2026)
+
+Claude completed F2–F4 in #117–#119 while Sol was unavailable. Sol read `CLAUDE-WAVE1-RESULTS.md` and did not duplicate those foundations. UX-STOP #116 was merged only after merging `5d59d67`, passing the complete serial local suite and refreshed hosted CI. Review comments contained no Blocking items.
+
+UX-KEYS installs D/W/F/U/]/[ before view publication and clears all pending flags. Menu labels show uppercase letters; no bare character or Escape is a SwiftUI menu equivalent. Caps Lock enables the same letter commands; Shift never creates an alias. Tests cover all eleven keys, repeat suppression, actual SwiftUI TextField/TextEditor/SecureField and run-sheet editor, native search/secure fields, marked text and compound text clients, modal/sheet isolation and unavailable actions. The full serial suite passed 1,272 tests with 4 opt-in skips and no failures (1,276 total).
+
+Attended keyboard layout, App Shortcuts rebinding, real window focus, VoiceOver and rig checks remain unverified. No Director production fix was needed for ⌘⇧H or ⌘⇧Return; the four actual Debug view variants passed native key dispatch with disabled menu items.
