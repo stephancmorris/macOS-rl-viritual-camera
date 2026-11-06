@@ -28,7 +28,10 @@ struct WebcamUsageObserverTests {
 
     @Test func readsOnlyDuringLiveWebcamAndStopClearsEvidence() async {
         let reader = Reader()
-        let observer = WebcamUsageObserver(automaticallyPoll: false, reader: { await reader.read() })
+        // A fixed clock: this test is about the live-Webcam gate, and on a
+        // loaded runner a real-clock read can exceed the 2.5 s freshness
+        // bound and come back unknown (seen on hosted CI, 6 Nov 2026).
+        let observer = WebcamUsageObserver(automaticallyPoll: false, now: { 0 }, reader: { await reader.read() })
         for mode in OperatorMode.allCases {
             for live in [false, true] {
                 observer.setMonitoring(mode: mode, isLive: live)
