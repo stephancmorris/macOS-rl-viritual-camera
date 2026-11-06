@@ -104,3 +104,16 @@ nonisolated enum StoppedSessionCopy {
         return remainder == 0 ? "\(minutes / 60) hr" : "\(minutes / 60) hr \(remainder) min"
     }
 }
+
+
+/// Background readiness never takes focus from another control. Only a
+/// disappearing checklist focus is handed back to Start.
+nonisolated struct ReadinessFocusPolicy {
+    private var checklistHasFocus = false
+    mutating func checklistFocusChanged(_ focused: Bool) { checklistHasFocus = focused }
+    mutating func becameReady() -> Bool {
+        let returnToStart = checklistHasFocus
+        checklistHasFocus = false
+        return returnToStart
+    }
+}

@@ -122,17 +122,8 @@ struct ContentView: View {
                 // Show setup (SHOW-SETUP) replaces the stopped screen in
                 // Multi Cam. Channel A starts through startCamera() so
                 // extension preflight is unchanged.
-                ScrollView {
-                    VStack(spacing: 18) {
-                        ReadinessChecklistView(readiness: readiness.readiness, inputs: readiness.inputs,
-                            requestingPermission: requestingPermission, showsRefusal: readinessRefused,
-                            focusRequest: readinessFocusRequest, actionError: readinessActionError,
-                            onAction: performReadinessAction)
-                            .padding(.top, 64)
-                        LiveShowSetup(show: show, startChannelA: { await startCamera() })
-                    }
-                }
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                LiveShowSetup(show: show, startChannelA: { await startCamera() })
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
             } else {
                 StoppedScreen(
                     operatorModes: operatorModes,
@@ -313,7 +304,14 @@ struct ContentView: View {
         readinessRefused = false
         if prepareNewShow { show?.prepareForNewShow() }
         OperatorAnnouncement.say("Starting session.")
+        Self.applyStartRoute(mode: operatorModes.mode, output: cameraManager.programOutput)
         cameraManager.dispatch(command)
+    }
+
+    /// Webcam always sends to Alfie camera, including when a stage session
+    /// saved Direct or Rehearsal. Called only after the stopped Start gate.
+    static func applyStartRoute(mode: OperatorMode, output: ProgramOutputManager) {
+        if mode == .webcam { output.preferredRoute = .virtualCamera }
     }
 
     private func toggleStoppedPreview() {
