@@ -53,3 +53,11 @@ Required owner-rig checks before wiring the label:
 - Check denied consumer permission, client crash, extension restart and device disappearance. Unknown must remain distinct from zero; status must recover without activating a camera preview.
 
 No rig, receiving app, release or privacy gate is certified by this note or by software tests. There is no owner decision needed to proceed with (a); observed rig failure would trigger the documented fallback to a separately reviewed extension change.
+
+## UX-M3 implementation (6 November 2026)
+
+`WebcamUsageObserver` is model-only. Track A calls `setMonitoring(mode:isLive:)` from the actual session lifecycle. It samples immediately and about once a second only in live Webcam mode, never during stopped previews. Stop/mode exit clears evidence to unknown. Reads run off the main actor; an independent tick expires old evidence after 2.5 seconds, and generation tokens reject completions from an ended session. A read taking longer than that freshness bound is unknown too.
+
+`CMIOWebcamUsageReader` resolves the current device list on every read and accepts only a single persistent UID that parses as the existing extension's fixed device UUID. It never matches a display name. If the installed device exposes a different UID format, this conservative implementation returns unknown: the actual UID format still needs the owner-rig check above. Unsupported, failed, malformed and non-Boolean property reads return unknown. No capture session, stream start, permission request, XPC change or extension change is involved.
+
+The injected reader and monotonic clock cover the live-mode gate, positive/zero/unknown transitions, stale evidence, slow reads, overlapping refresh suppression, stopped-session override and late-completion rejection. They do not certify the property transitions on installed hardware or what any receiver displays.
