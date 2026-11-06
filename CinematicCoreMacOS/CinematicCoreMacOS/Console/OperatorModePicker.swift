@@ -30,6 +30,8 @@ struct OperatorModePicker: View {
     let cameras: OperatorModeChoice.Cameras
     var style: Style = .form
 
+    @Environment(\.operatorCameraChoice) private var cameraChoice
+
     @State private var refusal: String?
     /// Briefly outlines Multi Cam when a second camera unlocks it.
     @State private var isHighlightingMultiCam = false
@@ -45,7 +47,10 @@ struct OperatorModePicker: View {
     }
 
     var body: some View {
-        content
+        VStack(spacing: 10) {
+            content
+            if let cameraChoice { OperatorCameraChoiceView(choice: cameraChoice) }
+        }
             .onChange(of: store.mode) { _, _ in refusal = nil }
             .onChange(of: isMultiCamEnabled) { wasEnabled, isEnabled in
                 guard !wasEnabled, isEnabled, store.mode != .multiCam else { return }
@@ -136,10 +141,33 @@ struct OperatorModePicker: View {
         }
         .alfieButtonStyle(.segment, isSelected: isSelected)
         .disabled(!choice.isEnabled)
-        .help(choice.isEnabled ? choice.mode.detail : choice.note)
-        .accessibilityLabel(choice.mode.title)
-        .accessibilityValue(choice.note)
+        .help(choice.mode.detail + (choice.isEnabled ? "" : " " + choice.note + "."))
+        .accessibilityLabel(Self.accessibilityLabel(choice, cameras: cameras))
+        .accessibilityValue(choice.isEnabled ? choice.note : "")
         .accessibilityAddTraits(isSelected ? .isSelected : [])
+    }
+
+    static func accessibilityLabel(_ choice: OperatorModeChoice, cameras: OperatorModeChoice.Cameras) -> String {
+        guard !choice.isEnabled else { return choice.mode.title }
+        let count = cameras.count == 0 ? "no cameras found" : cameras.count == 1 ? "one camera found" : "\(cameras.count) cameras found"
+        return "\(choice.mode.title), unavailable, \(count)"
+    }
+
+    /// The same offer rule for the segments and menu commands; a retained
+    /// action rechecks the stopped state and discovery at activation time.
+    static func command(_ mode: OperatorMode, store: OperatorModeStore,
+                        cameras: @escaping () -> OperatorModeChoice.Cameras,
+                        isStopped: @escaping () -> Bool) -> AlfieCommandAction? {
+        func available() -> Bool {
+            isStopped() && OperatorModeChoice.choices(available: store.available, current: store.mode,
+                cameras: cameras()).contains { $0.mode == mode && $0.isEnabled }
+        }
+        guard available() else { return nil }
+        return AlfieCommandAction {
+            guard available() else { return }
+            if let reason = store.request(mode) { OperatorAnnouncement.say(reason) }
+            else { OperatorAnnouncement.say("\(mode.title) selected.") }
+        }
     }
 
     private struct Palette {

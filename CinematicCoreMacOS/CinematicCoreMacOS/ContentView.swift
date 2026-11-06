@@ -84,6 +84,34 @@ struct ContentView: View {
     private var content: some View {
         contentStack
             .modifier(LiveConsoleAppearance(isLive: screen == .multiviewConsole))
+            .environment(\.operatorCameraChoice, stoppedCameraChoice)
+            .focusedSceneValue(\.alfieSingleCam, modeCommand(.singleCam))
+            .focusedSceneValue(\.alfieMultiCam, modeCommand(.multiCam))
+            .focusedSceneValue(\.alfieWebcam, modeCommand(.webcam))
+    }
+
+    private var isStopped: Bool {
+        !(show?.isAnyChannelLive ?? (cameraManager.isRunning || cameraManager.isStartingSession)) && !preparingStart
+    }
+
+    private func modeCommand(_ mode: OperatorMode) -> AlfieCommandAction? {
+        OperatorModePicker.command(mode, store: operatorModes,
+            cameras: { .init(cameraManager.availableCameras) }, isStopped: { isStopped })
+    }
+
+    private var stoppedCameraChoice: OperatorCameraChoice? {
+        guard isStopped, cameraManager.preferredInputSource == .liveCamera else { return nil }
+        return OperatorCameraChoice(selectedID: cameraManager.selectedCamera?.uniqueID,
+            name: cameraManager.selectedCamera?.name ?? "No camera selected",
+            options: cameraManager.availableCameras.map { .init(id: $0.uniqueID, name: $0.name) },
+            onChoose: { id in
+                guard isStopped,
+                      let camera = cameraManager.availableCameras.first(where: { $0.uniqueID == id }) else { return }
+                // Stopped selection is a preference only. This cannot restart
+                // a live camera after an asynchronous menu action.
+                cameraManager.selectedCamera = camera
+                OperatorAnnouncement.say("\(camera.name) selected.")
+            })
     }
 
     private var contentStack: some View {
