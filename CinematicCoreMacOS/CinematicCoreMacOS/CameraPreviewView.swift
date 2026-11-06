@@ -41,6 +41,9 @@ struct CameraPreviewView: View {
     /// legacy detection hit targets so one click produces one bound intent.
     var subjectPick: DirectorSubjectPick? = nil
     var onSubjectOverride: ((DirectorSubjectOverrideRequest) -> DirectorControlResult)? = nil
+    /// J3: what a click on people does, for hover, the pointer and the
+    /// on-picture hints. nil (the console and Director) keeps the old look.
+    var tracking: TrackingPresentation? = nil
 
     /// How long a press must be held before it counts as a re-target.
     private static let retargetHoldDuration: TimeInterval = 0.4
@@ -48,6 +51,7 @@ struct CameraPreviewView: View {
     private static let retargetHoldSlop: CGFloat = 12
 
     @State private var holdStartedAt: Date?
+    @State private var hoveredPersonID: UUID?
 
     var body: some View {
         GeometryReader { geometry in
@@ -74,7 +78,8 @@ struct CameraPreviewView: View {
                             trackedSubjectRect: trackedSubjectRect,
                             isRecovering: isRecovering,
                             framingTitle: framingTitle,
-                            onSelectPerson: onSelectPerson
+                            onSelectPerson: onSelectPerson,
+                            hoveredPersonID: tracking?.candidatesClickable == true ? hoveredPersonID : nil
                         )
                     }
 
@@ -92,6 +97,15 @@ struct CameraPreviewView: View {
                         .allowsHitTesting(false)
                     }
 
+                    if let tracking, subjectPick == nil {
+                        TrackingHintOverlay(
+                            tracking: tracking,
+                            pictureRect: TrackingGeometry.pictureRect(imageSize: imageSize, viewSize: geometry.size,
+                                                                      aspectFill: aspectFill))
+                            .frame(width: geometry.size.width, height: geometry.size.height)
+                            .allowsHitTesting(false)
+                    }
+
                     // Tap and hold are mutually exclusive by construction:
                     // `onTapPoint` is supplied while picking a subject, and
                     // `onHoldPoint` while one is already locked. Attaching only
@@ -100,8 +114,21 @@ struct CameraPreviewView: View {
                         DirectorSubjectPickView(pick: subjectPick, imageSize: imageSize,
                             aspectFill: aspectFill, onOverride: onSubjectOverride)
                     } else if onTapPoint != nil {
+                        let clickable = tracking?.candidatesClickable == true
                         Color.clear
                             .contentShape(Rectangle())
+                            // J3: the pointing hand appears over people only
+                            // while a click picks them; nowhere else uses it.
+                            .onContinuousHover { phase in
+                                switch phase {
+                                case .active(let location) where clickable:
+                                    hoveredPersonID = person(at: location, viewSize: geometry.size,
+                                                             imageSize: imageSize)
+                                default:
+                                    hoveredPersonID = nil
+                                }
+                            }
+                            .pointerStyle(clickable && hoveredPersonID != nil ? .link : nil)
                             .onTapGesture { location in
                                 if let point = normalizedPoint(
                                     location,
@@ -147,6 +174,12 @@ struct CameraPreviewView: View {
                 Color.black
             }
         }
+    }
+
+    private func person(at location: CGPoint, viewSize: CGSize, imageSize: CGSize) -> UUID? {
+        TrackingGeometry.person(at: location, in: detectedPersons.map {
+            (id: $0.id, rect: TrackingGeometry.displayRect(for: $0.boundingBox, imageSize: imageSize, viewSize: viewSize))
+        })
     }
 
     /// View point → normalized frame coords (bottom-left origin, Vision's

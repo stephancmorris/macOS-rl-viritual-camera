@@ -28,6 +28,8 @@ struct CropPreviewView: View {
     var onSelectPerson: ((UUID) -> Void)? = nil
     var onTapPoint: ((CGPoint) -> Void)? = nil
     var onHoldPoint: ((CGPoint) -> Void)? = nil
+    /// J3: hover, pointer and on-picture hints for the wide pane.
+    var tracking: TrackingPresentation? = nil
 
     var body: some View {
         HStack(spacing: 0) {
@@ -47,7 +49,8 @@ struct CropPreviewView: View {
                 isZoomLimited: isZoomLimited,
                 steadyBand: steadyBand,
                 framingTitle: framingTitle,
-                aspectFill: false
+                aspectFill: false,
+                tracking: tracking
             )
             .frame(maxWidth: .infinity, maxHeight: .infinity)
 
