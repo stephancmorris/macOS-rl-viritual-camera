@@ -46,7 +46,7 @@ struct LockedTrackIntegrationRegressionTests {
         let resolution = PersonDetector.resolveLockedAssignment(
             detections: [candidate], referenceBox: reference,
             lockVelocityMagnitude: 0, timeSinceLockSeen: 0.02,
-            otherTrackBoxes: [], probation: nil
+            otherTrackBoxes: [], probation: nil, observationTimestamp: 0
         )
         #expect(resolution.assignedIndex == nil)
         #expect(resolution.probation != nil)

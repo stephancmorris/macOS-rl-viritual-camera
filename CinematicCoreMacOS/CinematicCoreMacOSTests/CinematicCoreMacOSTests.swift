@@ -170,11 +170,11 @@ struct CropStabilityTests {
         let composer = ShotComposer()
         composer.config.shotPreset = .waistUp
 
-        let first = try #require(composer.compose(person: person(x: 0.40, y: 0.20, w: 0.20, h: 0.40)))
+        let first = try #require(composer.compose(person: person(x: 0.40, y: 0.20, w: 0.20, h: 0.40), observationTimestamp: 0))
         // Head bobs up by 3% of frame (a natural speaking motion).
         let bobbedRawY = first.origin.y - 0.03 * 1.15  // anchor moves with desired height
         _ = bobbedRawY
-        let second = try #require(composer.compose(person: person(x: 0.40, y: 0.17, w: 0.20, h: 0.40)))
+        let second = try #require(composer.compose(person: person(x: 0.40, y: 0.17, w: 0.20, h: 0.40), observationTimestamp: 0.04))
 
         // The emitted anchor must move PART of the raw delta (damped), not
         // none (still responsive) and not all (jumpy).

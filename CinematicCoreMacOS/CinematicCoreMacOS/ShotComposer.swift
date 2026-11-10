@@ -97,8 +97,9 @@ final class ShotComposer: ObservableObject {
     /// webcam), baseline for `smoothedVerticalAnchor`. Context shots (Wide /
     /// Full Body) center on body-mid and don't need it.
     private var lastEmittedVerticalAnchor: CGFloat?
+    private var lastVerticalAnchorObservationAt: TimeInterval?
 
-    /// Per-frame fraction of a new vertical anchor to adopt for tight shots.
+    /// Reference fraction per 20 ms of a new vertical anchor for tight shots.
     /// Tight shots anchor the crop's top edge to the subject's HEAD, and a
     /// speaking head bobs at ~1–2 Hz — right where the tracking spring
     /// transmits best, which read as "Waist Up is jumpy". A one-pole low-pass
@@ -112,8 +113,8 @@ final class ShotComposer: ObservableObject {
     private var lastAppliedFramingFingerprint: FramingFingerprint?
 
     private var subjectVelocity: CGFloat = 0.0
-    private var lastComposeTime: TimeInterval = 0
-    private var lastComposeTrackingCenter: CGPoint?
+    private var lastSpeedObservationAt: TimeInterval?
+    private var lastSpeedTrackingCenter: CGPoint?
 
     private struct FramingFingerprint: Equatable {
         let frameProfile: Config.FrameProfile
@@ -1056,10 +1057,11 @@ final class ShotComposer: ObservableObject {
         frameStateRevision &+= 1
 
         subjectVelocity = 0.0
-        lastComposeTime = 0
-        lastComposeTrackingCenter = nil
+        lastSpeedObservationAt = nil
+        lastSpeedTrackingCenter = nil
         lastEmittedCropSize = nil
         lastEmittedVerticalAnchor = nil
+        lastVerticalAnchorObservationAt = nil
 
         // Steady Following returns to following + clears the guide lines.
         enterSteadyFollowing()
@@ -1091,6 +1093,7 @@ final class ShotComposer: ObservableObject {
         lastAppliedFramingFingerprint = nil
         lastEmittedCropSize = nil
         lastEmittedVerticalAnchor = nil
+        lastVerticalAnchorObservationAt = nil
         enterSteadyFollowing()
         invalidateIdentityWork()
     }
@@ -1241,7 +1244,8 @@ final class ShotComposer: ObservableObject {
         if isTightShot {
             emittedOriginY = smoothedVerticalAnchor(
                 originY,
-                framingChanged: lastAppliedFramingFingerprint != currentFramingFingerprint
+                framingChanged: lastAppliedFramingFingerprint != currentFramingFingerprint,
+                isFresh: isFresh, observationTimestamp: observationTimestamp
             )
         }
 
@@ -1341,17 +1345,24 @@ final class ShotComposer: ObservableObject {
         )
     }
 
-    /// One-pole low-pass on the tight shot's vertical anchor. First frame (or
-    /// a framing change) adopts the raw value outright; afterwards each fresh
-    /// target moves the emitted anchor only `verticalAnchorSmoothing` of the
-    /// remaining distance.
-    private func smoothedVerticalAnchor(_ y: CGFloat, framingChanged: Bool) -> CGFloat {
+    /// Time-based one-pole low-pass, calibrated to the former 35% per 20 ms.
+    /// Re-displaying an observation cannot advance this filter.
+    private func smoothedVerticalAnchor(
+        _ y: CGFloat, framingChanged: Bool, isFresh: Bool,
+        observationTimestamp: TimeInterval
+    ) -> CGFloat {
         guard !framingChanged, let last = lastEmittedVerticalAnchor else {
             lastEmittedVerticalAnchor = y
+            lastVerticalAnchorObservationAt = observationTimestamp
             return y
         }
-        let smoothed = last + (y - last) * Self.verticalAnchorSmoothing
+        guard isFresh, observationTimestamp.isFinite,
+              let previous = lastVerticalAnchorObservationAt,
+              observationTimestamp > previous else { return last }
+        let alpha = 1 - pow(1 - Self.verticalAnchorSmoothing, CGFloat((observationTimestamp - previous) / 0.02))
+        let smoothed = last + (y - last) * alpha
         lastEmittedVerticalAnchor = smoothed
+        lastVerticalAnchorObservationAt = observationTimestamp
         return smoothed
     }
 
@@ -1403,17 +1414,23 @@ final class ShotComposer: ObservableObject {
         currentComputedCrop = clampedCrop
         frameStateRevision &+= 1
 
-        // Calculate velocity for dynamic deadzone
-        let now = CACurrentMediaTime()
-        if let lastCenter = lastComposeTrackingCenter, lastComposeTime > 0 {
-            let dt = max(now - lastComposeTime, 0.001)
-            let distance = hypot(trackingCenter.x - lastCenter.x, trackingCenter.y - lastCenter.y)
-            let instantVelocity = distance / CGFloat(dt)
-            // Smooth the velocity to prevent noise spikes
-            subjectVelocity = (subjectVelocity * 0.8) + (instantVelocity * 0.2)
+        // Only new capture evidence changes speed. A repeat holds the last
+        // estimate, rather than inserting zero then doubling the next sample.
+        if isFresh, observationTimestamp.isFinite {
+            if let previous = lastSpeedObservationAt, let lastCenter = lastSpeedTrackingCenter,
+               observationTimestamp > previous {
+                let dt = observationTimestamp - previous
+                let distance = hypot(trackingCenter.x - lastCenter.x, trackingCenter.y - lastCenter.y)
+                let instantVelocity = distance / CGFloat(dt)
+                let alpha = 1 - pow(CGFloat(0.8), CGFloat(dt / 0.02))
+                subjectVelocity += (instantVelocity - subjectVelocity) * alpha
+                lastSpeedTrackingCenter = trackingCenter
+                lastSpeedObservationAt = observationTimestamp
+            } else if lastSpeedObservationAt == nil {
+                lastSpeedTrackingCenter = trackingCenter
+                lastSpeedObservationAt = observationTimestamp
+            }
         }
-        lastComposeTrackingCenter = trackingCenter
-        lastComposeTime = now
 
         // Every feel except Steady Follow uses the classic velocity-adaptive
         // deadzone gate. `enterSteadyFollowing()` is compare-before-write, so
