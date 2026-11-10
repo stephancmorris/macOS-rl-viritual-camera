@@ -41,7 +41,8 @@ runs/
 !final_model.pth
 
 # Large Data Files (Prevent GitHub rejection)
-data/
+# Anchor root data so case-insensitive disks do not hide *.mlpackage/Data.
+/data/
 datasets/
 *.mp4
 *.mov
@@ -75,10 +76,12 @@ CinematicCoreMacOS/CinematicCoreMacOS.xcodeproj/NewRoadmap.md
 CinematicCoreMacOS/CinematicCoreMacOS.xcodeproj/ROADMAP.md
 AlfieMVP.md
 
-# --- Local Alfie build output (release artifacts in build_out/ stay tracked) ---
+# --- Local Alfie build output (only release export options stay tracked) ---
 CinematicCoreMacOS/build_*/
 CinematicCoreMacOS/build_*.log
 !CinematicCoreMacOS/build_out/
+CinematicCoreMacOS/build_out/*
+!CinematicCoreMacOS/build_out/ExportOptions.plist
 
 # --- Local build caches, logs and binaries (review hygiene, Oct 2026) ---
 # Xcode derived data from agent runs, and a compiled test tool; build it
