@@ -39,6 +39,45 @@ nonisolated enum XPCPeerRequirement {
     }
 }
 
+/// A bounded ping attempt. Scheduling is injectable; callback identity makes
+/// cancelled/superseded deadlines inert even if their scheduler still fires.
+@MainActor
+final class XPCPingVerification {
+    typealias Schedule = (TimeInterval, @escaping @MainActor () -> Void) -> Void
+    private let schedule: Schedule
+    private var pending: (generation: UInt64, attempt: UUID)?
+
+    init(schedule: @escaping Schedule = { delay, fire in
+        Task { @MainActor in
+            do { try await Task.sleep(for: .seconds(delay)) }
+            catch { return }
+            fire()
+        }
+    }) {
+        self.schedule = schedule
+    }
+
+    func begin(generation: UInt64, onTimeout: @escaping @MainActor (UInt64) -> Void) -> UUID {
+        let attempt = UUID()
+        pending = (generation, attempt)
+        schedule(3) { [weak self] in
+            guard let self, self.pending?.generation == generation,
+                  self.pending?.attempt == attempt else { return }
+            self.pending = nil
+            onTimeout(generation)
+        }
+        return attempt
+    }
+
+    func acceptReply(generation: UInt64, attempt: UUID) -> Bool {
+        guard pending?.generation == generation, pending?.attempt == attempt else { return false }
+        pending = nil
+        return true
+    }
+
+    func cancel() { pending = nil }
+}
+
 /// Manages XPC connection to the Camera Extension
 /// Handles connection lifecycle, retries, and error recovery
 @MainActor
@@ -54,6 +93,7 @@ final class XPCConnectionManager {
     // MARK: - Properties
 
     private var connection: NSXPCConnection?
+    private let verification: XPCPingVerification
     private(set) var connectionGeneration: UInt64 = 0
     private var reconnectTask: Task<Void, Never>?
     private var shouldMaintainConnection = false
@@ -87,6 +127,14 @@ final class XPCConnectionManager {
         return nil
     }
     
+    init(verificationSchedule: XPCPingVerification.Schedule? = nil) {
+        if let verificationSchedule {
+            verification = XPCPingVerification(schedule: verificationSchedule)
+        } else {
+            verification = XPCPingVerification()
+        }
+    }
+
     // MARK: - Connection Management
     
     /// Establish XPC connection to the system extension
@@ -163,6 +211,7 @@ final class XPCConnectionManager {
     
     /// Disconnect from the extension
     func disconnect() {
+        verification.cancel()
         logger.info("🔌 Disconnecting XPC connection...")
         shouldMaintainConnection = false
         reconnectTask?.cancel()
@@ -179,6 +228,7 @@ final class XPCConnectionManager {
 
     /// Force an immediate reconnect attempt without waiting for backoff.
     func forceReconnect() {
+        verification.cancel()
         logger.notice(
             "XPC forceReconnect requested; service=\(CinematicCoreXPC.machServiceName, privacy: .public); state=\(String(describing: self.connectionState), privacy: .public); lastError=\(self.lastErrorDescription ?? "none", privacy: .public)"
         )
@@ -232,6 +282,7 @@ final class XPCConnectionManager {
         return connection.remoteObjectProxyWithErrorHandler { [weak self] error in
             Task { @MainActor in
                 guard let self, self.connectionGeneration == generation else { return }
+                self.verification.cancel()
                 self.logger.error("XPC proxy error: \(error.localizedDescription)")
                 AlfieDiagnosticsLog.append("XPC", "proxy error: \(error.localizedDescription)")
                 self.lastErrorDescription = error.localizedDescription
@@ -263,10 +314,23 @@ final class XPCConnectionManager {
         }
         
         let generation = connectionGeneration
+        let attempt = verification.begin(generation: generation) { [weak self] expiredGeneration in
+            guard let self, self.connectionGeneration == expiredGeneration, self.connection != nil else { return }
+            let message = "The virtual camera connection check timed out."
+            self.logger.error("XPC ping verification timed out")
+            AlfieDiagnosticsLog.append("XPC", "ping verification timed out")
+            self.connectionGeneration &+= 1
+            self.connection?.invalidate()
+            self.connection = nil
+            self.lastErrorDescription = message
+            self.connectionState = .error(message)
+            self.scheduleReconnect(reason: "verification timeout")
+        }
         proxy.ping { [weak self] in
             Task { @MainActor in
                 guard let self = self else { return }
-                guard self.connectionGeneration == generation, self.connection != nil else { return }
+                guard self.connectionGeneration == generation, self.connection != nil,
+                      self.verification.acceptReply(generation: generation, attempt: attempt) else { return }
                 self.logger.info("✓ XPC connection verified")
                 AlfieDiagnosticsLog.append("XPC", "connection verified")
                 self.reconnectAttemptCount = 0
@@ -282,6 +346,7 @@ final class XPCConnectionManager {
     // MARK: - Error Handling
     
     private func handleInterruption() {
+        verification.cancel()
         logger.warning("⚠️ XPC connection interrupted")
         AlfieDiagnosticsLog.append("XPC", "connection interrupted")
         connectionGeneration &+= 1
@@ -294,6 +359,7 @@ final class XPCConnectionManager {
     }
     
     private func handleInvalidation() {
+        verification.cancel()
         logger.info("XPC connection invalidated")
         AlfieDiagnosticsLog.append("XPC", "connection invalidated")
         connection = nil
