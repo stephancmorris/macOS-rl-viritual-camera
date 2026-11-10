@@ -170,6 +170,7 @@ final class LiveConsoleModel: ObservableObject, ConsoleActions {
     }
 
     func refresh() {
+        show.refreshWorldModel()
         updateRates()
         measurePairIfUnmeasured()
         logConsoleStatsIfDue()

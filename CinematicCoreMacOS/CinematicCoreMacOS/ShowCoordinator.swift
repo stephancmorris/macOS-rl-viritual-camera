@@ -44,6 +44,10 @@ final class ShowCoordinator: ObservableObject {
     /// Fair, bounded render / perception admission across channels (SCHEDULER).
     let workScheduler = FrameWorkScheduler()
 
+    /// What every camera currently sees (C-01). Plain storage, sampled by
+    /// `refreshWorldModel()`; deliberately not published.
+    var worldModel = WorldModel()
+
     var channelA: CameraManager { channels[.a]! }
 
     /// Single Cam, Multi Cam or Webcam (MODES-SPEC). Every channel's composer
