@@ -126,6 +126,8 @@ final class PersonDetector: ObservableObject {
     struct DetectionRequestPlan: Sendable {
         var mode: DetectionMode
         var roi: CGRect?
+        /// Last locked-subject box, snapshotted before leaving MainActor.
+        var referenceBox: CGRect? = nil
 
         static let off = DetectionRequestPlan(mode: .off, roi: nil)
 
@@ -577,7 +579,13 @@ final class PersonDetector: ObservableObject {
 
                         let rectResults = (self.cachedRectRequest.results ?? [])
                             .filter { $0.confidence >= config.confidenceThreshold }
-                        let limited = Array(rectResults.prefix(config.maxPersons))
+                        let candidates = rectResults.enumerated().map {
+                            RectangleCandidate(index: $0.offset, box: $0.element.boundingBox,
+                                               confidence: $0.element.confidence)
+                        }
+                        let limited = Self.preferredRectangleIndices(
+                            candidates, referenceBox: plan.referenceBox, limit: config.maxPersons
+                        ).map { rectResults[$0] }
 
                         let poseResults = self.cachedPoseRequest.results ?? []
                         // Only read face results when the face request actually ran
@@ -596,6 +604,36 @@ final class PersonDetector: ObservableObject {
                 }
             }
         }
+    }
+
+    nonisolated struct RectangleCandidate {
+        let index: Int
+        let box: CGRect
+        let confidence: Float
+    }
+
+    /// Rank before truncating; a recovery scan must not lose the lock merely
+    /// because Vision reports its box after a crowd of other people.
+    nonisolated static func preferredRectangleIndices(
+        _ candidates: [RectangleCandidate], referenceBox: CGRect?, limit: Int
+    ) -> [Int] {
+        func distanceSquared(_ box: CGRect, from reference: CGRect) -> CGFloat {
+            let dx = box.midX - reference.midX
+            let dy = box.midY - reference.midY
+            return dx * dx + dy * dy
+        }
+        return candidates.sorted { a, b in
+            if let referenceBox {
+                let da = distanceSquared(a.box, from: referenceBox)
+                let db = distanceSquared(b.box, from: referenceBox)
+                if da != db { return da < db }
+            }
+            let areaA = a.box.width * a.box.height
+            let areaB = b.box.width * b.box.height
+            if areaA != areaB { return areaA > areaB }
+            if a.confidence != b.confidence { return a.confidence > b.confidence }
+            return a.index < b.index
+        }.prefix(max(0, limit)).map(\.index)
     }
 
     /// Extract head and waist keypoints from a pose observation
