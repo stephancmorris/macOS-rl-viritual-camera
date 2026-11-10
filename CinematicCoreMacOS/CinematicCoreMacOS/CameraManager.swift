@@ -267,7 +267,7 @@ final class CameraManager: NSObject, ObservableObject {
 
     /// Padding multiplier applied to the locked subject's last box to form the
     /// tracking ROI, so a moving subject stays inside the scanned region.
-    private static let lockedROIPadding: CGFloat = 1.8
+    private nonisolated static let lockedROIPadding: CGFloat = 1.8
 
     /// Last detected bounding box of the acquiring/locked subject. Updated
     /// every frame from detections and used to seed the next frame's ROI. This
@@ -1842,23 +1842,29 @@ final class CameraManager: NSObject, ObservableObject {
         ).intersection(CGRect(x: 0, y: 0, width: 1, height: 1))
     }
 
-    /// Padded ROI around the locked subject's last known box. Falls back to a
-    /// generous centered region if no tracked bounds are available yet.
+    /// Lead the locked subject using a snapshot of the track's measured motion.
     private func lockedROI() -> CGRect {
+        let box = lastSubjectROIBox ?? shotComposer.currentTrackedBounds
+        let motion = shotComposer.manualLockedTargetID.flatMap { personDetector.trackMotion(for: $0) }
+        return Self.lockedSearchRegion(box: box, velocity: motion?.velocity ?? .zero,
+            elapsed: motion.map { CACurrentMediaTime() - $0.lastSeen } ?? 0)
+    }
+
+    nonisolated static func lockedSearchRegion(box: CGRect?, velocity: CGVector, elapsed: TimeInterval) -> CGRect {
         let unit = CGRect(x: 0, y: 0, width: 1, height: 1)
-        // Prefer the subject's last raw detected box (available during
-        // acquiring too); fall back to the composer's tracked bounds.
-        guard let box = lastSubjectROIBox ?? shotComposer.currentTrackedBounds,
-              !box.isEmpty else {
-            return unit
+        guard let box, !box.isEmpty, !box.isInfinite,
+              box.origin.x.isFinite, box.origin.y.isFinite,
+              box.width.isFinite, box.height.isFinite else { return unit }
+        var lead = CGVector.zero
+        let speed = hypot(velocity.dx, velocity.dy)
+        if speed.isFinite, speed > 0, elapsed.isFinite, elapsed > 0 {
+            let distance = min(speed * CGFloat(elapsed), box.width * 0.25)
+            lead = CGVector(dx: velocity.dx / speed * distance, dy: velocity.dy / speed * distance)
         }
-        let p = Self.lockedROIPadding
-        let w = min(box.width * p, 1)
-        let hgt = min(box.height * p, 1)
-        return CGRect(
-            x: box.midX - w / 2, y: box.midY - hgt / 2,
-            width: w, height: hgt
-        ).intersection(unit)
+        let w = min(box.width * lockedROIPadding, 1)
+        let h = min(box.height * lockedROIPadding, 1)
+        return CGRect(x: box.midX + lead.dx - w / 2, y: box.midY + lead.dy - h / 2,
+                      width: w, height: h).intersection(unit)
     }
 
     /// Pick the detected person whose box contains the tapped point; if none

@@ -385,6 +385,17 @@ final class PersonDetector: ObservableObject {
         displayMirrorTimer?.invalidate()
     }
     
+    struct TrackMotion: Sendable {
+        let velocity: CGVector
+        let lastSeen: TimeInterval
+    }
+
+    /// A value snapshot; ROI prediction cannot mutate the tracker's state.
+    func trackMotion(for id: UUID) -> TrackMotion? {
+        guard let track = trackedPersons[id] else { return nil }
+        return TrackMotion(velocity: track.lastVelocity, lastSeen: track.lastSeen)
+    }
+
     // MARK: - Public Methods
     
     /// Process a video frame and detect persons
