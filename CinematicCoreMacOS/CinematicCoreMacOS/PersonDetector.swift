@@ -312,12 +312,12 @@ final class PersonDetector: ObservableObject {
     /// A candidate overlapping the lock's last box by at least this IoU is the
     /// same physical object and is accepted instantly (no probation).
     nonisolated static let lockedSameObjectIoU: CGFloat = 0.30
-    /// Consecutive frames a discontinuous candidate must persist before the
-    /// lock re-binds (~60–100 ms at 30–50 fps).
-    nonisolated static let lockedProbationFrames = 3
-    /// Longer probation when the candidate is better explained by another live
-    /// track (an occluder standing where the subject was).
-    nonisolated static let lockedProbationFramesContested = 8
+    /// Three sightings at 25 detections/s span two 40 ms intervals.
+    nonisolated static let lockedProbationDuration: TimeInterval = 0.08
+    /// Eight sightings at the same cadence span seven intervals.
+    nonisolated static let lockedProbationDurationContested: TimeInterval = 0.28
+    /// Match Steady Follow's fresh-observation continuity window.
+    nonisolated static let lockedProbationObservationGap: TimeInterval = 0.150
     /// The best candidate must beat the runner-up by this factor for instant
     /// acceptance; otherwise the frame is ambiguous and the lock coasts.
     nonisolated static let lockedScoreMargin: CGFloat = 1.15
@@ -897,7 +897,8 @@ final class PersonDetector: ObservableObject {
                     lockVelocityMagnitude: velocityMagnitude,
                     timeSinceLockSeen: elapsed,
                     otherTrackBoxes: otherTrackBoxes,
-                    probation: lockProbation
+                    probation: lockProbation,
+                    observationTimestamp: timestamp
                 )
                 lockProbation = resolution.probation
                 if let index = resolution.assignedIndex {
@@ -990,7 +991,7 @@ final class PersonDetector: ObservableObject {
             if diag.chosen != nil {
                 state = "BOUND"
             } else if let probation = lockProbation {
-                state = "COAST probation=\(probation.framesAgreed)"
+                state = "COAST probation_seconds=\(probation.lastObservedAt - probation.startedAt)"
             } else {
                 state = "COAST"
             }
@@ -1010,7 +1011,8 @@ final class PersonDetector: ObservableObject {
     /// Probation state for a discontinuous locked-track candidate.
     nonisolated struct LockProbation: Equatable {
         var candidateBox: CGRect
-        var framesAgreed: Int
+        var startedAt: TimeInterval
+        var lastObservedAt: TimeInterval
     }
 
     /// Outcome of one frame of locked-track matching.
@@ -1037,8 +1039,8 @@ final class PersonDetector: ObservableObject {
     ///    `lockedScoreMargin`. This covers continuous tracking — the common
     ///    case — with zero added latency.
     ///  - **Probation otherwise**: a discontinuous candidate must persist for
-    ///    `lockedProbationFrames` consecutive frames
-    ///    (`lockedProbationFramesContested` when contested) before the lock
+    ///    `lockedProbationDuration` of continuous observations
+    ///    (`lockedProbationDurationContested` when contested) before the lock
     ///    re-binds. Until then the lock coasts: no assignment, and the
     ///    candidate stays available to Pass B so its own track survives —
     ///    which is what keeps the occluder guard's evidence alive.
@@ -1048,7 +1050,8 @@ final class PersonDetector: ObservableObject {
         lockVelocityMagnitude: CGFloat,
         timeSinceLockSeen: TimeInterval,
         otherTrackBoxes: [CGRect],
-        probation: LockProbation?
+        probation: LockProbation?,
+        observationTimestamp: TimeInterval
     ) -> LockedResolution {
         let allowedDistance = min(
             lockedMaxJumpRadius,
@@ -1077,6 +1080,12 @@ final class PersonDetector: ObservableObject {
             return LockedResolution(assignedIndex: nil, probation: nil)
         }
 
+        guard observationTimestamp.isFinite else {
+            return LockedResolution(assignedIndex: nil, probation: nil)
+        }
+        if let probation, observationTimestamp <= probation.lastObservedAt {
+            return LockedResolution(assignedIndex: nil, probation: probation)
+        }
         let candidate = detections[best.index]
         let iouRef = iou(candidate, referenceBox)
         let iouOther = otherTrackBoxes.reduce(CGFloat(0)) { max($0, iou(candidate, $1)) }
@@ -1089,22 +1098,22 @@ final class PersonDetector: ObservableObject {
         }
 
         let required = iouOther > iouRef
-            ? lockedProbationFramesContested
-            : lockedProbationFrames
+            ? lockedProbationDurationContested
+            : lockedProbationDuration
         if let probation, iou(candidate, probation.candidateBox) > 0.5 {
-            let framesAgreed = probation.framesAgreed + 1
-            if framesAgreed >= required {
-                return LockedResolution(assignedIndex: best.index, probation: nil)
+            let dt = observationTimestamp - probation.lastObservedAt
+            if dt <= lockedProbationObservationGap {
+                if observationTimestamp - probation.startedAt + 1e-9 >= required {
+                    return LockedResolution(assignedIndex: best.index, probation: nil)
+                }
+                return LockedResolution(assignedIndex: nil, probation: LockProbation(
+                    candidateBox: candidate, startedAt: probation.startedAt,
+                    lastObservedAt: observationTimestamp))
             }
-            return LockedResolution(
-                assignedIndex: nil,
-                probation: LockProbation(candidateBox: candidate, framesAgreed: framesAgreed)
-            )
         }
-        return LockedResolution(
-            assignedIndex: nil,
-            probation: LockProbation(candidateBox: candidate, framesAgreed: 1)
-        )
+        return LockedResolution(assignedIndex: nil, probation: LockProbation(
+            candidateBox: candidate, startedAt: observationTimestamp,
+            lastObservedAt: observationTimestamp))
     }
 
     /// Score a candidate detection against the locked subject's *last known*

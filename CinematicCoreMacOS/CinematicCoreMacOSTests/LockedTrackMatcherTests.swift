@@ -63,7 +63,7 @@ struct LockedTrackMatcherTests {
                 lockVelocityMagnitude: 0,
                 timeSinceLockSeen: 0.02,
                 otherTrackBoxes: [],
-                probation: probation
+                probation: probation, observationTimestamp: 0
             )
             #expect(resolution.assignedIndex == 0, "frame \(frame) should instant-accept")
             #expect(resolution.probation == nil, "frame \(frame) should not enter probation")
@@ -86,7 +86,7 @@ struct LockedTrackMatcherTests {
             lockVelocityMagnitude: 0,
             timeSinceLockSeen: 0.1,
             otherTrackBoxes: [],
-            probation: probation
+            probation: probation, observationTimestamp: 0
         )
         #expect(resolution.assignedIndex == 0)
         #expect(resolution.probation == nil)
@@ -108,7 +108,7 @@ struct LockedTrackMatcherTests {
                 lockVelocityMagnitude: 0,
                 timeSinceLockSeen: 0.033,
                 otherTrackBoxes: [],
-                probation: probation
+                probation: probation, observationTimestamp: 0
             )
             #expect(resolution.assignedIndex == nil, "frame \(frame) must coast, never jump")
             #expect(resolution.probation == nil, "gate should reject before probation starts")
@@ -126,40 +126,40 @@ struct LockedTrackMatcherTests {
 
         var probation: PersonDetector.LockProbation? = nil
 
-        // Frame 1: coast, probation starts at framesAgreed == 1.
+        // First sighting at 0 ms starts probation.
         var resolution = PersonDetector.resolveLockedAssignment(
             detections: [candidate],
             referenceBox: Self.narrowReferenceBox,
             lockVelocityMagnitude: 0,
             timeSinceLockSeen: 0.033,
             otherTrackBoxes: [],
-            probation: probation
+            probation: probation, observationTimestamp: 0
         )
         #expect(resolution.assignedIndex == nil)
-        #expect(resolution.probation?.framesAgreed == 1)
+        #expect(resolution.probation?.startedAt == 0)
         probation = resolution.probation
 
-        // Frame 2: coast, framesAgreed == 2.
+        // Second sighting at 40 ms still coasts.
         resolution = PersonDetector.resolveLockedAssignment(
             detections: [candidate],
             referenceBox: Self.narrowReferenceBox,
             lockVelocityMagnitude: 0,
             timeSinceLockSeen: 0.033,
             otherTrackBoxes: [],
-            probation: probation
+            probation: probation, observationTimestamp: 0.04
         )
         #expect(resolution.assignedIndex == nil)
-        #expect(resolution.probation?.framesAgreed == 2)
+        #expect(resolution.probation?.lastObservedAt == 0.04)
         probation = resolution.probation
 
-        // Frame 3: reaches lockedProbationFrames (3) -> accepts.
+        // Third sighting at 80 ms accepts, preserving the 25 Hz baseline.
         resolution = PersonDetector.resolveLockedAssignment(
             detections: [candidate],
             referenceBox: Self.narrowReferenceBox,
             lockVelocityMagnitude: 0,
             timeSinceLockSeen: 0.033,
             otherTrackBoxes: [],
-            probation: probation
+            probation: probation, observationTimestamp: 0.08
         )
         #expect(resolution.assignedIndex == 0)
         #expect(resolution.probation == nil)
@@ -187,21 +187,21 @@ struct LockedTrackMatcherTests {
                 lockVelocityMagnitude: 0,
                 timeSinceLockSeen: 0.033,
                 otherTrackBoxes: [occluder],
-                probation: probation
+                probation: probation, observationTimestamp: Double(frame - 1) * 0.04
             )
             #expect(resolution.assignedIndex == nil, "frame \(frame) should coast (contested)")
-            #expect(resolution.probation?.framesAgreed == frame, "frame \(frame) framesAgreed mismatch")
+            #expect(resolution.probation?.lastObservedAt == Double(frame - 1) * 0.04)
             probation = resolution.probation
         }
 
-        // Frame 8 reaches lockedProbationFramesContested (8) -> accepts.
+        // Eighth sighting at 280 ms accepts, preserving the 25 Hz baseline.
         let finalResolution = PersonDetector.resolveLockedAssignment(
             detections: [candidate],
             referenceBox: Self.narrowReferenceBox,
             lockVelocityMagnitude: 0,
             timeSinceLockSeen: 0.033,
             otherTrackBoxes: [occluder],
-            probation: probation
+            probation: probation, observationTimestamp: 0.28
         )
         #expect(finalResolution.assignedIndex == 0)
         #expect(finalResolution.probation == nil)
@@ -239,7 +239,7 @@ struct LockedTrackMatcherTests {
             // ever overlaps the other (both stay well past the 0.055
             // half-width sum), so the winning candidate's IoU against
             // whichever candidate won the previous frame is 0 whenever the
-            // side flips — which resets probation.framesAgreed to 1 instead
+            // side flips — which resets the probation start time instead
             // of letting it accumulate.
             let leftDistance: CGFloat = frame % 2 == 0 ? -(0.08 - epsilon) : -(0.08 + epsilon)
             let left = Self.nonOverlappingCandidate(distanceFromReferenceCenter: leftDistance)
@@ -250,10 +250,10 @@ struct LockedTrackMatcherTests {
                 lockVelocityMagnitude: 0,
                 timeSinceLockSeen: 0.033,
                 otherTrackBoxes: [],
-                probation: probation
+                probation: probation, observationTimestamp: Double(frame) * 0.04
             )
             #expect(resolution.assignedIndex == nil, "frame \(frame): must not bind while both candidates are contesting")
-            #expect(resolution.probation?.framesAgreed == 1, "frame \(frame): the crossing pair should keep resetting probation, never accumulate")
+            #expect(resolution.probation?.startedAt == Double(frame) * 0.04, "frame \(frame): the crossing pair should keep resetting probation, never accumulate")
             probation = resolution.probation
         }
     }
@@ -270,11 +270,11 @@ struct LockedTrackMatcherTests {
             lockVelocityMagnitude: 0,
             timeSinceLockSeen: 0.033,
             otherTrackBoxes: [],
-            probation: nil
+            probation: nil, observationTimestamp: 0
         )
         #expect(firstResolution.assignedIndex == nil)
         let establishedProbation = firstResolution.probation
-        #expect(establishedProbation?.framesAgreed == 1)
+        #expect(establishedProbation?.startedAt == 0)
 
         // Now the subject exits frame entirely: no detections at all (or all
         // far outside the radius). A probation run is consecutive evidence,
@@ -285,7 +285,7 @@ struct LockedTrackMatcherTests {
             lockVelocityMagnitude: 0,
             timeSinceLockSeen: 0.066,
             otherTrackBoxes: [],
-            probation: establishedProbation
+            probation: establishedProbation, observationTimestamp: 0
         )
         #expect(emptyResolution.assignedIndex == nil)
         #expect(emptyResolution.probation == nil)
@@ -299,7 +299,7 @@ struct LockedTrackMatcherTests {
             lockVelocityMagnitude: 0,
             timeSinceLockSeen: 0.1,
             otherTrackBoxes: [],
-            probation: establishedProbation
+            probation: establishedProbation, observationTimestamp: 0
         )
         #expect(farResolution.assignedIndex == nil)
         #expect(farResolution.probation == nil)
@@ -317,10 +317,10 @@ struct LockedTrackMatcherTests {
             lockVelocityMagnitude: 1,
             timeSinceLockSeen: 0.2,
             otherTrackBoxes: [],
-            probation: nil
+            probation: nil, observationTimestamp: 0
         )
         #expect(moving.assignedIndex == nil)
-        #expect(moving.probation?.framesAgreed == 1)
+        #expect(moving.probation?.startedAt == 0)
 
         let stationary = PersonDetector.resolveLockedAssignment(
             detections: [candidate],
@@ -328,7 +328,7 @@ struct LockedTrackMatcherTests {
             lockVelocityMagnitude: 0,
             timeSinceLockSeen: 0,
             otherTrackBoxes: [],
-            probation: nil
+            probation: nil, observationTimestamp: 0
         )
         #expect(stationary.assignedIndex == nil)
         #expect(stationary.probation == nil)
@@ -364,7 +364,7 @@ struct LockedTrackMatcherTests {
                     lockVelocityMagnitude: 0,
                     timeSinceLockSeen: 0.033,
                     otherTrackBoxes: otherTrackBoxes,
-                    probation: probation
+                    probation: probation, observationTimestamp: 0
                 )
                 // Feed the loop's own output back in so probation bookkeeping
                 // (Equatable comparisons, struct copies) is exercised too,
