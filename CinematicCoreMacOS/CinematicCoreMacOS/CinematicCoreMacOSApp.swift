@@ -40,7 +40,9 @@ struct CinematicCoreMacOSApp: App {
     }
 
     var body: some Scene {
-        WindowGroup("Alfie") {
+        // One main window. A second window of this scene would share `show`
+        // and draw another pill, overlay set and preview on the same live show.
+        Window("Alfie", id: "alfie") {
             if Self.isUnitTestHost {
                 EmptyView()
             } else {
