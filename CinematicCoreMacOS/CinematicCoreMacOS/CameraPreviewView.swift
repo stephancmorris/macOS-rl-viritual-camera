@@ -16,6 +16,10 @@ struct CameraPreviewView: View {
     /// IOSurface layer (see `PixelBufferPreviewView`). Overlay/tap math reads
     /// the frame's pixel dimensions straight off this buffer.
     let pixelBuffer: CVPixelBuffer?
+    /// When set, the picture layer samples this on the display's refresh
+    /// instead of waiting for SwiftUI to pass a new `pixelBuffer` (D-01).
+    /// `pixelBuffer` still supplies the picture's size for layout.
+    var pixelBufferSource: (() -> CVPixelBuffer?)? = nil
     let detectedPersons: [PersonDetector.DetectedPerson]
     let showDetections: Bool
     let activeTargetID: UUID?
@@ -64,7 +68,13 @@ struct CameraPreviewView: View {
                 )
                 ZStack {
                     // Zero-copy IOSurface display (already black-backed).
-                    PixelBufferPreviewView(pixelBuffer: pixelBuffer, aspectFill: aspectFill)
+                    Group {
+                        if let pixelBufferSource {
+                            SampledPixelBufferView(source: pixelBufferSource, aspectFill: aspectFill)
+                        } else {
+                            PixelBufferPreviewView(pixelBuffer: pixelBuffer, aspectFill: aspectFill)
+                        }
+                    }
                         .frame(width: geometry.size.width, height: geometry.size.height)
                         .clipped()
 

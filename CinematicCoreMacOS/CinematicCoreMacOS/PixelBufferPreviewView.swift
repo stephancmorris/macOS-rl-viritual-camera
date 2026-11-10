@@ -93,3 +93,67 @@ class PixelBufferLayerView: NSView {
         installedBuffer = pixelBuffer
     }
 }
+
+/// A preview that samples its buffer on the display's refresh (D-01).
+///
+/// `CameraManager`'s two picture buffers are assigned on every frame. They
+/// used to be `@Published`, which re-evaluated every observing view up to 100
+/// times a second on the thread that runs the frame path. They are plain
+/// storage now, and this view pulls the newest one itself: no SwiftUI update
+/// is involved in showing a new frame.
+struct SampledPixelBufferView: NSViewRepresentable {
+    /// Returns the newest buffer to show. Called on the main thread.
+    let source: () -> CVPixelBuffer?
+    var aspectFill: Bool = false
+
+    func makeNSView(context: Context) -> SampledPixelBufferLayerView {
+        let view = SampledPixelBufferLayerView()
+        view.aspectFill = aspectFill
+        view.source = source
+        return view
+    }
+
+    func updateNSView(_ nsView: SampledPixelBufferLayerView, context: Context) {
+        nsView.aspectFill = aspectFill
+        nsView.source = source
+        nsView.sample()
+    }
+
+    static func dismantleNSView(_ nsView: SampledPixelBufferLayerView, coordinator: ()) {
+        nsView.source = nil
+        nsView.stopSampling()
+    }
+}
+
+final class SampledPixelBufferLayerView: PixelBufferLayerView {
+    var source: (() -> CVPixelBuffer?)?
+    /// The buffer on screen. It stays retained here (and in the base class)
+    /// until `sample()` replaces it, so its pool cannot re-vend the surface
+    /// while the layer still shows it.
+    private(set) var displayed: CVPixelBuffer?
+    private var link: CADisplayLink?
+
+    override func viewDidMoveToWindow() {
+        super.viewDidMoveToWindow()
+        stopSampling()
+        guard window != nil else { return }
+        let link = displayLink(target: self, selector: #selector(displayLinkFired(_:)))
+        link.add(to: .main, forMode: .common)
+        self.link = link
+    }
+
+    func stopSampling() {
+        link?.invalidate()
+        link = nil
+    }
+
+    @objc private func displayLinkFired(_ link: CADisplayLink) { sample() }
+
+    /// Show the source's newest buffer. The same buffer needs no layer work.
+    func sample() {
+        let next = source?()
+        if next === displayed { return }
+        displayed = next
+        display(next)
+    }
+}
