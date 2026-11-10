@@ -10,8 +10,26 @@ nonisolated enum HostFrameLiveness {
         guard let lastArrival, lastArrival.isFinite, now.isFinite, now >= lastArrival else { return true }
         return now - lastArrival >= timeout
     }
+}
 
-    static func isCurrentConnection(_ connection: UUID, active: UUID?) -> Bool {
-        connection == active
+/// Reserving an accepted connection is not proof that its messages satisfy
+/// XPC's signing requirement. Only an authenticated service request activates
+/// its epoch; an old request cannot displace a newer authenticated host.
+nonisolated struct HostConnectionEpochs {
+    private var reserved: UInt64 = 0
+    private(set) var active: UInt64?
+
+    mutating func reserve() -> UInt64 {
+        reserved &+= 1
+        return reserved
     }
+
+    mutating func activate(_ connection: UInt64) -> Bool {
+        guard connection > 0, connection <= reserved,
+              active.map({ connection >= $0 }) ?? true else { return false }
+        active = connection
+        return true
+    }
+
+    func isCurrent(_ connection: UInt64) -> Bool { connection == active }
 }

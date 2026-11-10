@@ -209,7 +209,7 @@ class CinematicCoreExtensionDeviceSource: NSObject, CMIOExtensionDeviceSource {
 	// Track if we're receiving frames from host
 	private var isReceivingFrames = false
 	private var lastFrameArrival: TimeInterval?
-	private var activeHostConnection: UUID?
+	private var hostConnections = HostConnectionEpochs()
 	private var hasLoggedFirstCaptureStart = false
 	private var hasLoggedFirstEnqueuedFrame = false
 	private var hasLoggedFirstDequeuedFrame = false
@@ -295,9 +295,10 @@ class CinematicCoreExtensionDeviceSource: NSObject, CMIOExtensionDeviceSource {
 	/// drained to latest either way, but a mismatched clock would drop surplus
 	/// program frames and add judder downstream.
 	@discardableResult
-	func updatePlayoutFrameRate(_ frameRate: Double) -> Bool {
+	func updatePlayoutFrameRate(_ frameRate: Double, connection: UInt64) -> Bool {
 		stateLock.lock(); defer { stateLock.unlock() }
-		guard let standard = ShowStandard.matching(frameRate: frameRate) else { return false }
+		guard activateHostConnection(connection),
+			let standard = ShowStandard.matching(frameRate: frameRate) else { return false }
 		guard _playoutFrameRate != standard.frameRate || !hasLoggedPlayoutRate else { return true }
 		// Build the notification first: if it cannot be built, the rate is
 		// left unchanged and the host is told the update failed.
@@ -315,9 +316,8 @@ class CinematicCoreExtensionDeviceSource: NSObject, CMIOExtensionDeviceSource {
 	}
 	
 	/// Receive video frame from host app via XPC
-	func enqueueFrame(surfaceID: UInt32, timestamp: Double, width: Int32, height: Int32, connection: UUID) {
+	func enqueueFrame(surfaceID: UInt32, timestamp: Double, width: Int32, height: Int32, connection: UInt64) {
 		stateLock.lock(); defer { stateLock.unlock() }
-		guard HostFrameLiveness.isCurrentConnection(connection, active: activeHostConnection) else { return }
 		guard ExtensionSecurityPolicy.validateFrameMetadata(
 			surfaceID: surfaceID,
 			timestamp: timestamp,
@@ -335,6 +335,7 @@ class CinematicCoreExtensionDeviceSource: NSObject, CMIOExtensionDeviceSource {
 			return
 		}
 
+		guard activateHostConnection(connection) else { return }
 		// Synchronous enqueue: the lock-guarded FrameQueue makes this O(1) on
 		// the XPC delivery queue with no Task hop.
 		frameQueue.enqueue(surfaceID: surfaceID, timestamp: timestamp, width: width, height: height)
@@ -346,18 +347,29 @@ class CinematicCoreExtensionDeviceSource: NSObject, CMIOExtensionDeviceSource {
 		}
 	}
 	
-	/// Start a new private connection epoch before accepting its messages.
-	func beginHostConnection() -> UUID {
+	/// Reservation has no playout effect: signing is enforced by XPC when
+	/// delivering a service request, not by the bundle-identifier precheck.
+	func reserveHostConnection() -> UInt64 {
 		stateLock.lock(); defer { stateLock.unlock() }
-		let connection = UUID()
-		activeHostConnection = connection
-		stopReceivingFrames()
-		return connection
+		return hostConnections.reserve()
 	}
 
-	func hostConnectionEnded(_ connection: UUID) {
+	/// Called only by an authenticated XPC service request. Requires stateLock.
+	private func activateHostConnection(_ connection: UInt64) -> Bool {
+		let wasCurrent = hostConnections.isCurrent(connection)
+		guard hostConnections.activate(connection) else { return false }
+		if !wasCurrent { stopReceivingFrames() }
+		return true
+	}
+
+	func verifyHostConnection(_ connection: UInt64) {
 		stateLock.lock(); defer { stateLock.unlock() }
-		guard HostFrameLiveness.isCurrentConnection(connection, active: activeHostConnection) else { return }
+		_ = activateHostConnection(connection)
+	}
+
+	func hostConnectionEnded(_ connection: UInt64) {
+		stateLock.lock(); defer { stateLock.unlock() }
+		guard hostConnections.isCurrent(connection) else { return }
 		stopReceivingFrames()
 	}
 
@@ -369,9 +381,9 @@ class CinematicCoreExtensionDeviceSource: NSObject, CMIOExtensionDeviceSource {
 	}
 
 	/// Update capture status from host app
-	func updateCaptureStatus(isRunning: Bool, connection: UUID) {
+	func updateCaptureStatus(isRunning: Bool, connection: UInt64) {
 		stateLock.lock(); defer { stateLock.unlock() }
-		guard HostFrameLiveness.isCurrentConnection(connection, active: activeHostConnection) else { return }
+		guard activateHostConnection(connection) else { return }
 		if !isRunning {
 			stopReceivingFrames()
 			os_log(.info, "Host app stopped capturing")
@@ -853,7 +865,7 @@ extension CinematicCoreExtensionProviderSource: NSXPCListenerDelegate {
 
 		// Configure connection
 		newConnection.exportedInterface = NSXPCInterface(with: CinematicCoreXPCProtocol.self)
-		let connection = deviceSource.beginHostConnection()
+		let connection = deviceSource.reserveHostConnection()
 		newConnection.exportedObject = XPCServiceImplementation(deviceSource: deviceSource, connection: connection)
 		
 		newConnection.invalidationHandler = { [weak deviceSource] in
@@ -879,9 +891,9 @@ extension CinematicCoreExtensionProviderSource: NSXPCListenerDelegate {
 private class XPCServiceImplementation: NSObject, CinematicCoreXPCProtocol {
 	
 	private weak var deviceSource: CinematicCoreExtensionDeviceSource?
-	private let connection: UUID
+	private let connection: UInt64
 
-	init(deviceSource: CinematicCoreExtensionDeviceSource, connection: UUID) {
+	init(deviceSource: CinematicCoreExtensionDeviceSource, connection: UInt64) {
 		self.deviceSource = deviceSource
 		self.connection = connection
 		super.init()
@@ -897,10 +909,11 @@ private class XPCServiceImplementation: NSObject, CinematicCoreXPCProtocol {
 	}
 	
 	func updatePlayoutFrameRate(_ frameRate: Double, reply: @escaping (Bool) -> Void) {
-		reply(deviceSource?.updatePlayoutFrameRate(frameRate) ?? false)
+		reply(deviceSource?.updatePlayoutFrameRate(frameRate, connection: connection) ?? false)
 	}
 	
 	func ping(reply: @escaping () -> Void) {
+		deviceSource?.verifyHostConnection(connection)
 		os_log(.debug, "XPC ping received")
 		reply()
 	}

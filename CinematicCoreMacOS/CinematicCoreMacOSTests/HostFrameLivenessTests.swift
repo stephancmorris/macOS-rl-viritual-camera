@@ -27,10 +27,31 @@ struct HostFrameLivenessTests {
     }
 
     @Test func delayedOldConnectionCannotAffectTheReplacement() {
-        let old = UUID(), replacement = UUID()
-        #expect(HostFrameLiveness.isCurrentConnection(old, active: old))
-        #expect(!HostFrameLiveness.isCurrentConnection(old, active: replacement))
-        #expect(HostFrameLiveness.isCurrentConnection(replacement, active: replacement))
-        #expect(!HostFrameLiveness.isCurrentConnection(old, active: nil))
+        var epochs = HostConnectionEpochs()
+        let old = epochs.reserve()
+        let oldActivated = epochs.activate(old)
+        #expect(oldActivated)
+        let replacement = epochs.reserve()
+        let replacementActivated = epochs.activate(replacement)
+        #expect(replacementActivated)
+        let oldReactivated = epochs.activate(old)
+        #expect(!oldReactivated)
+        #expect(!epochs.isCurrent(old))
+        #expect(epochs.isCurrent(replacement))
+    }
+
+    @Test func reservingAnUnverifiedConnectionCannotStopTheCurrentHost() {
+        var epochs = HostConnectionEpochs()
+        let authenticated = epochs.reserve()
+        let activated = epochs.activate(authenticated)
+        #expect(activated)
+        let unverified = epochs.reserve()
+        // Listener acceptance and its later invalidation have no authority
+        // over the active host until a signed service request is delivered.
+        #expect(epochs.active == authenticated)
+        #expect(!epochs.isCurrent(unverified))
+        let stillActive = epochs.activate(authenticated)
+        #expect(stillActive)
+        #expect(epochs.active == authenticated)
     }
 }
