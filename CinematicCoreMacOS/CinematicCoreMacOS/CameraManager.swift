@@ -1867,23 +1867,55 @@ final class CameraManager: NSObject, ObservableObject {
                       width: w, height: h).intersection(unit)
     }
 
-    /// Pick the detected person whose box contains the tapped point; if none
-    /// contains it (the tap landed just off the body), fall back to the person
-    /// whose box center is closest to the tap.
-    private func personNearest(
+    /// A direct hit wins; a near-body fallback is bounded in box-relative
+    /// coordinates so an empty-stage click cannot select a distant person.
+    nonisolated static func personNearest(
         to point: CGPoint,
         in persons: [PersonDetector.DetectedPerson]
     ) -> PersonDetector.DetectedPerson? {
+        guard point.x.isFinite, point.y.isFinite else { return nil }
         if let hit = persons.first(where: { $0.boundingBox.contains(point) }) {
             return hit
         }
-        return persons.min { a, b in
+        guard let nearest = persons.min(by: { a, b in
             let da = hypot(a.boundingBox.midX - point.x, a.boundingBox.midY - point.y)
             let db = hypot(b.boundingBox.midX - point.x, b.boundingBox.midY - point.y)
             return da < db
-        }
+        }) else { return nil }
+        let box = nearest.boundingBox
+        guard box.width > 0, box.height > 0 else { return nil }
+        let distance = hypot((box.midX - point.x) / box.width, (box.midY - point.y) / box.height)
+        return distance <= 0.75 ? nearest : nil
     }
     
+    /// Resolve the one-shot scan. A retarget miss keeps the current lock;
+    /// an ordinary miss re-arms Detect. Shared with synthetic state tests.
+    func resolvePendingSubjectTap(in persons: [PersonDetector.DetectedPerson], now: TimeInterval) {
+        if let tap = pendingTapPoint {
+            let wasRetarget = pendingTapIsRetarget
+            pendingTapPoint = nil
+            pendingTapIsRetarget = false
+            tapPending = false
+            if let picked = Self.personNearest(to: tap, in: persons) {
+                lockTarget(personID: picked.id)   // → .acquiring, leaves discovery
+                lastSubjectROIBox = picked.boundingBox
+                if wasRetarget {
+                    outputPort.noteDiagnostics("operator re-targeted subject")
+                }
+            } else if !wasRetarget {
+                // Scan found no one at the tap — re-arm discovery so the
+                // operator can try again, and surface that nothing was found.
+                detectionDiscoveryActive = true
+                discoveryTimeoutAt = now + Self.discoveryTimeout
+            }
+            // A re-target that found nobody deliberately does nothing: the
+            // current subject stays locked and on air. Dropping the shot
+            // because the operator held on an empty patch of stage would be a
+            // far worse outcome than the hold appearing to be ignored.
+        }
+
+    }
+
     /// Restart capture with a different camera
     func restartWithCamera(_ cameraDevice: CameraDevice) async throws {
         try Task.checkCancellation()
@@ -2226,30 +2258,8 @@ final class CameraManager: NSObject, ObservableObject {
         let detectedPersons = observation.frame?.persons ?? []
         let detectionIsFresh = observation.isFresh
 
-        // The pending tap drove exactly one ROI scan. Bind acquisition to the
-        // detected person nearest the tap point. If nothing was found, keep
-        // discovery armed so the operator can tap again.
-        if let tap = pendingTapPoint {
-            let wasRetarget = pendingTapIsRetarget
-            pendingTapPoint = nil
-            pendingTapIsRetarget = false
-            tapPending = false
-            if let picked = personNearest(to: tap, in: detectedPersons) {
-                lockTarget(personID: picked.id)   // → .acquiring, leaves discovery
-                lastSubjectROIBox = picked.boundingBox
-                if wasRetarget {
-                    outputPort.noteDiagnostics("operator re-targeted subject")
-                }
-            } else if !wasRetarget {
-                // Scan found no one at the tap — re-arm discovery so the
-                // operator can try again, and surface that nothing was found.
-                detectionDiscoveryActive = true
-                discoveryTimeoutAt = CACurrentMediaTime() + Self.discoveryTimeout
-            }
-            // A re-target that found nobody deliberately does nothing: the
-            // current subject stays locked and on air. Dropping the shot
-            // because the operator held on an empty patch of stage would be a
-            // far worse outcome than the hold appearing to be ignored.
+        if pendingTapPoint != nil {
+            resolvePendingSubjectTap(in: detectedPersons, now: CACurrentMediaTime())
         }
 
         // Track the acquiring/locked subject's latest box to seed the next
