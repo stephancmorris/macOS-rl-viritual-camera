@@ -2427,8 +2427,8 @@ final class CameraManager: NSObject, ObservableObject {
             let scheduler = workScheduler
             let channel = channelID
             outputPixelBuffer = await renderProgramFrame(crop: snapshot.crop, timestamp: timestampSeconds) {
-                // The render slot is shared across channels; wait for this
-                // channel's fair turn (immediate with one camera).
+                // Each camera has its own render slot and queue; the slot only
+                // keeps this camera to one render at a time.
                 try await Self.renderInTurn(scheduler: scheduler, channel: channel) {
                     try await cropEngine.renderCrop(pixelBuffer, crop: snapshot.crop,
                                                     outputSize: snapshot.outputSize, highQuality: snapshot.highQuality)

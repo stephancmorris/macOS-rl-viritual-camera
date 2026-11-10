@@ -282,7 +282,8 @@ struct DirectorSubjectDiscoveryTests {
     @Test(.timeLimit(.minutes(1))) func cancellingDiscoveryWaiterPreservesRenderWaiterAndRunningPermits() async throws {
         let scheduler = FrameWorkScheduler()
         let perceptionGrant = await scheduler.acquire(.perception, for: .a)
-        let renderGrant = await scheduler.acquire(.render, for: .a)
+        // Render slots are per camera, so B's render waiter waits behind B's own render.
+        let renderGrant = await scheduler.acquire(.render, for: .b)
         let perception = try #require(perceptionGrant)
         let render = try #require(renderGrant)
         let discoveryWaiter = Task { await scheduler.acquire(.perception, for: .b) }
