@@ -51,7 +51,7 @@ import Testing
     }
     private func rig(configured: Bool = true) throws -> Rig {
         let sink = Sink(), clock = Clock(), gates = Gates()
-        let show = ShowCoordinator(programOutput: ProgramOutputManager(sinks: [sink]),
+        let show = TestHardware.makeShow(programOutput: ProgramOutputManager(sinks: [sink]),
             admissionRecords: AdmissionRecordStore(defaults: UserDefaults(suiteName: "b12-\(UUID())")!),
             qualificationRecords: DirectorQualificationStore(storage: nil, acceptsInjectedRecords: false))
         show.clock = { clock.now }

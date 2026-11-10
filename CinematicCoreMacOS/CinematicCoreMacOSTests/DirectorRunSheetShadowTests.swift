@@ -17,7 +17,7 @@ import Testing
         let first = RunSheet.Segment(type: .presenter, name: "PRIVATE-OPENING-NAME", positionHint: .lectern)
         let second = RunSheet.Segment(type: .panel, name: "PRIVATE-PANEL-NAME", positionHint: .right)
         let sheet = try RunSheet(segments: [first, second])
-        let show = ShowCoordinator(programOutput: ProgramOutputManager(sinks: []),
+        let show = TestHardware.makeShow(programOutput: ProgramOutputManager(sinks: []),
             qualificationRecords: DirectorQualificationStore(storage: nil, acceptsInjectedRecords: false))
         show.clock = { 100 }
         let controller = DirectorController(show: show, ticker: Ticker(), clock: { 100 },

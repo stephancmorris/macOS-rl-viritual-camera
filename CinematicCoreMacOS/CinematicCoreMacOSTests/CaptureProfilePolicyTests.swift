@@ -178,7 +178,7 @@ struct BuiltInCameraCaptureIdentityTests {
     @Test func descriptorIsAnExplicitHintAndAdmissionUsesActualCapturedProfile() {
         let output = ProgramOutputManager(sinks: [])
         for slot in [ChannelID.a, .b] {
-            let channel = CameraManager(channelID: slot, programOutput: output, routed: false)
+            let channel = TestHardware.makeCamera(channelID: slot, programOutput: output, routed: false)
             let camera = CameraManager.CameraDevice(id: "built-in", name: "Camera", modelID: "test-model",
                 uniqueID: "built-in", maxResolution: "1920×1080", supports4K: false,
                 formatCount: 1, isBuiltIn: true)

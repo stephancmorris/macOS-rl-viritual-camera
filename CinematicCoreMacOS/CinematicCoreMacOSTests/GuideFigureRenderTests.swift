@@ -19,7 +19,7 @@ import Testing
 struct GuideFigureRenderTests {
     private func render(_ tab: SettingsTab, file: String) throws {
         let defaults = UserDefaults(suiteName: "alfie-guide-\(UUID().uuidString)")!
-        let show = ShowCoordinator(programOutput: ProgramOutputManager(sinks: []),
+        let show = TestHardware.makeShow(programOutput: ProgramOutputManager(sinks: []),
                                    admissionRecords: AdmissionRecordStore(defaults: defaults),
                                    operatorModes: OperatorModeStore(defaults: defaults, multiviewEnabled: true))
         let controller = SettingsWindowController()

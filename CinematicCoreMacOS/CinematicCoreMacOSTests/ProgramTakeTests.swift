@@ -50,7 +50,7 @@ struct ProgramTakeTests {
     private func rig() -> Rig {
         let sink = TakeFakeSink()
         let records = AdmissionRecordStore(defaults: UserDefaults(suiteName: "alfie-take-\(UUID().uuidString)")!)
-        let show = ShowCoordinator(programOutput: ProgramOutputManager(sinks: [sink]), admissionRecords: records)
+        let show = TestHardware.makeShow(programOutput: ProgramOutputManager(sinks: [sink]), admissionRecords: records)
         let clock = Clock()
         show.clock = { clock.now }
         show.router.clock = { clock.now }
@@ -136,7 +136,7 @@ struct ProgramTakeTests {
 
     @Test func rehearsalOutputLetsTakeCommitWithoutARealDestination() throws {
         let records = AdmissionRecordStore(defaults: UserDefaults(suiteName: "alfie-rehearsal-\(UUID().uuidString)")!)
-        let show = ShowCoordinator(programOutput: ProgramOutputManager(sinks: [RehearsalOutputSink()]), admissionRecords: records)
+        let show = TestHardware.makeShow(programOutput: ProgramOutputManager(sinks: [RehearsalOutputSink()]), admissionRecords: records)
         let b = show.addChannel(.b)
         show.channelA.outputPort.start()
         show.channelA.outputPort.updateCaptureStatus(isRunning: true)
@@ -150,7 +150,7 @@ struct ProgramTakeTests {
     }
 
     @Test func noDestinationRefusalSaysWhy() {
-        let show = ShowCoordinator(programOutput: ProgramOutputManager(sinks: []),
+        let show = TestHardware.makeShow(programOutput: ProgramOutputManager(sinks: []),
             admissionRecords: AdmissionRecordStore(defaults: UserDefaults(suiteName: "alfie-nodest-\(UUID().uuidString)")!))
         #expect(LiveConsoleModel.describe(.outputRefused, show: show).hasPrefix("No output destination"))
     }
@@ -253,7 +253,7 @@ struct ProgramTakeTests {
     }
 
     @Test func noPreviewNoTake() {
-        let show = ShowCoordinator(programOutput: ProgramOutputManager(sinks: []))
+        let show = TestHardware.makeShow(programOutput: ProgramOutputManager(sinks: []))
         #expect(show.take() == .rejected(.noPreview))
         #expect(show.makeTakeRequest() == nil)
     }

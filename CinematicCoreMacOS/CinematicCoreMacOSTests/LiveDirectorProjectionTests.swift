@@ -11,7 +11,7 @@ struct LiveDirectorProjectionTests {
     typealias Section = NextShotStatus.DirectorSection
 
     private func show(sink: (any ProgramOutputSink)? = nil) -> ShowCoordinator {
-        ShowCoordinator(programOutput: ProgramOutputManager(sinks: sink.map { [$0] } ?? []),
+        TestHardware.makeShow(programOutput: ProgramOutputManager(sinks: sink.map { [$0] } ?? []),
             admissionRecords: AdmissionRecordStore(defaults: UserDefaults(suiteName: "c03-\(UUID())")!),
             qualificationRecords: DirectorQualificationStore(storage: nil, acceptsInjectedRecords: false))
     }

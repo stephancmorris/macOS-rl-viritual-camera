@@ -52,6 +52,7 @@ jobs:
           -scheme CinematicCoreMacOS
           -destination 'platform=macOS'
           -derivedDataPath "${{ runner.temp }}/AlfieDerivedData"
+          -parallel-testing-enabled NO
           -only-testing:CinematicCoreMacOSTests
           -resultBundlePath "${{ runner.temp }}/unit.xcresult"
           CODE_SIGNING_ALLOWED=NO

@@ -58,7 +58,7 @@ import Testing
             limits: .init(maximumRecordBytes: 16384, maximumQueuedBytes: 262144,
                 maximumFileBytes: 262144, maximumStoreBytes: 524288), utcClock: { date })
         let clock = Clock(), sink = Sink(), scheduler = Scheduler()
-        let show = ShowCoordinator(programOutput: ProgramOutputManager(sinks: [sink]),
+        let show = TestHardware.makeShow(programOutput: ProgramOutputManager(sinks: [sink]),
             qualificationRecords: DirectorQualificationStore(storage: nil, acceptsInjectedRecords: false))
         show.clock = { clock.now }; show.router.clock = { clock.now }
         show.addChannel(.b)

@@ -253,7 +253,7 @@ struct AdmissionRecordTests {
     }
 
     @Test func showAdmissionFollowsTheChannelCount() throws {
-        let show = ShowCoordinator(programOutput: ProgramOutputManager(sinks: []), admissionRecords: store())
+        let show = TestHardware.makeShow(programOutput: ProgramOutputManager(sinks: []), admissionRecords: store())
         #expect(show.admissionDecision == .allowed(certified: false))    // one input: nothing to admit
         show.addChannel(.b)
         #expect(show.admissionDecision == .trialOnly)
@@ -268,7 +268,7 @@ struct AdmissionRecordTests {
     }
 
     @Test func aCurrentPairFailureOverridesHistoricalCertificationForTake() throws {
-        let show = ShowCoordinator(programOutput: ProgramOutputManager(sinks: []), admissionRecords: store())
+        let show = TestHardware.makeShow(programOutput: ProgramOutputManager(sinks: []), admissionRecords: store())
         show.channelA.setRunningForTesting(true)
         show.addChannel(.b).setRunningForTesting(true)
         let binding = try #require(show.admissionCheckBinding(preview: .b))
@@ -287,7 +287,7 @@ struct AdmissionRecordTests {
 
     @Test(arguments: [false, true])
     func missingRecheckEvidenceCannotClearAFailureButACompletePassCan(certified: Bool) throws {
-        let show = ShowCoordinator(programOutput: ProgramOutputManager(sinks: []), admissionRecords: store())
+        let show = TestHardware.makeShow(programOutput: ProgramOutputManager(sinks: []), admissionRecords: store())
         show.channelA.setRunningForTesting(true)
         show.addChannel(.b).setRunningForTesting(true)
         let binding = try #require(show.admissionCheckBinding(preview: .b))
@@ -305,7 +305,7 @@ struct AdmissionRecordTests {
     }
 
     @Test func sourceHealthLossCannotHideTheCurrentPairRefusal() throws {
-        let show = ShowCoordinator(programOutput: ProgramOutputManager(sinks: []), admissionRecords: store())
+        let show = TestHardware.makeShow(programOutput: ProgramOutputManager(sinks: []), admissionRecords: store())
         show.channelA.setRunningForTesting(true)
         show.addChannel(.b).setRunningForTesting(true)
         let binding = try #require(show.admissionCheckBinding(preview: .b))
@@ -320,7 +320,7 @@ struct AdmissionRecordTests {
     }
 
     @Test func aReplacementSourceDoesNotInheritThePreviousSessionsRefusal() throws {
-        let show = ShowCoordinator(programOutput: ProgramOutputManager(sinks: []), admissionRecords: store())
+        let show = TestHardware.makeShow(programOutput: ProgramOutputManager(sinks: []), admissionRecords: store())
         show.channelA.setRunningForTesting(true)
         show.addChannel(.b).setRunningForTesting(true)
         let binding = try #require(show.admissionCheckBinding(preview: .b))
@@ -360,7 +360,7 @@ struct AdmissionRecordTests {
     private func runningPair() -> ShowCoordinator {
         let defaults = UserDefaults(suiteName: "alfie-admission-mode-\(UUID().uuidString)")!
         defaults.set(OperatorMode.multiCam.rawValue, forKey: OperatorModeStore.key)
-        let show = ShowCoordinator(programOutput: ProgramOutputManager(sinks: []), admissionRecords: store(),
+        let show = TestHardware.makeShow(programOutput: ProgramOutputManager(sinks: []), admissionRecords: store(),
                                    operatorModes: OperatorModeStore(defaults: defaults, multiviewEnabled: true))
         show.channelA.setRunningForTesting(true)
         show.addChannel(.b).setRunningForTesting(true)

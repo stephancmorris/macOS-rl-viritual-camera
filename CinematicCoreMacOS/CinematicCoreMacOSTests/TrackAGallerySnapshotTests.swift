@@ -176,7 +176,7 @@ private struct WebcamScene: View {
 
 /// J4 and J12: the lock states with their glyph, and the pill's Stop phases.
 private struct PillScene: View {
-    @StateObject private var manager = CameraManager()
+    @StateObject private var manager = TestHardware.makeCamera()
 
     var body: some View {
         ZStack {

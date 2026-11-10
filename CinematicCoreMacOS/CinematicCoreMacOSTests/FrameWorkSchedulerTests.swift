@@ -175,7 +175,7 @@ struct FrameWorkSchedulerTests {
     }
 
     @Test func showSchedulerFollowsTheRoutersProgram() {
-        let show = ShowCoordinator(programOutput: ProgramOutputManager(sinks: []))
+        let show = TestHardware.makeShow(programOutput: ProgramOutputManager(sinks: []))
         let b = show.addChannel(.b)
         #expect(b.workScheduler === show.workScheduler)
         #expect(show.workScheduler.isProgram(.a))

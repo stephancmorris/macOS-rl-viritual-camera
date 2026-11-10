@@ -171,7 +171,7 @@ struct DirectorSubjectDiscoveryTests {
               timestamp: 100, poseKeypoints: nil, faceBoundingBox: nil, faceLandmarkRatios: nil)
     }
     private func rig() -> (ShowCoordinator, CameraManager, ContextBox) {
-        let show = ShowCoordinator(programOutput: ProgramOutputManager(sinks: []),
+        let show = TestHardware.makeShow(programOutput: ProgramOutputManager(sinks: []),
             qualificationRecords: DirectorQualificationStore(storage: nil, acceptsInjectedRecords: false))
         let b = show.addChannel(.b), context = ContextBox()
         b.setRunningForTesting(true)

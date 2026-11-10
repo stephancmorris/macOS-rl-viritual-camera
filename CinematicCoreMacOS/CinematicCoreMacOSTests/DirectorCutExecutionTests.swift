@@ -63,7 +63,7 @@ import Testing
     private func rig(level: NextShotStatus.DirectorSection.Level = .auto,
                      widePreview: Bool = false) -> Rig {
         let facts = Facts(), sink = Sink(), scheduler = Scheduler()
-        let show = ShowCoordinator(programOutput: ProgramOutputManager(sinks: [sink]),
+        let show = TestHardware.makeShow(programOutput: ProgramOutputManager(sinks: [sink]),
             admissionRecords: AdmissionRecordStore(defaults: UserDefaults(suiteName: "b08-\(UUID())")!),
             qualificationRecords: DirectorQualificationStore(storage: nil, acceptsInjectedRecords: false))
         show.clock = { facts.now }; show.router.clock = { facts.now }

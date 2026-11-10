@@ -13,7 +13,7 @@ import Testing
               maximumMovement: 1, settleTime: 1, onAirMoveRate: 1, cutOnMotionAllowed: false)
     }
     private func show() -> ShowCoordinator {
-        ShowCoordinator(programOutput: ProgramOutputManager(sinks: []),
+        TestHardware.makeShow(programOutput: ProgramOutputManager(sinks: []),
             admissionRecords: AdmissionRecordStore(defaults: UserDefaults(suiteName: "b11-\(UUID())")!),
             qualificationRecords: DirectorQualificationStore(storage: nil, acceptsInjectedRecords: false))
     }

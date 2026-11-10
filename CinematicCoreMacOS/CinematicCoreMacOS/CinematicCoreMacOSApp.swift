@@ -24,8 +24,14 @@ struct CinematicCoreMacOSApp: App {
         _show = StateObject(wrappedValue: Self.makeShow())
     }
 
+    /// The XCTest-injected host is a fixture container, with no live scene.
+    /// UI-test runners launch a separate normal app without XCTest injection.
+    static var isUnitTestHost: Bool { NSClassFromString("XCTestCase") != nil }
+
     private static func makeShow() -> ShowCoordinator {
-        let show = ShowCoordinator()
+        let show = isUnitTestHost
+            ? ShowCoordinator(programOutput: ProgramOutputManager(sinks: []), cameraDeviceSource: .isolated)
+            : ShowCoordinator()
         show.startDirectorShadow()
         #if DEBUG
         DebugLaunchHooks.startWindowDumps()
@@ -35,13 +41,17 @@ struct CinematicCoreMacOSApp: App {
 
     var body: some Scene {
         WindowGroup("Alfie") {
-            ContentView(
-                cameraManager: cameraManager,
-                systemExtensionManager: systemExtensionManager,
-                settingsWindowController: settingsWindowController,
-                show: show
-            )
-            .onAppear { AppAppearance.current.apply() }
+            if Self.isUnitTestHost {
+                EmptyView()
+            } else {
+                ContentView(
+                    cameraManager: cameraManager,
+                    systemExtensionManager: systemExtensionManager,
+                    settingsWindowController: settingsWindowController,
+                    show: show
+                )
+                .onAppear { AppAppearance.current.apply() }
+            }
         }
         .windowStyle(.hiddenTitleBar)
         .commands {

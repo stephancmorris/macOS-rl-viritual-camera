@@ -23,7 +23,7 @@ import Testing
             onAirMoveRate: rate, cutOnMotionAllowed: false)
     }
     private func rig() throws -> Rig {
-        let show = ShowCoordinator(programOutput: ProgramOutputManager(sinks: []),
+        let show = TestHardware.makeShow(programOutput: ProgramOutputManager(sinks: []),
             qualificationRecords: DirectorQualificationStore(storage: nil, acceptsInjectedRecords: false))
         let clock = Clock(), channel = show.channelA, subject = UUID()
         show.clock = { clock.now }; show.router.clock = { clock.now }

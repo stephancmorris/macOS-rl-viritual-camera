@@ -28,7 +28,7 @@ struct ManualActionHookTests {
     }
 
     private func twoChannelShow() -> ShowCoordinator {
-        let show = ShowCoordinator(programOutput: ProgramOutputManager(sinks: []))
+        let show = TestHardware.makeShow(programOutput: ProgramOutputManager(sinks: []))
         let b = show.addChannel(.b)
         show.channelA.setRunningForTesting(true)
         b.setRunningForTesting(true)
@@ -39,7 +39,7 @@ struct ManualActionHookTests {
 
     @Test func directDispatchPathIsObserved() {
         // ContentView's single-camera taps call CameraManager.dispatch directly.
-        let camera = CameraManager()
+        let camera = TestHardware.makeCamera()
         camera.setRunningForTesting(true)
         let recorder = Recorder()
         recorder.observe(camera)
@@ -48,7 +48,7 @@ struct ManualActionHookTests {
     }
 
     @Test func pillWithoutAShowIsObserved() {
-        let camera = CameraManager()
+        let camera = TestHardware.makeCamera()
         camera.setRunningForTesting(true)
         let recorder = Recorder()
         recorder.observe(camera)
@@ -67,7 +67,7 @@ struct ManualActionHookTests {
     }
 
     @Test func refusedCommandsAreStillObserved() {
-        let camera = CameraManager()
+        let camera = TestHardware.makeCamera()
         let recorder = Recorder()
         recorder.observe(camera)
         // Session stopped: refused, but the operator still acted.
@@ -83,7 +83,7 @@ struct ManualActionHookTests {
     // MARK: Director origin
 
     @Test func directorCommandsAreNotReportedAsManual() {
-        let camera = CameraManager()
+        let camera = TestHardware.makeCamera()
         camera.setRunningForTesting(true)
         let recorder = Recorder()
         recorder.observe(camera)
@@ -95,7 +95,7 @@ struct ManualActionHookTests {
     }
 
     @Test func directorMayOnlyChangeShotSize() {
-        let camera = CameraManager()
+        let camera = TestHardware.makeCamera()
         camera.setRunningForTesting(true)
         for action: OperatorCommand.Action in [.returnToWide, .setMode(.manualCrop), .detect,
                                                .unlock, .moveManualCenter(CGPoint(x: 0.5, y: 0.5))] {
@@ -110,7 +110,7 @@ struct ManualActionHookTests {
     // MARK: Settings changes outside commands
 
     @Test func settingsChangesAreObserved() {
-        let camera = CameraManager()
+        let camera = TestHardware.makeCamera()
         let recorder = Recorder()
         recorder.observe(camera)
         camera.shotComposer.config.smoothingFactor += 0.01
@@ -120,7 +120,7 @@ struct ManualActionHookTests {
     @Test func admittedPresetIsReportedOnceAsACommand() {
         // Applying the preset writes the shot settings internally; that write
         // must not also look like a Settings change.
-        let camera = CameraManager()
+        let camera = TestHardware.makeCamera()
         camera.setRunningForTesting(true)
         let recorder = Recorder()
         recorder.observe(camera)
@@ -133,7 +133,7 @@ struct ManualActionHookTests {
     // MARK: Take attempts
 
     @Test func everyTakeAttemptIsReportedWithItsOrigin() {
-        let single = ShowCoordinator(programOutput: ProgramOutputManager(sinks: []))
+        let single = TestHardware.makeShow(programOutput: ProgramOutputManager(sinks: []))
         var origins: [TakeOrigin] = []
         single.takeAttemptObserver = { origins.append($0) }
         // No Preview: refused, still reported.
