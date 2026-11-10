@@ -206,7 +206,7 @@ import CoreVideo
 @MainActor
 struct LiveInputStripTests {
     private func show() -> ShowCoordinator {
-        ShowCoordinator(
+        TestHardware.makeShow(
             programOutput: ProgramOutputManager(sinks: []),
             admissionRecords: AdmissionRecordStore(defaults: UserDefaults(suiteName: "alfie-strip-\(UUID().uuidString)")!))
     }

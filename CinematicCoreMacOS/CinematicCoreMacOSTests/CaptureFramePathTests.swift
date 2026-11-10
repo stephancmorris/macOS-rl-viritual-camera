@@ -50,7 +50,7 @@ import Testing
     }
 
     @Test func aSkippedTurnDiscardsTheFrameWithoutHolding() async throws {
-        let manager = CameraManager(channelID: .b, programOutput: ProgramOutputManager(sinks: []), routed: false)
+        let manager = TestHardware.makeCamera(channelID: .b, programOutput: ProgramOutputManager(sinks: []), routed: false)
         let result = await manager.renderProgramFrame(crop: .fullFrame, timestamp: 1) { throw CancellationError() }
         #expect(result == nil)
         #expect(!manager.isProgramHolding)

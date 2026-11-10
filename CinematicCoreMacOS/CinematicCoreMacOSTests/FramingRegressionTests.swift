@@ -44,7 +44,7 @@ struct FramingRegressionTests {
     }
 
     @Test func operatorOwnershipRejectsAllTrackingRecoveryEffects() {
-        let manager = CameraManager()
+        let manager = TestHardware.makeCamera()
         manager.commands.setTrackingOwnership(true)
         manager.applyLockOutcome(.acquired)
         #expect(manager.activeMode == .autoTracking)
@@ -58,7 +58,7 @@ struct FramingRegressionTests {
     }
 
     @Test func panSuspendsPerceptionUntilExplicitTrackAndWideClearsTheLock() {
-        let manager = CameraManager()
+        let manager = TestHardware.makeCamera()
         let subjectID = UUID()
         manager.shotComposer.lockTarget(subjectID)
         manager.shotComposer.forceTrackingForTesting()
@@ -97,7 +97,7 @@ struct FramingRegressionTests {
     }
 
     @Test func returnToWideRetiresResumeAndClearsRecoveryEligibility() {
-        let manager = CameraManager()
+        let manager = TestHardware.makeCamera()
         let subjectID = UUID()
         manager.shotComposer.lockTarget(subjectID)
         manager.shotComposer.forceTrackingForTesting()
@@ -114,7 +114,7 @@ struct FramingRegressionTests {
     }
 
     @Test func panReentryPreservesSweepPhaseWithoutAdvancingWhileInactive() {
-        let manager = CameraManager()
+        let manager = TestHardware.makeCamera()
         manager.shotComposer.config.autoPanSpeed = 0.03
         manager.setOperationMode(.autoPan)
         _ = manager.advanceAutoPan(now: 100, width: 0.5)
@@ -128,7 +128,7 @@ struct FramingRegressionTests {
     }
 
     @Test func pillFits1280PointWindowWithoutHidingControls() {
-        let manager = CameraManager()
+        let manager = TestHardware.makeCamera()
         manager.shotComposer.config.cinematicFormat = .stage
         let view = NSHostingView(rootView: OperatorPill(cameraManager: manager))
         let width = view.fittingSize.width
@@ -137,7 +137,7 @@ struct FramingRegressionTests {
     }
 
     @Test func focusLossAndStopCancelTheShotMove() throws {
-        let manager = CameraManager()
+        let manager = TestHardware.makeCamera()
         let engine = try #require(manager.cropEngine)
         manager.selectPreset(.stage(.fullBody))
         manager.setOperationMode(.manualCrop)
@@ -180,7 +180,7 @@ struct FramingRegressionTests {
 
     @Test func retiredFailedRenderCannotCancelNewZoom() async throws {
         enum RenderFailure: Error { case injected }
-        let manager = CameraManager()
+        let manager = TestHardware.makeCamera()
         let engine = try #require(manager.cropEngine)
         let frame = await manager.renderProgramFrame(crop: .fullFrame, timestamp: 0) {
             manager.cancelOperatorMotion() // a newer operator epoch while rendering
@@ -193,7 +193,7 @@ struct FramingRegressionTests {
     }
 
     @Test func holdRecoveryCancelsZoomAndRequestsWideWithoutSnapping() throws {
-        let manager = CameraManager()
+        let manager = TestHardware.makeCamera()
         let engine = try #require(manager.cropEngine)
         engine.setTargetCrop(.init(center: CGPoint(x: 0.5, y: 0.5), size: CGSize(width: 0.5, height: 0.5)))
         engine.jumpToTarget()
@@ -299,8 +299,8 @@ struct FramingRegressionTests {
     }
 
     @Test func repeatedSameDirectionTapDoesNotRestartAnActiveRung() throws {
-        let baseline = CameraManager()
-        let repeated = CameraManager()
+        let baseline = TestHardware.makeCamera()
+        let repeated = TestHardware.makeCamera()
         for manager in [baseline, repeated] {
             manager.selectPreset(.stage(.wide))
             manager.setOperationMode(.manualCrop)
@@ -325,7 +325,7 @@ struct FramingRegressionTests {
     }
 
     @Test func tapsLandOnOneStageRungAndEnableOnlyLegalDirections() throws {
-        let manager = CameraManager()
+        let manager = TestHardware.makeCamera()
         let engine = try #require(manager.cropEngine)
         manager.shotComposer.config.cinematicFormat = .stage
         manager.selectPreset(.stage(.wide))
@@ -361,7 +361,7 @@ struct FramingRegressionTests {
     }
 
     @Test func oppositeTapReversesToOriginAndSafetyActionsCancel() throws {
-        let manager = CameraManager()
+        let manager = TestHardware.makeCamera()
         let engine = try #require(manager.cropEngine)
         manager.selectPreset(.stage(.wide))
         manager.beginZoom(.pushIn) // uncropped enters Manual, heads to Full Body
@@ -386,7 +386,7 @@ struct FramingRegressionTests {
 
     @Test(arguments: [ShotComposer.Config.ShotPreset.fullBody, .waistUp])
     func reverseFromUncroppedReturnsToTheViewNotTheSelectedPreset(preset: ShotComposer.Config.ShotPreset) throws {
-        let manager = CameraManager()
+        let manager = TestHardware.makeCamera()
         manager.shotComposer.config.cinematicFormat = .stage
         let engine = try #require(manager.cropEngine)
         manager.selectPreset(.stage(preset))
@@ -402,7 +402,7 @@ struct FramingRegressionTests {
     }
 
     @Test func webcamUsesOnlyWideAndTight() throws {
-        let manager = CameraManager()
+        let manager = TestHardware.makeCamera()
         let engine = try #require(manager.cropEngine)
         manager.shotComposer.config.cinematicFormat = .webcam
         manager.selectPreset(.webcam(.wide))
@@ -420,7 +420,7 @@ struct FramingRegressionTests {
     }
 
     @Test func trackingMoveLandsOnComposerSizeWithoutResettingIdentity() throws {
-        let manager = CameraManager()
+        let manager = TestHardware.makeCamera()
         let composer = manager.shotComposer
         let engine = try #require(manager.cropEngine)
         composer.config.cinematicFormat = .stage
@@ -472,7 +472,7 @@ struct FramingRegressionTests {
     }
 
     @Test func panRetainsPhaseAcrossZeroTravelAndBothDwells() {
-        let manager = CameraManager()
+        let manager = TestHardware.makeCamera()
         manager.shotComposer.config.autoPanSpeed = 0.03
         _ = manager.advanceAutoPan(now: 100, width: 0.5)
         var rightReached: Double?
@@ -499,7 +499,7 @@ struct FramingRegressionTests {
     }
 
     @Test func panZoomHasNoSizeJumpAndIdlePanRetainsConstantSpeed() throws {
-        let manager = CameraManager()
+        let manager = TestHardware.makeCamera()
         manager.shotComposer.config.autoPanSpeed = 0.02
         let engine = try engine()
         var prior: CropEngine.CropRect?
@@ -526,7 +526,7 @@ struct FramingRegressionTests {
 
     @Test(arguments: [false, true])
     func shotMoveDuringEitherPanDwellKeepsTheVisibleEdge(left: Bool) throws {
-        let manager = CameraManager()
+        let manager = TestHardware.makeCamera()
         manager.shotComposer.config.cinematicFormat = .stage
         manager.shotComposer.config.autoPanSpeed = 0.03
         let engine = try #require(manager.cropEngine)
@@ -562,7 +562,7 @@ struct FramingRegressionTests {
 
     @Test func failedRenderKeepsPriorProgramAndNeverInventsFirstFrame() async throws {
         enum RenderFailure: Error { case injected }
-        let manager = CameraManager()
+        let manager = TestHardware.makeCamera()
         let first = await manager.renderProgramFrame(crop: .fullFrame, timestamp: 0) { throw RenderFailure.injected }
         #expect(first == nil)
         var buffer: CVPixelBuffer?

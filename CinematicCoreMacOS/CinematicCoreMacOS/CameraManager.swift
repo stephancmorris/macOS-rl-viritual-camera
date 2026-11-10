@@ -695,10 +695,31 @@ final class CameraManager: NSObject, ObservableObject {
         static let pixelFormat = kCVPixelFormatType_32BGRA
     }
     
+    /// Injectable discovery seam. The isolated source cannot authorize live
+    /// capture or subscribe to hardware changes; callers may supply fixtures.
+    struct DeviceSource {
+        var discover: () -> [CameraDevice]
+        var permitsHardwareAccess: Bool
+
+        static var live: DeviceSource {
+            .init(discover: { CameraManager.discoverSystemCameras() }, permitsHardwareAccess: true)
+        }
+        static var isolated: DeviceSource {
+            .init(discover: { [] }, permitsHardwareAccess: false)
+        }
+    }
+
+    private let deviceSource: DeviceSource
+    var observesCameraDeviceNotifications: Bool { deviceSource.permitsHardwareAccess }
+    #if DEBUG
+    /// Counts only the actual system enumerator, including app-host startup.
+    private(set) static var systemDeviceDiscoveryCount = 0
+    #endif
+
     // MARK: - Initialization
     
     /// Single-camera convenience: channel A, routed, with its own output.
-    /// Used by tests and previews; the app builds channels via ShowCoordinator.
+    /// Previews/standalone use; unit fixtures inject an isolated device source.
     override convenience init() {
         let output = ProgramOutputManager(sinks: [VirtualCameraOutputSink(), DisplayOutputSink()])
         self.init(channelID: .a, programOutput: output, outputPort: output)
@@ -715,7 +736,8 @@ final class CameraManager: NSObject, ObservableObject {
 
     /// Designated: the show (ShowCoordinator / ProgramRouter) supplies the port.
     init(channelID: ChannelID, programOutput: ProgramOutputManager, outputPort: any ChannelOutputPort,
-         trainingDataRecorder: TrainingDataRecorder? = nil) {
+         trainingDataRecorder: TrainingDataRecorder? = nil, deviceSource: DeviceSource = .live) {
+        self.deviceSource = deviceSource
         self.channelID = channelID
         self.programOutput = programOutput
         self.outputPort = outputPort
@@ -749,6 +771,24 @@ final class CameraManager: NSObject, ObservableObject {
     func discoverCameras() {
         Self.logger.notice("Discovering cameras")
         
+        let cameraDevices = deviceSource.discover()
+        availableCameras = cameraDevices
+
+        // Auto-select first 4K camera, or first available — channel A only.
+        // Any other input needs an explicit camera choice (DEVICES).
+        if selectedCamera == nil, channelID == .a {
+            selectedCamera = cameraDevices.first { $0.supports4K } ?? cameraDevices.first
+            if let selected = selectedCamera {
+                Self.logger.notice("Selected camera: \(selected.name, privacy: .public)")
+            }
+        }
+    }
+
+    /// The production enumerator is never reached by an isolated source.
+    private static func discoverSystemCameras() -> [CameraDevice] {
+        #if DEBUG
+        systemDeviceDiscoveryCount += 1
+        #endif
         let discoverySession = AVCaptureDevice.DiscoverySession(
             deviceTypes: [.builtInWideAngleCamera, .external],
             mediaType: .video,
@@ -762,8 +802,7 @@ final class CameraManager: NSObject, ObservableObject {
         }
         
         if devices.isEmpty {
-            availableCameras = []
-            return
+            return []
         }
         
         var cameraDevices: [CameraDevice] = []
@@ -802,18 +841,9 @@ final class CameraManager: NSObject, ObservableObject {
             cameraDevices.append(cameraDevice)
         }
         
-        availableCameras = cameraDevices
-        
-        // Auto-select first 4K camera, or first available — channel A only.
-        // Any other input needs an explicit camera choice (DEVICES).
-        if selectedCamera == nil, channelID == .a {
-            selectedCamera = cameraDevices.first { $0.supports4K } ?? cameraDevices.first
-            if let selected = selectedCamera {
-                Self.logger.notice("Selected camera: \(selected.name, privacy: .public)")
-            }
-        }
+        return cameraDevices
     }
-    
+
     /// Request camera permissions and start the capture session
     let commands: CommandDispatcher
     @Published private(set) var controlStatus: String?
@@ -1900,6 +1930,7 @@ final class CameraManager: NSObject, ObservableObject {
     // MARK: - Private Methods
     
     private func checkAuthorization() async -> Bool {
+        guard deviceSource.permitsHardwareAccess else { return false }
         switch AVCaptureDevice.authorizationStatus(for: .video) {
         case .authorized:
             return true

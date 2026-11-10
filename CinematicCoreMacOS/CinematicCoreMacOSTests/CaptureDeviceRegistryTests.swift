@@ -96,14 +96,14 @@ struct CaptureDeviceRegistryTests {
     }
 
     @Test func showSharesOneRegistryAcrossChannels() {
-        let show = ShowCoordinator(programOutput: ProgramOutputManager(sinks: []))
+        let show = TestHardware.makeShow(programOutput: ProgramOutputManager(sinks: []))
         let b = show.addChannel(.b)
         #expect(show.channelA.deviceRegistry === show.deviceRegistry)
         #expect(b.deviceRegistry === show.deviceRegistry)
     }
 
     @Test func sourceLossWithoutARunningSessionIsIgnored() {
-        let manager = CameraManager(channelID: .b, programOutput: ProgramOutputManager(sinks: []), routed: false)
+        let manager = TestHardware.makeCamera(channelID: .b, programOutput: ProgramOutputManager(sinks: []), routed: false)
         manager.handleSourceLost()
         #expect(!manager.sourceMissing)
     }
@@ -111,7 +111,7 @@ struct CaptureDeviceRegistryTests {
     // CR-027: after a hot unplug the session is still running for output hold, so a
     // buffer the stopping session delivers late must not reach the frame path.
     @Test func bufferArrivingAfterSourceLossIsNotProcessed() async throws {
-        let manager = CameraManager(channelID: .b, programOutput: ProgramOutputManager(sinks: []), routed: false)
+        let manager = TestHardware.makeCamera(channelID: .b, programOutput: ProgramOutputManager(sinks: []), routed: false)
         manager.setRunningForTesting(true)
         manager.handleSourceLost()
         #expect(manager.sourceMissing)

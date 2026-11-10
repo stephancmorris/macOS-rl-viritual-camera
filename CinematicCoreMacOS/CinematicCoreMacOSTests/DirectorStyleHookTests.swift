@@ -17,7 +17,7 @@ import Testing
 
     @Test(.enabled(if: DeveloperFlags.runDirectorShadow, "Director shadow is off in this build"))
     func savedStylesReachTheShowsDirector() throws {
-        let show = ShowCoordinator(programOutput: ProgramOutputManager(sinks: []))
+        let show = TestHardware.makeShow(programOutput: ProgramOutputManager(sinks: []))
         let preferences = DirectorPreferences(styles: [.liveEvent: style])
         show.directorPreferencesChanged(preferences)
         // Stored even in Manual; the pause for new styles applies only while
@@ -27,7 +27,7 @@ import Testing
 
     @Test(.enabled(if: DeveloperFlags.runDirectorShadow, "Director shadow is off in this build"))
     func settingsEditorSaveIsForwardedThroughTheHook() throws {
-        let show = ShowCoordinator(programOutput: ProgramOutputManager(sinks: []))
+        let show = TestHardware.makeShow(programOutput: ProgramOutputManager(sinks: []))
         let url = FileManager.default.temporaryDirectory
             .appendingPathComponent("alfie-style-hook-\(UUID().uuidString).json")
         defer { try? FileManager.default.removeItem(at: url) }

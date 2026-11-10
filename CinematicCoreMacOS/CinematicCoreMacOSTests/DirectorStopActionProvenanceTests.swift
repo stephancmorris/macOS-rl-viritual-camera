@@ -22,7 +22,7 @@ import Testing
         let root = FileManager.default.temporaryDirectory.appendingPathComponent("stop-provenance-\(UUID())")
         let log = try DirectorShadowLog(directory: root, limits: .init(maximumRecordBytes: 8192,
             maximumQueuedBytes: 262144, maximumFileBytes: 262144, maximumStoreBytes: 524288))
-        let show = ShowCoordinator(programOutput: ProgramOutputManager(sinks: []),
+        let show = TestHardware.makeShow(programOutput: ProgramOutputManager(sinks: []),
             qualificationRecords: DirectorQualificationStore(storage: nil, acceptsInjectedRecords: false))
         show.clock = { 100 }
         let b = show.addChannel(.b)

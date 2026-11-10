@@ -28,7 +28,7 @@ import Testing
     }
     private func rig(style: Bool = false, tracking: Bool = false) -> Rig {
         let sink = Sink(), clock = Clock()
-        let show = ShowCoordinator(programOutput: ProgramOutputManager(sinks: [sink]),
+        let show = TestHardware.makeShow(programOutput: ProgramOutputManager(sinks: [sink]),
             admissionRecords: AdmissionRecordStore(defaults: UserDefaults(suiteName: "b07-\(UUID())")!),
             qualificationRecords: DirectorQualificationStore(storage: nil, acceptsInjectedRecords: false))
         show.clock = { clock.now }; show.router.clock = { clock.now }

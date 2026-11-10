@@ -289,7 +289,7 @@ struct ShowSetupTests {
     // MARK: Live adapter
 
     private func show() -> ShowCoordinator {
-        ShowCoordinator(
+        TestHardware.makeShow(
             programOutput: ProgramOutputManager(sinks: []),
             admissionRecords: AdmissionRecordStore(defaults: UserDefaults(suiteName: "alfie-setup-\(UUID().uuidString)")!))
     }
@@ -337,7 +337,7 @@ struct ShowSetupTests {
         defaults.set(OperatorMode.multiCam.rawValue, forKey: OperatorModeStore.key)
         defaults.set(wide.uniqueID, forKey: LiveShowSetupModel.deviceAKey)
         defaults.set(side.uniqueID, forKey: LiveShowSetupModel.deviceBKey)
-        let show = ShowCoordinator(
+        let show = TestHardware.makeShow(
             programOutput: ProgramOutputManager(sinks: sinks),
             admissionRecords: AdmissionRecordStore(defaults: defaults),
             operatorModes: OperatorModeStore(defaults: defaults, multiviewEnabled: true))
@@ -367,7 +367,7 @@ struct ShowSetupTests {
 
     @Test func defaultCamerasFollowLiveRediscovery() {
         let defaults = UserDefaults(suiteName: "alfie-setup-discovery-\(UUID().uuidString)")!
-        let show = ShowCoordinator(programOutput: ProgramOutputManager(sinks: []),
+        let show = TestHardware.makeShow(programOutput: ProgramOutputManager(sinks: []),
                                    admissionRecords: AdmissionRecordStore(defaults: defaults),
                                    operatorModes: OperatorModeStore(defaults: defaults, multiviewEnabled: true))
         let live = LiveShowSetupModel(show: show, defaults: defaults, machine: machine) { }

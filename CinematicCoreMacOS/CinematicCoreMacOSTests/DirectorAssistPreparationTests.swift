@@ -11,7 +11,7 @@ import Testing
               minimumCutSettledTime: 1, maximumCutMotion: 0.1), maximumRequestAge: age, onePreparationPerTenure: one)
     }
     private func rig() -> Rig {
-        let show = ShowCoordinator(programOutput: ProgramOutputManager(sinks: []),
+        let show = TestHardware.makeShow(programOutput: ProgramOutputManager(sinks: []),
             qualificationRecords: DirectorQualificationStore(storage: nil, acceptsInjectedRecords: false))
         let clock = Clock(), subject = UUID(), b = show.addChannel(.b)
         show.clock = { clock.now }

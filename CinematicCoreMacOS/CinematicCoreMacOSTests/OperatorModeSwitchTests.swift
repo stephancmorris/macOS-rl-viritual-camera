@@ -69,7 +69,7 @@ struct OperatorModeSwitchTests {
     }
 
     private func show(_ mode: OperatorMode, defaults: UserDefaults? = nil) -> ShowCoordinator {
-        ShowCoordinator(
+        TestHardware.makeShow(
             programOutput: ProgramOutputManager(sinks: []),
             admissionRecords: AdmissionRecordStore(defaults: UserDefaults(suiteName: "alfie-switch-\(UUID().uuidString)")!),
             operatorModes: OperatorModeStore(defaults: defaults ?? self.defaults(mode: mode), multiviewEnabled: true))

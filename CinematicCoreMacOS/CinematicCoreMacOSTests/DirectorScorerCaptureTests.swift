@@ -38,7 +38,7 @@ import Testing
             let clock = Clock(); clock.now = 100 + Double(session * 100)
             let log = try DirectorShadowLog(directory: directory, limits: .init(maximumRecordBytes: 16384,
                 maximumQueuedBytes: 65536, maximumFileBytes: 131072, maximumStoreBytes: 524288), utcClock: { utc })
-            let show = ShowCoordinator(programOutput: ProgramOutputManager(sinks: []),
+            let show = TestHardware.makeShow(programOutput: ProgramOutputManager(sinks: []),
                 qualificationRecords: DirectorQualificationStore(storage: nil, acceptsInjectedRecords: false))
             show.clock = { clock.now }; show.channelA.setRunningForTesting(true); show.addChannel(.b).setRunningForTesting(true)
             let controller = DirectorController(show: show, ticker: Ticker(), clock: { clock.now }, shadowLog: log, log: { _ in })

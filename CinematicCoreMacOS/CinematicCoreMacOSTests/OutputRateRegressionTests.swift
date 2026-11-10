@@ -95,7 +95,7 @@ struct ShowStandardLifecycleTests {
     @Test(arguments: [ChannelID.a, .b])
     func programSourceRestartKeepsTheStandardWhilePreviewIsStillLive(program: ChannelID) {
         withPreferences { defaults in
-            let show = ShowCoordinator(programOutput: ProgramOutputManager(sinks: []))
+            let show = TestHardware.makeShow(programOutput: ProgramOutputManager(sinks: []))
             defer { show.stopShow() }
             let a = show.channelA, b = show.addChannel(.b)
             a.sessionStopRunningForTesting = {}; b.sessionStopRunningForTesting = {}
@@ -116,7 +116,7 @@ struct ShowStandardLifecycleTests {
 
     @Test func aStartingPreviewKeepsTheShowStandardUntilItsStartIsRetired() {
         withPreferences { defaults in
-            let show = ShowCoordinator(programOutput: ProgramOutputManager(sinks: []))
+            let show = TestHardware.makeShow(programOutput: ProgramOutputManager(sinks: []))
             defer { show.stopShow() }
             show.channelA.sessionStopRunningForTesting = {}
             show.channelA.setRunningForTesting(true)
@@ -135,7 +135,7 @@ struct ShowStandardLifecycleTests {
 
     @Test func stoppingEveryChannelLetsTheNextShowUseTheNewPreference() {
         withPreferences { defaults in
-            let show = ShowCoordinator(programOutput: ProgramOutputManager(sinks: []))
+            let show = TestHardware.makeShow(programOutput: ProgramOutputManager(sinks: []))
             defer { show.stopShow() }
             show.channelA.sessionStopRunningForTesting = {}
             let b = show.addChannel(.b); b.sessionStopRunningForTesting = {}
@@ -151,7 +151,7 @@ struct ShowStandardLifecycleTests {
 
     @Test func releasingALiveShowReleasesItsFormatOwnership() {
         withPreferences { _ in
-            var show: ShowCoordinator? = ShowCoordinator(programOutput: ProgramOutputManager(sinks: []))
+            var show: ShowCoordinator? = TestHardware.makeShow(programOutput: ProgramOutputManager(sinks: []))
             show?.channelA.setStartingForTesting(true)
             #expect(ShowStandard.activeSession == .p50)
             show = nil
