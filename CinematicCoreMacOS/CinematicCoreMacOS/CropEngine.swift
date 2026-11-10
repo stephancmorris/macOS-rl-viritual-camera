@@ -678,21 +678,6 @@ final class CropEngine: ObservableObject {
         let dt = CGFloat(min(now - lastInterpolationTime, 0.1)) // Cap dt at 100ms
         lastInterpolationTime = now
         
-        if zoomHeight != nil {
-            let omega = sqrt(CGFloat(effectiveSmoothing) * 600)
-            func spring(_ x: CGFloat, _ target: CGFloat, _ velocity: inout CGFloat) -> CGFloat {
-                let offset = x - target
-                let c = velocity + omega * offset
-                let decay = exp(-omega * dt)
-                velocity = (velocity - omega * c * dt) * decay
-                return target + (offset + c * dt) * decay
-            }
-            let x = spring(currentCrop.origin.x, targetCrop.origin.x, &velocityOrigin.x)
-            let y = spring(currentCrop.origin.y, targetCrop.origin.y, &velocityOrigin.y)
-            currentCrop = CropRect(origin: CGPoint(x: x, y: y), size: currentCrop.size).clamped()
-            return
-        }
-
         // Map transitionSmoothing (0.05 to 0.30) to a spring stiffness.
         // Higher value = stiffer spring = faster snap.
         //
@@ -709,30 +694,26 @@ final class CropEngine: ObservableObject {
         // k=120 snappiest); band exits additionally run the
         // fastFramingTransition window (see CameraManager).
         let stiffness = CGFloat(effectiveSmoothing) * 600.0
-        let damping = 2.0 * sqrt(stiffness) // Critically damped
-        
-        // Spring physics: acceleration = (target - current) * stiffness - velocity * damping
-        
-        // Origin X
-        let accX = (targetCrop.origin.x - currentCrop.origin.x) * stiffness - velocityOrigin.x * damping
-        velocityOrigin.x += accX * dt
-        let newX = currentCrop.origin.x + velocityOrigin.x * dt
-        
-        // Origin Y
-        let accY = (targetCrop.origin.y - currentCrop.origin.y) * stiffness - velocityOrigin.y * damping
-        velocityOrigin.y += accY * dt
-        let newY = currentCrop.origin.y + velocityOrigin.y * dt
-        
-        // Size Width
-        let accW = (targetCrop.size.width - currentCrop.size.width) * stiffness - velocitySize.width * damping
-        velocitySize.width += accW * dt
-        let newW = currentCrop.size.width + velocitySize.width * dt
-        
-        // Size Height
-        let accH = (targetCrop.size.height - currentCrop.size.height) * stiffness - velocitySize.height * damping
-        velocitySize.height += accH * dt
-        let newH = currentCrop.size.height + velocitySize.height * dt
-        
+        let omega = sqrt(stiffness)
+        let decay = exp(-omega * dt)
+        // Exact critical-spring step: unlike Euler integration, a long frame
+        // cannot invert/amplify the damping term. Zoom tracking uses this too.
+        func spring(_ x: CGFloat, _ target: CGFloat, _ velocity: inout CGFloat) -> CGFloat {
+            let offset = x - target
+            let c = velocity + omega * offset
+            velocity = (velocity - omega * c * dt) * decay
+            return target + (offset + c * dt) * decay
+        }
+
+        let newX = spring(currentCrop.origin.x, targetCrop.origin.x, &velocityOrigin.x)
+        let newY = spring(currentCrop.origin.y, targetCrop.origin.y, &velocityOrigin.y)
+        if zoomHeight != nil {
+            currentCrop = CropRect(origin: CGPoint(x: newX, y: newY), size: currentCrop.size).clamped()
+            return
+        }
+        let newW = spring(currentCrop.size.width, targetCrop.size.width, &velocitySize.width)
+        let newH = spring(currentCrop.size.height, targetCrop.size.height, &velocitySize.height)
+
         currentCrop = CropRect(
             origin: CGPoint(x: newX, y: newY),
             size: CGSize(width: newW, height: newH)
