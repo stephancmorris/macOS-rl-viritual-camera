@@ -116,6 +116,8 @@ nonisolated final class FaceSignatureExtractor: @unchecked Sendable {
                     }
 
                     let request = VNGenerateImageFeaturePrintRequest()
+                    // Pin the macOS 26.2 revision: ShotComposer's identity distance thresholds depend on it.
+                    request.revision = VNGenerateImageFeaturePrintRequestRevision2
                     let handler = VNImageRequestHandler(cgImage: cgImage, options: [:])
 
                     do {

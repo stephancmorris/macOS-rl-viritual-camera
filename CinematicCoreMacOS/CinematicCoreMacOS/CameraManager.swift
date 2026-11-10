@@ -2124,7 +2124,10 @@ final class CameraManager: NSObject, ObservableObject {
                 interval: DeveloperFlags.detectionFrameInterval
             )
         }
-        let detectionPlan = currentDetectionPlan(detectionRunsThisFrame: detectionDue)
+        var detectionPlan = currentDetectionPlan(detectionRunsThisFrame: detectionDue)
+        if shotComposer.manualLockedTargetID != nil {
+            detectionPlan.referenceBox = lastSubjectROIBox ?? shotComposer.currentTrackedBounds
+        }
         // The diagnostics CSV starts on the first processed frame, so runs with
         // detection off (Auto Pan, Manual, an unlocked wide shot) are recorded
         // too — PAN-HITCH compares exactly those against detection-on runs.
