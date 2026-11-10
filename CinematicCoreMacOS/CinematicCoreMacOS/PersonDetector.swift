@@ -461,6 +461,76 @@ final class PersonDetector: ObservableObject {
         return detectedPersons
     }
     
+    // MARK: - Census (world model, C-01 path 2)
+
+    /// One box from a census scan. Not a track: the world model matches
+    /// boxes to its own rows.
+    nonisolated struct CensusBox: Equatable, Sendable {
+        let box: CGRect
+        let confidence: Float
+    }
+
+    /// The census has its own request, so it never changes the region or the
+    /// results the tracking requests carry between runs. Touched only on
+    /// `processingQueue`.
+    nonisolated(unsafe) private let censusRectRequest: VNDetectHumanRectanglesRequest = {
+        let req = VNDetectHumanRectanglesRequest()
+        req.upperBodyOnly = false
+        return req
+    }()
+
+    #if DEBUG
+    /// Synthetic census result for tests; replaces the Vision call only.
+    var censusVisionForTesting: (@Sendable () -> [CensusBox])?
+
+    /// Test seam: feed boxes through the real tracker, as a tracking run would.
+    func trackForTesting(_ boxes: [CGRect], timestamp: TimeInterval) {
+        updateTracking(rectObservations: boxes.map { VNHumanObservation(boundingBox: $0) },
+                       poseObservations: [], faceObservations: [], timestamp: timestamp)
+    }
+    #endif
+
+    /// A full-frame box scan for the world model. Pose and faces stay off.
+    /// It reads nothing from and writes nothing to the tracker, the published
+    /// detections, the stats or the lock probation, and it is not cut to
+    /// `maxPersons`. It runs on the detector's own serial queue, so it never
+    /// overlaps a tracking run on this camera.
+    func census(_ pixelBuffer: CVPixelBuffer) async -> [CensusBox] {
+        let threshold = config.confidenceThreshold
+        let highAccuracy = config.useHighAccuracy
+        #if DEBUG
+        let synthetic = censusVisionForTesting
+        #else
+        let synthetic: (@Sendable () -> [CensusBox])? = nil
+        #endif
+        let source = SendablePixelBuffer(value: pixelBuffer)
+        return await withCheckedContinuation { continuation in
+            processingQueue.async { [self] in
+                autoreleasepool {
+                    if let synthetic {
+                        continuation.resume(returning: synthetic())
+                        return
+                    }
+                    self.censusRectRequest.revision = highAccuracy
+                        ? VNDetectHumanRectanglesRequestRevision2 : VNDetectHumanRectanglesRequestRevision1
+                    self.censusRectRequest.regionOfInterest = CGRect(x: 0, y: 0, width: 1, height: 1)
+                    let handler = VNImageRequestHandler(
+                        cvPixelBuffer: self.downscaledForDetection(source.value), orientation: .up, options: [:])
+                    do {
+                        try handler.perform([self.censusRectRequest])
+                        let boxes = (self.censusRectRequest.results ?? [])
+                            .filter { $0.confidence >= threshold }
+                            .map { CensusBox(box: $0.boundingBox, confidence: $0.confidence) }
+                        continuation.resume(returning: boxes)
+                    } catch {
+                        Self.logger.error("Census detection error: \(error.localizedDescription, privacy: .public)")
+                        continuation.resume(returning: [])
+                    }
+                }
+            }
+        }
+    }
+
     /// Diagnostic A/B hook: drop Core Image's caches for the detection
     /// downscaler. NOT the memory fix — the downscale context is created with
     /// `.cacheIntermediates: false` (see `downscaleContext`), so it should no
