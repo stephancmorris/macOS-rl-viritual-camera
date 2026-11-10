@@ -35,7 +35,8 @@ struct FreshOnlyComposeTests {
     /// The crop on every frame of a six-second take.
     private func picture(freshOnly: Bool, preset: ShotComposer.Config.ShotPreset, motion: FreshOnlyMotion,
                          fps: Double, detectionInterval: Int,
-                         changePresetAtFrame: Int? = nil, composeOnCommand: Bool = false) throws -> [CropEngine.CropRect] {
+                         changePresetAtFrame: Int? = nil, composeOnCommand: Bool = false,
+                         zoomAtFrame: Int? = nil, composeWhileZoomMoves: Bool = false) throws -> [CropEngine.CropRect] {
         let composer = ShotComposer()
         composer.config.cinematicFormat = .stage
         composer.config.shotPreset = preset
@@ -50,12 +51,24 @@ struct FreshOnlyComposeTests {
         var latestTime = 0.0
         var lastTrackingCrop: CropEngine.CropRect?
         var crops: [CropEngine.CropRect] = []
+        var lastZoomHeight: CGFloat?
+        engine.zoomUsesTopAnchor = true
         for frame in 0..<Int(fps * 6) {
             let now = 100 + Double(frame) / fps
             let fresh = frame % detectionInterval == 0
             // Path 2 as specified composes on fresh detections only. The variant
             // also composes on the frame a framing command lands.
+            // A push-in, as CameraManager.advanceShotMove steps it: every frame,
+            // before composing, the engine moves the size and tells the composer.
+            if frame == zoomAtFrame { engine.beginZoom(.pushIn, to: 0.3) }
+            if let zoomAtFrame, frame >= zoomAtFrame {
+                engine.advanceZoom(now: now, aspect: composer.normalizedAspect)
+                composer.setVisibleZoomHeight(engine.adjustedHeight)
+            }
+            let zoomMoved = engine.adjustedHeight != lastZoomHeight
+            lastZoomHeight = engine.adjustedHeight
             let composes = fresh || !freshOnly || (composeOnCommand && frame == changePresetAtFrame)
+                || (composeWhileZoomMoves && zoomMoved)
             if frame == changePresetAtFrame {
                 // An operator preset change, as the command path applies it.
                 composer.config.shotPreset = preset == .waistUp ? .fullBody : .waistUp
@@ -146,5 +159,23 @@ struct FreshOnlyComposeTests {
                                   changePresetAtFrame: 151, composeOnCommand: true)
         let worst = largestDifference(today, variant)
         #expect(worst.value < 1e-9, "largest crop difference \(worst.value) at frame \(worst.frame)")
+    }
+
+    /// A push-in changes the composer's input on every frame, not only when a
+    /// detection arrives. This records what fresh-only composing does to a
+    /// walking subject during the move, and shows that composing on the frames
+    /// where the move changed the size gives today's picture.
+    @Test func aZoomMoveNeedsComposingOnTheFramesItMoves() throws {
+        let today = try picture(freshOnly: false, preset: .fullBody, motion: .walk, fps: 50, detectionInterval: 2, zoomAtFrame: 101)
+        let freshOnly = try picture(freshOnly: true, preset: .fullBody, motion: .walk, fps: 50, detectionInterval: 2, zoomAtFrame: 101)
+        let variant = try picture(freshOnly: true, preset: .fullBody, motion: .walk, fps: 50, detectionInterval: 2,
+                                  zoomAtFrame: 101, composeWhileZoomMoves: true)
+        let differing = zip(today, freshOnly).enumerated().filter { $0.element.0 != $0.element.1 }.map(\.offset)
+        let worst = largestDifference(today, freshOnly)
+        print("FRESH-ONLY-GATE zoom move: differing frames=\(differing.count) first=\(differing.first ?? -1) last=\(differing.last ?? -1) largest=\(worst.value) at=\(worst.frame) moved=\(today[100].size.height)->\(today[today.count - 1].size.height)")
+        // The move really happened.
+        #expect(today[today.count - 1].size.height < today[100].size.height - 0.01)
+        let fixed = largestDifference(today, variant)
+        #expect(fixed.value < 1e-9, "largest crop difference \(fixed.value) at frame \(fixed.frame)")
     }
 }
