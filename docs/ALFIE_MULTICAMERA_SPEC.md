@@ -54,7 +54,7 @@ The engine work units exist in code with unit tests; none has run on two real ca
 | `CHANNEL-CMD` | `OperatorCommand.Target.channel(ChannelID)`, `ShowCoordinator.makeCommand/dispatch` | Control target + revision; Program needs Edit Live; target changes cancel pending gestures only. |
 | `ROUTER` | `ProgramRouter.swift` | Router-owned ports; monotonic host-clock output timestamps; route-generation stamp at frame start; 0.5 s → labelled 2 s hold → black standby; destination frozen per show (no mid-show fallback). |
 | `DEVICES` | `CaptureDeviceRegistry.swift` | Exclusive leases; no substitute for a missing selection; start/stop on a per-channel serial queue; hot unplug → source missing, explicit `reconnectSource()`. |
-| `SCHEDULER` | `FrameWorkScheduler.swift` | One render + one perception slot, latest-only per channel, Program streak ≤ 2 while Preview waits. |
+| `SCHEDULER` | `FrameWorkScheduler.swift` | One render slot per channel (each `CropEngine` has its own render queue and filter) and one shared perception slot; latest-only per channel; Program streak ≤ 2 while Preview waits for perception. |
 | `ADMISSION` | `MultiInputAdmission.swift` | Fingerprinted records; unknown → trial only; unsupported names the bottleneck; certified only via MULTI-QA. |
 | `TAKE` | `ProgramTake.swift`, `ShowCoordinator.take`, `ProgramRouter.commitTake` | Validated at the click; commits on sink acceptance; route-generation-bound requests + 0.5 s guard stop double-click bounce. Output is capture-paced, so validation and commit happen in one MainActor turn. |
 

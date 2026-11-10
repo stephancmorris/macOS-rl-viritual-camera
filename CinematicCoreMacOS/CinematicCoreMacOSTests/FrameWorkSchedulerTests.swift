@@ -30,44 +30,68 @@ struct FrameWorkSchedulerTests {
 
     @Test func secondChannelWaitsUntilRelease() async {
         let scheduler = FrameWorkScheduler()
-        let first = await scheduler.acquire(.render, for: .a)!
-        let waiter = Task { await scheduler.acquire(.render, for: .b) }
+        let first = await scheduler.acquire(.perception, for: .a)!
+        let waiter = Task { await scheduler.acquire(.perception, for: .b) }
         await settle()
-        #expect(scheduler.waitingChannels(.render) == [.b])
+        #expect(scheduler.waitingChannels(.perception) == [.b])
         scheduler.release(first)
         let granted = await waiter.value
         #expect(granted?.channel == .b)
-        #expect(scheduler.runningPermit(.render) == granted)
+        #expect(scheduler.runningPermit(.perception) == granted)
     }
 
-    @Test func newerRequestSupersedesTheOlderOneFromTheSameChannel() async {
+    /// Same-kind requests from one camera supersede each other. Perception
+    /// waits behind another camera's job; render waits behind its own.
+    @Test(arguments: [FrameWorkScheduler.WorkClass.render, .perception])
+    func newerRequestSupersedesTheOlderOneFromTheSameChannel(workClass: FrameWorkScheduler.WorkClass) async {
         let scheduler = FrameWorkScheduler()
-        let running = await scheduler.acquire(.render, for: .a)!
-        let older = Task { await scheduler.acquire(.render, for: .b) }
+        let running = await scheduler.acquire(workClass, for: workClass == .render ? .b : .a)!
+        let older = Task { await scheduler.acquire(workClass, for: .b) }
         await settle()
-        let newer = Task { await scheduler.acquire(.render, for: .b) }
+        let newer = Task { await scheduler.acquire(workClass, for: .b) }
         await settle()
         #expect(await older.value == nil)
-        #expect(scheduler.waitingChannels(.render) == [.b])   // bounded: one waiter per channel
+        #expect(scheduler.waitingChannels(workClass) == [.b])   // bounded: one waiter per channel
         scheduler.release(running)
         #expect(await newer.value?.channel == .b)
         #expect(scheduler.stats[.b]?.superseded == 1)
     }
 
+    @Test func renderSlotsArePerCamera() async {
+        let scheduler = FrameWorkScheduler()
+        let a = await scheduler.acquire(.render, for: .a)!
+        // Another camera's render never waits behind this one.
+        let b = await scheduler.acquire(.render, for: .b)
+        #expect(b?.channel == .b)
+        #expect(scheduler.runningPermit(.render, for: .a) == a)
+        #expect(scheduler.runningPermit(.render, for: .b) == b)
+        #expect(scheduler.waitingChannels(.render).isEmpty)
+        // The same camera still renders one frame at a time.
+        let second = Task { await scheduler.acquire(.render, for: .a) }
+        await settle()
+        #expect(scheduler.waitingChannels(.render) == [.a])
+        scheduler.release(a)
+        let next = await second.value
+        #expect(next?.channel == .a)
+        if let next { scheduler.release(next) }
+        if let b { scheduler.release(b) }
+        #expect(scheduler.runningPermit(.render) == nil)
+    }
+
     @Test func previewIsServedWithinTwoProgramSelections() async {
         let scheduler = FrameWorkScheduler()
         scheduler.isProgram = { $0 == .a }
-        var current = await scheduler.acquire(.render, for: .a)!
-        let preview = Task { await scheduler.acquire(.render, for: .b) }
+        var current = await scheduler.acquire(.perception, for: .a)!
+        let preview = Task { await scheduler.acquire(.perception, for: .b) }
         var programSelections = 0
         var previewPermit: FrameWorkScheduler.Permit?
         for _ in 0..<5 {
             // Program always has fresh work waiting too.
-            let program = Task { await scheduler.acquire(.render, for: .a) }
+            let program = Task { await scheduler.acquire(.perception, for: .a) }
             await settle()
             scheduler.release(current)
             await settle()
-            if let running = scheduler.runningPermit(.render), running.channel == .b {
+            if let running = scheduler.runningPermit(.perception), running.channel == .b {
                 previewPermit = running
                 // Hand the slot back so Program's waiting request completes.
                 scheduler.release(running)
@@ -99,12 +123,12 @@ struct FrameWorkSchedulerTests {
 
     @Test func cancellingAChannelDropsOnlyItsWaitingRequest() async {
         let scheduler = FrameWorkScheduler()
-        let running = await scheduler.acquire(.render, for: .a)!
-        let b = Task { await scheduler.acquire(.render, for: .b) }
+        let running = await scheduler.acquire(.perception, for: .a)!
+        let b = Task { await scheduler.acquire(.perception, for: .b) }
         await settle()
         scheduler.cancelWaiting(for: .b)
         #expect(await b.value == nil)
-        #expect(scheduler.runningPermit(.render) == running)   // running job not pre-empted
+        #expect(scheduler.runningPermit(.perception) == running)   // running job not pre-empted
         #expect(scheduler.stats[.b]?.cancelled == 1)
     }
 
@@ -122,7 +146,8 @@ struct FrameWorkSchedulerTests {
         #expect(render != nil && perception != nil)
     }
 
-    @Test(arguments: [FrameWorkScheduler.WorkClass.render, .perception], ["idle", "uncontended", "roles", "cancel"])
+    /// Program priority only exists where cameras share a slot: perception.
+    @Test(arguments: [FrameWorkScheduler.WorkClass.perception], ["idle", "uncontended", "roles", "cancel"])
     func newContentionUsesTheCurrentProgramsPriority(workClass: FrameWorkScheduler.WorkClass, reset: String) async {
         let scheduler = FrameWorkScheduler()
         var running = await scheduler.acquire(workClass, for: .a)!
