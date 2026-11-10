@@ -48,6 +48,12 @@ final class ShowCoordinator: ObservableObject {
     /// `refreshWorldModel()`; deliberately not published.
     var worldModel = WorldModel()
 
+    /// Census bookkeeping (C-01 path 2): at most one census in flight per
+    /// camera, when each camera's last one started, and plain counters.
+    var censusInFlight: [ChannelID: Task<Bool, Never>] = [:]
+    var lastCensusStartedAt: [ChannelID: TimeInterval] = [:]
+    var censusStats = WorldModel.CensusStats()
+
     var channelA: CameraManager { channels[.a]! }
 
     /// Single Cam, Multi Cam or Webcam (MODES-SPEC). Every channel's composer

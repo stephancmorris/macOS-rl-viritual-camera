@@ -95,6 +95,12 @@ nonisolated struct WorldModel: Equatable, Sendable {
         var id: UUID { track }
     }
 
+    /// Everyone a full-frame census found on one camera.
+    struct Census: Equatable, Sendable {
+        var observedAt: TimeInterval
+        var people: [Person]
+    }
+
     struct Camera: Equatable, Sendable {
         var sourceGeneration: UInt64
         var role: Role
@@ -107,6 +113,10 @@ nonisolated struct WorldModel: Equatable, Sendable {
         var people: [Person]
         var crop: CGRect
         var minimumCropHeight: Double
+        /// The newest full-frame census of this camera, if one was taken
+        /// (C-01 path 2). Kept beside the camera's own scan, never merged
+        /// into it.
+        var census: Census? = nil
 
         /// How many times tighter the crop may still go before the quality
         /// floor stops it. nil when the floor is unconstrained.
@@ -145,7 +155,46 @@ nonisolated struct WorldModel: Equatable, Sendable {
             sourceGeneration: reading.sourceGeneration, role: role, isRunning: reading.isRunning,
             sourceMissing: reading.sourceMissing, lockPhase: reading.lockPhase,
             coverage: observation?.coverage ?? .none, observedAt: observation?.observedAt,
-            people: people, crop: reading.crop, minimumCropHeight: reading.minimumCropHeight)
+            people: people, crop: reading.crop, minimumCropHeight: reading.minimumCropHeight,
+            census: reading.isRunning && !reading.sourceMissing ? previous?.census : nil)
+    }
+
+    /// The least overlap (intersection over union) for a census box to be
+    /// the same person as a row the table already has.
+    static let censusMatchOverlap: CGFloat = 0.3
+
+    /// Store a full-frame census of one camera. Boxes are matched by overlap
+    /// to people the table already knows on that camera (the camera's own
+    /// scan first, then the previous census); the rest get new IDs. The
+    /// camera's own rows are not changed. Returns false, and stores nothing,
+    /// when the row is missing, stopped, or from another source generation.
+    @discardableResult
+    mutating func recordCensus(_ boxes: [PersonDetector.CensusBox], on channel: ChannelID,
+                               sourceGeneration: UInt64, observedAt: TimeInterval) -> Bool {
+        guard var camera = cameras[channel], camera.sourceGeneration == sourceGeneration,
+              camera.isRunning, !camera.sourceMissing else { return false }
+        var known = camera.people
+        for person in camera.census?.people ?? [] where !known.contains(where: { $0.track == person.track }) {
+            known.append(person)
+        }
+        let lockTrack = camera.people.first(where: \.isLockSubject)?.track
+        var used = Set<UUID>()
+        var people: [Person] = []
+        for sighting in boxes.sorted(by: { $0.confidence > $1.confidence }) {
+            let match = known
+                .filter { !used.contains($0.track) }
+                .map { (person: $0, overlap: PersonDetector.iou($0.box, sighting.box)) }
+                .filter { $0.overlap >= Self.censusMatchOverlap }
+                .max { $0.overlap < $1.overlap }?.person
+            let track = match?.track ?? UUID()
+            used.insert(track)
+            people.append(Person(track: track, box: sighting.box, confidence: sighting.confidence,
+                                 firstSeen: match?.firstSeen ?? observedAt, lastSeen: observedAt,
+                                 isLockSubject: track == lockTrack))
+        }
+        camera.census = Census(observedAt: observedAt, people: people)
+        cameras[channel] = camera
+        return true
     }
 
     /// Drop a slot's row: the slot has no camera.
@@ -182,15 +231,31 @@ nonisolated struct WorldModel: Equatable, Sendable {
         guard let camera = cameras[channel] else { return .unknown(.notAssigned) }
         if camera.sourceMissing { return .unknown(.sourceMissing) }
         guard camera.isRunning else { return .unknown(.notObserved) }
-        switch camera.coverage {
-        case .none: return .unknown(.notObserved)
-        case .region(let region): return .unknown(.partialView(region))
-        case .fullFrame: break
+        // The camera's own scan answers when it covered the full frame.
+        // Otherwise a census of this camera does. Either must be fresh.
+        var people: [Person]?
+        var staleAge: TimeInterval?
+        func consider(_ candidates: [Person], observedAt: TimeInterval) {
+            guard people == nil else { return }
+            let age = now - observedAt
+            if age.isFinite, age >= 0, age <= maximumAge {
+                people = candidates
+            } else {
+                staleAge = staleAge.map { min($0, age) } ?? age
+            }
         }
-        guard let observedAt = camera.observedAt else { return .unknown(.notObserved) }
-        let age = now - observedAt
-        guard age.isFinite, age >= 0, age <= maximumAge else { return .unknown(.stale(age: age)) }
-        let ordered = camera.people.sorted {
+        if camera.coverage == .fullFrame, let observedAt = camera.observedAt {
+            consider(camera.people, observedAt: observedAt)
+        }
+        if let census = camera.census {
+            consider(census.people, observedAt: census.observedAt)
+        }
+        guard let people else {
+            if let staleAge { return .unknown(.stale(age: staleAge)) }
+            if case .region(let region) = camera.coverage { return .unknown(.partialView(region)) }
+            return .unknown(.notObserved)
+        }
+        let ordered = people.sorted {
             side == .left ? $0.box.midX < $1.box.midX : $0.box.midX > $1.box.midX
         }
         guard let first = ordered.first else { return .nobody }

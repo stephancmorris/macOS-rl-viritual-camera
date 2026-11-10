@@ -1224,6 +1224,8 @@ final class CameraManager: NSObject, ObservableObject {
     #if DEBUG
     /// Test seam: lets unit tests exercise command admission without a camera.
     func setRunningForTesting(_ running: Bool) { isRunning = running }
+    /// Test seam: the frame a census scans, without a capture session.
+    var censusFrameForTesting: CVPixelBuffer?
     /// Test seam: discovery results as if `discoverCameras()` had run.
     func setAvailableCamerasForTesting(_ cameras: [CameraDevice]) { availableCameras = cameras }
     /// Raw synthetic perception only. Actual subject, revisions, geometry,
