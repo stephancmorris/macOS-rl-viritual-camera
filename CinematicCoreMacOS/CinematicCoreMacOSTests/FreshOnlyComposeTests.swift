@@ -51,13 +51,14 @@ struct FreshOnlyComposeTests {
         var latestTime = 0.0
         var lastTrackingCrop: CropEngine.CropRect?
         var crops: [CropEngine.CropRect] = []
-        var lastZoomHeight: CGFloat?
+        // The frame path's own rule (`ComposeRule`), not a copy of it.
+        var rule = ComposeRule()
         engine.zoomUsesTopAnchor = true
         for frame in 0..<Int(fps * 6) {
             let now = 100 + Double(frame) / fps
             let fresh = frame % detectionInterval == 0
-            // Path 2 as specified composes on fresh detections only. The variant
-            // also composes on the frame a framing command lands.
+            // Path 2 as first specified composes on fresh detections only. The
+            // variants add the rule's other two triggers.
             // A push-in, as CameraManager.advanceShotMove steps it: every frame,
             // before composing, the engine moves the size and tells the composer.
             if frame == zoomAtFrame { engine.beginZoom(.pushIn, to: 0.3) }
@@ -65,15 +66,18 @@ struct FreshOnlyComposeTests {
                 engine.advanceZoom(now: now, aspect: composer.normalizedAspect)
                 composer.setVisibleZoomHeight(engine.adjustedHeight)
             }
-            let zoomMoved = engine.adjustedHeight != lastZoomHeight
-            lastZoomHeight = engine.adjustedHeight
-            let composes = fresh || !freshOnly || (composeOnCommand && frame == changePresetAtFrame)
-                || (composeWhileZoomMoves && zoomMoved)
             if frame == changePresetAtFrame {
                 // An operator preset change, as the command path applies it.
                 composer.config.shotPreset = preset == .waistUp ? .fullBody : .waistUp
                 composer.reapplyFraming()
             }
+            // Each variant switches one trigger of the rule off by withholding
+            // its input; "today" composes on every frame regardless.
+            let ruleComposes = rule.composes(
+                freshDetection: fresh,
+                framingChangePending: composeOnCommand && composer.framingChangePending,
+                zoomHeight: composeWhileZoomMoves ? engine.adjustedHeight : nil)
+            let composes = !freshOnly || ruleComposes
             if fresh {
                 latestTime = now
                 latest = motion.centreX(at: now - 100).map {

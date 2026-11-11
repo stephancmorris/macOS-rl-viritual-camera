@@ -22,7 +22,7 @@ final class CropEngine: ObservableObject {
 
     // MARK: - Configuration
 
-    struct Config: Sendable {
+    nonisolated struct Config: Sendable, Equatable {
         /// Output resolution (default: 1920x1080 for ATEM)
         var outputSize: CGSize = CGSize(width: 1920, height: 1080)
 
@@ -35,271 +35,163 @@ final class CropEngine: ObservableObject {
         var useHighQuality: Bool = true
     }
 
+    /// The motion state itself: target, spring, zoom, pan and quality floor
+    /// (D-02 path 2). A plain class with its own lock, so a camera's capture
+    /// queue steps it per frame without the main thread. Everything below
+    /// that reads or moves the crop forwards to it.
+    nonisolated let motion = CropMotionCore()
+
     /// Operator settings. Published for the settings forms, so the frame path
     /// must not write it per frame; see `applyFrameSmoothing`.
-    @Published var config = Config()
+    @Published var config = Config() {
+        didSet { motion.settings = config }
+    }
 
     /// Smoothing for the current frame, chosen by the frame path (fast-framing
     /// boost, ML agent, or the operator's setting). Plain storage: it changes
     /// at capture rate, and a publish per frame would also overwrite the Crop
     /// Settings slider. Nil uses `config.transitionSmoothing`.
-    var liveSmoothing: Float?
-
-    private var effectiveSmoothing: Float { liveSmoothing ?? config.transitionSmoothing }
+    var liveSmoothing: Float? {
+        get { motion.liveSmoothing }
+        set { motion.liveSmoothing = newValue }
+    }
 
     /// Frame-path entry: set this frame's smoothing and mirror the operator's
     /// setting into `config` only when that setting changed.
     func applyFrameSmoothing(_ live: Float, operatorSetting: Float) {
-        liveSmoothing = live
+        motion.liveSmoothing = live
         if config.transitionSmoothing != operatorSetting { config.transitionSmoothing = operatorSetting }
     }
 
-    // MARK: - State
+    // MARK: - State (read through to the motion core)
 
-    /// Current crop rectangle (normalized 0-1 coordinates). Plain per-frame
-    /// storage — written every interpolation tick; logic readers (CameraManager,
-    /// training recorder, ML agent) read this. UI reads the 15 Hz
-    /// `displayedCrop` mirror.
-    private(set) var currentCrop: CropRect = .fullFrame {
-        didSet { cropStateRevision &+= 1 }
-    }
+    /// Current crop rectangle (normalized 0-1 coordinates). Logic readers
+    /// (CameraManager, training recorder, ML agent) read this. UI reads the
+    /// 15 Hz `displayedCrop` mirror.
+    var currentCrop: CropRect { motion.currentCrop }
 
-    /// Target crop rectangle (where we're smoothly transitioning to).
-    ///
-    /// Every assignment is clamped against `qualityFloor` so no caller — ML
-    /// agent, rule-based composer, manual crop, or auto-pan — can request a
-    /// crop tighter than the floor. This is the single chokepoint all four
-    /// modes pass through. Plain per-frame storage (reassigned on every
-    /// accepted compose frame) — never published.
-    var targetCrop: CropRect = .fullFrame {
-        didSet {
-            cropStateRevision &+= 1
-            // Automatically start interpolating. Compare-before-write:
-            // an unguarded write here would fire an extra objectWillChange
-            // per frame even though the value is already true.
-            if !isInterpolating { isInterpolating = true }
-        }
+    /// Target crop rectangle (where the spring is heading). Assigning it
+    /// directly skips the quality floor; use `setTargetCrop`.
+    var targetCrop: CropRect {
+        get { motion.targetCrop }
+        set { motion.targetCrop = newValue; syncMirrors() }
     }
 
     /// 15 Hz UI mirror of `currentCrop` for the crop-indicator overlay
     /// (see `publishDisplayMirror`).
     @Published private(set) var displayedCrop: CropRect?
 
-    /// Bumped on every per-frame crop write; the 15 Hz coalescer republishes
-    /// the mirror only when it moved.
-    private var cropStateRevision: UInt64 = 0
+    /// Published copy of the core's flags. The core changes them on the
+    /// capture queue; this copy is refreshed after every main-thread call and
+    /// by the 15 Hz mirror timer, so views observing the engine redraw. Logic
+    /// reads the properties below, which always return the core's value.
+    @Published private(set) var motionFlags = CropMotionCore.Flags()
+
+    var hasZoomAdjustment: Bool { motion.currentFlags.hasZoomAdjustment }
+    var isZoomLimited: Bool { motion.currentFlags.isZoomLimited }
+    var zoomDirection: OperatorCommand.ZoomDirection? { motion.currentFlags.zoomDirection }
+    /// Whether the spring is still moving toward the target.
+    var isInterpolating: Bool { motion.currentFlags.isInterpolating }
+
     private var publishedCropStateRevision: UInt64 = 0
     private var displayMirrorTimer: Timer?
 
+    private func syncMirrors() {
+        let flags = motion.currentFlags
+        if motionFlags != flags { motionFlags = flags }
+    }
+
     private func publishDisplayMirror() {
-        guard publishedCropStateRevision != cropStateRevision else { return }
-        publishedCropStateRevision = cropStateRevision
-        displayedCrop = currentCrop
+        syncMirrors()
+        let revision = motion.revision
+        if publishedCropStateRevision != revision {
+            publishedCropStateRevision = revision
+            displayedCrop = motion.currentCrop
+        }
+        let now = CACurrentMediaTime()
+        if now - lastStatsPublish >= statsPublishInterval {
+            lastStatsPublish = now
+            let latest = motion.renderStats
+            if stats != latest { stats = latest }
+        }
     }
 
     /// Resolution-derived quality floor. Updated from the *actual delivered*
     /// frame resolution (not the advertised capture format). Defaults to
     /// `.unconstrained` until the first frame sets it.
-    var qualityFloor: QualityFloor = .unconstrained
-
-    /// Assign `targetCrop` with the quality floor applied. Use this instead of
-    /// setting `targetCrop` directly so over-tight crops are enlarged back to
-    /// the floor (re-centered) before interpolation.
-    ///
-    /// Identical targets are dropped: the frame path re-sends the composed
-    /// crop every frame, and re-assigning an unchanged target would restart
-    /// interpolation bookkeeping (`isInterpolating`, timers) for no motion —
-    /// churn the crop rectangle's stability doesn't need.
-    func setTargetCrop(_ crop: CropRect) {
-        zoomAnchorCrop = crop
-        let sized = zoomHeight.map { resized(crop, height: $0) } ?? crop
-        let floored = sized.clampedToQualityFloor(qualityFloor).clamped()
-        if zoomHeight == nil {
-            let limited = crop.size.height <= qualityFloor.minCropHeightFraction
-            if isZoomLimited != limited { isZoomLimited = limited }
-        }
-        guard floored != targetCrop else { return }
-        targetCrop = floored
+    var qualityFloor: QualityFloor {
+        get { motion.qualityFloor }
+        set { motion.qualityFloor = newValue }
     }
 
-    // Size has its own critically damped, rate-limited log-space motion.
-    // Tracking catch-up stiffness never changes the speed of a shot move.
-    @Published private(set) var hasZoomAdjustment = false
-    @Published private(set) var isZoomLimited = false
-    @Published private(set) var zoomDirection: OperatorCommand.ZoomDirection?
-    private var zoomHeight: CGFloat?
-    private var zoomDestination: CGFloat = 1
-    private var zoomVelocity: CGFloat = 0
-    private var zoomLastTick: TimeInterval?
-    private var zoomAspect: CGFloat = 1
-    private var zoomAnchorCrop: CropRect?
-    private var directorZoom: (trajectory: DirectorShotMoveTrajectory, elapsed: TimeInterval, aspect: CGFloat, floor: CGFloat)?
-    private var deterministicPan = false
-    var zoomUsesTopAnchor = false
-    var adjustedHeight: CGFloat? { zoomHeight }
-    var zoomHasLanded: Bool { zoomHeight != nil && zoomDirection == nil && !hasZoomAdjustment }
+    /// Assign the target with the quality floor applied (see
+    /// `CropMotionCore.setTargetCrop`).
+    func setTargetCrop(_ crop: CropRect) {
+        motion.setTargetCrop(crop)
+        syncMirrors()
+    }
+
+    var zoomUsesTopAnchor: Bool {
+        get { motion.zoomUsesTopAnchor }
+        set { motion.zoomUsesTopAnchor = newValue }
+    }
+    var adjustedHeight: CGFloat? { motion.adjustedHeight }
+    var zoomHasLanded: Bool { motion.zoomHasLanded }
 
     func adoptVisibleSize(from visible: CropRect? = nil) {
-        directorZoom = nil
-        if let visible { currentCrop = visible }
-        zoomHeight = currentCrop.size.height
-        zoomDestination = currentCrop.size.height
-        zoomAspect = currentCrop.size.width / currentCrop.size.height
-        zoomAnchorCrop = currentCrop
-        targetCrop = currentCrop
-        zoomVelocity = 0
-        velocitySize = .zero
-        zoomLastTick = nil
-        hasZoomAdjustment = true
+        motion.adoptVisibleSize(from: visible)
+        syncMirrors()
     }
 
     func beginZoom(_ direction: OperatorCommand.ZoomDirection, to height: CGFloat,
                    visibleCrop: CropRect? = nil) {
-        adoptVisibleSize(from: visibleCrop)
-        zoomDirection = direction
-        let upper = min(1, 1 / zoomAspect)
-        let lower = min(upper, max(0.001, qualityFloor.minCropHeightFraction))
-        zoomDestination = min(upper, max(lower, height))
-        isZoomLimited = height < lower || (direction == .pushIn && zoomDestination <= lower)
+        motion.beginZoom(direction, to: height, visibleCrop: visibleCrop)
+        syncMirrors()
     }
 
-    /// A separate explicit Director path: one adjacent rung, paced in ladder
-    /// steps per second over its actual visible/clamped log-height distance.
-    /// Operator zoom retains its existing velocity and acceleration limits.
     @discardableResult
     func beginDirectorZoom(_ direction: OperatorCommand.ZoomDirection, to height: CGFloat,
                            maximumRate: Double, visibleCrop: CropRect) -> Bool {
-        let aspect = visibleCrop.size.width / visibleCrop.size.height
-        guard aspect.isFinite, aspect > 0, height.isFinite else { return false }
-        let upper = min(1, 1 / aspect)
-        let lower = min(upper, max(0.001, qualityFloor.minCropHeightFraction))
-        let destination = min(upper, max(lower, height))
-        guard visibleCrop.size.height >= lower, visibleCrop.size.height <= upper,
-              let trajectory = DirectorShotMoveTrajectory(originHeight: Double(visibleCrop.size.height),
-                  destinationHeight: Double(destination), maximumRate: maximumRate),
-              (direction == .pushIn ? destination < visibleCrop.size.height : destination > visibleCrop.size.height) else { return false }
-        adoptVisibleSize(from: visibleCrop)
-        zoomDirection = direction
-        zoomDestination = destination
-        directorZoom = (trajectory, 0, aspect, qualityFloor.minCropHeightFraction)
-        isZoomLimited = height < lower
-        return true
+        let began = motion.beginDirectorZoom(direction, to: height, maximumRate: maximumRate, visibleCrop: visibleCrop)
+        syncMirrors()
+        return began
     }
 
     /// Stop at the visible size; a later push/pull starts a fresh shot move.
     func endZoom() {
-        directorZoom = nil
-        guard zoomDirection != nil else { return }
-        zoomDirection = nil
-        zoomDestination = zoomHeight ?? currentCrop.size.height
-        zoomVelocity = 0
+        motion.endZoom()
+        syncMirrors()
     }
 
     func clearZoomAdjustment() {
-        directorZoom = nil
-        zoomHeight = nil
-        zoomDirection = nil
-        zoomVelocity = 0
-        zoomLastTick = nil
-        zoomAnchorCrop = nil
-        hasZoomAdjustment = false
-        isZoomLimited = false
-    }
-
-    private func resized(_ crop: CropRect, height: CGFloat) -> CropRect {
-        let size = CGSize(width: height * zoomAspect, height: height)
-        var center = crop.center
-        if zoomUsesTopAnchor { center.y = crop.origin.y + crop.size.height - height / 2 }
-        return CropRect(center: center, size: size).clamped()
+        motion.clearZoomAdjustment()
+        syncMirrors()
     }
 
     func advanceZoom(now: TimeInterval, aspect: CGFloat) {
-        deterministicPan = false
-        if var move = directorZoom {
-            // A geometry change retires this trajectory at its visible size.
-            // It cannot silently turn a quality-floor update into a fast move.
-            guard now.isFinite, now >= 0, aspect == move.aspect,
-                  qualityFloor.minCropHeightFraction == move.floor,
-                  zoomLastTick.map({ now >= $0 }) ?? true else { endZoom(); return }
-            let delta = min(0.1, max(0, now - (zoomLastTick ?? now)))
-            zoomLastTick = now
-            move.elapsed += delta
-            let height = CGFloat(move.trajectory.height(at: move.elapsed))
-            zoomHeight = height
-            currentCrop = resized(currentCrop, height: height)
-            targetCrop = resized(zoomAnchorCrop ?? targetCrop, height: height)
-            if move.elapsed >= move.trajectory.duration {
-                directorZoom = nil
-                zoomDirection = nil
-                hasZoomAdjustment = false
-            } else { directorZoom = move }
-            return
-        }
-        zoomAspect = max(0.001, aspect)
-        guard var height = zoomHeight else { return }
-        let upper = min(1, 1 / zoomAspect)
-        let lower = min(upper, max(0.001, qualityFloor.minCropHeightFraction))
-        zoomDestination = min(upper, max(lower, zoomDestination))
-        height = min(upper, max(lower, height))
-        var remaining = CGFloat(min(0.1, max(0, now - (zoomLastTick ?? now))))
-        zoomLastTick = now
-        while remaining > 0, zoomDirection != nil {
-            let dt = min(remaining, 1 / 240)
-            let error = log(zoomDestination / height)
-            let acceleration = min(0.36, max(-0.36, error * 100 - zoomVelocity * 20))
-            zoomVelocity = min(0.12, max(-0.12, zoomVelocity + acceleration * dt))
-            let next = min(upper, max(lower, height * exp(zoomVelocity * dt)))
-            if (zoomDestination - height) * (zoomDestination - next) <= 0 ||
-                (abs(error) < 0.00001 && abs(zoomVelocity) < 0.0001) {
-                height = zoomDestination
-                zoomVelocity = 0
-                zoomDirection = nil
-                hasZoomAdjustment = false
-            } else { height = next }
-            remaining -= dt
-        }
-        zoomHeight = height
-        currentCrop = resized(currentCrop, height: height)
-        targetCrop = resized(zoomAnchorCrop ?? targetCrop, height: height)
+        motion.advanceZoom(now: now, aspect: aspect)
+        syncMirrors()
     }
 
     /// Pan position is deterministic; size is advanced separately above.
     func placePan(center: CGPoint, baseSize: CGSize) {
-        if zoomHeight == nil {
-            let limited = baseSize.height <= qualityFloor.minCropHeightFraction
-            if isZoomLimited != limited { isZoomLimited = limited }
-        }
-        let size = zoomHeight.map { CGSize(width: $0 * zoomAspect, height: $0) } ?? baseSize
-        let crop = CropRect(center: center, size: size).clampedToQualityFloor(qualityFloor).clamped()
-        targetCrop = crop
-        currentCrop = crop
-        velocityOrigin = .zero
-        deterministicPan = true
+        motion.placePan(center: center, baseSize: baseSize)
+        syncMirrors()
     }
 
-    /// Whether we're actively interpolating between crops
-    @Published private(set) var isInterpolating: Bool = false
-
-    /// Spring physics state
-    private var velocityOrigin: CGPoint = .zero
-    private var velocitySize: CGSize = .zero
-    private var lastInterpolationTime: TimeInterval = 0
-
-    /// Performance statistics
+    /// Performance statistics, republished from the core at most every
+    /// `statsPublishInterval` so the render loop never invalidates SwiftUI.
     @Published private(set) var stats: Stats = .init()
 
-    struct Stats: Sendable {
+    nonisolated struct Stats: Sendable, Equatable {
         var lastRenderTime: TimeInterval = 0
         var averageRenderTime: TimeInterval = 0
         var totalFramesRendered: Int = 0
     }
 
-    /// Per-frame stats accumulate here (plain storage); the @Published `stats`
-    /// snapshot is republished at most every `statsPublishInterval` so the
-    /// 50 fps render loop doesn't fire SwiftUI invalidations on every frame.
-    private var statsAccumulator: Stats = .init()
     private var lastStatsPublish: TimeInterval = 0
     private let statsPublishInterval: TimeInterval = 0.5
+
 
     // MARK: - Rendering Resources
 
@@ -472,14 +364,15 @@ final class CropEngine: ObservableObject {
     }
 
     // MARK: - Public Methods
+    // MARK: - Public Methods
 
-    /// MainActor-only: advance interpolation toward `targetCrop`, then snapshot
-    /// the values the render needs. Call this from `processFrame` before
-    /// handing off to `renderCrop` so only the GPU work leaves the main thread.
-    @MainActor
+    /// Advance the spring toward the target, then snapshot what a render
+    /// needs. The frame loop steps the core directly on the capture queue;
+    /// this is the main-thread entry tests use.
     func tickInterpolation(now: TimeInterval = CACurrentMediaTime()) -> (crop: CropRect, outputSize: CGSize, smoothingFactor: Float, highQuality: Bool) {
-        updateInterpolation(now: now)
-        return (currentCrop, config.outputSize, effectiveSmoothing, config.useHighQuality)
+        let snapshot = motion.tick(now: now)
+        syncMirrors()
+        return (snapshot.crop, snapshot.outputSize, snapshot.smoothingFactor, snapshot.highQuality)
     }
 
     /// Serial queue for crop renders. The render used to run synchronously on
@@ -630,128 +523,19 @@ final class CropEngine: ObservableObject {
         ciContext.clearCaches()
     }
 
-    /// MainActor-only: record a completed render for the stats HUD. Called
-    /// fire-and-forget after `processCrop` returns so the cooperative thread
-    /// isn't blocked on SwiftUI updates. Accumulates every frame but only
-    /// republishes the @Published snapshot at `statsPublishInterval`.
-    @MainActor
-    func publishRenderStats(renderTime: TimeInterval) {
-        updateStats(renderTime: renderTime)
-        let now = CACurrentMediaTime()
-        if now - lastStatsPublish >= statsPublishInterval {
-            lastStatsPublish = now
-            stats = statsAccumulator
-        }
-    }
-
-
     /// Reset to a wide shot. Pass the composer's `normalizedAspect` for an
     /// aspect-correct widest crop (largest output-aspect region of the source);
     /// omit it only when an exact full-frame source rect is genuinely wanted
     /// (note: that stretches a non-output-aspect source when rendered).
     func resetToFullFrame(aspect: CGFloat? = nil) {
-        if let aspect {
-            targetCrop = .widest(aspect: aspect)
-        } else {
-            targetCrop = .fullFrame
-        }
+        motion.resetToFullFrame(aspect: aspect)
+        syncMirrors()
     }
-    
+
     /// Jump to target immediately (no smooth transition)
     func jumpToTarget() {
-        currentCrop = targetCrop
-        velocityOrigin = .zero
-        velocitySize = .zero
-        if isInterpolating { isInterpolating = false }
-        lastInterpolationTime = 0
-    }
-    
-    // MARK: - Private Methods
-    
-    private func updateInterpolation(now: TimeInterval) {
-        if deterministicPan { lastInterpolationTime = 0; return }
-        guard isInterpolating else {
-            lastInterpolationTime = 0
-            return
-        }
-        
-        if lastInterpolationTime == 0 {
-            lastInterpolationTime = now
-            return // Skip first frame to get a valid delta time
-        }
-        
-        let dt = CGFloat(min(now - lastInterpolationTime, 0.1)) // Cap dt at 100ms
-        lastInterpolationTime = now
-        
-        // Map transitionSmoothing (0.05 to 0.30) to a spring stiffness.
-        // Higher value = stiffer spring = faster snap.
-        //
-        // ×600 (July 2026, was ×300): the old default (0.10 → k=30, ω≈5.5)
-        // trailed a walking speaker by ≈0.37 s of ramp lag and needed ~0.7–1.1
-        // s to converge after a band exit — the dominant "tracking feels late"
-        // term after the Steady Follow band itself. ×600 (0.10 → k=60, ω≈7.7)
-        // roughly halves both (≈0.26 s ramp lag, ≈0.5 s step convergence),
-        // which fits the spring term inside the 100–150 ms motion-lag budget
-        // at walking speeds, while still attenuating bbox jitter: a ±0.3%
-        // Vision box wobble at ~3 Hz passes through at <20% amplitude, well
-        // under a visible pixel at output scale. The preset hierarchy is
-        // unchanged (Locked Down 0.06 → k=36 smoothest, Fast Follow 0.20 →
-        // k=120 snappiest); band exits additionally run the
-        // fastFramingTransition window (see CameraManager).
-        let stiffness = CGFloat(effectiveSmoothing) * 600.0
-        let omega = sqrt(stiffness)
-        let decay = exp(-omega * dt)
-        // Exact critical-spring step: unlike Euler integration, a long frame
-        // cannot invert/amplify the damping term. Zoom tracking uses this too.
-        func spring(_ x: CGFloat, _ target: CGFloat, _ velocity: inout CGFloat) -> CGFloat {
-            let offset = x - target
-            let c = velocity + omega * offset
-            velocity = (velocity - omega * c * dt) * decay
-            return target + (offset + c * dt) * decay
-        }
-
-        let newX = spring(currentCrop.origin.x, targetCrop.origin.x, &velocityOrigin.x)
-        let newY = spring(currentCrop.origin.y, targetCrop.origin.y, &velocityOrigin.y)
-        if zoomHeight != nil {
-            currentCrop = CropRect(origin: CGPoint(x: newX, y: newY), size: currentCrop.size).clamped()
-            return
-        }
-        let newW = spring(currentCrop.size.width, targetCrop.size.width, &velocitySize.width)
-        let newH = spring(currentCrop.size.height, targetCrop.size.height, &velocitySize.height)
-
-        currentCrop = CropRect(
-            origin: CGPoint(x: newX, y: newY),
-            size: CGSize(width: newW, height: newH)
-        ).clampedToQualityFloor(qualityFloor).clamped()
-        
-        // Check if we're close enough and moving slow enough to stop interpolating
-        let distanceThreshold: CGFloat = 0.001
-        let velocityThreshold: CGFloat = 0.005
-        
-        if abs(currentCrop.origin.x - targetCrop.origin.x) < distanceThreshold &&
-           abs(currentCrop.origin.y - targetCrop.origin.y) < distanceThreshold &&
-           abs(currentCrop.size.width - targetCrop.size.width) < distanceThreshold &&
-           abs(currentCrop.size.height - targetCrop.size.height) < distanceThreshold &&
-           abs(velocityOrigin.x) < velocityThreshold &&
-           abs(velocityOrigin.y) < velocityThreshold &&
-           abs(velocitySize.width) < velocityThreshold &&
-           abs(velocitySize.height) < velocityThreshold {
-            
-            currentCrop = targetCrop
-            velocityOrigin = .zero
-            velocitySize = .zero
-            isInterpolating = false
-            lastInterpolationTime = 0
-        }
-    }
-    
-    private func updateStats(renderTime: TimeInterval) {
-        statsAccumulator.lastRenderTime = renderTime
-        statsAccumulator.totalFramesRendered += 1
-
-        // Running average
-        let alpha: TimeInterval = 0.1
-        statsAccumulator.averageRenderTime = (alpha * renderTime) + ((1 - alpha) * statsAccumulator.averageRenderTime)
+        motion.jumpToTarget()
+        syncMirrors()
     }
 }
 

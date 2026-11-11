@@ -901,6 +901,8 @@ final class CameraManager: NSObject, ObservableObject {
     private var lastGoodProgramBuffer: CVPixelBuffer?
     private var lastGoodProgramCrop: CropEngine.CropRect?
     private var lastTrackingCrop: CropEngine.CropRect?
+    /// Decides the frames the composer runs on in the tracking branch.
+    private var composeRule = ComposeRule()
     private struct ShotMove {
         var origin: OperatorCommand.Preset
         var destination: OperatorCommand.Preset
@@ -2002,9 +2004,9 @@ final class CameraManager: NSObject, ObservableObject {
     }
 
     private func configureFramingBindings() {
-        cropEngine?.$hasZoomAdjustment.removeDuplicates().dropFirst()
+        cropEngine?.$motionFlags.map(\.hasZoomAdjustment).removeDuplicates().dropFirst()
             .sink { [weak self] _ in self?.objectWillChange.send() }.store(in: &cancellables)
-        cropEngine?.$isZoomLimited.removeDuplicates().dropFirst()
+        cropEngine?.$motionFlags.map(\.isZoomLimited).removeDuplicates().dropFirst()
             .sink { [weak self] _ in self?.objectWillChange.send() }.store(in: &cancellables)
 
         shotComposer.$config
@@ -2390,9 +2392,13 @@ final class CameraManager: NSObject, ObservableObject {
                             ? Self.fastFramingSmoothing
                             : shotComposer.config.smoothingFactor
                         cropEngine.applyFrameSmoothing(smoothing, operatorSetting: shotComposer.config.smoothingFactor)
+                        // The composer no longer runs on every frame; see `ComposeRule`.
+                        let composes = composeRule.composes(
+                            freshDetection: detectionIsFresh,
+                            framingChangePending: shotComposer.framingChangePending,
+                            zoomHeight: cropEngine.adjustedHeight)
                         if let primaryPerson {
-                            frameLog("🔍 DEBUG: Composing shot for person at \(primaryPerson.boundingBox)")
-                            if let idealCrop = shotComposer.compose(
+                            if composes, let idealCrop = shotComposer.compose(
                                 person: primaryPerson,
                                 isFresh: detectionIsFresh,
                                 observationTimestamp: observation.frame?.capturedAt
@@ -2400,9 +2406,8 @@ final class CameraManager: NSObject, ObservableObject {
                                 lastTrackingCrop = idealCrop
                                 cropEngine.setTargetCrop(idealCrop)
                             }
-                        } else {
-                            if let lastTrackingCrop { cropEngine.setTargetCrop(lastTrackingCrop) }
-                            frameLog("🔍 DEBUG: No persons detected, holding last position")
+                        } else if composes, let lastTrackingCrop {
+                            cropEngine.setTargetCrop(lastTrackingCrop)
                         }
                     }
                 case .manualCrop:
@@ -2437,7 +2442,7 @@ final class CameraManager: NSObject, ObservableObject {
             mainSegmentStart = CACurrentMediaTime()
             cropDuration = CACurrentMediaTime() - cropStart
             outputPort.recordLatency(stage: .cropRender, duration: cropDuration)
-            cropEngine.publishRenderStats(renderTime: cropDuration)
+            cropEngine.motion.recordRender(renderTime: cropDuration)
             frameLog("🔍 DEBUG: Crop processing complete")
         } else {
             composeDuration = CACurrentMediaTime() - composeStart
