@@ -21,7 +21,7 @@ struct OperatorCommand {
     nonisolated enum Preset: Hashable, Sendable {
         case stage(ShotComposer.Config.ShotPreset), webcam(ShotComposer.Config.WebcamPreset)
     }
-    enum ZoomDirection: CGFloat { case pullOut = -1, pushIn = 1 }
+    nonisolated enum ZoomDirection: CGFloat, Sendable { case pullOut = -1, pushIn = 1 }
     enum Action {
         case detect, cancelDetect
         case selectSubject(CGPoint, retarget: Bool = false)
@@ -65,7 +65,12 @@ enum CommandResult: Equatable {
 final class CommandDispatcher {
     /// The channel this dispatcher admits camera commands for.
     let channelID: ChannelID
-    private(set) var epoch: UInt64 = 0
+    private(set) var epoch: UInt64 = 0 {
+        didSet { epochObserver?(epoch) }
+    }
+    /// Told of every epoch change, so the frame loop can read the epoch off
+    /// the main thread. Observes only; admission is unchanged.
+    var epochObserver: ((UInt64) -> Void)?
     private(set) var trackingOwnsControl = false
     private var recentIDs: [UUID] = []
 

@@ -28,6 +28,32 @@ import CoreVideo
 import Foundation
 import QuartzCore
 
+/// Who is Program and under which route generation, readable on any thread.
+/// The router is the only writer; capture queues read it to stamp frames.
+nonisolated final class ProgramRouteState: @unchecked Sendable {
+    private let lock = NSLock()
+    private var program: ChannelID
+    private var generation: UInt64 = 0
+
+    init(program: ChannelID) { self.program = program }
+
+    var programChannel: ChannelID {
+        get { lock.lock(); defer { lock.unlock() }; return program }
+        set { lock.lock(); program = newValue; lock.unlock() }
+    }
+
+    var routeGeneration: UInt64 {
+        get { lock.lock(); defer { lock.unlock() }; return generation }
+        set { lock.lock(); generation = newValue; lock.unlock() }
+    }
+
+    func route(for channel: ChannelID) -> FrameRoute {
+        lock.lock()
+        defer { lock.unlock() }
+        return FrameRoute(generation: generation, isProgram: channel == program)
+    }
+}
+
 final class ProgramRouter {
 
     enum State: Equatable {
@@ -69,9 +95,17 @@ final class ProgramRouter {
     static let holdDuration: TimeInterval = 2.0
 
     let output: ProgramOutputManager
-    private(set) var programChannel: ChannelID
+    /// Storage for the two values below, so a capture queue can read them.
+    nonisolated let routeState: ProgramRouteState
+    private(set) var programChannel: ChannelID {
+        get { routeState.programChannel }
+        set { routeState.programChannel = newValue }
+    }
     /// Increments on every role change; sends are gated on it.
-    private(set) var routeGeneration: UInt64 = 0
+    private(set) var routeGeneration: UInt64 {
+        get { routeState.routeGeneration }
+        set { routeState.routeGeneration = newValue }
+    }
     private(set) var state: State = .idle {
         didSet { if state != oldValue { stateObserver?(state) } }
     }
@@ -112,7 +146,7 @@ final class ProgramRouter {
 
     init(output: ProgramOutputManager, programChannel: ChannelID = .a) {
         self.output = output
-        self.programChannel = programChannel
+        self.routeState = ProgramRouteState(program: programChannel)
     }
 
     func isProgram(_ channel: ChannelID) -> Bool { channel == programChannel }
@@ -425,6 +459,11 @@ final class RouterChannelPort: ChannelOutputPort {
     func updateCaptureStatus(isRunning: Bool) { router.updateCaptureStatus(channelID, isRunning: isRunning) }
 
     var routeGeneration: UInt64 { router.routeGeneration }
+    var frameRoute: @Sendable () -> FrameRoute {
+        let state = router.routeState
+        let channel = channelID
+        return { state.route(for: channel) }
+    }
 
     func submitFrame(_ pixelBuffer: CVPixelBuffer, timestamp: Double, isRepeat: Bool, routeGeneration: UInt64) {
         // Source timestamps are not passed downstream; the router restamps.

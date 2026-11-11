@@ -432,6 +432,21 @@ final class CropEngine: ObservableObject {
         }
     }
 
+    /// Render now, on the calling queue (D-02 path 2). A camera's capture
+    /// queue calls this once per frame. It runs through `renderQueue` so the
+    /// Lanczos filter is still touched from that one serial queue only, and a
+    /// camera still renders one frame at a time.
+    nonisolated func renderCropNow(
+        _ pixelBuffer: CVPixelBuffer,
+        crop: CropRect,
+        outputSize: CGSize,
+        highQuality: Bool
+    ) throws -> CVPixelBuffer {
+        try renderQueue.sync {
+            try processCrop(pixelBuffer, crop: crop, outputSize: outputSize, highQuality: highQuality)
+        }
+    }
+
     /// Crop and scale a video frame using CoreImage. This is the synchronous
     /// render core — the frame path calls it via `renderCrop`, which hops to a
     /// serial render queue so it never occupies the MainActor. (See git history

@@ -45,6 +45,10 @@ nonisolated final class CropMotionCore: @unchecked Sendable {
         return try body()
     }
 
+    /// Hold the lock across calls that cannot share one closure. Always paired.
+    func beginTransaction() { lock.lock() }
+    func endTransaction() { lock.unlock() }
+
     // MARK: Settings (written by the wrapper)
 
     private var _settings = CropEngine.Config()
