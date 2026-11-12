@@ -49,11 +49,15 @@ final class CameraManager: NSObject, ObservableObject {
     /// every frame, and publishing it re-evaluated every view that observes
     /// this object at frame rate. Preview layers sample it instead
     /// (`SampledPixelBufferView`).
-    private(set) var currentFrameBuffer: CVPixelBuffer?
+    var currentFrameBuffer: CVPixelBuffer? { frameMailbox.sourceBuffer }
     
     /// Capture session status
     @Published private(set) var isRunning: Bool = false {
-        didSet { if isRunning != oldValue { sessionLivenessDidChange?() } }
+        didSet {
+            let running = isRunning
+            frameMailbox.update { $0.isRunning = running }
+            if isRunning != oldValue { sessionLivenessDidChange?() }
+        }
     }
     /// Lifecycle-only notification after state is installed, unlike Published's
     /// willSet signal. The owning show uses it to retain the frozen standard.
@@ -86,6 +90,21 @@ final class CameraManager: NSObject, ObservableObject {
     let personDetector = PersonDetector()
     
     let cropEngine: CropEngine?
+
+    // MARK: Motion off the main thread (D-02 path 2)
+    //
+    // This object is the controller that remains on the main thread: commands,
+    // detection results, the lock machine and the composer. The per-frame
+    // loop (step, render, store) is `motionUnit`, run by the capture source on
+    // the camera's capture queue. The two meet only in these mailboxes.
+
+    /// Capture queue → main: the newest finished frame, and what admits one.
+    nonisolated let frameMailbox: ChannelFrameMailbox
+    /// Main → capture queue: what the picture should aim at.
+    nonisolated let motionTargets: MotionTargetMailbox
+    nonisolated let autoPan: AutoPanState
+    /// Nil only when Metal is unavailable and there is no crop engine.
+    nonisolated let motionUnit: ChannelMotionUnit?
 
     let shotComposer = ShotComposer()
 
@@ -131,18 +150,21 @@ final class CameraManager: NSObject, ObservableObject {
     /// Discrete shot-intent revision (see ChannelFrame.swift). Increments on
     /// admitted shot-changing commands and lock-phase transitions; ordinary
     /// tracking motion does not change it.
-    private(set) var shotRevision: UInt64 = 0
+    private(set) var shotRevision: UInt64 {
+        get { frameMailbox.admission.shotRevision }
+        set { frameMailbox.update { $0.shotRevision = newValue } }
+    }
     private var lastShotPhase: RecoveryState.Phase = .inactive
 
     /// The most recent program frame this channel rendered, with the
-    /// revisions it was made under. Plain storage (not published): written
-    /// once per frame, read by routing / Take.
-    private(set) var latestRenderedFrame: RenderedChannelFrame?
+    /// revisions it was made under. Read from the frame mailbox the capture
+    /// queue stores into (not published); read by routing / Take.
+    var latestRenderedFrame: RenderedChannelFrame? { frameMailbox.latestRendered }
 
     /// Program frames this channel produced (new renders and repeats) since
     /// launch. Plain counter, sampled per diagnostics window by admission to
     /// measure a Preview channel whose telemetry is not in the show log.
-    private(set) var renderedFrameCount: UInt64 = 0
+    var renderedFrameCount: UInt64 { frameMailbox.renderedFrameCount }
 
     /// Capture rate configured on the device (nil before configuration or
     /// for a validation clip).
@@ -167,7 +189,7 @@ final class CameraManager: NSObject, ObservableObject {
                 ?? CaptureProfilePolicy.Profile(shotComposer.config.cinematicFormat).identifier,
             mode: mode)
     }
-    private(set) var repeatedFrameCount: UInt64 = 0
+    var repeatedFrameCount: UInt64 { frameMailbox.repeatedFrameCount }
 
     // MARK: Device ownership (DEVICES)
 
@@ -183,7 +205,12 @@ final class CameraManager: NSObject, ObservableObject {
     /// The claimed device disappeared mid-session. The generation is retired
     /// and frames stop (the router holds, then sends standby); recovery needs
     /// an explicit `reconnectSource()`. Changes rarely, so it is published.
-    @Published private(set) var sourceMissing = false
+    @Published private(set) var sourceMissing = false {
+        didSet {
+            let missing = sourceMissing
+            frameMailbox.update { $0.sourceMissing = missing }
+        }
+    }
     private var disconnectObserver: NSObjectProtocol?
 
     /// Per-channel serial executor for blocking session calls, so starting or
@@ -209,7 +236,7 @@ final class CameraManager: NSObject, ObservableObject {
     ///
     /// Plain storage, deliberately not `@Published` (D-01); preview layers
     /// sample it (`SampledPixelBufferView`) and keep the buffer they show.
-    private(set) var croppedFrameBuffer: CVPixelBuffer?
+    var croppedFrameBuffer: CVPixelBuffer? { frameMailbox.programBuffer }
 
 
 
@@ -316,6 +343,7 @@ final class CameraManager: NSObject, ObservableObject {
         retireSubjectDiscovery()
         subjectDiscoveryConfiguration = configuration.flatMap { $0.isValid ? $0 : nil }
         subjectDiscoveryContext = subjectDiscoveryConfiguration == nil ? nil : eligibility
+        setNeedsMotionRefresh()
         subjectDiscoveryState.configure(subjectDiscoveryConfiguration)
     }
     #endif
@@ -461,7 +489,10 @@ final class CameraManager: NSObject, ObservableObject {
 
     /// Bumped when a capture source starts, stops, or rebinds. In-flight frames
     /// from an older value are retired.
-    private var captureGeneration: UInt64 = 0
+    private var captureGeneration: UInt64 {
+        get { frameMailbox.admission.sourceGeneration }
+        set { frameMailbox.update { $0.sourceGeneration = newValue } }
+    }
 
     /// Frame counter driving `DeveloperFlags.detectionFrameInterval`.
     private var detectionFrameCounter: UInt64 = 0
@@ -520,7 +551,13 @@ final class CameraManager: NSObject, ObservableObject {
         let box = SendablePixelBufferBox(pixelBuffer)
         Task { [weak self] in
             guard let self else { return }
-            defer { self.detectionInFlight = false }
+            // Whatever happens to this detection, a control turn follows it:
+            // a result reaches the picture without waiting for the next
+            // frame's turn, and a detector left idle is cleared.
+            defer {
+                self.detectionInFlight = false
+                self.requestControlWake()
+            }
             // The task may sit behind other MainActor work after it was
             // scheduled. Do not let it begin Vision under a newer
             // session/target generation and mutate the detector before the
@@ -566,12 +603,6 @@ final class CameraManager: NSObject, ObservableObject {
     }
 
     // State for Auto Pan
-    private var autoPanPhase: CGFloat = 0.5
-    private var autoPanDirection: CGFloat = 1.0
-    private var autoPanPauseUntil: Double = 0
-    private var autoPanLastTick: Double = 0
-
-    private static let autoPanPauseDuration: Double = 1.5
     /// PAN-EASE-MODEL: shape the sweep with `AutoPanMotion.eased`. Follows the
     /// Debug-only flag (off); tests set it directly.
     var autoPanEasing = DeveloperFlags.easedAutoPan
@@ -592,6 +623,7 @@ final class CameraManager: NSObject, ObservableObject {
     /// faster to the newly-chosen framing for the next ~0.5s.
     func boostFramingTransition() {
         fastFramingUntil = CACurrentMediaTime() + Self.fastFramingDuration
+        setNeedsMotionRefresh()
     }
 
 
@@ -656,7 +688,7 @@ final class CameraManager: NSObject, ObservableObject {
     
     private let captureSession = AVCaptureSession()
     private var videoOutput: AVCaptureVideoDataOutput?
-    private let videoOutputQueue = DispatchQueue(
+    private nonisolated let videoOutputQueue = DispatchQueue(
         label: "com.cinematiccore.videoOutput",
         qos: .userInteractive,
         // `.workItem` drains the autorelease pool after every job. Without it
@@ -752,9 +784,30 @@ final class CameraManager: NSObject, ObservableObject {
         self.trainingDataRecorder = trainingDataRecorder ?? TrainingDataRecorder()
         self.commands = CommandDispatcher(channelID: channelID)
         self.sessionQueue = DispatchQueue(label: "com.alfie.capture-session.\(channelID.letter)", qos: .userInitiated)
-        self.cropEngine = CropEngine()
-        
+        let engine = CropEngine()
+        self.cropEngine = engine
+        let frameMailbox = ChannelFrameMailbox()
+        let motionTargets = MotionTargetMailbox()
+        let autoPan = AutoPanState()
+        self.frameMailbox = frameMailbox
+        self.motionTargets = motionTargets
+        self.autoPan = autoPan
+        let route = outputPort.frameRoute
+        self.motionUnit = engine.map { engine in
+            ChannelMotionUnit(channelID: channelID, core: engine.motion, targets: motionTargets,
+                              frames: frameMailbox, pan: autoPan, route: route) {
+                try engine.renderCropNow($0, crop: $1, outputSize: $2, highQuality: $3)
+            }
+        }
+
         super.init()
+
+        // The capture queue reads these to stamp and admit frames.
+        commands.epochObserver = { epoch in frameMailbox.update { $0.controlEpoch = epoch } }
+        detectionFrames.generationObserver = { generation in frameMailbox.update { $0.detectionGeneration = generation } }
+        motionUnit?.setMainHop { [weak self] kind in
+            Task(priority: .userInitiated) { @MainActor in await self?.receiveFromLoop(kind) }
+        }
         
         if cropEngine == nil {
             Self.logger.warning("CropEngine failed to initialize - Metal may not be available")
@@ -768,6 +821,7 @@ final class CameraManager: NSObject, ObservableObject {
 
         configureFramingBindings()
         applyFrameProfile(shotComposer.config.frameProfile)
+        refreshMotionInputs()
 
         // Discover cameras on initialization
         discoverCameras()
@@ -898,9 +952,22 @@ final class CameraManager: NSObject, ObservableObject {
         guard sessionStartRequest == request else { return }
         stopCapture()
     }
-    private var lastGoodProgramBuffer: CVPixelBuffer?
-    private var lastGoodProgramCrop: CropEngine.CropRect?
+    private var lastGoodProgramCrop: CropEngine.CropRect? { frameMailbox.lastGoodCrop }
+    /// The composed tracking target and its serial, published to the capture
+    /// queue in the motion directive.
+    private var trackingTarget: CropEngine.CropRect?
+    private var trackingSerial: UInt64 = 0
+    private var lastPublishedDirective: MotionDirective?
+    private var motionRefreshScheduled = false
+    private var motionTransactionDepth = 0
+    private var stagedDirective: MotionDirective?
+    private var controlPumpActive = false
+    private var loopMessageWaiters: [CheckedContinuation<Void, Never>] = []
+    /// True once the detector was cleared for a mode that runs no detection.
+    private var detectionIdleCleaned = false
     private var lastTrackingCrop: CropEngine.CropRect?
+    /// Decides the frames the composer runs on in the tracking branch.
+    private var composeRule = ComposeRule()
     private struct ShotMove {
         var origin: OperatorCommand.Preset
         var destination: OperatorCommand.Preset
@@ -995,6 +1062,7 @@ final class CameraManager: NSObject, ObservableObject {
         shotMove = move
         zoomMoveDirection = direction
         engine.beginZoom(direction, to: move.destinationHeight, visibleCrop: visible)
+        refreshMotionInputs()
     }
 
     /// B-09: dedicated slow admission. The caller consumes its one-shot policy
@@ -1024,6 +1092,7 @@ final class CameraManager: NSObject, ObservableObject {
         directorShotMoveID = id
         directorShotMoveIsCurrent = isCurrent
         zoomMoveDirection = direction
+        refreshMotionInputs()
         return .accepted
     }
 
@@ -1041,16 +1110,35 @@ final class CameraManager: NSObject, ObservableObject {
         directorShotMoveID == id && shotMove?.commandOrigin == .director
     }
 
+    /// One whole shot-move step from the main thread: check, step the size,
+    /// then the ladder. Tests drive this. On the live path the capture queue
+    /// steps the size (`ChannelMotionUnit.step`) and the control turn runs the
+    /// two halves around it without stepping again.
     func advanceShotMove(now: TimeInterval) {
-        guard let engine = cropEngine else { return }
+        guard let engine = cropEngine, prepareShotMove(engine) else { return }
+        engine.advanceZoom(now: now, aspect: shotComposer.normalizedAspect)
+        finishShotMoveStep(engine)
+    }
+
+    private var zoomUsesTopAnchor: Bool {
+        activeMode == .autoTracking &&
+            (shotComposer.config.cinematicFormat == .webcam || shotComposer.config.shotPreset == .waistUp)
+    }
+
+    /// False when a Director move lost its owner and was cancelled.
+    private func prepareShotMove(_ engine: CropEngine) -> Bool {
         if let id = directorShotMoveID, shotMove?.commandOrigin == .director,
            directorShotMoveIsCurrent?() != true {
             cancelDirectorShotMove(id: id)
-            return
+            return false
         }
-        engine.zoomUsesTopAnchor = activeMode == .autoTracking &&
-            (shotComposer.config.cinematicFormat == .webcam || shotComposer.config.shotPreset == .waistUp)
-        engine.advanceZoom(now: now, aspect: shotComposer.normalizedAspect)
+        engine.zoomUsesTopAnchor = zoomUsesTopAnchor
+        return true
+    }
+
+    /// The ladder: tell the composer the visible size and, when the move has
+    /// landed, select its destination preset.
+    private func finishShotMoveStep(_ engine: CropEngine) {
         if let id = directorShotMoveID, shotMove?.commandOrigin == .director,
            engine.zoomDirection == nil, !engine.zoomHasLanded {
             cancelDirectorShotMove(id: id)
@@ -1112,7 +1200,12 @@ final class CameraManager: NSObject, ObservableObject {
             retireSubjectDiscovery()
             manualActionObserver?(.command(command))
         }
+        // The command's writes to the motion core and the directive that
+        // follows land as one step for the capture queue. The transaction is
+        // staged, so the capture queue keeps rendering while this runs.
+        beginMotionTransaction()
         let result = dispatchAdmittedCommand(command, interruptedDirectorMove: interrupted)
+        endMotionTransaction()
         if command.origin != .director { manualResultObserver?(command, result) }
         return result
     }
@@ -1240,7 +1333,7 @@ final class CameraManager: NSObject, ObservableObject {
     /// Test seam: a session that is still starting.
     func setStartingForTesting(_ starting: Bool) { isStartingSession = starting }
     /// Test seam: a rendered frame as if processFrame had produced it.
-    func setLatestRenderedFrameForTesting(_ frame: RenderedChannelFrame?) { latestRenderedFrame = frame }
+    func setLatestRenderedFrameForTesting(_ frame: RenderedChannelFrame?) { frameMailbox.setRenderedForTesting(frame) }
     /// Test seam: a detection observation as if the frame path consumed it.
     func recordObservationForTesting(capturedAt: TimeInterval, personCount: Int) {
         lastObservationCapturedAt = capturedAt
@@ -1252,7 +1345,17 @@ final class CameraManager: NSObject, ObservableObject {
     func setDeviceLeaseForTesting(_ lease: CaptureDeviceRegistry.Lease?) { deviceLease = lease }
     /// Test seam: feed one captured buffer through the frame path.
     func processFrameForTesting(_ pixelBuffer: CVPixelBuffer, timestampSeconds: Double) async {
-        await processFrame(pixelBuffer: pixelBuffer, timestampSeconds: timestampSeconds)
+        await processValidationFrame(SendablePixelBufferBox(pixelBuffer), timestampSeconds: timestampSeconds,
+                                     generation: captureGeneration)
+        // Frame by frame: this frame's control turn, hand-off and events have
+        // all run before the next frame is delivered.
+        await loopMessagesSettled()
+    }
+    /// Test seam: the lock machine, shot-move ladder and composer step of one
+    /// control turn, with the detection result a test supplies instead of
+    /// Vision's. It is the same step `controlTurn` runs for a frame.
+    func runControlStepForTesting(persons: [PersonDetector.DetectedPerson], isFresh: Bool) {
+        composeControlStep(observation: nil, detectedPersons: persons, detectionIsFresh: isFresh, onFrame: true)
     }
     /// Test seam: the identity a configured source would have recorded.
     func setSourceIdentityForTesting(_ source: DiagnosticsSessionIdentity.Source) { recordSourceIdentity(source) }
@@ -1264,20 +1367,8 @@ final class CameraManager: NSObject, ObservableObject {
     /// and router, or discarded (retired session, stopped, no render). One
     /// line per channel every 5 s, so a console showing no picture can be
     /// told apart from a pipeline producing none.
-    private var renderStats = (published: 0, discarded: 0, lastLogAt: 0.0)
-
-    private func logRenderStatsIfDue(_ buffer: CVPixelBuffer?) {
-        let now = CACurrentMediaTime()
-        guard now - renderStats.lastLogAt >= 5 else { return }
-        renderStats.lastLogAt = now
-        let level = buffer.map(Self.sampledLevel) ?? -1
-        Self.logger.notice("[RENDER] ch=\(self.channelID.letter, privacy: .public) published=\(self.renderStats.published) discarded=\(self.renderStats.discarded) mode=\(String(describing: self.activeMode), privacy: .public) level=\(level, format: .fixed(precision: 1)) running=\(self.isRunning) cropped=\(self.croppedFrameBuffer != nil)")
-        renderStats.published = 0
-        renderStats.discarded = 0
-    }
-
     /// Mean of 64 sampled bytes of the first plane; ~0 means a black frame.
-    private nonisolated static func sampledLevel(_ buffer: CVPixelBuffer) -> Double {
+    nonisolated static func sampledLevel(_ buffer: CVPixelBuffer) -> Double {
         CVPixelBufferLockBaseAddress(buffer, .readOnly)
         defer { CVPixelBufferUnlockBaseAddress(buffer, .readOnly) }
         let planar = CVPixelBufferIsPlanar(buffer)
@@ -1340,8 +1431,9 @@ final class CameraManager: NSObject, ObservableObject {
             if let visible { manualCropPoint = visible.center; cropEngine?.adoptVisibleSize(from: visible) }
         }
         if mode == .autoTracking { shotComposer.reapplyFraming() }
-        if mode == .autoPan { autoPanLastTick = 0 }
+        if mode == .autoPan { autoPan.restartClock() }
         activeMode = mode
+        refreshMotionInputs()
     }
 
     func applyLockOutcome(_ outcome: ShotComposer.TickOutcome) {
@@ -1370,27 +1462,32 @@ final class CameraManager: NSObject, ObservableObject {
         return CGSize(width: height * aspect, height: height)
     }
 
+    /// Main-thread entry to the sweep the capture-queue loop steps
+    /// (`AutoPanState`); tests drive it directly.
     func advanceAutoPan(now: TimeInterval, width: CGFloat) -> CGFloat {
-        let dt = autoPanLastTick > 0 ? min(0.1, max(0, now - autoPanLastTick)) : 0
-        autoPanLastTick = now
-        let width = min(1, max(0, width))
-        let travel = 1 - width
-        if travel > 0.0001, now > autoPanPauseUntil {
-            autoPanPhase += CGFloat(shotComposer.config.autoPanSpeed) * 3 * autoPanDirection * CGFloat(dt)
-            if autoPanPhase >= 1 {
-                autoPanPhase = 1; autoPanDirection = -1; autoPanPauseUntil = now + Self.autoPanPauseDuration
-            } else if autoPanPhase <= 0 {
-                autoPanPhase = 0; autoPanDirection = 1; autoPanPauseUntil = now + Self.autoPanPauseDuration
-            }
-        }
-        return width / 2 + AutoPanMotion.position(autoPanPhase, eased: autoPanEasing) * travel
+        autoPan.advance(now: now, width: width, speed: Double(shotComposer.config.autoPanSpeed), eased: autoPanEasing)
     }
 
+    /// Hold-frame selection lives in the frame mailbox, which the capture
+    /// queue applies after each render (`ChannelFrameMailbox.selectProgram`).
+    /// This is the same rule from the main thread, kept for
+    /// `renderProgramFrame`.
     func selectProgramBuffer(rendered: CVPixelBuffer?, crop: CropEngine.CropRect? = nil) -> CVPixelBuffer? {
-        if let rendered { lastGoodProgramBuffer = rendered; lastGoodProgramCrop = crop }
-        if isProgramHolding != (rendered == nil) { isProgramHolding = rendered == nil }
-        return lastGoodProgramBuffer
+        let selection = frameMailbox.selectProgram(rendered: rendered, crop: crop, sourceGeneration: captureGeneration)
+        syncProgramHolding()
+        return selection?.buffer
     }
+
+    private func syncProgramHolding() {
+        let holding = frameMailbox.isHolding
+        if isProgramHolding != holding { isProgramHolding = holding }
+    }
+
+    // The capture-queue loop no longer takes the scheduler's render lane:
+    // taking it needs the main thread. One render in flight per camera is
+    // held by the camera's serial capture queue and its serial render queue.
+    // `renderInTurn` and `renderProgramFrame` remain as main-thread seams the
+    // tests drive; the live frame path does not call them.
 
     /// Run `render` holding the shared render slot. Without a scheduler the
     /// render runs directly. A scheduler that cancels or supersedes this turn
@@ -1440,14 +1537,16 @@ final class CameraManager: NSObject, ObservableObject {
         try checkSessionStart(request)
         cancelOperatorMotion()
         commands.setTrackingOwnership(false)
-        lastGoodProgramBuffer = nil
-        lastGoodProgramCrop = nil
-        croppedFrameBuffer = nil
-        isProgramHolding = false
         let sourceTitle = preferredInputSource.title
         Self.logger.notice("Starting capture from \(sourceTitle, privacy: .public)")
+        // Retire the generation first: from here no frame of the old one can
+        // be held or stored, so the reset below cannot be undone by one.
         captureGeneration &+= 1
-        latestRenderedFrame = nil
+        frameMailbox.resetHold(clearHolding: true)
+        frameMailbox.clearProgramBuffer()
+        frameMailbox.clearRendered()
+        isProgramHolding = false
+        retireTrackingTarget()
         invalidateDetection()
         frameProcessingGate.reset()
         outputPort.start()
@@ -1535,13 +1634,13 @@ final class CameraManager: NSObject, ObservableObject {
         commands.setTrackingOwnership(false)
         cropEngine?.clearZoomAdjustment()
         lastTrackingCrop = nil
-        lastGoodProgramBuffer = nil
-        lastGoodProgramCrop = nil
-        croppedFrameBuffer = nil
-        isProgramHolding = false
         Self.logger.notice("Stopping capture")
         captureGeneration &+= 1
-        latestRenderedFrame = nil
+        frameMailbox.resetHold(clearHolding: true)
+        frameMailbox.clearProgramBuffer()
+        frameMailbox.clearRendered()
+        isProgramHolding = false
+        retireTrackingTarget()
         invalidateDetection()
         cancelDetection()
         clipPlaybackTask?.cancel()
@@ -1584,6 +1683,8 @@ final class CameraManager: NSObject, ObservableObject {
         cinematicAgent.reset()
         cropEngine.setTargetCrop(widestSafeCrop())
         cropEngine.jumpToTarget()
+        retireTrackingTarget()
+        refreshMotionInputs()
     }
 
     /// Crop target for "wide" as a *view*: the entire camera picture — truly
@@ -1617,12 +1718,15 @@ final class CameraManager: NSObject, ObservableObject {
         if useMLAgent, let crop = cropEngine?.currentCrop {
             cinematicAgent.initialize(from: crop)
         }
+        retireTrackingTarget()
+        setNeedsMotionRefresh()
     }
 
     func lockTarget(personID: UUID) {
         discoveredSubjectOrigin = nil
         cropEngine?.clearZoomAdjustment()
         lastTrackingCrop = nil
+        retireTrackingTarget()
         invalidateDetection(clearTracks: false)
         // Selection made — leave discovery and begin acquisition. Cropping
         // stays wide until the gallery is ready (ShotComposer promotes
@@ -2002,9 +2106,14 @@ final class CameraManager: NSObject, ObservableObject {
     }
 
     private func configureFramingBindings() {
-        cropEngine?.$hasZoomAdjustment.removeDuplicates().dropFirst()
+        // Anything published on this camera or its composer may change what
+        // the capture queue should aim at; republish on the next main turn.
+        objectWillChange.sink { [weak self] _ in self?.setNeedsMotionRefresh() }.store(in: &cancellables)
+        shotComposer.objectWillChange.sink { [weak self] _ in self?.setNeedsMotionRefresh() }.store(in: &cancellables)
+
+        cropEngine?.$motionFlags.map(\.hasZoomAdjustment).removeDuplicates().dropFirst()
             .sink { [weak self] _ in self?.objectWillChange.send() }.store(in: &cancellables)
-        cropEngine?.$isZoomLimited.removeDuplicates().dropFirst()
+        cropEngine?.$motionFlags.map(\.isZoomLimited).removeDuplicates().dropFirst()
             .sink { [weak self] _ in self?.objectWillChange.send() }.store(in: &cancellables)
 
         shotComposer.$config
@@ -2071,8 +2180,8 @@ final class CameraManager: NSObject, ObservableObject {
         activeMode = .wide
         shotComposer.reset(clearManualLock: true)
         cinematicAgent.reset()
-        currentFrameBuffer = nil
-        croppedFrameBuffer = nil
+        frameMailbox.clearSourceBuffer()
+        frameMailbox.clearProgramBuffer()
         validationClipStatus = "Preparing \(validationClipURL.lastPathComponent)…"
         outputPort.updateCaptureStatus(isRunning: true)
 
@@ -2110,82 +2219,263 @@ final class CameraManager: NSObject, ObservableObject {
         }
     }
 
-    private func processFrame(pixelBuffer: CVPixelBuffer, timestampSeconds: Double) async {
-        let sessionGeneration = captureGeneration
-        // A hot unplug retires the generation but keeps `isRunning` so the
-        // output holds and then sends standby. A buffer the stopping session
-        // still delivers would start under the new generation, so refuse it
-        // here: it must not be rendered, sent, or replace the cleared hold.
-        guard isRunning, !sourceMissing else { return }
-        let bufferWidth = CGFloat(CVPixelBufferGetWidth(pixelBuffer))
-        let bufferHeight = CGFloat(CVPixelBufferGetHeight(pixelBuffer))
+    // MARK: - Frame path, main-thread side (D-02 path 2)
+    //
+    // The capture queue renders every frame on its own (`ChannelMotionUnit`).
+    // What is left here runs on the main thread and is never awaited by the
+    // picture:
+    // - `controlTurn`: detection planning and results, the lock machine, the
+    //   shot-move ladder and the composer. It ends by publishing the motion
+    //   directive the capture queue reads on its next frame.
+    // - `handOffProgramFrame`: the Program camera's finished frame goes to
+    //   the router and sink, with that frame's diagnostics.
+    // - `drainLoopEvents`: a failed render, or hold starting or ending.
 
-        let captureInterval = Self.signposter.beginInterval("captureFrame")
-        let captureStart = CACurrentMediaTime()
-        // Stamp the route generation now: if roles change while this frame
-        // renders, the router refuses it on arrival.
-        let frameRouteGeneration = outputPort.routeGeneration
-        var mainActiveTime: TimeInterval = 0
-        var mainSegmentStart = captureStart
-        flushImageCachesIfDue(now: captureStart)
+    private func receiveFromLoop(_ kind: MotionMainHop) async {
+        switch kind {
+        case .handOff: handOffProgramFrame()
+        case .control: await runControlPump()
+        case .event: drainLoopEvents()
+        }
+    }
 
-        outputPort.recordInputFrame(timestamp: timestampSeconds)
+    /// Run control turns until the slot is empty, in the task that asked.
+    /// One pump at a time: a turn that is waiting on an inline tap detection
+    /// keeps later frames in the one-slot mailbox, where the newest replaces
+    /// the rest.
+    private func runControlPump() async {
+        guard !controlPumpActive, let motionUnit else { return }
+        controlPumpActive = true
+        defer {
+            controlPumpActive = false
+            resumeLoopMessageWaiters()
+        }
+        while true {
+            let work = motionUnit.takeControl()
+            guard work.hasWork else { return }
+            await controlTurn(work.tick)
+        }
+    }
 
-        // Publish the wide (left) pane's raw pixels *before* any processing so
-        // the operator sees the live frame at the earliest possible instant,
-        // rather than inheriting the full detection→compose→crop latency. This
-        // is a zero-copy IOSurface handoff (see PixelBufferPreviewView), so it
-        // costs a pointer assignment. Detection overlays are still published
-        // post-detection below, so during fast motion the boxes may trail the
-        // raw pixels by a frame — that is accepted for a monitoring pane. The
-        // program (right) pane still publishes post-crop; it must show output.
-        currentFrameBuffer = pixelBuffer
+    /// A detection finished: run a control turn now, without a new frame, so
+    /// its result reaches the picture on the next frame the camera delivers.
+    private func requestControlWake() {
+        guard let motionUnit, motionUnit.requestControlWake() else { return }
+        Task { @MainActor [weak self] in await self?.runControlPump() }
+    }
 
-        if bufferHeight > 0 {
-            let bufferAspect = bufferWidth / bufferHeight
-            if abs(bufferAspect - lastAppliedSourceAspect) > 0.001 {
-                lastAppliedSourceAspect = bufferAspect
-                shotComposer.updateSourcePixelAspect(bufferAspect)
+    /// Test seam: wait until every message the capture queue has posted (a
+    /// control turn, a hand-off, events) has been taken by the main thread.
+    private func loopMessagesSettled() async {
+        while controlPumpActive || motionUnit?.hasPendingMainWork == true {
+            await withCheckedContinuation { loopMessageWaiters.append($0) }
+        }
+    }
+
+    private func resumeLoopMessageWaiters() {
+        guard !loopMessageWaiters.isEmpty else { return }
+        let waiters = loopMessageWaiters
+        loopMessageWaiters.removeAll()
+        for waiter in waiters { waiter.resume() }
+    }
+
+    /// Republish on the next main turn. Coalesced; cheap when nothing changed.
+    private func setNeedsMotionRefresh() {
+        // A transaction republishes when it ends; no extra task for it.
+        guard !motionRefreshScheduled, motionTransactionDepth == 0 else { return }
+        motionRefreshScheduled = true
+        Task { @MainActor [weak self] in
+            guard let self else { return }
+            self.motionRefreshScheduled = false
+            self.refreshMotionInputs()
+        }
+    }
+
+    /// Publish what the capture queue reads: the motion directive, and whether
+    /// this camera has per-frame work for the main thread.
+    private func refreshMotionInputs() {
+        publishMotionDirective()
+        let wanted = controlNeedsFrames
+        guard wanted != frameMailbox.admission.controlWanted else { return }
+        frameMailbox.update { $0.controlWanted = wanted }
+        // One last turn after the frames stop, to clear the detector.
+        if !wanted { requestControlWake() }
+    }
+
+    /// True while the main thread needs this camera's frames: detection and
+    /// the lock machine's tick, a tap or discovery in progress, or a shot
+    /// move whose ladder runs here. A camera that is wide, in Manual or in
+    /// Auto Pan with none of these posts nothing to the main thread per frame.
+    private var controlNeedsFrames: Bool {
+        guard isRunning, !sourceMissing else { return false }
+        if shotMove != nil || pendingTapPoint != nil || detectionDiscoveryActive { return true }
+        switch activeMode {
+        case .autoTracking:
+            return true
+        case .wide:
+            if case .inactive = shotComposer.lockState {} else { return true }
+            return subjectDiscoveryConfiguration != nil
+        case .manualCrop, .autoPan:
+            return false
+        }
+    }
+
+    /// The directive for the current mode. The values are the ones the frame
+    /// path read per frame before; the capture queue now reads them here.
+    private func publishMotionDirective() {
+        guard let cropEngine else { return }
+        let operatorSmoothing = shotComposer.config.smoothingFactor
+        let boost = MotionDirective.Boost(smoothing: Self.fastFramingSmoothing, until: fastFramingUntil)
+        var directive = MotionDirective()
+        directive.aspect = shotComposer.normalizedAspect
+        directive.fixedHeight = fixedHeight(for: selectedShot)
+        directive.zoomUsesTopAnchor = zoomUsesTopAnchor
+        directive.trackingTarget = trackingTarget
+        directive.trackingSerial = trackingSerial
+        switch activeMode {
+        case .wide:
+            // Return to Wide snaps there via jumpToTarget(); entering .wide
+            // through a softer path (e.g. unlocking the subject) animates.
+            directive.mode = .wide(target: widestSafeCrop())
+            directive.smoothing = operatorSmoothing
+            directive.boost = boost
+        case .autoTracking:
+            directive.mode = .tracking
+            if useMLAgent {
+                directive.smoothing = 0.05
+            } else {
+                directive.smoothing = operatorSmoothing
+                directive.boost = boost
             }
+        case .manualCrop:
+            directive.mode = .manual(center: manualCropPoint)
+            directive.smoothing = operatorSmoothing
+        case .autoPan:
+            directive.mode = .autoPan(speed: Double(shotComposer.config.autoPanSpeed),
+                                      height: shotComposer.config.autoPanHeight, eased: autoPanEasing)
+        }
+        // The Crop Settings slider mirrors the operator's setting.
+        if directive.smoothing != nil, cropEngine.config.transitionSmoothing != operatorSmoothing {
+            cropEngine.config.transitionSmoothing = operatorSmoothing
+        }
+        guard directive != lastPublishedDirective else { return }
+        lastPublishedDirective = directive
+        // Inside a transaction the directive is published with the commit.
+        if motionTransactionDepth > 0 { stagedDirective = directive } else { motionTargets.write(directive) }
+    }
 
-            // Drive the crop quality floor from the *actual delivered*
-            // resolution, not the advertised capture format — some drivers
-            // (e.g. BMD CMIO) advertise 4K but deliver 1080p, which would
-            // otherwise permit an unsafe 2× zoom. This single update covers
-            // all crop modes (the floor is applied in CropEngine.setTargetCrop)
-            // and corrects the ML agent's internal clamp to the same numbers.
-            let sourceHeight = Int(bufferHeight)
-            let sourceWidth = Int(bufferWidth)
-            if sourceWidth != sourcePixelWidth || sourceHeight != sourcePixelHeight {
-                sourcePixelWidth = sourceWidth
-                sourcePixelHeight = sourceHeight
-                sourceIdentity?.deliveredWidth = sourceWidth
-                sourceIdentity?.deliveredHeight = sourceHeight
-                outputPort.recordDeliveredDimensions(width: sourceWidth, height: sourceHeight)
-                if activeInputSource == .liveCamera, let expected = configuredCaptureSize {
-                    let requested = "\(expected.width)×\(expected.height)"
-                    let actual = "\(sourceWidth)×\(sourceHeight)"
-                    if sourceWidth == expected.width && sourceHeight == expected.height {
-                        captureProfileStatus = "Delivered \(actual) at \(configuredCaptureRateLabel). \(configuredCaptureReason?.description ?? "")"
-                    } else {
-                        captureProfileStatus = "Driver delivered \(actual) after \(requested) was requested; crop quality follows delivered pixels."
-                        Self.logger.warning("Capture delivery mismatch: requested \(requested, privacy: .public), delivered \(actual, privacy: .public)")
-                    }
+    /// Stage this camera's writes to the motion core. The capture queue sees
+    /// none of them, nor the directive, until `endMotionTransaction`.
+    private func beginMotionTransaction() {
+        motionTransactionDepth += 1
+        cropEngine?.motion.beginTransaction()
+    }
+
+    /// Republish, then commit: the staged core state and the directive reach
+    /// the capture queue in one locked step.
+    private func endMotionTransaction() {
+        refreshMotionInputs()
+        motionTransactionDepth -= 1
+        guard let core = cropEngine?.motion else { return }
+        if motionTransactionDepth == 0, let directive = stagedDirective {
+            stagedDirective = nil
+            let targets = motionTargets
+            core.endTransaction { targets.write(directive) }
+        } else {
+            core.endTransaction()
+        }
+    }
+
+    private func setTrackingTarget(_ crop: CropEngine.CropRect) {
+        trackingTarget = crop
+        trackingSerial &+= 1
+    }
+
+    /// A command set the target itself (Return to Wide, Track, a new
+    /// subject, a session boundary). A composed target the capture queue has
+    /// not applied yet is older than that command and must not follow it.
+    private func retireTrackingTarget() {
+        trackingTarget = nil
+        trackingSerial &+= 1
+    }
+
+    /// The source's delivered size changed (or a session began).
+    private func applySourceFormat(width sourceWidth: Int, height sourceHeight: Int) {
+        guard sourceHeight > 0 else { return }
+        let bufferAspect = CGFloat(sourceWidth) / CGFloat(sourceHeight)
+        if abs(bufferAspect - lastAppliedSourceAspect) > 0.001 {
+            lastAppliedSourceAspect = bufferAspect
+            shotComposer.updateSourcePixelAspect(bufferAspect)
+        }
+
+        // Drive the crop quality floor from the *actual delivered*
+        // resolution, not the advertised capture format — some drivers
+        // (e.g. BMD CMIO) advertise 4K but deliver 1080p, which would
+        // otherwise permit an unsafe 2× zoom. This single update covers
+        // all crop modes (the floor is applied in CropMotionCore.setTargetCrop)
+        // and corrects the ML agent's internal clamp to the same numbers.
+        if sourceWidth != sourcePixelWidth || sourceHeight != sourcePixelHeight {
+            sourcePixelWidth = sourceWidth
+            sourcePixelHeight = sourceHeight
+            sourceIdentity?.deliveredWidth = sourceWidth
+            sourceIdentity?.deliveredHeight = sourceHeight
+            outputPort.recordDeliveredDimensions(width: sourceWidth, height: sourceHeight)
+            if activeInputSource == .liveCamera, let expected = configuredCaptureSize {
+                let requested = "\(expected.width)×\(expected.height)"
+                let actual = "\(sourceWidth)×\(sourceHeight)"
+                if sourceWidth == expected.width && sourceHeight == expected.height {
+                    captureProfileStatus = "Delivered \(actual) at \(configuredCaptureRateLabel). \(configuredCaptureReason?.description ?? "")"
+                } else {
+                    captureProfileStatus = "Driver delivered \(actual) after \(requested) was requested; crop quality follows delivered pixels."
+                    Self.logger.warning("Capture delivery mismatch: requested \(requested, privacy: .public), delivered \(actual, privacy: .public)")
                 }
             }
-            if sourceHeight != lastFloorSourceHeight {
-                lastFloorSourceHeight = sourceHeight
-                let floor = CropEngine.QualityFloor.forSource(height: sourceHeight)
-                cropEngine?.qualityFloor = floor
-                // The composer needs the same number so it can floor the crop
-                // at the top anchor instead of letting setTargetCrop's
-                // center-preserving clamp re-expand tight presets symmetrically.
-                shotComposer.qualityFloorHeightFraction = floor.minCropHeightFraction
-                cinematicAgent.updateSourceResolution(
-                    width: Int(bufferWidth),
-                    height: sourceHeight
-                )
-            }
+        }
+        if sourceHeight != lastFloorSourceHeight {
+            lastFloorSourceHeight = sourceHeight
+            let floor = CropEngine.QualityFloor.forSource(height: sourceHeight)
+            // The capture queue already set the same floor before its first
+            // step with these pixels; this keeps the main-thread readers and
+            // the composer on the same number.
+            cropEngine?.qualityFloor = floor
+            // The composer needs the same number so it can floor the crop
+            // at the top anchor instead of letting setTargetCrop's
+            // center-preserving clamp re-expand tight presets symmetrically.
+            shotComposer.qualityFloorHeightFraction = floor.minCropHeightFraction
+            cinematicAgent.updateSourceResolution(width: sourceWidth, height: sourceHeight)
+        }
+    }
+
+    /// The diagnostics CSV starts on the first processed frame, so runs with
+    /// detection off (Auto Pan, Manual, an unlocked wide shot) are recorded
+    /// too — PAN-HITCH compares exactly those against detection-on runs.
+    /// The first frame that runs Vision is marked with a `detection start`
+    /// note, so time under detection load can still be read from the CSV.
+    private func beginDiagnosticsIfNeeded(width: Int, height: Int) {
+        guard outputPort.diagnosticsFileName == nil else { return }
+        let bundle = Bundle.main
+        let version = bundle.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "unknown"
+        let build = bundle.object(forInfoDictionaryKey: "CFBundleVersion") as? String ?? "unknown"
+        let recordedFingerprint = bundle.object(forInfoDictionaryKey: "AlfieSourceFingerprint") as? String
+        let fingerprint = recordedFingerprint.flatMap { $0.isEmpty ? nil : $0 } ?? "unrecorded"
+        outputPort.beginDiagnosticsSessionIfNeeded(note:
+            "capture start; app=\(version)(\(build)); source_fingerprint=\(fingerprint); input=\(activeInputSource.title); pixels=\(width)x\(height); show_fps=\(ShowStandard.activeOrCurrent.frameRate); detection_interval=\(DeveloperFlags.detectionFrameInterval); smoothing=\(shotComposer.config.smoothingFactor); band=\(shotComposer.config.steadyBandWidth)")
+    }
+
+    /// One main-thread control turn. `tick` carries the frame the capture
+    /// queue just received; it is nil when a detection finished and no new
+    /// frame is involved. Detection cadence, scheduling and the ML agent
+    /// advance only on a frame.
+    private func controlTurn(_ tick: ControlTick?) async {
+        let sessionGeneration = captureGeneration
+        guard isRunning, !sourceMissing else { return }
+        if let tick, tick.sourceGeneration != sessionGeneration { return }
+
+        let turnStart = CACurrentMediaTime()
+        flushImageCachesIfDue(now: turnStart)
+        if let tick {
+            applySourceFormat(width: tick.width, height: tick.height)
+            beginDiagnosticsIfNeeded(width: tick.width, height: tick.height)
         }
 
         let detectionInterval = Self.signposter.beginInterval("detection")
@@ -2206,7 +2496,7 @@ final class CameraManager: NSObject, ObservableObject {
         // before building the plan lets one-shot plan decisions (the throttled
         // gallery refresh scan) fire only on frames where Vision actually runs.
         var detectionDue = false
-        if !detectionInFlight {
+        if tick != nil, !detectionInFlight {
             detectionFrameCounter &+= 1
             detectionDue = Self.detectionSlotIsDue(
                 eligibleFrameCount: detectionFrameCounter,
@@ -2216,20 +2506,6 @@ final class CameraManager: NSObject, ObservableObject {
         var detectionPlan = currentDetectionPlan(detectionRunsThisFrame: detectionDue)
         if shotComposer.manualLockedTargetID != nil {
             detectionPlan.referenceBox = lastSubjectROIBox ?? shotComposer.currentTrackedBounds
-        }
-        // The diagnostics CSV starts on the first processed frame, so runs with
-        // detection off (Auto Pan, Manual, an unlocked wide shot) are recorded
-        // too — PAN-HITCH compares exactly those against detection-on runs.
-        // The first frame that runs Vision is marked with a `detection start`
-        // note, so time under detection load can still be read from the CSV.
-        if outputPort.diagnosticsFileName == nil {
-            let bundle = Bundle.main
-            let version = bundle.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "unknown"
-            let build = bundle.object(forInfoDictionaryKey: "CFBundleVersion") as? String ?? "unknown"
-            let recordedFingerprint = bundle.object(forInfoDictionaryKey: "AlfieSourceFingerprint") as? String
-            let fingerprint = recordedFingerprint.flatMap { $0.isEmpty ? nil : $0 } ?? "unrecorded"
-            outputPort.beginDiagnosticsSessionIfNeeded(note:
-                "capture start; app=\(version)(\(build)); source_fingerprint=\(fingerprint); input=\(activeInputSource.title); pixels=\(Int(bufferWidth))x\(Int(bufferHeight)); show_fps=\(ShowStandard.activeOrCurrent.frameRate); detection_interval=\(DeveloperFlags.detectionFrameInterval); smoothing=\(shotComposer.config.smoothingFactor); band=\(shotComposer.config.steadyBandWidth)")
         }
         if detectionPlan.runsVision {
             outputPort.noteDetectionStartIfNeeded()
@@ -2242,38 +2518,49 @@ final class CameraManager: NSObject, ObservableObject {
             retireSubjectDiscovery()
         }
         if !detectionPlan.runsVision {
-            // Release the retained source pixels immediately and reject any
-            // scheduled detection that has not entered Vision yet. Without
-            // this, an organic transition to off (for example discovery or
-            // acquisition timeout) can leave the latest observation buffer
-            // retained until the next explicit operator action.
-            detectionFrames.invalidate()
-            personDetector.clearForInactiveMode()
-            lastWorldObservation = nil
-        } else if detectionPlan.mode == .discovery {
-            scheduleSubjectDiscoveryIfDue(pixelBuffer: pixelBuffer)
-        } else if pendingTapPoint != nil {
-            let generation = detectionFrames.generation
-            let id = detectionFrames.nextObservationID()
-            let capturedAt = CACurrentMediaTime()
-            mainActiveTime += CACurrentMediaTime() - mainSegmentStart
-            let persons = await personDetector.processFrame(pixelBuffer, plan: detectionPlan)
-            mainSegmentStart = CACurrentMediaTime()
-            guard generation == detectionFrames.generation, sessionGeneration == captureGeneration else {
-                Self.signposter.endInterval("detection", detectionInterval)
-                Self.signposter.endInterval("captureFrame", captureInterval)
-                return
+            // Release the retained source pixels and reject any scheduled
+            // detection that has not entered Vision yet. Without this, an
+            // organic transition to off (for example discovery or acquisition
+            // timeout) can leave the latest observation buffer retained until
+            // the next explicit operator action. Done once per idle stretch,
+            // and again after a detection that was still running finishes:
+            // each call retires the detection generation, and the capture
+            // queue drops a frame rendered across a retirement.
+            if !detectionIdleCleaned {
+                detectionFrames.invalidate()
+                personDetector.clearForInactiveMode()
+                lastWorldObservation = nil
+                detectionIdleCleaned = !detectionInFlight
             }
-            let frame = DetectionFrame(observationID: id, capturedAt: capturedAt,
-                sourceTimestamp: timestampSeconds, pixelBuffer: pixelBuffer, persons: persons,
-                queueWait: personDetector.stats.lastQueueWait, detectionDuration: personDetector.stats.lastDetectionTime,
-                coverage: .scanned(mode: detectionPlan.mode, roi: detectionPlan.roi))
-            detectionFrames.publish(frame, generation: generation)
-            outputPort.recordDetectionTiming(queueWait: frame.queueWait, visionWall: frame.detectionDuration)
-            outputPort.recordLatency(stage: .detection, duration: frame.detectionDuration)
         } else {
-            scheduleDetectionIfDue(pixelBuffer: pixelBuffer, sourceTimestamp: timestampSeconds,
-                plan: detectionPlan, due: detectionDue)
+            detectionIdleCleaned = false
+            if let tick {
+                if detectionPlan.mode == .discovery {
+                    scheduleSubjectDiscoveryIfDue(pixelBuffer: tick.pixelBuffer)
+                } else if pendingTapPoint != nil {
+                    // An operator tap waits for its own detection, inline.
+                    // Only this turn waits; the picture keeps rendering.
+                    let generation = detectionFrames.generation
+                    let id = detectionFrames.nextObservationID()
+                    let capturedAt = CACurrentMediaTime()
+                    let persons = await personDetector.processFrame(tick.pixelBuffer, plan: detectionPlan)
+                    guard generation == detectionFrames.generation, sessionGeneration == captureGeneration,
+                          isRunning, !sourceMissing else {
+                        Self.signposter.endInterval("detection", detectionInterval)
+                        return
+                    }
+                    let frame = DetectionFrame(observationID: id, capturedAt: capturedAt,
+                        sourceTimestamp: tick.timestamp, pixelBuffer: tick.pixelBuffer, persons: persons,
+                        queueWait: personDetector.stats.lastQueueWait, detectionDuration: personDetector.stats.lastDetectionTime,
+                        coverage: .scanned(mode: detectionPlan.mode, roi: detectionPlan.roi))
+                    detectionFrames.publish(frame, generation: generation)
+                    outputPort.recordDetectionTiming(queueWait: frame.queueWait, visionWall: frame.detectionDuration)
+                    outputPort.recordLatency(stage: .detection, duration: frame.detectionDuration)
+                } else {
+                    scheduleDetectionIfDue(pixelBuffer: tick.pixelBuffer, sourceTimestamp: tick.timestamp,
+                        plan: detectionPlan, due: detectionDue)
+                }
+            }
         }
         let observation = detectionPlan.runsVision && detectionPlan.mode != .discovery
             ? detectionFrames.consume(at: CACurrentMediaTime()) : (frame: nil, isFresh: false)
@@ -2309,6 +2596,47 @@ final class CameraManager: NSObject, ObservableObject {
 
         let composeInterval = Self.signposter.beginInterval("compose")
         let composeStart = CACurrentMediaTime()
+        composeControlStep(observation: observation.frame, detectedPersons: detectedPersons,
+                           detectionIsFresh: detectionIsFresh, onFrame: tick != nil)
+        Self.signposter.endInterval("compose", composeInterval)
+        outputPort.recordLatency(stage: .compose, duration: CACurrentMediaTime() - composeStart)
+
+        // Only real detections are recorded. Logging repeats would teach the
+        // agent that an identical observation can demand a different action.
+        if trainingDataRecorder.isRecording, detectionIsFresh,
+           let timestamp = tick?.timestamp ?? observation.frame?.sourceTimestamp {
+            trainingDataRecorder.recordFrame(
+                timestamp: timestamp,
+                persons: detectedPersons,
+                currentCrop: cropEngine?.currentCrop ?? .fullFrame,
+                idealCrop: useMLAgent
+                    ? cinematicAgent.lastPredictedCrop
+                    : shotComposer.currentComputedCrop,
+                isInterpolating: cropEngine?.isInterpolating ?? false
+            )
+        }
+        outputPort.recordFramePathCounts(detectedPersons: detectedPersons.count)
+
+        // The aspect, the wide target and the composer's floor for this size
+        // are applied and the directive is published: the capture queue may
+        // now render frames of this size.
+        if let tick {
+            let admission = frameMailbox.admission
+            if admission.formatWidth != tick.width || admission.formatHeight != tick.height {
+                frameMailbox.update { $0.formatWidth = tick.width; $0.formatHeight = tick.height }
+            }
+        }
+    }
+
+    /// The lock machine, the shot-move ladder and the composer for one
+    /// control turn. Everything it writes to the motion core, and the
+    /// directive it ends with, land as one step for the capture queue. The
+    /// transaction is staged (`CropMotionCore`): no lock is held while the
+    /// lock machine or the composer runs, so a slow turn delays no frame.
+    private func composeControlStep(observation: DetectionFrame?, detectedPersons: [PersonDetector.DetectedPerson],
+                                    detectionIsFresh: Bool, onFrame: Bool) {
+        beginMotionTransaction()
+        defer { endMotionTransaction() }
 
         // Advance the lock state machine. tracking → hold when the locked
         // subject goes missing, hold → wideWaiting after holdDuration. The
@@ -2320,10 +2648,10 @@ final class CameraManager: NSObject, ObservableObject {
             let lockOutcome = shotComposer.tick(
                 detections: detectedPersons,
                 timestamp: CACurrentMediaTime(),
-                pixelBuffer: detectionIsFresh ? observation.frame?.pixelBuffer : nil,
+                pixelBuffer: detectionIsFresh ? observation?.pixelBuffer : nil,
                 isFresh: detectionIsFresh,
-                observationID: observation.frame?.observationID,
-                observationTimestamp: observation.frame?.capturedAt
+                observationID: observation?.observationID,
+                observationTimestamp: observation?.capturedAt
             )
             applyLockOutcome(lockOutcome)
         }
@@ -2345,139 +2673,42 @@ final class CameraManager: NSObject, ObservableObject {
         }
         lastObservedSteadyBand = shotComposer.steadyBand
 
-        let primaryPerson = activeMode != .autoTracking
-            ? nil
-            : shotComposer.primaryPerson(from: detectedPersons)
-
-        func manualCropRect(center: CGPoint) -> CropEngine.CropRect {
-            let size = manualCropSize()
-            let originX = center.x - size.width / 2.0
-            let originY = center.y - size.height / 2.0
-
-            return CropEngine.CropRect(
-                origin: CGPoint(x: originX, y: originY),
-                size: size
-            ).clamped()
-        }
-
-        var outputPixelBuffer: CVPixelBuffer?
-        var composeDuration: TimeInterval = 0
-        var cropDuration: TimeInterval = 0
         if let cropEngine {
-            advanceShotMove(now: CACurrentMediaTime())
-            switch activeMode {
-            case .wide:
-                    // Drive the spring toward the wide VIEW. Return to Wide
-                    // snaps there via jumpToTarget(); entering .wide through a
-                    // softer path (e.g. unlocking the subject) animates
-                    // instead. Honour the framing-boost window so the pull-out
-                    // arrives in ~0.5s rather than crawling.
-                    let smoothing = CACurrentMediaTime() < fastFramingUntil
-                        ? Self.fastFramingSmoothing
-                        : shotComposer.config.smoothingFactor
-                    cropEngine.applyFrameSmoothing(smoothing, operatorSetting: shotComposer.config.smoothingFactor)
-                    cropEngine.setTargetCrop(widestSafeCrop())
-                case .autoTracking:
-                    if useMLAgent {
-                        cropEngine.applyFrameSmoothing(0.05, operatorSetting: shotComposer.config.smoothingFactor)
-                        let newCrop = cinematicAgent.predict(
-                            person: primaryPerson,
-                            currentCrop: cropEngine.currentCrop
-                        )
-                        cropEngine.setTargetCrop(newCrop)
-                    } else {
-                        let smoothing = CACurrentMediaTime() < fastFramingUntil
-                            ? Self.fastFramingSmoothing
-                            : shotComposer.config.smoothingFactor
-                        cropEngine.applyFrameSmoothing(smoothing, operatorSetting: shotComposer.config.smoothingFactor)
-                        if let primaryPerson {
-                            frameLog("🔍 DEBUG: Composing shot for person at \(primaryPerson.boundingBox)")
-                            if let idealCrop = shotComposer.compose(
-                                person: primaryPerson,
-                                isFresh: detectionIsFresh,
-                                observationTimestamp: observation.frame?.capturedAt
-                            ) {
-                                lastTrackingCrop = idealCrop
-                                cropEngine.setTargetCrop(idealCrop)
-                            }
-                        } else {
-                            if let lastTrackingCrop { cropEngine.setTargetCrop(lastTrackingCrop) }
-                            frameLog("🔍 DEBUG: No persons detected, holding last position")
-                        }
-                    }
-                case .manualCrop:
-                    cropEngine.applyFrameSmoothing(shotComposer.config.smoothingFactor, operatorSetting: shotComposer.config.smoothingFactor)
-                    let idealCrop = manualCropRect(center: manualCropPoint)
-                    cropEngine.setTargetCrop(idealCrop)
-                case .autoPan:
-                    let size = manualCropSize()
-                    let legal = CropEngine.CropRect(center: .init(x: 0.5, y: 0.5), size: size)
-                        .clampedToQualityFloor(cropEngine.qualityFloor).clamped()
-                    let centerX = advanceAutoPan(now: CACurrentMediaTime(), width: legal.size.width)
-                    cropEngine.placePan(center: CGPoint(x: centerX, y: shotComposer.config.autoPanHeight), baseSize: size)
-                }
-            composeDuration = CACurrentMediaTime() - composeStart
-            Self.signposter.endInterval("compose", composeInterval)
-            outputPort.recordLatency(stage: .compose, duration: composeDuration)
+            // The capture queue stepped the size; this is the ladder around it.
+            if prepareShotMove(cropEngine) { finishShotMoveStep(cropEngine) }
 
-            frameLog("🔍 DEBUG: About to call renderCrop...")
-            let cropStart = CACurrentMediaTime()
-            let snapshot = cropEngine.tickInterpolation()
-            mainActiveTime += CACurrentMediaTime() - mainSegmentStart
-            let scheduler = workScheduler
-            let channel = channelID
-            outputPixelBuffer = await renderProgramFrame(crop: snapshot.crop, timestamp: timestampSeconds) {
-                // Each camera has its own render slot and queue; the slot only
-                // keeps this camera to one render at a time.
-                try await Self.renderInTurn(scheduler: scheduler, channel: channel) {
-                    try await cropEngine.renderCrop(pixelBuffer, crop: snapshot.crop,
-                                                    outputSize: snapshot.outputSize, highQuality: snapshot.highQuality)
+            if activeMode == .autoTracking {
+                let primaryPerson = shotComposer.primaryPerson(from: detectedPersons)
+                if useMLAgent {
+                    // The agent integrates a velocity per call, so it runs
+                    // once per frame, not on a detection wake. Control ticks
+                    // are one slot: when the main thread is behind it takes
+                    // fewer steps, as it did when the gate dropped frames.
+                    if onFrame {
+                        setTrackingTarget(cinematicAgent.predict(person: primaryPerson,
+                                                                 currentCrop: cropEngine.currentCrop))
+                    }
+                } else {
+                    // The composer no longer runs on every frame; see `ComposeRule`.
+                    let composes = composeRule.composes(
+                        freshDetection: detectionIsFresh,
+                        framingChangePending: shotComposer.framingChangePending,
+                        zoomHeight: cropEngine.adjustedHeight)
+                    if let primaryPerson {
+                        if composes, let idealCrop = shotComposer.compose(
+                            person: primaryPerson,
+                            isFresh: detectionIsFresh,
+                            observationTimestamp: observation?.capturedAt
+                        ) {
+                            lastTrackingCrop = idealCrop
+                            setTrackingTarget(idealCrop)
+                        }
+                    } else if composes, let lastTrackingCrop {
+                        setTrackingTarget(lastTrackingCrop)
+                    }
                 }
             }
-            mainSegmentStart = CACurrentMediaTime()
-            cropDuration = CACurrentMediaTime() - cropStart
-            outputPort.recordLatency(stage: .cropRender, duration: cropDuration)
-            cropEngine.publishRenderStats(renderTime: cropDuration)
-            frameLog("🔍 DEBUG: Crop processing complete")
-        } else {
-            composeDuration = CACurrentMediaTime() - composeStart
-            Self.signposter.endInterval("compose", composeInterval)
-            outputPort.recordLatency(stage: .compose, duration: composeDuration)
         }
-
-        // A retired render is dropped. A failed current render holds the last good program.
-        guard sessionGeneration == captureGeneration, isRunning, let outputPixelBuffer else {
-            renderStats.discarded += 1
-            logRenderStatsIfDue(nil)
-            Self.signposter.endInterval("captureFrame", captureInterval)
-            return
-        }
-
-        // Only real detections are recorded. Logging repeats would teach the
-        // agent that an identical observation can demand a different action.
-        if trainingDataRecorder.isRecording, detectionIsFresh {
-            trainingDataRecorder.recordFrame(
-                timestamp: timestampSeconds,
-                persons: detectedPersons,
-                currentCrop: cropEngine?.currentCrop ?? .fullFrame,
-                idealCrop: useMLAgent
-                    ? cinematicAgent.lastPredictedCrop
-                    : shotComposer.currentComputedCrop,
-                isInterpolating: cropEngine?.isInterpolating ?? false
-            )
-        }
-
-        // Publish the program (right) pane every frame. This is now a zero-copy
-        // IOSurface layer assignment (PixelBufferPreviewView) rather than the
-        // old per-render CIContext + full-frame createCGImage, so full-rate
-        // (50 Hz) publishing is affordable on the MainActor — the earlier
-        // half-rate gate (`previewPublishTick`) existed only to amortise that
-        // expensive display path, which no longer exists. `outputPixelBuffer`
-        // is the crop pool's output surface (every mode renders through
-        // processCrop; failures hold the prior rendered surface);
-        // holding it in the published property keeps the pool from re-vending it
-        // while on screen. The wide pane was already published above, pre-crop.
-        croppedFrameBuffer = outputPixelBuffer
 
         // Acquisition, hold, recovery and unlock transitions are discrete shot
         // changes: a frame rendered before one must not be taken after it.
@@ -2486,62 +2717,95 @@ final class CameraManager: NSObject, ObservableObject {
             lastShotPhase = phase
             shotRevision &+= 1
         }
-        renderedFrameCount &+= 1
-        if isProgramHolding { repeatedFrameCount &+= 1 }
-        latestRenderedFrame = RenderedChannelFrame(
-            channelID: channelID,
-            revisions: revisions,
-            sourceTimestamp: timestampSeconds,
-            processingStartedAt: captureStart,
-            renderedAt: CACurrentMediaTime(),
-            crop: lastGoodProgramCrop ?? cropEngine?.currentCrop ?? .fullFrame,
-            outputSize: cropEngine?.config.outputSize ?? .zero,
-            isRepeat: isProgramHolding,
-            pixelBuffer: outputPixelBuffer)
+    }
 
-        // isProgramHolding is set by selectProgramBuffer for this frame: true
-        // means this send repeats the last good render (telemetry only).
-        outputPort.submitFrame(outputPixelBuffer, timestamp: timestampSeconds, isRepeat: isProgramHolding,
-                               routeGeneration: frameRouteGeneration)
-        renderStats.published += 1
-        logRenderStatsIfDue(outputPixelBuffer)
+    /// The Program camera's one main-thread turn per frame: hand the finished
+    /// frame to the router and sink, and record that frame's diagnostics.
+    /// When the main thread falls behind, the newest frame replaces the ones
+    /// it did not get to, so Program still freezes for as long as this turn
+    /// cannot run.
+    static let supersededHandOffReason = "The main thread was behind: a newer Program frame replaced this one before it was handed on."
 
-        let detectionDuration = observation.frame?.detectionDuration ?? 0
-        let totalDuration = CACurrentMediaTime() - captureStart
-        mainActiveTime += CACurrentMediaTime() - mainSegmentStart
-        outputPort.recordLatency(stage: .mainActor, duration: mainActiveTime)
-        outputPort.recordLatency(stage: .total, duration: totalDuration)
-        Self.signposter.endInterval("captureFrame", captureInterval)
+    private func handOffProgramFrame() {
+        defer { resumeLoopMessageWaiters() }
+        guard let motionUnit, let item = motionUnit.takeHandOff() else { return }
+        let arrived = CACurrentMediaTime()
+        syncProgramHolding()
+        let frame = item.frame
+        // A stop, a rebind or a hot unplug retired it while it waited.
+        guard frame.revisions.sourceGeneration == captureGeneration, isRunning, !sourceMissing else { return }
 
+        flushImageCachesIfDue(now: arrived)
+        beginDiagnosticsIfNeeded(width: item.sourceWidth, height: item.sourceHeight)
+        // Frames the loop finished while the main thread was behind, which
+        // this one replaced in the hand-off slot. Each is an input frame, and
+        // a drop with its own stage: the camera delivered and rendered it;
+        // Program never showed it. One hand-off records them all.
+        for timestamp in item.superseded {
+            outputPort.recordInputFrame(timestamp: timestamp)
+            outputPort.recordDroppedFrame(timestamp: timestamp, reason: Self.supersededHandOffReason,
+                                          stage: .handoffSuperseded)
+        }
+        // Soak diagnostic: how long the finished frame waited for the main
+        // thread. A growing hopLag with flat Vision wall time is the signature
+        // of MainActor/SwiftUI accumulation (see the [SOAK] line).
+        outputPort.recordMainActorHop(arrived - item.postedAt)
+        outputPort.recordInputFrame(timestamp: frame.sourceTimestamp)
+        outputPort.recordLatency(stage: .cropRender, duration: item.renderDuration)
+
+        outputPort.submitFrame(frame.pixelBuffer, timestamp: frame.sourceTimestamp, isRepeat: frame.isRepeat,
+                               routeGeneration: item.routeGeneration)
+
+        let finished = CACurrentMediaTime()
+        outputPort.recordLatency(stage: .mainActor, duration: finished - arrived)
+        outputPort.recordLatency(stage: .total, duration: finished - frame.processingStartedAt)
         let gateDrops = frameProcessingGate.droppedFrameCount
         outputPort.recordGateDropTotal(gateDrops)
-        outputPort.recordFramePathCounts(detectedPersons: detectedPersons.count)
-        if let cropEngine {
-            outputPort.recordPictureQuality(
-                sourceHeight: Int(bufferHeight),
-                cropHeightFraction: Double(cropEngine.currentCrop.size.height),
-                outputHeight: Int(cropEngine.config.outputSize.height)
-            )
-        }
+        outputPort.recordPictureQuality(
+            sourceHeight: item.sourceHeight,
+            cropHeightFraction: item.cropHeightFraction,
+            outputHeight: Int(frame.outputSize.height)
+        )
         latencyLog(
-            "total=\(String(format: "%.1f", totalDuration * 1000))ms " +
-            "detect=\(String(format: "%.1f", detectionDuration * 1000))ms " +
-            "crop=\(String(format: "%.1f", cropDuration * 1000))ms " +
-            "compose=\(String(format: "%.1f", composeDuration * 1000))ms " +
-            "gateDrops=\(gateDrops)"
+            "total=\(String(format: "%.1f", (finished - frame.processingStartedAt) * 1000))ms " +
+            "crop=\(String(format: "%.1f", item.renderDuration * 1000))ms " +
+            "handoffWait=\(String(format: "%.1f", (arrived - item.postedAt) * 1000))ms " +
+            "handoffSuperseded=\(item.superseded.count) gateDrops=\(gateDrops)"
         )
     }
 
-    private func processValidationFrame(
+    private func drainLoopEvents() {
+        defer {
+            syncProgramHolding()
+            resumeLoopMessageWaiters()
+        }
+        guard let motionUnit else { return }
+        let batch = motionUnit.takeEvents()
+        guard !batch.failedRenders.isEmpty, isRunning, !sourceMissing else { return }
+        cancelOperatorMotion()
+        refreshMotionInputs()
+        let reason = "Crop processing failed: \(batch.lastFailureDescription ?? "unknown")"
+        for timestamp in batch.failedRenders {
+            outputPort.recordDroppedFrame(timestamp: timestamp, reason: reason, stage: .renderFailed)
+        }
+    }
+
+    /// Validation-clip playback is a capture source like the camera: it
+    /// delivers each frame to the same loop on the same queue, and waits for
+    /// that frame before reading the next. No main-thread turn is involved.
+    private nonisolated func processValidationFrame(
         _ pixelBufferBox: SendablePixelBufferBox,
         timestampSeconds: Double,
         generation: UInt64
     ) async {
-        guard generation == captureGeneration else { return }
-        await processFrame(
-            pixelBuffer: pixelBufferBox.pixelBuffer,
-            timestampSeconds: timestampSeconds
-        )
+        guard generation == frameMailbox.admission.sourceGeneration, let motionUnit else { return }
+        let queue = videoOutputQueue
+        await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in
+            queue.async {
+                motionUnit.process(pixelBufferBox.pixelBuffer, timestamp: timestampSeconds)
+                continuation.resume()
+            }
+        }
     }
 
     private func updateValidationClipStatus(_ status: String) {
@@ -2806,9 +3070,8 @@ final class CameraManager: NSObject, ObservableObject {
         guard isRunning, activeInputSource == .liveCamera, !sourceMissing else { return }
         Self.logger.warning("Capture device disconnected on \(self.channelID.cameraLabel, privacy: .public)")
         captureGeneration &+= 1
-        latestRenderedFrame = nil
-        lastGoodProgramBuffer = nil
-        lastGoodProgramCrop = nil
+        frameMailbox.clearRendered()
+        frameMailbox.resetHold(clearHolding: false)
         cancelOperatorMotion()
         invalidateDetection()
         frameProcessingGate.reset()
@@ -3045,29 +3308,15 @@ extension CameraManager: AVCaptureVideoDataOutputSampleBufferDelegate {
 
             let timestampSeconds = CMSampleBufferGetPresentationTimeStamp(sampleBuffer).seconds
 
-            // No per-drop logging here. Under overload this fires at frame rate on
-            // the capture delegate queue, and the logging itself then contributes to
-            // the overload. The gate already emits a delivered/dropped summary once
-            // per second (`CaptureThroughput`), and the [SOAK] line carries the
-            // running total.
+            // The whole frame runs here, on this camera's capture queue: read
+            // the target, step, render, store (D-02 path 2). It does not wait
+            // for the main thread. While it runs AVCapture discards late
+            // frames itself and reports them through `didDrop` below; the gate
+            // still counts delivered frames for the once-a-second
+            // `CaptureThroughput` line and retires a frame across a reset.
             guard let frameLease = frameProcessingGate.begin() else { return }
-
-            let sendableBuffer = SendablePixelBufferBox(pixelBuffer)
-
-            // Soak diagnostic: how long the frame Task waits for the MainActor.
-            // A growing hopLag with flat Vision wall time is the signature of
-            // MainActor/SwiftUI accumulation (see the [SOAK] line).
-            let enqueueTime = CACurrentMediaTime()
-
-            Task(priority: .userInitiated) { @MainActor in
-                defer { self.frameProcessingGate.finish(frameLease) }
-                guard self.frameProcessingGate.isCurrent(frameLease) else { return }
-                self.outputPort.recordMainActorHop(CACurrentMediaTime() - enqueueTime)
-                await self.processFrame(
-                    pixelBuffer: sendableBuffer.pixelBuffer,
-                    timestampSeconds: timestampSeconds
-                )
-            }
+            defer { frameProcessingGate.finish(frameLease) }
+            motionUnit?.process(pixelBuffer, timestamp: timestampSeconds)
         }
     }
     

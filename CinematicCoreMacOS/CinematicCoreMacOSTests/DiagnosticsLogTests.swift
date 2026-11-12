@@ -62,10 +62,10 @@ struct DiagnosticsLogTests {
         window.detections = 10
         window.window = PipelineCounters(
             admitted: 90, gateSkipped: 10, captureDropped: 1, renderFailed: 2,
-            routed: 90, noRoute: 3, handoffAccepted: 86, handoffRefused: 1, repeated: 2)
+            routed: 90, noRoute: 3, handoffAccepted: 86, handoffRefused: 1, repeated: 2, handoffSuperseded: 4)
         window.totals = PipelineCounters(
             admitted: 900, gateSkipped: 100, captureDropped: 4, renderFailed: 5,
-            routed: 900, noRoute: 6, handoffAccepted: 880, handoffRefused: 7, repeated: 8)
+            routed: 900, noRoute: 6, handoffAccepted: 880, handoffRefused: 7, repeated: 8, handoffSuperseded: 11)
 
         let raw = DiagnosticsLog.rowFields(elapsed: 12.3, clock: "10:00:00", system: system, window: window, note: "a, b")
         #expect(raw.count == DiagnosticsLog.columns.count)
@@ -86,6 +86,8 @@ struct DiagnosticsLogTests {
         #expect(row["handoff_refused_total"] == "7")
         #expect(row["repeated_window"] == "2")
         #expect(row["repeated_total"] == "8")
+        #expect(row["handoff_superseded_window"] == "4")
+        #expect(row["handoff_superseded_total"] == "11")
         #expect(row["handoff_fps"] == "43.00")
         #expect(row["detector_fps"] == "5.00")
         #expect(row["cpu_pct"] == "150")

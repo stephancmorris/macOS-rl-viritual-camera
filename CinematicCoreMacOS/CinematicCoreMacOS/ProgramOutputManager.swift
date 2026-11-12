@@ -111,6 +111,9 @@ final class ProgramOutputManager: ObservableObject {
         case renderFailed
         /// The active route's sink refused it.
         case handoffRefused
+        /// It was rendered, but a newer Program frame replaced it before the
+        /// main thread handed it to the route (the main thread was behind).
+        case handoffSuperseded
     }
 
     struct StageLatency: Identifiable {
@@ -532,13 +535,13 @@ final class ProgramOutputManager: ObservableObject {
         )
 
         let line = String(
-            format: "[SOAK] footprint=%.0fMB hopLag=%.1f/%.1fms queueWait=%.1f/%.1fms visionWall=%.1f/%.1fms delivered=%llu admitted=%d handoff=%d refused=%d repeated=%d renderFailed=%d captureDropped=%d gateDrops=%llu/%llu",
+            format: "[SOAK] footprint=%.0fMB hopLag=%.1f/%.1fms queueWait=%.1f/%.1fms visionWall=%.1f/%.1fms delivered=%llu admitted=%d handoff=%d refused=%d superseded=%d repeated=%d renderFailed=%d captureDropped=%d gateDrops=%llu/%llu",
             footprint,
             hopMean * 1000, rawHopLagMax * 1000,
             qwMean * 1000, rawQueueWaitMax * 1000,
             vwMean * 1000, rawVisionWallMax * 1000,
             window.delivered, window.admitted, counters.handoffAccepted, counters.handoffRefused,
-            window.repeated, window.renderFailed, window.captureDropped,
+            window.handoffSuperseded, window.repeated, window.renderFailed, window.captureDropped,
             window.gateSkipped, counters.gateSkipped
         )
         logger.notice("\(line, privacy: .public)")
@@ -774,6 +777,7 @@ final class ProgramOutputManager: ObservableObject {
         case .captureUpstream: counters.captureDropped += 1
         case .renderFailed: counters.renderFailed += 1
         case .handoffRefused: counters.handoffRefused += 1
+        case .handoffSuperseded: counters.handoffSuperseded += 1
         }
         rawDroppedFrames += 1
         rawLastDropTimestamp = timestamp
