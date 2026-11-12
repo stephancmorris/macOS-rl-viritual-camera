@@ -189,6 +189,7 @@ final class ScenarioLoop {
         // Acquisition already observed the subject. Make that observation available immediately.
         // This also keeps the first scheduled scan in the tracking ROI, rather than
         // the accidental startup hold's full-frame scan. Do not subtract startup hold time.
+        reportedBoxes = [first]
         latest = (t, 1, detector.detectedPersons)
         seq = 1
     }
@@ -361,7 +362,7 @@ struct TrackingScenarios {
             if loop.trace.count > traceIndex {
                 let scan = loop.trace[traceIndex]
                 let actor = scan.lockedBox.flatMap { lb in
-                    actors.indices.filter { actors[$0].present(el) }.max {
+                    actors.indices.filter { actors[$0].present(el) && PersonDetector.iou(lb, box(actors[$0], el)) > 0.3 }.max {
                         PersonDetector.iou(lb, box(actors[$0], el)) < PersonDetector.iou(lb, box(actors[$1], el))
                     }
                 }
