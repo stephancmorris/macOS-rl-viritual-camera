@@ -27,6 +27,11 @@ final class ProbeRng {
     }
 }
 
+enum TrackingScenarioOptions {
+    static var wide: Bool { ProcessInfo.processInfo.environment["TRACKING_SCENARIO_WIDE"] == "1" }
+    static var trace: Bool { ProcessInfo.processInfo.environment["TRACKING_SCENARIO_TRACE"] == "1" }
+}
+
 func r2(_ v: Double, _ d: Int = 2) -> String { String(format: "%.\(d)f", v) }
 func scenarioBox(cx: Double, bottom: Double = 0.25, w: Double = 0.07, h: Double = 0.30) -> CGRect {
     CGRect(x: cx - w / 2, y: bottom, width: w, height: h)
@@ -150,6 +155,17 @@ final class ScenarioLoop {
     private var fastUntil = 0.0
     private var lastBand: ShotComposer.SteadyBand?
     private var lastTrackingCrop: CropEngine.CropRect?
+    struct ScanTrace {
+        let capturedAt: Double
+        let lockState: String
+        let lockedBox: CGRect?
+        let visionBoxes: [CGRect]
+        let passABound: Bool
+        let lockLastSeen: Double?
+    }
+    var traceEnabled = false
+    private(set) var trace: [ScanTrace] = []
+    private var reportedBoxes: [CGRect] = []
     var visionLatency = 0.018
     var lockedBox: CGRect?
     var isHold = false
@@ -184,6 +200,7 @@ final class ScenarioLoop {
             // stamped with the detection start time.
             detector.updateTracking(rectObservations: p.boxes.map { VNHumanObservation(boundingBox: $0) },
                                     poseObservations: [], faceObservations: [], timestamp: p.capturedAt)
+            reportedBoxes = p.boxes
             latest = (p.capturedAt, p.obsID, detector.detectedPersons)
             pending = nil
             inFlight = false
@@ -239,6 +256,19 @@ final class ScenarioLoop {
                 engine.setTargetCrop(crop)
             }
         } else if let lastTrackingCrop { engine.setTargetCrop(lastTrackingCrop) }
+        if fresh, traceEnabled, let obsT {
+            let motion = detector.trackMotion(for: id)
+            let state: String
+            switch composer.lockState {
+            case .tracking: state = "tracking"
+            case .hold: state = "hold"
+            case .wideWaiting: state = "wide"
+            default: state = "other"
+            }
+            trace.append(ScanTrace(capturedAt: obsT, lockState: state, lockedBox: lockedBox,
+                visionBoxes: reportedBoxes, passABound: motion?.lastSeen == obsT,
+                lockLastSeen: motion?.lastSeen))
+        }
         return engine.tickInterpolation(now: t).crop
     }
 }
@@ -288,9 +318,11 @@ struct TrackingScenarios {
             actors[0].present(e) && !hidden(0, e) && !actors[0].visionMiss(e)
         }
         let loop = try ScenarioLoop(preset: .waistUp, feel: .steadyFollow, first: box(actors[0], 0), t: t0)
+        loop.traceEnabled = TrackingScenarioOptions.trace && !TrackingScenarioOptions.wide
+        var traceIndex = 0
         var on = 0
         var wrong = 0.0, hold = 0.0, holdVisible = 0.0
-        for frame in 1...Int(min(sc.duration, 15) * fps) {
+        for frame in 1...Int((TrackingScenarioOptions.wide ? sc.duration : min(sc.duration, 15)) * fps) {
             let el = Double(frame) / fps
             _ = loop.step(t: t0 + el) { t, roi in
                 let e = t - self.t0
@@ -325,7 +357,18 @@ struct TrackingScenarios {
                 }
                 return out
             }
-            if frame == 1 { #expect(!loop.isHold) }
+            if frame == 1, !TrackingScenarioOptions.wide { #expect(!loop.isHold) }
+            if loop.trace.count > traceIndex {
+                let scan = loop.trace[traceIndex]
+                let actor = scan.lockedBox.flatMap { lb in
+                    actors.indices.filter { actors[$0].present(el) }.max {
+                        PersonDetector.iou(lb, box(actors[$0], el)) < PersonDetector.iou(lb, box(actors[$1], el))
+                    }
+                }
+                let boxes = scan.visionBoxes.map { "\(r2(Double($0.midX), 4)),\(r2(Double($0.width), 4))" }.joined(separator: ";")
+                print("TRACKING-TRACE|\(sc.name)|seed=\(seed)|t=\(r2(scan.capturedAt - t0, 3))|state=\(scan.lockState)|actor=\(actor.map(String.init) ?? "none")|vision=\(scan.visionBoxes.count)|passA=\(scan.passABound)|lastSeen=\(scan.lockLastSeen.map { r2($0 - t0, 3) } ?? "expired")|boxes=\(boxes)")
+                traceIndex += 1
+            }
             if loop.isTracking, let lb = loop.lockedBox {
                 var best = on, bestIoU = 0.0
                 for i in actors.indices where actors[i].present(el) {
