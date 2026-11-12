@@ -37,14 +37,16 @@ nonisolated final class ProgramRouteState: @unchecked Sendable {
 
     init(program: ChannelID) { self.program = program }
 
-    var programChannel: ChannelID {
-        get { lock.lock(); defer { lock.unlock() }; return program }
-        set { lock.lock(); program = newValue; lock.unlock() }
-    }
+    var programChannel: ChannelID { lock.lock(); defer { lock.unlock() }; return program }
+    var routeGeneration: UInt64 { lock.lock(); defer { lock.unlock() }; return generation }
 
-    var routeGeneration: UInt64 {
-        get { lock.lock(); defer { lock.unlock() }; return generation }
-        set { lock.lock(); generation = newValue; lock.unlock() }
+    /// A role change: the new Program and the next generation in one locked
+    /// write, so no reader sees the new Program under the old generation.
+    func setProgram(_ channel: ChannelID) {
+        lock.lock()
+        program = channel
+        generation &+= 1
+        lock.unlock()
     }
 
     func route(for channel: ChannelID) -> FrameRoute {
@@ -97,15 +99,9 @@ final class ProgramRouter {
     let output: ProgramOutputManager
     /// Storage for the two values below, so a capture queue can read them.
     nonisolated let routeState: ProgramRouteState
-    private(set) var programChannel: ChannelID {
-        get { routeState.programChannel }
-        set { routeState.programChannel = newValue }
-    }
+    var programChannel: ChannelID { routeState.programChannel }
     /// Increments on every role change; sends are gated on it.
-    private(set) var routeGeneration: UInt64 {
-        get { routeState.routeGeneration }
-        set { routeState.routeGeneration = newValue }
-    }
+    var routeGeneration: UInt64 { routeState.routeGeneration }
     private(set) var state: State = .idle {
         didSet { if state != oldValue { stateObserver?(state) } }
     }
@@ -266,8 +262,7 @@ final class ProgramRouter {
     @discardableResult
     func setProgram(_ channel: ChannelID, expectedRouteGeneration: UInt64) -> Bool {
         guard expectedRouteGeneration == routeGeneration else { return false }
-        programChannel = channel
-        routeGeneration &+= 1
+        routeState.setProgram(channel)
         if handoff != nil { resetHandoff() }
         return true
     }
@@ -291,8 +286,7 @@ final class ProgramRouter {
         guard output.sendFrameAccepted(frame.pixelBuffer, timestamp: timestamp, isRepeat: false) else {
             return false
         }
-        programChannel = channel
-        routeGeneration &+= 1
+        routeState.setProgram(channel)
         lastGoodBuffer = frame.pixelBuffer
         lastSentBuffer = frame.pixelBuffer
         lastProgramFrameAt = clock()

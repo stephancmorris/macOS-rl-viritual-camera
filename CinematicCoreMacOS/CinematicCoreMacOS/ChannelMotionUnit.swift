@@ -14,7 +14,7 @@
 //  - hand-off: the Program camera's finished frame, for the router and sink;
 //  - control: the raw frame, only while the controller has per-frame work
 //    (detection, the lock machine, a shot move);
-//  - event: rare changes (a failed render, hold starting or ending).
+//  - event: rare changes (failed renders, counted; hold starting or ending).
 //
 //  The lock machine, the composer and commands stay with the controller
 //  (`CameraManager`) on the main thread.
@@ -64,13 +64,21 @@ nonisolated struct ProgramHandOff: @unchecked Sendable {
     let renderDuration: TimeInterval
     let totalDuration: TimeInterval
     let cropHeightFraction: Double
-    /// Earlier frames this one replaced before the main thread took them.
-    let superseded: UInt64
+    /// Source timestamps of the finished frames this one replaced in the
+    /// slot before the main thread took them: frames Program never showed.
+    let superseded: [Double]
 }
 
-nonisolated enum MotionEvent: Sendable {
-    case renderFailed(timestamp: Double, description: String)
-    case holdChanged
+/// What happened on the capture queue since the main thread last asked.
+/// Bounded: failures are counted, with timestamps kept up to the coalescer's
+/// cap, however long the main thread was away.
+nonisolated struct MotionEventBatch: Sendable {
+    /// Source timestamp of every failed render, oldest first.
+    var failedRenders: [Double] = []
+    var lastFailureDescription: String?
+    var holdChanged = false
+
+    var isEmpty: Bool { failedRenders.isEmpty && !holdChanged }
 }
 
 /// Auto Pan's sweep state. Stepped by the loop; tests step it directly.
@@ -120,7 +128,6 @@ nonisolated final class ChannelMotionUnit: @unchecked Sendable {
     let core: CropMotionCore
     let targets: MotionTargetMailbox
     let frames: ChannelFrameMailbox
-    let hold: ProgramHoldState
     let pan: AutoPanState
 
     private let render: Renderer
@@ -132,22 +139,23 @@ nonisolated final class ChannelMotionUnit: @unchecked Sendable {
     private var hop: (@Sendable (MotionMainHop) -> Void)?
     private var pendingHandOff: ProgramHandOff?
     private var handOffHopPending = false
-    private var supersededHandOffs: UInt64 = 0
+    private let supersededHandOffs = CaptureDropCoalescer()
     private var pendingControlTick: ControlTick?
     private var controlWake = false
     private var controlHopPending = false
-    private var events: [MotionEvent] = []
+    private let failedRenders = CaptureDropCoalescer()
+    private var lastFailureDescription: String?
+    private var holdChangedPending = false
     private var eventHopPending = false
 
     // Touched only by the capture source's queue, inside `process`.
     private var loopGeneration: UInt64?
     private var lastWidth = 0
     private var lastHeight = 0
-    private var appliedTrackingSerial: UInt64 = 0
     private var stats = (stored: 0, discarded: 0, lastLogAt: 0.0)
 
     init(channelID: ChannelID, core: CropMotionCore, targets: MotionTargetMailbox,
-         frames: ChannelFrameMailbox, hold: ProgramHoldState, pan: AutoPanState,
+         frames: ChannelFrameMailbox, pan: AutoPanState,
          route: @escaping @Sendable () -> FrameRoute,
          clock: @escaping @Sendable () -> TimeInterval = { CACurrentMediaTime() },
          render: @escaping Renderer) {
@@ -155,7 +163,6 @@ nonisolated final class ChannelMotionUnit: @unchecked Sendable {
         self.core = core
         self.targets = targets
         self.frames = frames
-        self.hold = hold
         self.pan = pan
         self.route = route
         self.clock = clock
@@ -199,14 +206,21 @@ nonisolated final class ChannelMotionUnit: @unchecked Sendable {
             lastHeight = height
             formatChanged = true
             // The floor follows the delivered pixels, before the first step.
-            if height > 0 { core.qualityFloor = .forSource(height: height) }
+            if height > 0 { core.setDeliveredQualityFloor(.forSource(height: height)) }
         }
+        // A size the controller has not applied yet: the directive still
+        // carries the previous size's aspect and wide target.
+        let formatKnown = admission.formatWidth == width && admission.formatHeight == height
 
         // The controller's per-frame work, if it has any. Never awaited.
-        if admission.controlWanted || formatChanged {
+        if admission.controlWanted || formatChanged || !formatKnown {
             postControl(ControlTick(pixelBuffer: pixelBuffer, timestamp: timestamp, arrivedAt: started,
                                     sourceGeneration: admission.sourceGeneration, width: width, height: height))
         }
+        // No frame with the wrong aspect is rendered, stored or handed to
+        // Program. The first frame or two of a new size wait here for the
+        // controller's one turn; the wide pane already has the raw frame.
+        guard formatKnown else { return discard() }
 
         let snapshot = step(now: clock())
 
@@ -230,22 +244,27 @@ nonisolated final class ChannelMotionUnit: @unchecked Sendable {
             return discard()
         }
 
-        let wasHolding = hold.isHolding
-        let chosen: CVPixelBuffer?
+        // The new render, or after a failure the last good frame. Refused
+        // for a retired generation in the same locked step as the choice, so
+        // a retired frame cannot refill a hold the main thread just reset.
+        let rendered: CVPixelBuffer?
         switch result {
         case .success(let buffer):
-            chosen = hold.select(rendered: buffer, crop: snapshot.crop)
+            rendered = buffer
         case .failure(let error):
-            // A failed render repeats the last good program frame.
-            post(.renderFailed(timestamp: timestamp, description: error.localizedDescription))
-            chosen = hold.select(rendered: nil, crop: nil)
+            rendered = nil
+            noteFailedRender(timestamp: timestamp, description: error.localizedDescription)
         }
-        let isHolding = hold.isHolding
-        if isHolding != wasHolding { post(.holdChanged) }
-        guard let chosen else { return discard() }
+        guard let selection = frames.selectProgram(rendered: rendered, crop: rendered == nil ? nil : snapshot.crop,
+                                                   sourceGeneration: admission.sourceGeneration) else {
+            return discard()
+        }
+        if selection.holdingChanged { noteHoldChanged() }
+        let isHolding = selection.isHolding
+        guard let chosen = selection.buffer else { return discard() }
 
         let renderedAt = clock()
-        let crop = hold.lastGoodCrop ?? snapshot.crop
+        let crop = selection.crop ?? snapshot.crop
         let frame = RenderedChannelFrame(
             channelID: channelID,
             revisions: admission.revisions,
@@ -270,39 +289,40 @@ nonisolated final class ChannelMotionUnit: @unchecked Sendable {
         return true
     }
 
-    /// Zoom, target and spring for one frame, as one locked step so a
-    /// main-thread command never lands half-way through it.
+    /// Zoom, target and spring for one frame, as one locked step on the live
+    /// state. The directive is read inside the step, so it and the state
+    /// belong to the same side of any main-thread transaction.
     private func step(now: TimeInterval) -> CropMotionCore.Snapshot {
-        core.withLock {
+        core.step { state in
             let directive = targets.read()
-            core.zoomUsesTopAnchor = directive.zoomUsesTopAnchor
-            core.advanceZoom(now: now, aspect: directive.aspect)
+            state.zoomUsesTopAnchor = directive.zoomUsesTopAnchor
+            state.advanceZoom(now: now, aspect: directive.aspect)
             if let smoothing = directive.smoothing {
                 if let boost = directive.boost, now < boost.until {
-                    core.liveSmoothing = boost.smoothing
+                    state.liveSmoothing = boost.smoothing
                 } else {
-                    core.liveSmoothing = smoothing
+                    state.liveSmoothing = smoothing
                 }
             }
             switch directive.mode {
             case .wide(let target):
-                core.setTargetCrop(target)
+                state.setTargetCrop(target)
             case .tracking:
-                if directive.trackingSerial != appliedTrackingSerial {
-                    appliedTrackingSerial = directive.trackingSerial
-                    if let target = directive.trackingTarget { core.setTargetCrop(target) }
+                if directive.trackingSerial != state.appliedTargetSerial {
+                    state.appliedTargetSerial = directive.trackingSerial
+                    if let target = directive.trackingTarget { state.setTargetCrop(target) }
                 }
             case .manual(let center):
-                let size = directive.cropSize(adjustedHeight: core.adjustedHeight)
-                core.setTargetCrop(Self.manualCrop(center: center, size: size))
+                let size = directive.cropSize(adjustedHeight: state.adjustedHeight)
+                state.setTargetCrop(Self.manualCrop(center: center, size: size))
             case .autoPan(let speed, let height, let eased):
-                let size = directive.cropSize(adjustedHeight: core.adjustedHeight)
+                let size = directive.cropSize(adjustedHeight: state.adjustedHeight)
                 let legal = CropRect(center: CGPoint(x: 0.5, y: 0.5), size: size)
-                    .clampedToQualityFloor(core.qualityFloor).clamped()
+                    .clampedToQualityFloor(state.qualityFloor).clamped()
                 let centerX = pan.advance(now: now, width: legal.size.width, speed: speed, eased: eased)
-                core.placePan(center: CGPoint(x: centerX, y: height), baseSize: size)
+                state.placePan(center: CGPoint(x: centerX, y: height), baseSize: size)
             }
-            return core.tick(now: now)
+            return state.tick(now: now)
         }
     }
 
@@ -346,26 +366,40 @@ nonisolated final class ChannelMotionUnit: @unchecked Sendable {
                              width: Int, height: Int, renderDuration: TimeInterval,
                              totalDuration: TimeInterval, cropHeightFraction: Double) {
         lock.lock()
-        if pendingHandOff != nil { supersededHandOffs &+= 1 }
+        // A frame still in the slot is one Program never showed: counted,
+        // with its timestamp, for the hand-off that does get through.
+        if let replaced = pendingHandOff { _ = supersededHandOffs.note(timestamp: replaced.frame.sourceTimestamp) }
         pendingHandOff = ProgramHandOff(
             frame: frame, routeGeneration: routeGeneration, postedAt: postedAt,
             sourceWidth: width, sourceHeight: height, renderDuration: renderDuration,
             totalDuration: totalDuration, cropHeightFraction: cropHeightFraction,
-            superseded: supersededHandOffs)
+            superseded: [])
         let needsHop = !handOffHopPending
         handOffHopPending = true
         lock.unlock()
         if needsHop { send(.handOff) }
     }
 
-    /// Main thread: the newest Program frame not yet handed on, if any.
+    /// Main thread: the newest Program frame not yet handed on, if any, with
+    /// the timestamps of the frames it replaced.
     func takeHandOff() -> ProgramHandOff? {
         lock.lock()
         defer { lock.unlock() }
-        let item = pendingHandOff
-        pendingHandOff = nil
         handOffHopPending = false
-        return item
+        guard let item = pendingHandOff else { return nil }
+        pendingHandOff = nil
+        return ProgramHandOff(
+            frame: item.frame, routeGeneration: item.routeGeneration, postedAt: item.postedAt,
+            sourceWidth: item.sourceWidth, sourceHeight: item.sourceHeight,
+            renderDuration: item.renderDuration, totalDuration: item.totalDuration,
+            cropHeightFraction: item.cropHeightFraction, superseded: supersededHandOffs.drain().all)
+    }
+
+    /// Main thread: true while a message is waiting for it (test seam).
+    var hasPendingMainWork: Bool {
+        lock.lock()
+        defer { lock.unlock() }
+        return handOffHopPending || controlHopPending || eventHopPending
     }
 
     private func postControl(_ tick: ControlTick) {
@@ -404,22 +438,35 @@ nonisolated final class ChannelMotionUnit: @unchecked Sendable {
         return (true, tick)
     }
 
-    private func post(_ event: MotionEvent) {
+    private func noteFailedRender(timestamp: Double, description: String) {
+        _ = failedRenders.note(timestamp: timestamp)
+        requestEventHop { lastFailureDescription = description }
+    }
+
+    private func noteHoldChanged() {
+        requestEventHop { holdChangedPending = true }
+    }
+
+    private func requestEventHop(_ record: () -> Void) {
         lock.lock()
-        events.append(event)
+        record()
         let needsHop = !eventHopPending
         eventHopPending = true
         lock.unlock()
         if needsHop { send(.event) }
     }
 
-    /// Main thread: events since the last call, oldest first.
-    func takeEvents() -> [MotionEvent] {
+    /// Main thread: what happened since the last call. Bounded however long
+    /// the main thread was away: failures are counted, not queued one by one.
+    func takeEvents() -> MotionEventBatch {
         lock.lock()
         defer { lock.unlock() }
-        let taken = events
-        events.removeAll()
+        let batch = MotionEventBatch(failedRenders: failedRenders.drain().all,
+                                     lastFailureDescription: lastFailureDescription,
+                                     holdChanged: holdChangedPending)
+        lastFailureDescription = nil
+        holdChangedPending = false
         eventHopPending = false
-        return taken
+        return batch
     }
 }

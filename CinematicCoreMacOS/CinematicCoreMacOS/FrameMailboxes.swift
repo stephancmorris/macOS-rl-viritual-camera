@@ -8,10 +8,11 @@
 //  - `MotionTargetMailbox`: main thread → capture queue. What the picture
 //    should aim at. The newest directive replaces the one before it.
 //  - `ChannelFrameMailbox`: capture queue → main thread. The newest finished
-//    frame, with the revisions it was made under. It also holds the values
-//    the capture queue needs to stamp and admit a frame (source generation,
-//    command epoch, shot revision), so a frame from a retired generation is
-//    refused in the same locked step that would have stored it.
+//    frame, with the revisions it was made under, and the last good frame a
+//    failed render repeats. It also holds the values the capture queue needs
+//    to stamp and admit a frame (source generation, command epoch, shot
+//    revision), so a frame from a retired generation is refused in the same
+//    locked step that would have stored or held it.
 //
 //  Neither side waits for the other.
 //
@@ -95,6 +96,12 @@ nonisolated final class ChannelFrameMailbox: @unchecked Sendable {
         /// The main thread has per-frame work for this camera (detection, the
         /// lock machine, a shot move). False: the loop posts it nothing.
         var controlWanted = false
+        /// The delivered frame size the controller has applied (aspect, wide
+        /// target, composer floor) and published a directive for. The loop
+        /// renders nothing from frames of any other size: a frame stepped
+        /// with the previous size's directive would have the wrong aspect.
+        var formatWidth = 0
+        var formatHeight = 0
 
         var revisions: ChannelRevisions {
             ChannelRevisions(sourceGeneration: sourceGeneration, controlEpoch: controlEpoch, shotRevision: shotRevision)
@@ -108,6 +115,12 @@ nonisolated final class ChannelFrameMailbox: @unchecked Sendable {
     private var program: CVPixelBuffer?
     private var renderedCount: UInt64 = 0
     private var repeatedCount: UInt64 = 0
+    // The last good program frame, repeated when a render fails. Kept under
+    // the same lock as the source generation, so a retired frame can never
+    // refill it after the reset that retired it.
+    private var heldBuffer: CVPixelBuffer?
+    private var heldCrop: CropEngine.CropRect?
+    private var holding = false
 
     private func locked<T>(_ body: () -> T) -> T {
         lock.lock()
@@ -117,9 +130,55 @@ nonisolated final class ChannelFrameMailbox: @unchecked Sendable {
 
     var admission: Admission { locked { state } }
 
-    /// Main thread only.
+    /// Main thread only. A new source generation forgets the held frame and
+    /// the finished frame in the same locked step.
     func update(_ change: (inout Admission) -> Void) {
-        locked { change(&state) }
+        locked {
+            let generation = state.sourceGeneration
+            change(&state)
+            if state.sourceGeneration != generation {
+                heldBuffer = nil
+                heldCrop = nil
+                rendered = nil
+            }
+        }
+    }
+
+    // MARK: Hold-frame selection
+
+    struct Selection {
+        /// The frame to show: the new render, or the held one. Nil when a
+        /// render failed and nothing was ever rendered.
+        let buffer: CVPixelBuffer?
+        let crop: CropEngine.CropRect?
+        let isHolding: Bool
+        let holdingChanged: Bool
+    }
+
+    /// A new render replaces the held frame; a failed one (nil) repeats it.
+    /// Returns nil, and changes nothing, when `sourceGeneration` has retired.
+    func selectProgram(rendered newBuffer: CVPixelBuffer?, crop newCrop: CropEngine.CropRect?,
+                       sourceGeneration: UInt64) -> Selection? {
+        locked {
+            guard state.sourceGeneration == sourceGeneration else { return nil }
+            if let newBuffer { heldBuffer = newBuffer; heldCrop = newCrop }
+            let wasHolding = holding
+            holding = newBuffer == nil
+            return Selection(buffer: heldBuffer, crop: heldCrop, isHolding: holding, holdingChanged: holding != wasHolding)
+        }
+    }
+
+    var isHolding: Bool { locked { holding } }
+    var lastGoodCrop: CropEngine.CropRect? { locked { heldCrop } }
+
+    /// Forget the held frame. `clearHolding` also drops the holding flag
+    /// (session start and stop); a source loss keeps it.
+    func resetHold(clearHolding: Bool) {
+        locked {
+            heldBuffer = nil
+            heldCrop = nil
+            if clearHolding { holding = false }
+        }
     }
 
     // MARK: Capture queue → main thread
@@ -164,44 +223,4 @@ nonisolated final class ChannelFrameMailbox: @unchecked Sendable {
 
     /// Test seam: a frame as if the loop had stored it, without admission.
     func setRenderedForTesting(_ frame: RenderedChannelFrame?) { locked { rendered = frame } }
-}
-
-/// The last good program frame of one camera, repeated when a render fails.
-nonisolated final class ProgramHoldState: @unchecked Sendable {
-    private let lock = NSLock()
-    private var buffer: CVPixelBuffer?
-    private var crop: CropEngine.CropRect?
-    private var holding = false
-
-    /// A new render replaces the held frame; a failed one (nil) repeats it.
-    /// Returns the frame to show, nil when nothing was ever rendered.
-    func select(rendered: CVPixelBuffer?, crop newCrop: CropEngine.CropRect?) -> CVPixelBuffer? {
-        lock.lock()
-        defer { lock.unlock() }
-        if let rendered { buffer = rendered; crop = newCrop }
-        holding = rendered == nil
-        return buffer
-    }
-
-    var isHolding: Bool {
-        lock.lock()
-        defer { lock.unlock() }
-        return holding
-    }
-
-    var lastGoodCrop: CropEngine.CropRect? {
-        lock.lock()
-        defer { lock.unlock() }
-        return crop
-    }
-
-    /// Forget the held frame. `clearHolding` also drops the holding flag
-    /// (session start and stop); a source loss keeps it.
-    func reset(clearHolding: Bool) {
-        lock.lock()
-        buffer = nil
-        crop = nil
-        if clearHolding { holding = false }
-        lock.unlock()
-    }
 }

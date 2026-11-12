@@ -39,9 +39,12 @@ nonisolated struct FakeRenderFailure: Error {}
 /// Records what a Program camera hands to its port.
 final class RecordingPort: ChannelOutputPort {
     struct Submission { let buffer: CVPixelBuffer; let timestamp: Double; let isRepeat: Bool; let routeGeneration: UInt64 }
+    struct Drop { let timestamp: Double; let reason: String; let stage: ProgramOutputManager.DropStage }
     var submissions: [Submission] = []
     var hopLags: [TimeInterval] = []
-    var droppedReasons: [String] = []
+    var inputs: [Double] = []
+    var drops: [Drop] = []
+    var droppedReasons: [String] { drops.map(\.reason) }
 
     var diagnosticsFileName: String? { "recording port" }
     func submitFrame(_ pixelBuffer: CVPixelBuffer, timestamp: Double, isRepeat: Bool, routeGeneration: UInt64) {
@@ -56,12 +59,14 @@ final class RecordingPort: ChannelOutputPort {
     func noteDiagnostics(_ text: String) {}
     func recordSourceIdentity(_ source: DiagnosticsSessionIdentity.Source) {}
     func recordDeliveredDimensions(width: Int, height: Int) {}
-    func recordInputFrame(timestamp: Double) {}
+    func recordInputFrame(timestamp: Double) { inputs.append(timestamp) }
     func recordMainActorHop(_ seconds: TimeInterval) { hopLags.append(seconds) }
     func recordDetectionTiming(queueWait: TimeInterval, visionWall: TimeInterval) {}
     func recordObservationAge(_ age: TimeInterval) {}
     func recordLatency(stage: ProgramOutputManager.LatencyStage, duration: TimeInterval, timestamp: TimeInterval) {}
-    func recordDroppedFrame(timestamp: Double, reason: String, stage: ProgramOutputManager.DropStage) { droppedReasons.append(reason) }
+    func recordDroppedFrame(timestamp: Double, reason: String, stage: ProgramOutputManager.DropStage) {
+        drops.append(.init(timestamp: timestamp, reason: reason, stage: stage))
+    }
     func recordGateDropTotal(_ total: UInt64) {}
     func recordFramePathCounts(detectedPersons: Int) {}
     func recordPictureQuality(sourceHeight: Int, cropHeightFraction: Double, outputHeight: Int) {}
@@ -90,15 +95,18 @@ struct MotionLoopTests {
         let now: LoopProbe<TimeInterval>
     }
 
-    private func makeRig(isProgram: Bool, render: @escaping ChannelMotionUnit.Renderer) -> Rig {
+    /// `width` × `height` is the frame size the controller has already
+    /// applied; the loop renders nothing from frames of another size.
+    private func makeRig(isProgram: Bool, width: Int = 64, height: Int = 36,
+                         render: @escaping ChannelMotionUnit.Renderer) -> Rig {
         let frames = ChannelFrameMailbox()
-        frames.update { $0.isRunning = true }
+        frames.update { $0.isRunning = true; $0.formatWidth = width; $0.formatHeight = height }
         let targets = MotionTargetMailbox()
         let hops = HopCounter()
         let route = LoopProbe(FrameRoute(generation: 0, isProgram: isProgram))
         let now = LoopProbe<TimeInterval>(100)
         let unit = ChannelMotionUnit(channelID: isProgram ? .a : .b, core: CropMotionCore(), targets: targets,
-                                     frames: frames, hold: ProgramHoldState(), pan: AutoPanState(),
+                                     frames: frames, pan: AutoPanState(),
                                      route: { route.value }, clock: { now.value }, render: render)
         unit.setMainHop { hops.note($0) }
         return Rig(unit: unit, frames: frames, targets: targets, hops: hops, route: route, now: now)
@@ -123,18 +131,46 @@ struct MotionLoopTests {
         for _ in 0..<400 where !done() { try? await Task.sleep(nanoseconds: 5_000_000) }
     }
 
+    /// A running camera whose controller has applied the fake source's frame
+    /// size. The first frame of a size is not rendered: it waits for the
+    /// controller's turn, which `processFrameForTesting` waits for.
+    private func runningCamera(port: RecordingPort, width: Int = 64, height: Int = 36) async throws -> CameraManager {
+        let camera = TestHardware.makeCamera(outputPort: port)
+        camera.setRunningForTesting(true)
+        await camera.processFrameForTesting(try Self.buffer(width: width, height: height), timestampSeconds: -1)
+        return camera
+    }
+
+    /// A loop on a real camera's mailboxes and motion core, with a renderer
+    /// the test controls. The camera's own controller is not wired to it.
+    private func loop(on camera: CameraManager, isProgram: Bool = false,
+                      render: @escaping ChannelMotionUnit.Renderer) throws -> ChannelMotionUnit {
+        let engine = try #require(camera.cropEngine)
+        camera.frameMailbox.update { $0.formatWidth = 64; $0.formatHeight = 36 }
+        return ChannelMotionUnit(channelID: camera.channelID, core: engine.motion, targets: camera.motionTargets,
+                                 frames: camera.frameMailbox, pan: camera.autoPan,
+                                 route: { FrameRoute(generation: 0, isProgram: isProgram) }, render: render)
+    }
+
+    /// Start one frame and return once its render has begun; the render then
+    /// waits for `proceed`. Lets a test act on the main thread mid-render.
+    private func beginFrame(on unit: ChannelMotionUnit, entered: DispatchSemaphore) throws {
+        let box = SendablePixelBufferBox(try Self.buffer())
+        source.async { unit.process(box.pixelBuffer, timestamp: 1) }
+        entered.wait()
+    }
+
     // MARK: Frames keep rendering while the main thread is busy
 
-    @Test func framesKeepRenderingWhileTheMainThreadIsBusy() throws {
+    @Test func framesKeepRenderingWhileTheMainThreadIsBusy() async throws {
         // The real camera object, its real crop engine and renderer. Program,
         // so every frame also has a hand-off waiting for the main thread.
         let port = RecordingPort()
-        let camera = TestHardware.makeCamera(outputPort: port)
-        camera.setRunningForTesting(true)
+        let camera = try await runningCamera(port: port)
         let unit = try #require(camera.motionUnit)
 
-        // This test function is the main thread, and it does not suspend
-        // while the frames are delivered: the main thread is busy throughout.
+        // This test function is the main thread, and from here it does not
+        // suspend while the frames are delivered: the main thread is busy.
         try deliver(25, to: unit)
 
         #expect(camera.renderedFrameCount == 25)
@@ -149,8 +185,7 @@ struct MotionLoopTests {
 
     @Test func theProgramHandOffIsOneSlotAndDeliversTheNewestFrame() async throws {
         let port = RecordingPort()
-        let camera = TestHardware.makeCamera(outputPort: port)
-        camera.setRunningForTesting(true)
+        let camera = try await runningCamera(port: port)
         let unit = try #require(camera.motionUnit)
 
         try deliver(25, to: unit)
@@ -161,6 +196,14 @@ struct MotionLoopTests {
         #expect(port.submissions.first?.timestamp == 24.0 / 50)
         #expect(port.submissions.first?.buffer === camera.latestRenderedFrame?.pixelBuffer)
         #expect(port.hopLags.count == 1)
+
+        // Every frame the loop finished is an input frame. The 24 that the
+        // newest one replaced are drops with their own stage and reason, so
+        // a stalled main thread is not read as a camera that delivered less.
+        #expect(port.inputs == (0..<25).map { Double($0) / 50 })
+        #expect(port.drops.count == 24)
+        #expect(port.drops.allSatisfy { $0.stage == .handoffSuperseded && $0.reason == CameraManager.supersededHandOffReason })
+        #expect(port.drops.map(\.timestamp) == (0..<24).map { Double($0) / 50 })
 
         // Frame by frame, each one is handed on.
         for index in 0..<3 {
@@ -197,7 +240,10 @@ struct MotionLoopTests {
         #expect(rig.hops.count(.handOff) == 6)
         let pending = try #require(rig.unit.takeHandOff())
         #expect(pending.frame.sourceTimestamp == 9.0 / 50)
-        #expect(pending.superseded == 9)
+        #expect(pending.superseded == (0..<9).map { Double($0) / 50 })
+        // Taken once: the next hand-off starts a new count.
+        try deliver(1, to: rig.unit, now: rig.now)
+        #expect(try #require(rig.unit.takeHandOff()).superseded.isEmpty)
     }
 
     @Test func aCameraWithControlWorkPostsOneCoalescedControlMessage() throws {
@@ -235,9 +281,10 @@ struct MotionLoopTests {
 
         retire.value = true
         try deliver(1, to: rig.unit, now: rig.now)
-        // Not stored, not handed off; the earlier frame is untouched.
+        // Not stored, not handed off. The retiring also cleared the earlier
+        // frame, in the same locked step as the new generation.
         #expect(rig.frames.renderedFrameCount == 1)
-        #expect(rig.frames.latestRendered?.pixelBuffer === kept.pixelBuffer)
+        #expect(rig.frames.latestRendered == nil)
         #expect(rig.unit.takeHandOff() == nil)
         // And it no longer matches the camera's current revisions.
         #expect(!kept.matches(rig.frames.admission.revisions))
@@ -287,9 +334,9 @@ struct MotionLoopTests {
 
         let roles = LoopProbe<(@Sendable () -> Void)?>(nil)
         let frames = ChannelFrameMailbox()
-        frames.update { $0.isRunning = true }
+        frames.update { $0.isRunning = true; $0.formatWidth = 64; $0.formatHeight = 36 }
         let unit = ChannelMotionUnit(channelID: .a, core: CropMotionCore(), targets: MotionTargetMailbox(),
-                                     frames: frames, hold: ProgramHoldState(), pan: AutoPanState(),
+                                     frames: frames, pan: AutoPanState(),
                                      route: routeOfA, clock: { 100 }) { _, _, _, _ in
             roles.value?()
             return try Self.buffer()
@@ -297,7 +344,7 @@ struct MotionLoopTests {
         // The roles change while the frame renders (the router's state is
         // written under its own lock; the router itself stays on the main thread).
         let state = router.routeState
-        roles.value = { state.programChannel = .b; state.routeGeneration = 1 }
+        roles.value = { state.setProgram(.b) }
         try deliver(1, to: unit)
 
         let handOff = try #require(unit.takeHandOff())
@@ -335,12 +382,14 @@ struct MotionLoopTests {
         #expect(held.sourceTimestamp == 1.0 / 50)
         #expect(rig.frames.renderedFrameCount == 3)
         #expect(rig.frames.repeatedFrameCount == 2)
-        #expect(rig.unit.hold.isHolding)
+        #expect(rig.frames.isHolding)
         // The held frame is still handed to the router, marked as a repeat.
         #expect(try #require(rig.unit.takeHandOff()).frame.isRepeat)
-        // The controller hears of both failures and of hold starting, once.
+        // The controller hears of both failures and of hold starting, in one message.
         let events = rig.unit.takeEvents()
-        #expect(events.count == 3)
+        #expect(events.failedRenders == [1.0 / 50, 1.0 / 50 + 0.02].map { $0 - 1.0 / 50 })
+        #expect(events.lastFailureDescription != nil)
+        #expect(events.holdChanged)
         #expect(rig.hops.count(.event) == 1)
 
         fail.value = false
@@ -348,7 +397,7 @@ struct MotionLoopTests {
         let recovered = try #require(rig.frames.latestRendered)
         #expect(!recovered.isRepeat)
         #expect(recovered.pixelBuffer !== good.pixelBuffer)
-        #expect(!rig.unit.hold.isHolding)
+        #expect(!rig.frames.isHolding)
     }
 
     @Test func aFailedFirstRenderHasNothingToHold() throws {
@@ -361,8 +410,7 @@ struct MotionLoopTests {
 
     @Test func theCameraMirrorsHoldAndRecordsTheFailedRenderOnTheMainThread() async throws {
         let port = RecordingPort()
-        let camera = TestHardware.makeCamera(outputPort: port)
-        camera.setRunningForTesting(true)
+        let camera = try await runningCamera(port: port)
         let unit = try #require(camera.motionUnit)
         try deliver(1, to: unit)
         await settle { port.submissions.count == 1 }
@@ -376,7 +424,8 @@ struct MotionLoopTests {
         #expect(camera.isProgramHolding)
         #expect(port.submissions.last?.isRepeat == true)
         #expect(port.submissions.last?.buffer === port.submissions.first?.buffer)
-        #expect(port.droppedReasons.count == 1)
+        #expect(port.drops.count == 1)
+        #expect(port.drops.first?.stage == .renderFailed)
     }
 
     // MARK: The loop steps what the directive says
@@ -385,7 +434,7 @@ struct MotionLoopTests {
     // height, and a 36-line frame would floor every crop at the full picture.
 
     @Test func theLoopAppliesATrackingTargetOncePerSerialAndStepsTheSpring() throws {
-        let rig = makeRig(isProgram: false) { _, _, _, _ in try Self.buffer() }
+        let rig = makeRig(isProgram: false, width: 1920, height: 1080) { _, _, _, _ in try Self.buffer() }
         let target = CropEngine.CropRect(center: CGPoint(x: 0.6, y: 0.5), size: CGSize(width: 0.5, height: 0.5))
         var directive = MotionDirective()
         directive.mode = .tracking
@@ -414,7 +463,7 @@ struct MotionLoopTests {
     @Test func theLoopGivesTheSameCropsAsSteppingTheEngineOnTheMainThread() throws {
         // The spring stepped by the loop, against the engine stepped the way
         // the frame path stepped it before: same target, same times.
-        let rig = makeRig(isProgram: false) { _, _, _, _ in try Self.buffer() }
+        let rig = makeRig(isProgram: false, width: 1920, height: 1080) { _, _, _, _ in try Self.buffer() }
         let reference = try #require(CropEngine())
         let target = CropEngine.CropRect(center: CGPoint(x: 0.35, y: 0.55), size: CGSize(width: 0.4, height: 0.4))
         var directive = MotionDirective()
@@ -439,7 +488,7 @@ struct MotionLoopTests {
     }
 
     @Test func manualAndAutoPanDirectivesMoveTheCrop() throws {
-        let rig = makeRig(isProgram: false) { _, _, _, _ in try Self.buffer() }
+        let rig = makeRig(isProgram: false, width: 1920, height: 1080) { _, _, _, _ in try Self.buffer() }
         var directive = MotionDirective()
         directive.aspect = 1
         directive.fixedHeight = 0.5
@@ -461,5 +510,365 @@ struct MotionLoopTests {
         #expect(later.center.x > first.center.x)
         #expect(later.size == first.size)
         #expect(abs(later.center.y - 0.5) < 1e-9)
+    }
+
+    // MARK: Review fixes (PR #141)
+
+    // 3. The capture queue never waits on a main-thread transaction.
+
+    @Test func aMainThreadTransactionNeverDelaysAFrameAndLandsAsOneStep() throws {
+        let rig = makeRig(isProgram: false, width: 1920, height: 1080) { _, _, _, _ in try Self.buffer() }
+        let tight = CropEngine.CropRect(center: CGPoint(x: 0.3, y: 0.5), size: CGSize(width: 0.5, height: 0.5))
+        let other = CropEngine.CropRect(center: CGPoint(x: 0.7, y: 0.5), size: CGSize(width: 0.4, height: 0.4))
+        var directive = MotionDirective()
+        directive.smoothing = 0.10
+        directive.mode = .wide(target: tight)
+        rig.targets.write(directive)
+        rig.unit.core.setTargetCrop(tight)
+        rig.unit.core.jumpToTarget()
+        try deliver(3, to: rig.unit, now: rig.now, width: 1920, height: 1080)
+        #expect(try #require(rig.frames.latestRendered).crop == tight)
+
+        // A command on the main thread: it writes the core and will publish a
+        // new directive. Then it is slow (a lock-machine tick, the composer),
+        // and stays open while the camera delivers ten frames.
+        let core = rig.unit.core
+        core.beginTransaction()
+        core.setTargetCrop(other)
+        core.jumpToTarget()
+        #expect(core.currentCrop == other)          // the main thread reads its own writes
+        try deliver(10, to: rig.unit, now: rig.now, width: 1920, height: 1080)
+        // All ten rendered (had the capture queue waited, this test would
+        // never get here), and none of them saw any part of the command.
+        #expect(rig.frames.renderedFrameCount == 13)
+        #expect(try #require(rig.frames.latestRendered).crop == tight)
+
+        // The commit: the core's new state and the directive, together.
+        directive.mode = .wide(target: other)
+        let targets = rig.targets
+        core.endTransaction { targets.write(directive) }
+        try deliver(1, to: rig.unit, now: rig.now, width: 1920, height: 1080)
+        #expect(try #require(rig.frames.latestRendered).crop == other)
+        #expect(!core.isInTransaction)
+    }
+
+    @Test func aTargetAppliedDuringATransactionIsAppliedAgainAfterIt() throws {
+        // The capture queue applies a composed target to the live state while
+        // a transaction is open; the commit replaces that state. The target
+        // must not be lost.
+        let rig = makeRig(isProgram: false, width: 1920, height: 1080) { _, _, _, _ in try Self.buffer() }
+        let target = CropEngine.CropRect(center: CGPoint(x: 0.6, y: 0.5), size: CGSize(width: 0.5, height: 0.5))
+        var directive = MotionDirective()
+        directive.mode = .tracking
+        directive.smoothing = 0.10
+        directive.trackingTarget = target
+        directive.trackingSerial = 1
+        rig.unit.core.beginTransaction()
+        rig.targets.write(directive)
+        try deliver(2, to: rig.unit, now: rig.now, width: 1920, height: 1080)
+        rig.unit.core.endTransaction()
+        #expect(rig.unit.core.targetCrop == .fullFrame)
+        try deliver(1, to: rig.unit, now: rig.now, width: 1920, height: 1080)
+        #expect(rig.unit.core.targetCrop == target)
+    }
+
+    @Test func aSlowCommandHandlerDoesNotDelayFrames() async throws {
+        // The real camera: frames arrive while a command is being handled on
+        // the main thread. 720-line frames, so the quality floor allows a
+        // crop tighter than the whole picture.
+        let port = RecordingPort()
+        let camera = try await runningCamera(port: port, width: 1280, height: 720)
+        let unit = try #require(camera.motionUnit)
+        let engine = try #require(camera.cropEngine)
+        engine.setTargetCrop(.init(center: CGPoint(x: 0.4, y: 0.5), size: CGSize(width: 0.5, height: 0.5)))
+        engine.jumpToTarget()
+        try deliver(2, to: unit, width: 1280, height: 720)
+        let before = camera.renderedFrameCount
+        #expect(before == 2)
+        #expect(camera.latestRenderedFrame?.crop != .fullFrame)
+
+        // The epoch observer runs inside the command handler. Deliver frames
+        // from there: the handler is busy for as long as they take.
+        var renderedDuring: [UInt64] = []
+        var cropsDuring: [CropEngine.CropRect] = []
+        let original = camera.commands.epochObserver
+        camera.commands.epochObserver = { epoch in
+            original?(epoch)
+            try? self.deliver(3, to: unit, width: 1280, height: 720)
+            renderedDuring.append(camera.renderedFrameCount)
+            if let crop = camera.latestRenderedFrame?.crop { cropsDuring.append(crop) }
+        }
+        let result = camera.dispatch(camera.makeCommand(.returnToWide))
+        camera.commands.epochObserver = original
+        guard case .accepted = result else {
+            Issue.record("Return to Wide was not accepted")
+            return
+        }
+        // Frames kept rendering while the handler ran, and none of them
+        // showed the command's snap to wide before it was complete.
+        #expect((renderedDuring.last ?? 0) >= before + 3)
+        #expect(!cropsDuring.isEmpty && cropsDuring.allSatisfy { $0 != .fullFrame })
+        // The next frame shows the whole command.
+        try deliver(1, to: unit, width: 1280, height: 720)
+        #expect(camera.latestRenderedFrame?.crop == .fullFrame)
+    }
+
+    // 2. The old hold and retire rules, asserted on the live loop.
+
+    @Test func liveLoopAFailedRenderKeepsThePriorProgramAndNeverInventsAFirstFrame() throws {
+        let camera = TestHardware.makeCamera()
+        camera.setRunningForTesting(true)
+        let fail = LoopProbe(true)
+        let good = LoopProbe<CVPixelBuffer?>(nil)
+        let unit = try loop(on: camera) { _, _, _, _ in
+            if fail.value { throw FakeRenderFailure() }
+            let buffer = try Self.buffer()
+            good.value = buffer
+            return buffer
+        }
+        try deliver(1, to: unit)
+        #expect(camera.latestRenderedFrame == nil)
+        #expect(camera.croppedFrameBuffer == nil)
+
+        fail.value = false
+        try deliver(1, to: unit)
+        let rendered = try #require(good.value)
+        #expect(camera.latestRenderedFrame?.pixelBuffer === rendered)
+
+        fail.value = true
+        for _ in 0..<5 {
+            try deliver(1, to: unit)
+            #expect(camera.latestRenderedFrame?.pixelBuffer === rendered)
+            #expect(camera.latestRenderedFrame?.isRepeat == true)
+        }
+        #expect(camera.frameMailbox.isHolding)
+        #expect(camera.repeatedFrameCount == 5)
+
+        camera.stopCapture()
+        #expect(camera.selectProgramBuffer(rendered: nil) == nil)
+        camera.setRunningForTesting(true)
+        try deliver(1, to: unit)
+        #expect(camera.latestRenderedFrame == nil)
+    }
+
+    @Test func liveLoopARetiredFailedRenderCannotCancelANewZoom() throws {
+        let camera = TestHardware.makeCamera()
+        camera.setRunningForTesting(true)
+        let engine = try #require(camera.cropEngine)
+        let entered = DispatchSemaphore(value: 0)
+        let proceed = DispatchSemaphore(value: 0)
+        let unit = try loop(on: camera) { _, _, _, _ in
+            entered.signal()
+            proceed.wait()
+            throw FakeRenderFailure()
+        }
+        try beginFrame(on: unit, entered: entered)
+        camera.cancelOperatorMotion() // a newer operator epoch while rendering
+        engine.beginZoom(.pushIn, to: 0.25)
+        proceed.signal()
+        source.sync {}
+
+        // The frame is retired: its failure is not reported, so nothing on
+        // the main thread cancels the zoom, and it does not start a hold.
+        #expect(unit.takeEvents().isEmpty)
+        #expect(engine.zoomDirection == .pushIn)
+        #expect(!camera.frameMailbox.isHolding)
+        #expect(!camera.isProgramHolding)
+        #expect(camera.latestRenderedFrame == nil)
+    }
+
+    @Test func liveLoopARetiredCompletionOnBIsRejectedAndAIsUntouched() throws {
+        let show = TestHardware.makeShow(programOutput: ProgramOutputManager(sinks: []))
+        let a = show.channelA
+        let b = show.addChannel(.b)
+        b.setRunningForTesting(true)
+        let aRevisions = a.revisions
+        let entered = DispatchSemaphore(value: 0)
+        let proceed = DispatchSemaphore(value: 0)
+        let unit = try loop(on: b) { _, _, _, _ in
+            entered.signal()
+            proceed.wait()
+            return try Self.buffer()
+        }
+        // B's source is stopped while its render is in flight: the completion
+        // belongs to a retired generation and must not become B's program.
+        try beginFrame(on: unit, entered: entered)
+        b.stopCapture()
+        proceed.signal()
+        source.sync {}
+
+        #expect(b.latestRenderedFrame == nil)
+        #expect(b.croppedFrameBuffer == nil)
+        #expect(unit.takeHandOff() == nil)
+        #expect(a.revisions == aRevisions)
+        #expect(a.latestRenderedFrame == nil)
+    }
+
+    // 4. A retired frame cannot refill the hold after a reset.
+
+    @Test func aRetiredFrameCannotRefillTheHoldAfterAReset() throws {
+        let frames = LoopProbe<ChannelFrameMailbox?>(nil)
+        let mode = LoopProbe("good")
+        let rig = makeRig(isProgram: true) { _, _, _, _ in
+            switch mode.value {
+            case "fail": throw FakeRenderFailure()
+            case "retire":
+                // A reconnect on the main thread, mid-render: the generation
+                // retires, and with it the held frame.
+                frames.value?.update { $0.sourceGeneration &+= 1 }
+                return try Self.buffer()
+            default: return try Self.buffer()
+            }
+        }
+        frames.value = rig.frames
+        try deliver(1, to: rig.unit, now: rig.now)
+        #expect(rig.frames.lastGoodCrop != nil)
+
+        mode.value = "retire"
+        try deliver(1, to: rig.unit, now: rig.now)
+        // The retired render was not held, and the old held frame is gone.
+        #expect(rig.frames.lastGoodCrop == nil)
+        #expect(rig.frames.latestRendered == nil)
+
+        // The new generation's first render fails: there is nothing to
+        // repeat, least of all a frame from the old generation.
+        mode.value = "fail"
+        _ = rig.unit.takeHandOff()
+        try deliver(2, to: rig.unit, now: rig.now)
+        #expect(rig.frames.latestRendered == nil)
+        #expect(rig.unit.takeHandOff() == nil)
+        #expect(rig.frames.renderedFrameCount == 1)
+
+        // In the mailbox itself: a selection for a retired generation is
+        // refused and changes nothing.
+        let generation = rig.frames.admission.sourceGeneration
+        #expect(rig.frames.selectProgram(rendered: try Self.buffer(), crop: .fullFrame, sourceGeneration: generation &- 1) == nil)
+        #expect(rig.frames.lastGoodCrop == nil)
+        #expect(rig.frames.selectProgram(rendered: try Self.buffer(), crop: .fullFrame, sourceGeneration: generation)?.buffer != nil)
+    }
+
+    // 5. A role change is one write.
+
+    @Test func noReaderSeesTheNewProgramUnderTheOldRouteGeneration() {
+        // Program alternates A, B, A, …: B is Program exactly when the
+        // generation is odd. A reader that ever sees otherwise read half of
+        // a role change.
+        let state = ProgramRouteState(program: .a)
+        let stop = LoopProbe(false)
+        let violations = LoopProbe(0)
+        let reads = LoopProbe(0)
+        let finished = DispatchSemaphore(value: 0)
+        DispatchQueue.global(qos: .userInitiated).async {
+            var seen = 0
+            var bad = 0
+            while !stop.value {
+                let route = state.route(for: .b)
+                seen += 1
+                if route.isProgram != (route.generation % 2 == 1) { bad += 1 }
+            }
+            reads.value = seen
+            violations.value = bad
+            finished.signal()
+        }
+        for index in 0..<200_000 { state.setProgram(index % 2 == 0 ? .b : .a) }
+        stop.value = true
+        finished.wait()
+        #expect(violations.value == 0)
+        #expect(reads.value > 0)
+        #expect(state.routeGeneration == 200_000)
+        #expect(state.programChannel == .a)
+    }
+
+    // 6. No frame of a size the controller has not applied is rendered.
+
+    @Test func framesOfANewSizeWaitForTheController() throws {
+        let rig = makeRig(isProgram: true) { _, _, _, _ in try Self.buffer() }
+        try deliver(2, to: rig.unit, now: rig.now)
+        #expect(rig.frames.renderedFrameCount == 2)
+        // The controller takes its messages until the slot is empty.
+        while rig.unit.takeControl().hasWork {}
+        _ = rig.unit.takeHandOff()
+        let hopsBefore = rig.hops.count(.control)
+
+        // The driver starts delivering another size (a different aspect).
+        try deliver(3, to: rig.unit, now: rig.now, width: 48, height: 48)
+        #expect(rig.frames.renderedFrameCount == 2)
+        #expect(rig.unit.takeHandOff() == nil)
+        // The controller was asked, with the new size, and the wide pane has
+        // the raw frame.
+        #expect(rig.hops.count(.control) == hopsBefore + 1)
+        let tick = try #require(rig.unit.takeControl().tick)
+        #expect(tick.width == 48 && tick.height == 48)
+        #expect(rig.frames.sourceBuffer.map(CVPixelBufferGetWidth) == 48)
+
+        // The controller applies it and publishes; frames render again.
+        rig.frames.update { $0.formatWidth = 48; $0.formatHeight = 48 }
+        try deliver(1, to: rig.unit, now: rig.now, width: 48, height: 48)
+        #expect(rig.frames.renderedFrameCount == 3)
+        #expect(rig.unit.takeHandOff() != nil)
+    }
+
+    @Test func theFirstFrameOfANewAspectIsNotHandedToProgramAndTheNextUsesTheNewWideTarget() async throws {
+        let port = RecordingPort()
+        let camera = try await runningCamera(port: port)          // 64 × 36, 16:9
+        let engine = try #require(camera.cropEngine)
+        await camera.processFrameForTesting(try Self.buffer(), timestampSeconds: 0)
+        #expect(port.submissions.count == 1)
+        #expect(engine.targetCrop == .fullFrame)
+
+        // A square source: the wide view is now a 16:9 band of it.
+        let square = try Self.buffer(width: 48, height: 48)
+        await camera.processFrameForTesting(square, timestampSeconds: 1)
+        #expect(port.submissions.count == 1)                       // not rendered, not handed on
+        #expect(camera.renderedFrameCount == 1)
+        #expect(camera.sourcePixelWidth == 48 && camera.sourcePixelHeight == 48)
+
+        await camera.processFrameForTesting(square, timestampSeconds: 2)
+        #expect(port.submissions.count == 2)
+        let band = CropEngine.CropRect.widest(aspect: camera.shotComposer.normalizedAspect)
+        #expect(band != .fullFrame)
+        #expect(engine.targetCrop == band)
+    }
+
+    // 7. The test seam is frame by frame.
+
+    @Test func theTestSeamReturnsAfterThatFramesControlTurnAndHandOff() async throws {
+        let port = RecordingPort()
+        let camera = TestHardware.makeCamera(outputPort: port)
+        camera.setRunningForTesting(true)
+        #expect(camera.sourcePixelHeight == 0)
+        await camera.processFrameForTesting(try Self.buffer(), timestampSeconds: 0)
+        // The control turn for that frame has run: the controller knows the size.
+        #expect(camera.sourcePixelWidth == 64 && camera.sourcePixelHeight == 36)
+        #expect(camera.frameMailbox.admission.formatHeight == 36)
+        for index in 1...5 {
+            await camera.processFrameForTesting(try Self.buffer(), timestampSeconds: Double(index))
+            // No waiting loop: the hand-off for this frame has been taken.
+            #expect(port.submissions.count == index)
+            #expect(port.submissions.last?.timestamp == Double(index))
+        }
+        #expect(port.drops.isEmpty)
+    }
+
+    // 8. Loop events are bounded.
+
+    @Test func failuresDuringALongStallAreCountedNotQueued() throws {
+        let fail = LoopProbe(false)
+        let rig = makeRig(isProgram: false) { _, _, _, _ in
+            if fail.value { throw FakeRenderFailure() }
+            return try Self.buffer()
+        }
+        try deliver(1, to: rig.unit, now: rig.now)
+        fail.value = true
+        // Twenty seconds of failed renders at 50 fps, and nobody listening.
+        try deliver(1000, to: rig.unit, now: rig.now)
+        #expect(rig.hops.count(.event) == 1)
+        let batch = rig.unit.takeEvents()
+        // How many failed is exact; the timestamps kept are capped.
+        #expect(batch.failedRenders.count == 1000)
+        #expect(Set(batch.failedRenders).count <= CaptureDropCoalescer.maxPendingTimestamps)
+        #expect(batch.failedRenders.last == 999.0 / 50)
+        #expect(batch.holdChanged)
+        #expect(rig.unit.takeEvents().isEmpty)
     }
 }

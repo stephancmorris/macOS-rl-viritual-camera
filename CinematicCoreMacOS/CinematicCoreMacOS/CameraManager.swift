@@ -102,8 +102,6 @@ final class CameraManager: NSObject, ObservableObject {
     nonisolated let frameMailbox: ChannelFrameMailbox
     /// Main → capture queue: what the picture should aim at.
     nonisolated let motionTargets: MotionTargetMailbox
-    /// The last good program frame, repeated when a render fails.
-    nonisolated let programHold: ProgramHoldState
     nonisolated let autoPan: AutoPanState
     /// Nil only when Metal is unavailable and there is no crop engine.
     nonisolated let motionUnit: ChannelMotionUnit?
@@ -790,16 +788,14 @@ final class CameraManager: NSObject, ObservableObject {
         self.cropEngine = engine
         let frameMailbox = ChannelFrameMailbox()
         let motionTargets = MotionTargetMailbox()
-        let programHold = ProgramHoldState()
         let autoPan = AutoPanState()
         self.frameMailbox = frameMailbox
         self.motionTargets = motionTargets
-        self.programHold = programHold
         self.autoPan = autoPan
         let route = outputPort.frameRoute
         self.motionUnit = engine.map { engine in
             ChannelMotionUnit(channelID: channelID, core: engine.motion, targets: motionTargets,
-                              frames: frameMailbox, hold: programHold, pan: autoPan, route: route) {
+                              frames: frameMailbox, pan: autoPan, route: route) {
                 try engine.renderCropNow($0, crop: $1, outputSize: $2, highQuality: $3)
             }
         }
@@ -810,7 +806,7 @@ final class CameraManager: NSObject, ObservableObject {
         commands.epochObserver = { epoch in frameMailbox.update { $0.controlEpoch = epoch } }
         detectionFrames.generationObserver = { generation in frameMailbox.update { $0.detectionGeneration = generation } }
         motionUnit?.setMainHop { [weak self] kind in
-            Task(priority: .userInitiated) { @MainActor in self?.receiveFromLoop(kind) }
+            Task(priority: .userInitiated) { @MainActor in await self?.receiveFromLoop(kind) }
         }
         
         if cropEngine == nil {
@@ -956,14 +952,17 @@ final class CameraManager: NSObject, ObservableObject {
         guard sessionStartRequest == request else { return }
         stopCapture()
     }
-    private var lastGoodProgramCrop: CropEngine.CropRect? { programHold.lastGoodCrop }
+    private var lastGoodProgramCrop: CropEngine.CropRect? { frameMailbox.lastGoodCrop }
     /// The composed tracking target and its serial, published to the capture
     /// queue in the motion directive.
     private var trackingTarget: CropEngine.CropRect?
     private var trackingSerial: UInt64 = 0
     private var lastPublishedDirective: MotionDirective?
     private var motionRefreshScheduled = false
+    private var motionTransactionDepth = 0
+    private var stagedDirective: MotionDirective?
     private var controlPumpActive = false
+    private var loopMessageWaiters: [CheckedContinuation<Void, Never>] = []
     /// True once the detector was cleared for a mode that runs no detection.
     private var detectionIdleCleaned = false
     private var lastTrackingCrop: CropEngine.CropRect?
@@ -1202,12 +1201,11 @@ final class CameraManager: NSObject, ObservableObject {
             manualActionObserver?(.command(command))
         }
         // The command's writes to the motion core and the directive that
-        // follows land as one step for the capture queue.
-        let core = cropEngine?.motion
-        core?.beginTransaction()
+        // follows land as one step for the capture queue. The transaction is
+        // staged, so the capture queue keeps rendering while this runs.
+        beginMotionTransaction()
         let result = dispatchAdmittedCommand(command, interruptedDirectorMove: interrupted)
-        refreshMotionInputs()
-        core?.endTransaction()
+        endMotionTransaction()
         if command.origin != .director { manualResultObserver?(command, result) }
         return result
     }
@@ -1349,6 +1347,9 @@ final class CameraManager: NSObject, ObservableObject {
     func processFrameForTesting(_ pixelBuffer: CVPixelBuffer, timestampSeconds: Double) async {
         await processValidationFrame(SendablePixelBufferBox(pixelBuffer), timestampSeconds: timestampSeconds,
                                      generation: captureGeneration)
+        // Frame by frame: this frame's control turn, hand-off and events have
+        // all run before the next frame is delivered.
+        await loopMessagesSettled()
     }
     /// Test seam: the identity a configured source would have recorded.
     func setSourceIdentityForTesting(_ source: DiagnosticsSessionIdentity.Source) { recordSourceIdentity(source) }
@@ -1461,17 +1462,18 @@ final class CameraManager: NSObject, ObservableObject {
         autoPan.advance(now: now, width: width, speed: Double(shotComposer.config.autoPanSpeed), eased: autoPanEasing)
     }
 
-    /// Hold-frame selection lives in `ProgramHoldState`, which the capture
-    /// queue applies after each render. This is the same rule from the main
-    /// thread, kept for `renderProgramFrame`.
+    /// Hold-frame selection lives in the frame mailbox, which the capture
+    /// queue applies after each render (`ChannelFrameMailbox.selectProgram`).
+    /// This is the same rule from the main thread, kept for
+    /// `renderProgramFrame`.
     func selectProgramBuffer(rendered: CVPixelBuffer?, crop: CropEngine.CropRect? = nil) -> CVPixelBuffer? {
-        let buffer = programHold.select(rendered: rendered, crop: crop)
+        let selection = frameMailbox.selectProgram(rendered: rendered, crop: crop, sourceGeneration: captureGeneration)
         syncProgramHolding()
-        return buffer
+        return selection?.buffer
     }
 
     private func syncProgramHolding() {
-        let holding = programHold.isHolding
+        let holding = frameMailbox.isHolding
         if isProgramHolding != holding { isProgramHolding = holding }
     }
 
@@ -1529,13 +1531,16 @@ final class CameraManager: NSObject, ObservableObject {
         try checkSessionStart(request)
         cancelOperatorMotion()
         commands.setTrackingOwnership(false)
-        programHold.reset(clearHolding: true)
-        frameMailbox.clearProgramBuffer()
-        isProgramHolding = false
         let sourceTitle = preferredInputSource.title
         Self.logger.notice("Starting capture from \(sourceTitle, privacy: .public)")
+        // Retire the generation first: from here no frame of the old one can
+        // be held or stored, so the reset below cannot be undone by one.
         captureGeneration &+= 1
+        frameMailbox.resetHold(clearHolding: true)
+        frameMailbox.clearProgramBuffer()
         frameMailbox.clearRendered()
+        isProgramHolding = false
+        retireTrackingTarget()
         invalidateDetection()
         frameProcessingGate.reset()
         outputPort.start()
@@ -1623,12 +1628,13 @@ final class CameraManager: NSObject, ObservableObject {
         commands.setTrackingOwnership(false)
         cropEngine?.clearZoomAdjustment()
         lastTrackingCrop = nil
-        programHold.reset(clearHolding: true)
-        frameMailbox.clearProgramBuffer()
-        isProgramHolding = false
         Self.logger.notice("Stopping capture")
         captureGeneration &+= 1
+        frameMailbox.resetHold(clearHolding: true)
+        frameMailbox.clearProgramBuffer()
         frameMailbox.clearRendered()
+        isProgramHolding = false
+        retireTrackingTarget()
         invalidateDetection()
         cancelDetection()
         clipPlaybackTask?.cancel()
@@ -1671,6 +1677,7 @@ final class CameraManager: NSObject, ObservableObject {
         cinematicAgent.reset()
         cropEngine.setTargetCrop(widestSafeCrop())
         cropEngine.jumpToTarget()
+        retireTrackingTarget()
         refreshMotionInputs()
     }
 
@@ -1705,12 +1712,15 @@ final class CameraManager: NSObject, ObservableObject {
         if useMLAgent, let crop = cropEngine?.currentCrop {
             cinematicAgent.initialize(from: crop)
         }
+        retireTrackingTarget()
+        setNeedsMotionRefresh()
     }
 
     func lockTarget(personID: UUID) {
         discoveredSubjectOrigin = nil
         cropEngine?.clearZoomAdjustment()
         lastTrackingCrop = nil
+        retireTrackingTarget()
         invalidateDetection(clearTracks: false)
         // Selection made — leave discovery and begin acquisition. Cropping
         // stays wide until the gallery is ready (ShotComposer promotes
@@ -2215,29 +2225,29 @@ final class CameraManager: NSObject, ObservableObject {
     //   the router and sink, with that frame's diagnostics.
     // - `drainLoopEvents`: a failed render, or hold starting or ending.
 
-    private func receiveFromLoop(_ kind: MotionMainHop) {
+    private func receiveFromLoop(_ kind: MotionMainHop) async {
         switch kind {
         case .handOff: handOffProgramFrame()
-        case .control: pumpControl()
+        case .control: await runControlPump()
         case .event: drainLoopEvents()
         }
     }
 
-    /// Run control turns until the slot is empty. One pump at a time: a turn
-    /// that is waiting on an inline tap detection keeps later frames in the
-    /// one-slot mailbox, where the newest replaces the rest.
-    private func pumpControl() {
+    /// Run control turns until the slot is empty, in the task that asked.
+    /// One pump at a time: a turn that is waiting on an inline tap detection
+    /// keeps later frames in the one-slot mailbox, where the newest replaces
+    /// the rest.
+    private func runControlPump() async {
         guard !controlPumpActive, let motionUnit else { return }
         controlPumpActive = true
-        Task { @MainActor [weak self] in
-            while let self {
-                let work = motionUnit.takeControl()
-                guard work.hasWork else {
-                    self.controlPumpActive = false
-                    return
-                }
-                await self.controlTurn(work.tick)
-            }
+        defer {
+            controlPumpActive = false
+            resumeLoopMessageWaiters()
+        }
+        while true {
+            let work = motionUnit.takeControl()
+            guard work.hasWork else { return }
+            await controlTurn(work.tick)
         }
     }
 
@@ -2245,12 +2255,28 @@ final class CameraManager: NSObject, ObservableObject {
     /// its result reaches the picture on the next frame the camera delivers.
     private func requestControlWake() {
         guard let motionUnit, motionUnit.requestControlWake() else { return }
-        pumpControl()
+        Task { @MainActor [weak self] in await self?.runControlPump() }
+    }
+
+    /// Test seam: wait until every message the capture queue has posted (a
+    /// control turn, a hand-off, events) has been taken by the main thread.
+    private func loopMessagesSettled() async {
+        while controlPumpActive || motionUnit?.hasPendingMainWork == true {
+            await withCheckedContinuation { loopMessageWaiters.append($0) }
+        }
+    }
+
+    private func resumeLoopMessageWaiters() {
+        guard !loopMessageWaiters.isEmpty else { return }
+        let waiters = loopMessageWaiters
+        loopMessageWaiters.removeAll()
+        for waiter in waiters { waiter.resume() }
     }
 
     /// Republish on the next main turn. Coalesced; cheap when nothing changed.
     private func setNeedsMotionRefresh() {
-        guard !motionRefreshScheduled else { return }
+        // A transaction republishes when it ends; no extra task for it.
+        guard !motionRefreshScheduled, motionTransactionDepth == 0 else { return }
         motionRefreshScheduled = true
         Task { @MainActor [weak self] in
             guard let self else { return }
@@ -2328,11 +2354,42 @@ final class CameraManager: NSObject, ObservableObject {
         }
         guard directive != lastPublishedDirective else { return }
         lastPublishedDirective = directive
-        motionTargets.write(directive)
+        // Inside a transaction the directive is published with the commit.
+        if motionTransactionDepth > 0 { stagedDirective = directive } else { motionTargets.write(directive) }
+    }
+
+    /// Stage this camera's writes to the motion core. The capture queue sees
+    /// none of them, nor the directive, until `endMotionTransaction`.
+    private func beginMotionTransaction() {
+        motionTransactionDepth += 1
+        cropEngine?.motion.beginTransaction()
+    }
+
+    /// Republish, then commit: the staged core state and the directive reach
+    /// the capture queue in one locked step.
+    private func endMotionTransaction() {
+        refreshMotionInputs()
+        motionTransactionDepth -= 1
+        guard let core = cropEngine?.motion else { return }
+        if motionTransactionDepth == 0, let directive = stagedDirective {
+            stagedDirective = nil
+            let targets = motionTargets
+            core.endTransaction { targets.write(directive) }
+        } else {
+            core.endTransaction()
+        }
     }
 
     private func setTrackingTarget(_ crop: CropEngine.CropRect) {
         trackingTarget = crop
+        trackingSerial &+= 1
+    }
+
+    /// A command set the target itself (Return to Wide, Track, a new
+    /// subject, a session boundary). A composed target the capture queue has
+    /// not applied yet is older than that command and must not follow it.
+    private func retireTrackingTarget() {
+        trackingTarget = nil
         trackingSerial &+= 1
     }
 
@@ -2553,16 +2610,27 @@ final class CameraManager: NSObject, ObservableObject {
             )
         }
         outputPort.recordFramePathCounts(detectedPersons: detectedPersons.count)
+
+        // The aspect, the wide target and the composer's floor for this size
+        // are applied and the directive is published: the capture queue may
+        // now render frames of this size.
+        if let tick {
+            let admission = frameMailbox.admission
+            if admission.formatWidth != tick.width || admission.formatHeight != tick.height {
+                frameMailbox.update { $0.formatWidth = tick.width; $0.formatHeight = tick.height }
+            }
+        }
     }
 
     /// The lock machine, the shot-move ladder and the composer for one
     /// control turn. Everything it writes to the motion core, and the
-    /// directive it ends with, land as one step for the capture queue.
+    /// directive it ends with, land as one step for the capture queue. The
+    /// transaction is staged (`CropMotionCore`): no lock is held while the
+    /// lock machine or the composer runs, so a slow turn delays no frame.
     private func composeControlStep(observation: DetectionFrame?, detectedPersons: [PersonDetector.DetectedPerson],
                                     detectionIsFresh: Bool, onFrame: Bool) {
-        let core = cropEngine?.motion
-        core?.beginTransaction()
-        defer { core?.endTransaction() }
+        beginMotionTransaction()
+        defer { endMotionTransaction() }
 
         // Advance the lock state machine. tracking → hold when the locked
         // subject goes missing, hold → wideWaiting after holdDuration. The
@@ -2607,7 +2675,9 @@ final class CameraManager: NSObject, ObservableObject {
                 let primaryPerson = shotComposer.primaryPerson(from: detectedPersons)
                 if useMLAgent {
                     // The agent integrates a velocity per call, so it runs
-                    // once per frame, not on a detection wake.
+                    // once per frame, not on a detection wake. Control ticks
+                    // are one slot: when the main thread is behind it takes
+                    // fewer steps, as it did when the gate dropped frames.
                     if onFrame {
                         setTrackingTarget(cinematicAgent.predict(person: primaryPerson,
                                                                  currentCrop: cropEngine.currentCrop))
@@ -2641,7 +2711,6 @@ final class CameraManager: NSObject, ObservableObject {
             lastShotPhase = phase
             shotRevision &+= 1
         }
-        refreshMotionInputs()
     }
 
     /// The Program camera's one main-thread turn per frame: hand the finished
@@ -2649,7 +2718,10 @@ final class CameraManager: NSObject, ObservableObject {
     /// When the main thread falls behind, the newest frame replaces the ones
     /// it did not get to, so Program still freezes for as long as this turn
     /// cannot run.
+    static let supersededHandOffReason = "The main thread was behind: a newer Program frame replaced this one before it was handed on."
+
     private func handOffProgramFrame() {
+        defer { resumeLoopMessageWaiters() }
         guard let motionUnit, let item = motionUnit.takeHandOff() else { return }
         let arrived = CACurrentMediaTime()
         syncProgramHolding()
@@ -2659,6 +2731,15 @@ final class CameraManager: NSObject, ObservableObject {
 
         flushImageCachesIfDue(now: arrived)
         beginDiagnosticsIfNeeded(width: item.sourceWidth, height: item.sourceHeight)
+        // Frames the loop finished while the main thread was behind, which
+        // this one replaced in the hand-off slot. Each is an input frame, and
+        // a drop with its own stage: the camera delivered and rendered it;
+        // Program never showed it. One hand-off records them all.
+        for timestamp in item.superseded {
+            outputPort.recordInputFrame(timestamp: timestamp)
+            outputPort.recordDroppedFrame(timestamp: timestamp, reason: Self.supersededHandOffReason,
+                                          stage: .handoffSuperseded)
+        }
         // Soak diagnostic: how long the finished frame waited for the main
         // thread. A growing hopLag with flat Vision wall time is the signature
         // of MainActor/SwiftUI accumulation (see the [SOAK] line).
@@ -2683,24 +2764,24 @@ final class CameraManager: NSObject, ObservableObject {
             "total=\(String(format: "%.1f", (finished - frame.processingStartedAt) * 1000))ms " +
             "crop=\(String(format: "%.1f", item.renderDuration * 1000))ms " +
             "handoffWait=\(String(format: "%.1f", (arrived - item.postedAt) * 1000))ms " +
-            "handoffSuperseded=\(item.superseded) gateDrops=\(gateDrops)"
+            "handoffSuperseded=\(item.superseded.count) gateDrops=\(gateDrops)"
         )
     }
 
     private func drainLoopEvents() {
-        guard let motionUnit else { return }
-        for event in motionUnit.takeEvents() {
-            switch event {
-            case .holdChanged:
-                break
-            case .renderFailed(let timestamp, let description):
-                guard isRunning, !sourceMissing else { continue }
-                cancelOperatorMotion()
-                refreshMotionInputs()
-                outputPort.recordDroppedFrame(timestamp: timestamp, reason: "Crop processing failed: \(description)", stage: .renderFailed)
-            }
+        defer {
+            syncProgramHolding()
+            resumeLoopMessageWaiters()
         }
-        syncProgramHolding()
+        guard let motionUnit else { return }
+        let batch = motionUnit.takeEvents()
+        guard !batch.failedRenders.isEmpty, isRunning, !sourceMissing else { return }
+        cancelOperatorMotion()
+        refreshMotionInputs()
+        let reason = "Crop processing failed: \(batch.lastFailureDescription ?? "unknown")"
+        for timestamp in batch.failedRenders {
+            outputPort.recordDroppedFrame(timestamp: timestamp, reason: reason, stage: .renderFailed)
+        }
     }
 
     /// Validation-clip playback is a capture source like the camera: it
@@ -2984,7 +3065,7 @@ final class CameraManager: NSObject, ObservableObject {
         Self.logger.warning("Capture device disconnected on \(self.channelID.cameraLabel, privacy: .public)")
         captureGeneration &+= 1
         frameMailbox.clearRendered()
-        programHold.reset(clearHolding: false)
+        frameMailbox.resetHold(clearHolding: false)
         cancelOperatorMotion()
         invalidateDetection()
         frameProcessingGate.reset()
