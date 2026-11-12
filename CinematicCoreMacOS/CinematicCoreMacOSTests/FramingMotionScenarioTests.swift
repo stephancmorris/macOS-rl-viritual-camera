@@ -127,6 +127,31 @@ struct FramingMotionScenarioTests {
         }
     }
 
+    private func driftParks(speed: Double) throws -> Bool {
+        let loop = try FramingLoop(preset: .waistUp, feel: .steadyFollow)
+        var parked = false
+        for frame in 0..<400 {
+            let elapsed = Double(frame) / fps
+            _ = loop.step(t: t0 + elapsed) { t in scenarioBox(cx: 0.3 + speed * (t - t0)) }
+            if loop.composer.steadyBand != nil { parked = true }
+        }
+        return parked
+    }
+
+    @Test func driftAtWalkingThresholdDoesNotPark() throws {
+        #expect(try !driftParks(speed: 0.05))
+    }
+
+    @Test func slowDriftThresholdStaysWithinOneThird() throws {
+        var fastestParked = 0.0
+        for step in 1...17 {
+            let speed = Double(step) * 0.002
+            if try driftParks(speed: speed) { fastestParked = speed }
+        }
+        print("FRAMING-MOTION|fastestParkedDriftFwPerSecond=\(r2(fastestParked, 3))")
+        #expect((0.012...0.024).contains(fastestParked))
+    }
+
     private func medianRestTime(noise: Double) throws -> Double {
         var times: [Double] = []
         for seed: UInt64 in 9000..<9008 {
@@ -155,6 +180,6 @@ struct FramingMotionScenarioTests {
     @Test func lowNoiseRestToday() throws { #expect(try medianRestTime(noise: 0.001) <= 0.6) }
     @Test func noisyRestTarget() throws {
         let median = try medianRestTime(noise: 0.003)
-        withKnownIssue("T-04, fixed by stage C2") { #expect(median <= 1.5) }
+        #expect(median <= 1.5)
     }
 }
