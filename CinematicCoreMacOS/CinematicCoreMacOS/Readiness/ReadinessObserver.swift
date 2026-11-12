@@ -9,6 +9,8 @@ import Combine
 @MainActor
 final class ReadinessObserver: ObservableObject {
     @Published private(set) var readiness: ReadinessModel.Readiness
+    /// The same snapshot supplies detailed row copy (denied vs restricted, for example).
+    @Published private(set) var inputs: ReadinessModel.Inputs
 
     private let readInputs: @MainActor () -> ReadinessModel.Inputs
     private var subscriptions: Set<AnyCancellable> = []
@@ -19,7 +21,9 @@ final class ReadinessObserver: ObservableObject {
     init(readInputs: @escaping @MainActor () -> ReadinessModel.Inputs,
          changes: [AnyPublisher<Void, Never>] = []) {
         self.readInputs = readInputs
-        readiness = ReadinessModel.evaluate(readInputs())
+        let initial = readInputs()
+        inputs = initial
+        readiness = ReadinessModel.evaluate(initial)
         for changes in changes {
             changes.sink { [weak self] in
                 Task { @MainActor [weak self] in self?.refresh() }
@@ -59,7 +63,9 @@ final class ReadinessObserver: ObservableObject {
     }
 
     func refresh() {
-        let next = ReadinessModel.evaluate(readInputs())
+        let snapshot = readInputs()
+        let next = ReadinessModel.evaluate(snapshot)
+        if inputs != snapshot { inputs = snapshot }
         if readiness != next { readiness = next }
     }
 
