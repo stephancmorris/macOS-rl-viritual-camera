@@ -533,7 +533,8 @@ final class CameraManager: NSObject, ObservableObject {
             let frame = DetectionFrame(observationID: id, capturedAt: capturedAt,
                 sourceTimestamp: sourceTimestamp, pixelBuffer: box.pixelBuffer, persons: persons,
                 queueWait: self.personDetector.stats.lastQueueWait,
-                detectionDuration: self.personDetector.stats.lastDetectionTime)
+                detectionDuration: self.personDetector.stats.lastDetectionTime,
+                coverage: .scanned(mode: plan.mode, roi: plan.roi))
             guard self.detectionFrames.publish(frame, generation: generation) else { return }
             self.outputPort.recordDetectionTiming(queueWait: frame.queueWait, visionWall: frame.detectionDuration)
             self.outputPort.recordLatency(stage: .detection, duration: frame.detectionDuration)
@@ -1686,6 +1687,18 @@ final class CameraManager: NSObject, ObservableObject {
     /// subject ROI only, so 2+ means someone else is crossing the subject.
     private(set) var lastObservationPersonCount = 0
 
+    // MARK: World model (read-only, C-01)
+
+    /// The newest fresh scan as numbers only, for `worldModelReading()`.
+    /// Plain storage, never published; nil while detection is off.
+    private(set) var lastWorldObservation: WorldModel.Observation?
+
+    static func worldObservation(from frame: DetectionFrame, sourceGeneration: UInt64) -> WorldModel.Observation {
+        WorldModel.Observation(sourceGeneration: sourceGeneration, coverage: frame.coverage,
+            observedAt: frame.capturedAt,
+            sightings: frame.persons.map { .init(track: $0.id, box: $0.boundingBox, confidence: $0.confidence) })
+    }
+
     /// Seconds since the newest observation was captured, on the host clock.
     func observationAge(now: TimeInterval = CACurrentMediaTime()) -> TimeInterval? {
         lastObservationCapturedAt.map { now - $0 }
@@ -2229,6 +2242,7 @@ final class CameraManager: NSObject, ObservableObject {
             // retained until the next explicit operator action.
             detectionFrames.invalidate()
             personDetector.clearForInactiveMode()
+            lastWorldObservation = nil
         } else if detectionPlan.mode == .discovery {
             scheduleSubjectDiscoveryIfDue(pixelBuffer: pixelBuffer)
         } else if pendingTapPoint != nil {
@@ -2245,7 +2259,8 @@ final class CameraManager: NSObject, ObservableObject {
             }
             let frame = DetectionFrame(observationID: id, capturedAt: capturedAt,
                 sourceTimestamp: timestampSeconds, pixelBuffer: pixelBuffer, persons: persons,
-                queueWait: personDetector.stats.lastQueueWait, detectionDuration: personDetector.stats.lastDetectionTime)
+                queueWait: personDetector.stats.lastQueueWait, detectionDuration: personDetector.stats.lastDetectionTime,
+                coverage: .scanned(mode: detectionPlan.mode, roi: detectionPlan.roi))
             detectionFrames.publish(frame, generation: generation)
             outputPort.recordDetectionTiming(queueWait: frame.queueWait, visionWall: frame.detectionDuration)
             outputPort.recordLatency(stage: .detection, duration: frame.detectionDuration)
@@ -2279,7 +2294,10 @@ final class CameraManager: NSObject, ObservableObject {
         if let frame = observation.frame {
             outputPort.recordObservationAge(CACurrentMediaTime() - frame.capturedAt)
             lastObservationCapturedAt = frame.capturedAt
-            if detectionIsFresh { lastObservationPersonCount = frame.persons.count }
+            if detectionIsFresh {
+                lastObservationPersonCount = frame.persons.count
+                lastWorldObservation = Self.worldObservation(from: frame, sourceGeneration: captureGeneration)
+            }
         }
 
         let composeInterval = Self.signposter.beginInterval("compose")

@@ -12,6 +12,8 @@ struct DetectionFrame {
     let persons: [PersonDetector.DetectedPerson]
     let queueWait: TimeInterval
     let detectionDuration: TimeInterval
+    /// How much of the frame this scan covered (world model, C-01).
+    var coverage: WorldModel.Coverage = .none
 }
 
 /// Bounded latest-result mailbox, isolated with its producer/consumer on MainActor.
