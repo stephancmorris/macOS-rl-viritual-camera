@@ -45,36 +45,37 @@ struct FramingMotionScenarioTests {
     }
 
     // Probe B/L measurement only. No predictive lead is added to the subject.
-    private func walk(speed: Double) throws -> (lagMs: Double, overshootFraction: Double) {
+    private func walk(speed: Double) throws -> (lagMs: Double, overshootFraction: Double, parkedOffset: Double) {
         let loop = try FramingLoop(preset: .waistUp, feel: .steadyFollow)
         let stand = 2.0, duration = 0.4 / speed
         func position(_ time: Double) -> Double {
             0.3 + speed * max(0, min(time - t0 - stand, duration))
         }
-        var lagSum = 0.0, lagCount = 0, overshoot = 0.0
+        var lagSum = 0.0, lagCount = 0, overshoot = 0.0, parked = 0.0
         for frame in 0..<Int((stand + duration + 4) * fps) {
             let elapsed = Double(frame) / fps
             let time = t0 + elapsed
             let crop = loop.step(t: time) { scenarioBox(cx: position($0)) }
             let lag = position(time) - Double(crop.center.x)
+            parked = abs(lag) / Double(crop.size.width)
             let progress = (elapsed - stand) / duration
             if progress > 0.4, progress < 0.95 { lagSum += lag; lagCount += 1 }
             if elapsed >= stand + duration {
                 overshoot = max(overshoot, -lag / Double(crop.size.width))
             }
         }
-        return (lagSum / Double(lagCount) / speed * 1000, overshoot)
+        return (lagSum / Double(lagCount) / speed * 1000, overshoot, parked)
     }
 
-    @Test func walkerLagToday() throws {
+    @Test func walkerLagGuard() throws {
         let result = try walk(speed: 0.10)
         print("FRAMING-MOTION|walkerLagMs=\(r2(result.lagMs))")
-        #expect((250...310).contains(result.lagMs))
+        #expect(result.lagMs <= 150)
     }
 
     @Test func walkerLagTarget() throws {
         let result = try walk(speed: 0.10)
-        withKnownIssue("T-03, fixed by stage C1") { #expect(result.lagMs <= 150) }
+        #expect(result.lagMs <= 150)
     }
 
     @Test func deadStopOvershootGuard() throws {
@@ -103,6 +104,27 @@ struct FramingMotionScenarioTests {
         }
         print("FRAMING-MOTION|stillMovementPixels=\(maxMovementPixels)")
         #expect(maxMovementPixels == 0)
+    }
+
+    @Test func parkedAfterWalkingIsCentered() throws {
+        let result = try walk(speed: 0.10)
+        print("FRAMING-MOTION|parkedOffsetPct=\(r2(result.parkedOffset * 100))")
+        #expect(result.parkedOffset <= 0.01)
+    }
+
+    @Test func stillNoiseDoesNotMoveParkedCrop() throws {
+        let loop = try FramingLoop(preset: .waistUp, feel: .steadyFollow)
+        let rng = ProbeRng(77)
+        var reference: CropEngine.CropRect?
+        for frame in 0..<500 {
+            let crop = loop.step(t: t0 + Double(frame) / fps) { _ in
+                scenarioBox(cx: 0.5 + rng.gauss() * 0.002)
+            }
+            if frame >= 200 {
+                #expect(loop.composer.steadyBand != nil)
+                if let reference { #expect(crop == reference) } else { reference = crop }
+            }
+        }
     }
 
     private func medianRestTime(noise: Double) throws -> Double {

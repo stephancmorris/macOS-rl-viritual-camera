@@ -256,6 +256,28 @@ final class ShotComposer: ObservableObject {
     /// a percent per frame even for a perfectly still subject, which reads as
     /// a nonzero velocity EWMA forever — so dwell-in-a-radius is the signal.
     private var settleAnchor: CGPoint?
+    private static let walkerLeadTime: TimeInterval = 0.15
+    private var leadEvidenceIsTimed = false
+    private var leadSpeed: CGFloat = 0
+    private var leadLastX: CGFloat?
+    private var leadLastTime: TimeInterval?
+
+    private func resetLead() {
+        leadSpeed = 0
+        leadLastX = nil
+        leadLastTime = nil
+    }
+
+    private func leading(_ crop: CropEngine.CropRect) -> CropEngine.CropRect {
+        guard config.shotPreset != .wide else { return crop }
+        let ramp = min(1, max(0, (abs(leadSpeed) - 0.03) / 0.03))
+        let gain = ramp * ramp * (3 - 2 * ramp)
+        let limit = crop.size.width * 0.25
+        let shift = min(limit, max(-limit, leadSpeed * Self.walkerLeadTime * gain))
+        var result = crop
+        result.origin.x += shift
+        return clampCropToFrame(result)
+    }
 
     /// Confirmation periods preserve the former two- and twelve-frame feel at
     /// the 50 fps show standard without making slower input look stickier.
@@ -1002,6 +1024,9 @@ final class ShotComposer: ObservableObject {
         observationTimestamp: TimeInterval? = nil
     ) -> CropEngine.CropRect? {
         guard config.isEnabled else { return nil }
+        // Prediction requires capture-time evidence, never the timing of synchronous calls.
+        leadEvidenceIsTimed = observationTimestamp != nil
+        if !leadEvidenceIsTimed { resetLead() }
         let sampleTime = observationTimestamp ?? CACurrentMediaTime()
 
         let subjectBounds = person.boundingBox.standardized
@@ -1042,6 +1067,7 @@ final class ShotComposer: ObservableObject {
 
     /// Reset state (e.g., when switching subjects or losing track)
     func reset(clearManualLock: Bool = false) {
+        resetLead()
         invalidateIdentityWork()
         acquisitionFeedback = nil
         lastAcceptedCenter = nil
@@ -1078,6 +1104,7 @@ final class ShotComposer: ObservableObject {
     /// gallery reaches `readyThreshold` the FSM promotes to `tracking` (green
     /// box) and cropping begins. Accuracy/consistency over instant lock.
     func lockTarget(_ targetID: UUID) {
+        resetLead()
         lastSubjectHeight = nil
         visibleZoomHeight = nil
         acquisitionFeedback = nil
@@ -1181,6 +1208,20 @@ final class ShotComposer: ObservableObject {
         isFresh: Bool,
         observationTimestamp: TimeInterval
     ) -> CropEngine.CropRect? {
+        if isFresh, leadEvidenceIsTimed, observationTimestamp.isFinite,
+           leadLastTime == nil || observationTimestamp > leadLastTime! {
+            if let last = leadLastTime, let x = leadLastX {
+                let dt = observationTimestamp - last
+                if dt > Self.steadyObservationGap {
+                    leadSpeed = 0
+                } else {
+                    let instant = (trackingCenter.x - x) / dt
+                    leadSpeed += (instant - leadSpeed) * (1 - exp(-dt / 0.15))
+                }
+            }
+            leadLastX = trackingCenter.x
+            leadLastTime = observationTimestamp
+        }
         let tuning = framingTuning
         let aspect = normalizedAspect
 
@@ -1461,7 +1502,7 @@ final class ShotComposer: ObservableObject {
             lastAcceptedCenter = trackingCenter
             lastAppliedFramingFingerprint = fingerprint
             if !hasActiveTarget { hasActiveTarget = true }
-            return clampedCrop
+            return framingChanged ? clampedCrop : leading(clampedCrop)
         }
 
         // Steady Following: a two-state machine, active only for the Steady
@@ -1569,7 +1610,7 @@ final class ShotComposer: ObservableObject {
             lastAcceptedCenter = trackingCenter
             lastAppliedFramingFingerprint = fingerprint
             if !hasActiveTarget { hasActiveTarget = true }
-            return clampedCrop
+            return leading(clampedCrop)
         }
     }
 
