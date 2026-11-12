@@ -1351,6 +1351,12 @@ final class CameraManager: NSObject, ObservableObject {
         // all run before the next frame is delivered.
         await loopMessagesSettled()
     }
+    /// Test seam: the lock machine, shot-move ladder and composer step of one
+    /// control turn, with the detection result a test supplies instead of
+    /// Vision's. It is the same step `controlTurn` runs for a frame.
+    func runControlStepForTesting(persons: [PersonDetector.DetectedPerson], isFresh: Bool) {
+        composeControlStep(observation: nil, detectedPersons: persons, detectionIsFresh: isFresh, onFrame: true)
+    }
     /// Test seam: the identity a configured source would have recorded.
     func setSourceIdentityForTesting(_ source: DiagnosticsSessionIdentity.Source) { recordSourceIdentity(source) }
     #endif

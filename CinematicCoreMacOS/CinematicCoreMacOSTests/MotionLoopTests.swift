@@ -871,4 +871,61 @@ struct MotionLoopTests {
         #expect(batch.holdChanged)
         #expect(rig.unit.takeEvents().isEmpty)
     }
+
+    // Decided by the owner (11 Nov 2026): a framing command reaches the
+    // picture one frame later than it did. This pins it at exactly one.
+
+    @Test func aFramingCommandThatLandsInAControlTurnIsUsedByTheNextRenderedFrame() async throws {
+        // The real camera, tracking a subject. 1080-line frames, so the
+        // quality floor leaves room between the two presets.
+        let port = RecordingPort()
+        let camera = try await runningCamera(port: port, width: 1920, height: 1080)
+        let unit = try #require(camera.motionUnit)
+        let engine = try #require(camera.cropEngine)
+        camera.shotComposer.config.cinematicFormat = .stage
+        camera.shotComposer.config.shotPreset = .waistUp
+        let subject = PersonDetector.DetectedPerson(
+            id: UUID(), boundingBox: CGRect(x: 0.44, y: 0.15, width: 0.12, height: 0.5),
+            confidence: 0.95, timestamp: 0, poseKeypoints: nil, faceBoundingBox: nil, faceLandmarkRatios: nil)
+        camera.shotComposer.lockTarget(subject.id)
+        camera.shotComposer.forceTrackingForTesting()
+        camera.commands.setTrackingOwnership(true)
+        camera.setOperationMode(.autoTracking)
+        #expect(camera.activeMode == .autoTracking)
+
+        // From here the test does not suspend, so the camera's own control
+        // turns (which would run Vision on the fake frames) never run. The
+        // test runs the same control step by hand, with the subject above.
+        func frame() throws { try deliver(1, to: unit, width: 1920, height: 1080) }
+        for index in 0..<4 {
+            try frame()
+            camera.runControlStepForTesting(persons: [subject], isFresh: index % 2 == 0)
+        }
+        try frame()
+        let waistUp = engine.targetCrop
+        #expect(waistUp != .fullFrame)
+
+        // The command lands between two frames.
+        guard case .accepted = camera.dispatch(camera.makeCommand(.selectPreset(.stage(.fullBody)))) else {
+            Issue.record("the preset command was not accepted")
+            return
+        }
+        // The frames that arrive before the control turn still aim at the
+        // old framing, however many there are.
+        for _ in 0..<3 {
+            try frame()
+            #expect(engine.targetCrop == waistUp)
+        }
+        // The control turn composes the new framing and publishes it…
+        camera.runControlStepForTesting(persons: [subject], isFresh: false)
+        #expect(engine.targetCrop == waistUp)
+        // …and the very next rendered frame is stepped toward it.
+        try frame()
+        let fullBody = engine.targetCrop
+        #expect(fullBody != waistUp)
+        #expect(fullBody.size.height > waistUp.size.height)
+        // One frame, not two: the frame after changes nothing more.
+        try frame()
+        #expect(engine.targetCrop == fullBody)
+    }
 }
