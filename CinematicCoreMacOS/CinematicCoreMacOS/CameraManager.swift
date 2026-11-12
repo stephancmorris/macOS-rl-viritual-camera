@@ -268,6 +268,7 @@ final class CameraManager: NSObject, ObservableObject {
     /// Padding multiplier applied to the locked subject's last box to form the
     /// tracking ROI, so a moving subject stays inside the scanned region.
     private nonisolated static let lockedROIPadding: CGFloat = 1.8
+    private nonisolated static let lockedROIHorizontalPadding: CGFloat = 3.0
 
     /// Last detected bounding box of the acquiring/locked subject. Updated
     /// every frame from detections and used to seed the next frame's ROI. This
@@ -1684,7 +1685,8 @@ final class CameraManager: NSObject, ObservableObject {
     /// consumed (fresh or repeat). Plain storage, never published.
     private(set) var lastObservationCapturedAt: TimeInterval?
     /// People in the newest *fresh* observation. While locked this counts the
-    /// subject ROI only, so 2+ means someone else is crossing the subject.
+    /// subject ROI only, so 2+ means someone is within about one and a half
+    /// body widths of the subject.
     private(set) var lastObservationPersonCount = 0
 
     // MARK: World model (read-only, C-01)
@@ -1874,7 +1876,7 @@ final class CameraManager: NSObject, ObservableObject {
             let distance = min(speed * CGFloat(elapsed), box.width * 0.25)
             lead = CGVector(dx: velocity.dx / speed * distance, dy: velocity.dy / speed * distance)
         }
-        let w = min(box.width * lockedROIPadding, 1)
+        let w = min(box.width * lockedROIHorizontalPadding, 1)
         let h = min(box.height * lockedROIPadding, 1)
         return CGRect(x: box.midX + lead.dx - w / 2, y: box.midY + lead.dy - h / 2,
                       width: w, height: h).intersection(unit)

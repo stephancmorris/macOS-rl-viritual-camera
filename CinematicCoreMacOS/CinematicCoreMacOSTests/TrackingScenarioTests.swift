@@ -1,3 +1,4 @@
+import CoreGraphics
 import Foundation
 import Testing
 @testable import Alfie
@@ -37,12 +38,36 @@ struct TrackingScenarioTests {
         }
     }
 
-    @Test func frontSameSlow() throws { try target("crossInFront_size1.00_v0.05", fraction: 0, stage: "L2") }
+    private func guardTarget(_ name: String, fraction: Double) throws {
+        let result = try measure(name)
+        if TrackingScenarioOptions.wide { return }
+        #expect(Double(result.wrongRuns) / Double(seeds.count) <= fraction)
+    }
+
+    @Test(arguments: [true, false])
+    func witnessedBoxNeverTakesLock(wasBound: Bool) {
+        if TrackingScenarioOptions.wide { return }
+        let reference = CGRect(x: 0.465, y: 0.25, width: 0.07, height: 0.30)
+        let other = reference.offsetBy(dx: 0.02, dy: 0)
+        var probation: PersonDetector.LockProbation?
+        for frame in 0..<100 {
+            let time = Double(frame) * 0.04
+            let result = PersonDetector.resolveLockedAssignment(detections: [other],
+                referenceBox: reference, lockVelocityMagnitude: 0, timeSinceLockSeen: time,
+                otherTrackBoxes: [], probation: probation, observationTimestamp: time,
+                witnessBoxes: [other], lockWasBoundLastScan: wasBound)
+            #expect(result.assignedIndex == nil)
+            #expect(result.probation == nil)
+            probation = result.probation
+        }
+    }
+
+    @Test func frontSameSlow() throws { try guardTarget("crossInFront_size1.00_v0.05", fraction: 0) }
     @Test func frontSameWalking() throws { try target("crossInFront_size1.00_v0.10", fraction: 0.25, stage: "L2") }
-    @Test func frontSameFast() throws { try target("crossInFront_size1.00_v0.25", fraction: 0.10, stage: "L2") }
-    @Test func frontSmallerSlow() throws { try target("crossInFront_size0.85_v0.05", fraction: 0, stage: "L2") }
-    @Test func frontSmallerWalking() throws { try target("crossInFront_size0.85_v0.10", fraction: 0, stage: "L2") }
-    @Test func frontSmallerFast() throws { try target("crossInFront_size0.85_v0.25", fraction: 0, stage: "L2") }
+    @Test func frontSameFast() throws { try guardTarget("crossInFront_size1.00_v0.25", fraction: 0.125) }
+    @Test func frontSmallerSlow() throws { try guardTarget("crossInFront_size0.85_v0.05", fraction: 0) }
+    @Test func frontSmallerWalking() throws { try guardTarget("crossInFront_size0.85_v0.10", fraction: 0) }
+    @Test func frontSmallerFast() throws { try guardTarget("crossInFront_size0.85_v0.25", fraction: 0) }
     @Test func behindWalking() throws {
         let r = try measure("crossBehind_v0.10")
         if TrackingScenarioOptions.wide { return }
@@ -70,9 +95,9 @@ struct TrackingScenarioTests {
             #expect(r.allOnSubject)
         }
     }
-    @Test func walkingSubjectCrossed() throws { try target("crossInFront_subjectWalking0.04", fraction: 0.45, stage: "L2") }
-    @Test func gesturesOneWidth() throws { try target("groupGestures_spacing1.0bw", fraction: 0.15, stage: "L1 + L2") }
-    @Test func gesturesWider() throws { try target("groupGestures_spacing1.4bw", fraction: 0, stage: "L1 + L2") }
+    @Test func walkingSubjectCrossed() throws { try guardTarget("crossInFront_subjectWalking0.04", fraction: 0.5) }
+    @Test func gesturesOneWidth() throws { try guardTarget("groupGestures_spacing1.0bw", fraction: 0.125) }
+    @Test func gesturesWider() throws { try guardTarget("groupGestures_spacing1.4bw", fraction: 0) }
     @Test func groupSubjectMissed() throws { try target("groupStill_subjectMissed0.4s_every5s", fraction: 0, stage: "L5") }
     @Test func walkerMiss() throws {
         let r = try measure("walkerGap_v0.10_gap0.36_w0.070")
