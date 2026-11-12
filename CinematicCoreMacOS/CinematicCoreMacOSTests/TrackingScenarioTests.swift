@@ -98,7 +98,7 @@ struct TrackingScenarioTests {
     @Test func walkingSubjectCrossed() throws { try guardTarget("crossInFront_subjectWalking0.04", fraction: 0.5) }
     @Test func gesturesOneWidth() throws { try guardTarget("groupGestures_spacing1.0bw", fraction: 0.125) }
     @Test func gesturesWider() throws { try guardTarget("groupGestures_spacing1.4bw", fraction: 0) }
-    @Test func groupSubjectMissed() throws { try target("groupStill_subjectMissed0.4s_every5s", fraction: 0, stage: "L5") }
+    @Test func groupSubjectMissed() throws { try guardTarget("groupStill_subjectMissed0.4s_every5s", fraction: 0) }
     @Test func walkerMiss() throws {
         let r = try measure("walkerGap_v0.10_gap0.36_w0.070")
         if TrackingScenarioOptions.wide { return }

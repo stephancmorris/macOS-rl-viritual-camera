@@ -138,51 +138,18 @@ struct LockedTrackMatcherTests {
 
     // MARK: - 4. Discontinuous candidate inside radius (probation path)
 
-    @Test func discontinuousCandidateInsideRadiusRequiresProbationFrames() {
-        // Center 0.10 from the narrow reference (inside the 0.12 base
-        // radius), narrow enough that IoU with the reference box is exactly 0.
+    @Test func stationaryDiscontinuousCandidateNeverRebinds() {
         let candidate = Self.nonOverlappingCandidate(distanceFromReferenceCenter: 0.10)
-        #expect(PersonDetector.iou(candidate, Self.narrowReferenceBox) == 0, "precondition: candidate must not overlap reference")
-
-        var probation: PersonDetector.LockProbation? = nil
-
-        // First sighting at 0 ms starts probation.
-        var resolution = PersonDetector.resolveLockedAssignment(
-            detections: [candidate],
-            referenceBox: Self.narrowReferenceBox,
-            lockVelocityMagnitude: 0,
-            timeSinceLockSeen: 0.033,
-            otherTrackBoxes: [],
-            probation: probation, observationTimestamp: 0
-        )
-        #expect(resolution.assignedIndex == nil)
-        #expect(resolution.probation?.startedAt == 0)
-        probation = resolution.probation
-
-        // Second sighting at 40 ms still coasts.
-        resolution = PersonDetector.resolveLockedAssignment(
-            detections: [candidate],
-            referenceBox: Self.narrowReferenceBox,
-            lockVelocityMagnitude: 0,
-            timeSinceLockSeen: 0.033,
-            otherTrackBoxes: [],
-            probation: probation, observationTimestamp: 0.04
-        )
-        #expect(resolution.assignedIndex == nil)
-        #expect(resolution.probation?.lastObservedAt == 0.04)
-        probation = resolution.probation
-
-        // Third sighting at 80 ms accepts, preserving the 25 Hz baseline.
-        resolution = PersonDetector.resolveLockedAssignment(
-            detections: [candidate],
-            referenceBox: Self.narrowReferenceBox,
-            lockVelocityMagnitude: 0,
-            timeSinceLockSeen: 0.033,
-            otherTrackBoxes: [],
-            probation: probation, observationTimestamp: 0.08
-        )
-        #expect(resolution.assignedIndex == 0)
-        #expect(resolution.probation == nil)
+        var probation: PersonDetector.LockProbation?
+        for frame in 0...20 {
+            let t = Double(frame) * 0.04
+            let result = PersonDetector.resolveLockedAssignment(detections: [candidate],
+                referenceBox: Self.narrowReferenceBox, lockVelocityMagnitude: 0,
+                timeSinceLockSeen: t + 0.033, otherTrackBoxes: [], probation: probation,
+                observationTimestamp: t)
+            #expect(result.assignedIndex == nil)
+            probation = result.probation
+        }
     }
 
     // MARK: - 5. Contested candidate (occluder)
@@ -223,8 +190,8 @@ struct LockedTrackMatcherTests {
             otherTrackBoxes: [occluder],
             probation: probation, observationTimestamp: 0.28
         )
-        #expect(finalResolution.assignedIndex == 0)
-        #expect(finalResolution.probation == nil)
+        #expect(finalResolution.assignedIndex == nil)
+        #expect(finalResolution.probation != nil)
     }
 
     // MARK: - 6. Two people crossing (margin fail)
