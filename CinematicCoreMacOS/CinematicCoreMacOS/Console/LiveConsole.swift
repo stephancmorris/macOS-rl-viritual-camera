@@ -444,6 +444,7 @@ struct LivePanePicture: View {
         if pane.paneView == .source {
             CameraPreviewView(
                 pixelBuffer: channel.currentFrameBuffer,
+                pixelBufferSource: { [weak channel] in channel?.currentFrameBuffer },
                 detectedPersons: channel.personDetector.displayedPersons,
                 showDetections: true,
                 activeTargetID: channel.shotComposer.activeTargetID,
@@ -461,7 +462,7 @@ struct LivePanePicture: View {
                 onSubjectOverride: { request in controls?.overrideSubject(request) ?? .refused("Subject selection is unavailable") })
         } else {
             // Rendered output only — never the raw capture buffer.
-            PixelBufferPreviewView(pixelBuffer: channel.croppedFrameBuffer, aspectFill: true)
+            SampledPixelBufferView(source: { [weak channel] in channel?.croppedFrameBuffer }, aspectFill: true)
         }
     }
 
