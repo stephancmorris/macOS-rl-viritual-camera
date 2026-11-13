@@ -899,7 +899,8 @@ final class PersonDetector: ObservableObject {
                 // explained by someone else's track than by the stale lock box.
                 let otherTrackBoxes = trackedPersons.compactMap { id, track -> CGRect? in
                     guard id != lockedID,
-                          timestamp - track.firstSeen > 0.5 else { return nil }
+                          timestamp - track.firstSeen > 0.5,
+                          track.lastSeen >= lockedTrack.lastSeen else { return nil }
                     return predicted[id]
                 }
                 let resolution = Self.resolveLockedAssignment(

@@ -12,9 +12,29 @@
 import Testing
 import Foundation
 import CoreGraphics
+@preconcurrency import Vision
 @testable import Alfie
 
 struct LockedTrackMatcherTests {
+    @MainActor
+    @Test func staleOtherTrackDoesNotBlockAReboundLock() throws {
+        let detector = PersonDetector()
+        func box(_ x: Double) -> CGRect { CGRect(x: x - 0.035, y: 0.25, width: 0.07, height: 0.30) }
+        func scan(_ t: Double, _ xs: [Double]) {
+            detector.updateTracking(rectObservations: xs.map { VNHumanObservation(boundingBox: box($0)) },
+                poseObservations: [], faceObservations: [], timestamp: t)
+        }
+        scan(1000, [0.30, 0.36])
+        let lock = try #require(detector.detectedPersons.first?.id)
+        detector.lockedTargetID = lock
+        for i in 1...15 { scan(1000 + Double(i) * 0.04, [0.30, 0.36]) }
+        // The lock advances while its old neighbour is no longer observed.
+        scan(1000.64, [0.32])
+        #expect(detector.detectedPersons.first?.id == lock)
+        scan(1000.68, [0.35])
+        #expect(detector.detectedPersons.first?.id == lock)
+    }
+
 
     // MARK: - Helpers
 
