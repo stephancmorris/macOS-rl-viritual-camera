@@ -271,7 +271,11 @@ final class PersonDetector: ObservableObject {
     /// probation + coast policy in `resolveLockedAssignment`.
     var lockedTargetID: UUID? = nil {
         didSet {
-            if lockedTargetID != oldValue { lockProbation = nil }
+            if lockedTargetID != oldValue {
+                lockProbation = nil
+                lockBoundInPreviousScan = true
+                for id in trackedPersons.keys { trackedPersons[id]?.witnessCount = 0 }
+            }
         }
     }
 
@@ -279,6 +283,8 @@ final class PersonDetector: ObservableObject {
     /// candidate. Cleared on lock change, stale lock, acceptance, or when the
     /// candidate stops persisting.
     private var lockProbation: LockProbation?
+    private var lockBoundInPreviousScan = true
+    private var weakMatchIndices = Set<Int>()
 
     /// The LOCK-PASS-A state last logged; see `assignTracks`.
     private struct LockPassLogKey: Equatable {
@@ -313,13 +319,13 @@ final class PersonDetector: ObservableObject {
     /// same physical object and is accepted instantly (no probation).
     nonisolated static let lockedSameObjectIoU: CGFloat = 0.30
     /// Three sightings at 25 detections/s span two 40 ms intervals.
-    nonisolated static let lockedProbationDuration: TimeInterval = 0.08
+    nonisolated static let lockedProbationDuration: TimeInterval = 0.07
     /// Eight sightings at the same cadence span seven intervals.
     nonisolated static let lockedProbationDurationContested: TimeInterval = 0.28
     /// Match Steady Follow's fresh-observation continuity window.
     nonisolated static let lockedProbationObservationGap: TimeInterval = 0.150
     /// The best candidate must beat the runner-up by this factor for instant
-    /// acceptance; otherwise the frame is ambiguous and the lock coasts.
+    /// acceptance within the highest continuity tier; otherwise the frame is ambiguous and the lock coasts.
     nonisolated static let lockedScoreMargin: CGFloat = 1.15
     /// Base radius (normalized frame units) a stationary locked subject may
     /// move between sightings. Replaces the old fixed 0.5 gate that let the
@@ -363,6 +369,8 @@ final class PersonDetector: ObservableObject {
         var lastVelocity: CGVector = .zero
         var lastPose: PoseKeypoints? = nil
         var lastPoseTime: TimeInterval = 0
+        var witnessCount = 0
+        var lastWitnessedAt: TimeInterval = -.infinity
     }
 
     // Velocity clamp in frame-widths-per-second. Prevents stale tracks with a
@@ -798,7 +806,9 @@ final class PersonDetector: ObservableObject {
                 confidence: confidence,
                 lastVelocity: velocity,
                 lastPose: poseToStore,
-                lastPoseTime: poseTimeToStore
+                lastPoseTime: poseTimeToStore,
+                witnessCount: weakMatchIndices.contains(index) ? 0 : (existing?.witnessCount ?? 0),
+                lastWitnessedAt: existing?.lastWitnessedAt ?? -.infinity
             )
 
             let detectedPerson = DetectedPerson(
@@ -811,6 +821,16 @@ final class PersonDetector: ObservableObject {
                 faceLandmarkRatios: faceLandmarkRatios
             )
             updatedPersons.append(detectedPerson)
+        }
+
+        // Two distinct boxes in the same scan establish that these are different people.
+        if let lock = lockedTargetID, let locked = updatedPersons.first(where: { $0.id == lock }) {
+            for person in updatedPersons where person.id != lock {
+                if Self.iou(person.boundingBox, locked.boundingBox) < 0.5 {
+                    trackedPersons[person.id]?.witnessCount += 1
+                    trackedPersons[person.id]?.lastWitnessedAt = timestamp
+                }
+            }
         }
 
         // Cached-detection fallback (Step 2). When Vision dropped this frame
@@ -860,7 +880,9 @@ final class PersonDetector: ObservableObject {
         detections: [VNHumanObservation],
         timestamp: TimeInterval
     ) -> [Int: UUID] {
+        weakMatchIndices = []
         guard !detections.isEmpty, !trackedPersons.isEmpty else {
+            lockBoundInPreviousScan = false
             lockProbation = nil
             return [:]
         }
@@ -897,8 +919,15 @@ final class PersonDetector: ObservableObject {
                 // Predicted boxes of other *established* tracks (alive > 0.5 s):
                 // the occluder guard's evidence that a candidate is better
                 // explained by someone else's track than by the stale lock box.
+                func isWitness(_ track: TrackedPerson) -> Bool {
+                    track.witnessCount >= 1 && lockedTrack.lastSeen - track.lastWitnessedAt <= 0.15
+                }
+                let witnessBoxes = trackedPersons.compactMap { id, track -> CGRect? in
+                    guard id != lockedID, isWitness(track) else { return nil }
+                    return predicted[id]
+                }
                 let otherTrackBoxes = trackedPersons.compactMap { id, track -> CGRect? in
-                    guard id != lockedID,
+                    guard id != lockedID, !isWitness(track),
                           timestamp - track.firstSeen > 0.5,
                           track.lastSeen >= lockedTrack.lastSeen else { return nil }
                     return predicted[id]
@@ -910,8 +939,12 @@ final class PersonDetector: ObservableObject {
                     timeSinceLockSeen: elapsed,
                     otherTrackBoxes: otherTrackBoxes,
                     probation: lockProbation,
-                    observationTimestamp: timestamp
+                    observationTimestamp: timestamp,
+                    witnessBoxes: witnessBoxes,
+                    lockVelocity: lockedTrack.lastVelocity,
+                    lockWasBoundLastScan: lockBoundInPreviousScan
                 )
+                lockBoundInPreviousScan = resolution.assignedIndex != nil
                 lockProbation = resolution.probation
                 if let index = resolution.assignedIndex {
                     assignments[index] = lockedID
@@ -925,6 +958,7 @@ final class PersonDetector: ObservableObject {
                 lockedDiag = (lockedID, referenceBox, allowedDistance, resolution.assignedIndex)
             } else {
                 // Locked track went stale — drop any half-built probation.
+                lockBoundInPreviousScan = false
                 lockProbation = nil
             }
         }
@@ -963,6 +997,9 @@ final class PersonDetector: ObservableObject {
             assignments[pair.detectionIndex] = pair.trackID
             usedDetections.insert(pair.detectionIndex)
             usedTracks.insert(pair.trackID)
+            if let box = predicted[pair.trackID], Self.iou(detections[pair.detectionIndex].boundingBox, box) < 0.3 {
+                weakMatchIndices.insert(pair.detectionIndex)
+            }
         }
 
         // Diagnostic: when a lock is active and >1 person is in view, log per-
@@ -1063,15 +1100,19 @@ final class PersonDetector: ObservableObject {
         timeSinceLockSeen: TimeInterval,
         otherTrackBoxes: [CGRect],
         probation: LockProbation?,
-        observationTimestamp: TimeInterval
+        observationTimestamp: TimeInterval,
+        witnessBoxes: [CGRect] = [],
+        lockVelocity: CGVector = .zero,
+        lockWasBoundLastScan: Bool = true
     ) -> LockedResolution {
         let allowedDistance = min(
             lockedMaxJumpRadius,
             lockedBaseJumpRadius + lockVelocityMagnitude * CGFloat(timeSinceLockSeen)
         )
 
-        var best: (index: Int, score: CGFloat)? = nil
-        var secondScore: CGFloat = 0
+        let elapsed = CGFloat(max(0, timeSinceLockSeen))
+        let predictedReference = referenceBox.offsetBy(dx: lockVelocity.dx * elapsed, dy: lockVelocity.dy * elapsed)
+        var scored: [(index: Int, score: CGFloat, tier: Int)] = []
         for (idx, box) in detections.enumerated() {
             let score = lockedMatchScore(
                 detection: box,
@@ -1079,13 +1120,19 @@ final class PersonDetector: ObservableObject {
                 allowedDistance: allowedDistance
             )
             guard score > 0 else { continue }
-            if best == nil || score > best!.score {
-                secondScore = best?.score ?? 0
-                best = (idx, score)
-            } else if score > secondScore {
-                secondScore = score
+            let overlap = iou(box, referenceBox)
+            let explained = witnessBoxes.reduce(CGFloat(0)) { max($0, iou(box, $1)) }
+            let byLock = max(overlap, iou(box, predictedReference))
+            // A witnessed other person never becomes the lock, even after a long pause.
+            if explained >= 0.5 && (lockWasBoundLastScan ? explained > byLock + 0.15 : explained + 0.15 >= byLock) {
+                continue
             }
+            scored.append((idx, score, overlap >= lockedSameObjectIoU ? 1 : 0))
         }
+        let topTier = scored.map(\.tier).max() ?? 0
+        let ranked = scored.filter { $0.tier == topTier }.sorted { $0.score > $1.score }
+        let best = ranked.first
+        let secondScore = ranked.dropFirst().first?.score ?? 0
 
         guard let best else {
             // Missing candidates break consecutive probation evidence.
