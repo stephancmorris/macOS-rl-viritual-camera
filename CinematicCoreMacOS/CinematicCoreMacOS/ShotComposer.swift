@@ -249,13 +249,8 @@ final class ShotComposer: ObservableObject {
     /// domain so their feel does not change with camera/detection cadence.
     private var bandExitStartedAt: TimeInterval?
     private var bandExitLastObservationAt: TimeInterval?
-    private var settleStartedAt: TimeInterval?
-    private var settleLastObservationAt: TimeInterval?
-    /// Position the settle detector is measuring dwell around. Position-based
-    /// settling (not velocity): the Vision bbox center jitters a few tenths of
-    /// a percent per frame even for a perfectly still subject, which reads as
-    /// a nonzero velocity EWMA forever — so dwell-in-a-radius is the signal.
-    private var settleAnchor: CGPoint?
+    /// Fresh capture centres used to compare the older and newer half means.
+    private var settleWindow: [(time: TimeInterval, center: CGPoint)] = []
     private static let walkerLeadTime: TimeInterval = 0.15
     private var leadEvidenceIsTimed = false
     private var leadSpeed: CGFloat = 0
@@ -281,7 +276,7 @@ final class ShotComposer: ObservableObject {
 
     /// Confirmation periods preserve the former two- and twelve-frame feel at
     /// the 50 fps show standard without making slower input look stickier.
-    private static let bandExitConfirmation: TimeInterval = 2.0 / 50.0
+    private static let bandExitConfirmation: TimeInterval = 0.030
     private static let settleConfirmation: TimeInterval = 12.0 / 50.0
     /// A long gap means the camera has no continuous evidence of a settled or
     /// out-of-band subject. 150 ms admits 25/50/60 fps sources while rejecting
@@ -302,12 +297,10 @@ final class ShotComposer: ObservableObject {
     /// reset for the Steady Following machine (reset / lock-loss / mode change),
     /// and safe to call per frame from the legacy gate (compare-before-write).
     private func enterSteadyFollowing() {
+        settleWindow.removeAll(keepingCapacity: true)
         steadyState = .following
         bandExitStartedAt = nil
         bandExitLastObservationAt = nil
-        settleStartedAt = nil
-        settleLastObservationAt = nil
-        settleAnchor = nil
         if steadyBand != nil { steadyBand = nil }
     }
 
@@ -317,9 +310,6 @@ final class ShotComposer: ObservableObject {
         steadyState = .holding
         bandExitStartedAt = nil
         bandExitLastObservationAt = nil
-        settleStartedAt = nil
-        settleLastObservationAt = nil
-        settleAnchor = nil
         let band = SteadyBand(
             centerX: center.x,
             width: config.steadyBandWidth * min(max(programCropWidth, 0), 1)
@@ -1569,41 +1559,39 @@ final class ShotComposer: ObservableObject {
             return nil
 
         case .following:
-            // Position-based settle detection: velocity EWMA never reads as
-            // zero (Vision bbox jitter alone registers ~0.1–0.3 frame-widths/s
-            // for a still subject), so settling is dwell-in-a-radius instead.
-            // Once the subject stays within `settleRadius` of the anchor for
-            // `settleConfirmation` of capture time, re-enter holding,
-            // centered on the ANCHOR (not the instantaneous jittered center),
-            // and accept one final centering target.
-            //
-            // Fresh detections only. A repeated detection sits at *exactly* the
-            // anchor, so every repeat would be a guaranteed increment — at
-            // interval 2 half the evidence for "they have stopped moving" would
-            // be manufactured by the detection cadence, and the camera would
-            // park about twice as readily as it does today.
-            if isFresh {
-                if let anchor = settleAnchor,
-                   hypot(trackingCenter.x - anchor.x, trackingCenter.y - anchor.y) <= settleRadius {
-                    let isContinuous = settleLastObservationAt.map {
-                        observationTimestamp >= $0
-                            && observationTimestamp - $0 <= Self.steadyObservationGap
-                    } ?? true
-                    if !isContinuous { settleStartedAt = observationTimestamp }
-                } else {
-                    settleAnchor = trackingCenter
-                    settleStartedAt = observationTimestamp
+            // Compare means from continuous fresh evidence: noise averages out,
+            // while a steady drift keeps the two halves separated.
+            if isFresh, observationTimestamp.isFinite,
+               settleWindow.last.map({ observationTimestamp > $0.time }) ?? true {
+                if let last = settleWindow.last, observationTimestamp - last.time > Self.steadyObservationGap {
+                    settleWindow.removeAll(keepingCapacity: true)
                 }
-                if settleStartedAt == nil { settleStartedAt = observationTimestamp }
-                settleLastObservationAt = observationTimestamp
-                if let startedAt = settleStartedAt,
-                   observationTimestamp - startedAt >= Self.settleConfirmation,
-                   let anchor = settleAnchor {
-                    enterSteadyHolding(centeredOn: anchor, programCropWidth: clampedCrop.size.width)
-                    lastAcceptedCenter = anchor
-                    lastAppliedFramingFingerprint = fingerprint
-                    if !hasActiveTarget { hasActiveTarget = true }
-                    return clampedCrop
+                settleWindow.append((observationTimestamp, trackingCenter))
+                settleWindow.removeAll { observationTimestamp - $0.time > Self.settleConfirmation + 1e-9 }
+                if settleWindow.count >= 4,
+                   observationTimestamp - settleWindow[0].time >= 0.21,
+                   // Keep the transition within one observation of the former dwell.
+                   observationTimestamp - settleWindow[0].time
+                    + (settleWindow.last!.time - settleWindow[settleWindow.count - 2].time)
+                    >= Self.settleConfirmation - 1e-9 {
+                    func mean(_ values: ArraySlice<(time: TimeInterval, center: CGPoint)>) -> CGPoint {
+                        let sum = values.reduce(CGPoint.zero) { CGPoint(x: $0.x + $1.center.x, y: $0.y + $1.center.y) }
+                        return CGPoint(x: sum.x / CGFloat(values.count), y: sum.y / CGFloat(values.count))
+                    }
+                    let split = settleWindow.count / 2
+                    let older = mean(settleWindow[..<split])
+                    let newer = mean(settleWindow[split...])
+                    if hypot(newer.x - older.x, newer.y - older.y) <= settleRadius * 0.5 {
+                        let anchor = mean(settleWindow[...])
+                        enterSteadyHolding(centeredOn: anchor, programCropWidth: clampedCrop.size.width)
+                        lastAcceptedCenter = anchor
+                        lastAppliedFramingFingerprint = fingerprint
+                        if !hasActiveTarget { hasActiveTarget = true }
+                        var resting = clampedCrop
+                        resting.origin.x += anchor.x - trackingCenter.x
+                        resting.origin.y += anchor.y - trackingCenter.y
+                        return clampCropToFrame(resting)
+                    }
                 }
             }
             // Keep following — emit a target every frame.
