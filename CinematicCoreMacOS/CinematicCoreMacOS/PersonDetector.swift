@@ -1062,6 +1062,7 @@ final class PersonDetector: ObservableObject {
         var candidateBox: CGRect
         var startedAt: TimeInterval
         var lastObservedAt: TimeInterval
+        var firstBox: CGRect? = nil
     }
 
     /// Outcome of one frame of locked-track matching.
@@ -1156,23 +1157,31 @@ final class PersonDetector: ObservableObject {
             return LockedResolution(assignedIndex: best.index, probation: nil)
         }
 
+        let distant = iouRef == 0 && hypot(candidate.midX - referenceBox.midX, candidate.midY - referenceBox.midY) > referenceBox.width * 0.5
         let required = iouOther > iouRef
             ? lockedProbationDurationContested
-            : lockedProbationDuration
+            : (distant ? 0.16 : lockedProbationDuration)
         if let probation, iou(candidate, probation.candidateBox) > 0.5 {
             let dt = observationTimestamp - probation.lastObservedAt
             if dt <= lockedProbationObservationGap {
                 if observationTimestamp - probation.startedAt + 1e-9 >= required {
-                    return LockedResolution(assignedIndex: best.index, probation: nil)
+                    let first = probation.firstBox ?? probation.candidateBox
+                    let distance = hypot(candidate.midX - referenceBox.midX, candidate.midY - referenceBox.midY)
+                    let firstDistance = hypot(first.midX - referenceBox.midX, first.midY - referenceBox.midY)
+                    let duration = observationTimestamp - probation.startedAt
+                    let outwardSpeed = duration > 0 ? (distance - firstDistance) / duration : 0
+                    if !distant || outwardSpeed >= 0.3 * distance / CGFloat(max(timeSinceLockSeen, 1e-9)) {
+                        return LockedResolution(assignedIndex: best.index, probation: nil)
+                    }
                 }
                 return LockedResolution(assignedIndex: nil, probation: LockProbation(
                     candidateBox: candidate, startedAt: probation.startedAt,
-                    lastObservedAt: observationTimestamp))
+                    lastObservedAt: observationTimestamp, firstBox: probation.firstBox ?? probation.candidateBox))
             }
         }
         return LockedResolution(assignedIndex: nil, probation: LockProbation(
             candidateBox: candidate, startedAt: observationTimestamp,
-            lastObservedAt: observationTimestamp))
+            lastObservedAt: observationTimestamp, firstBox: candidate))
     }
 
     /// Score a candidate detection against the locked subject's *last known*

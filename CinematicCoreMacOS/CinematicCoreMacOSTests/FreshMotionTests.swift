@@ -75,16 +75,16 @@ struct TimedLockProbationTests {
     private func resolve(_ time: Double, probation: PersonDetector.LockProbation?,
                          contested: Bool = false, boxes: [CGRect]? = nil) -> PersonDetector.LockedResolution {
         PersonDetector.resolveLockedAssignment(
-            detections: boxes ?? [candidate], referenceBox: reference,
-            lockVelocityMagnitude: 0, timeSinceLockSeen: time,
-            otherTrackBoxes: contested ? [candidate.insetBy(dx: -0.01, dy: -0.01)] : [],
+            detections: boxes ?? [candidate.offsetBy(dx: time * 0.2, dy: 0)], referenceBox: reference,
+            lockVelocityMagnitude: 0.2, timeSinceLockSeen: time + 0.5,
+            otherTrackBoxes: contested ? [candidate.offsetBy(dx: time * 0.2, dy: 0).insetBy(dx: -0.01, dy: -0.01)] : [],
             probation: probation, observationTimestamp: time)
     }
 
     @Test(arguments: [15.0, 25.0, 30.0, 50.0, 60.0], [false, true])
     func probationDependsOnDurationRatherThanCount(rate: Double, contested: Bool) throws {
         var probation: PersonDetector.LockProbation?
-        let required = contested ? 0.28 : 0.08
+        let required = contested ? 0.28 : 0.16
         var accepted: Double?
         for frame in 0...Int(ceil(required * rate) + 1) {
             let time = Double(frame) / rate
@@ -116,6 +116,6 @@ struct TimedLockProbationTests {
         let afterGap = resolve(0.3, probation: second.probation)
         #expect(afterGap.assignedIndex == nil)
         #expect(afterGap.probation?.startedAt == 0.3)
-        #expect(resolve(0.38, probation: afterGap.probation).assignedIndex == 0)
+        #expect(resolve(0.38, probation: afterGap.probation).assignedIndex == nil)
     }
 }
