@@ -2236,7 +2236,8 @@ final class CameraManager: NSObject, ObservableObject {
         }
         // Hand the matcher the current operator lock so it can bind that track
         // first with a relaxed threshold (PersonDetector.swift assignTracks).
-        personDetector.lockedTargetID = shotComposer.manualLockedTargetID
+        // Nil while an identity veto holds the lock, so the vetoed track is not followed.
+        personDetector.lockedTargetID = shotComposer.lockBindingTargetID
 
         if detectionPlan.mode != .discovery, subjectDiscoveryToken != nil {
             retireSubjectDiscovery()

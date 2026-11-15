@@ -105,6 +105,8 @@ extension ShotComposer {
         let id: UUID
         let printDistance: Float?
         let landmarkDistance: Float?
+        /// A witness or identity-vetoed person: only a strong decision may bind them.
+        var isExcluded = false
     }
 
     /// One decision per completed observation, after ALL visible candidates were scored.
@@ -138,6 +140,46 @@ extension ShotComposer {
             count = candidate == winner.id ? count + 1 : 1
             candidate = winner.id
             return count >= ShotComposer.reacquisitionConsecutiveFrames ? winner.id : nil
+        }
+
+        struct Decision: Equatable, Sendable {
+            let id: UUID
+            /// Strong-tier face evidence. Only a strong decision may bind an excluded person.
+            let strong: Bool
+        }
+
+        /// The face-identity rules, used only while face identity is live.
+        ///
+        /// Excluded faces (witnesses, vetoed tracks) are scored too, so they
+        /// count as runners-up: a deliberate tightening of the margin. An
+        /// excluded winner needs the strong tier as well as the margin. Two
+        /// strong matches in one observation are ambiguous: the evidence
+        /// resets and the lock stays frozen.
+        mutating func decide(observationID: UInt64, scores: [ReacquisitionScore],
+                             strong: IdentityThresholds) -> Decision? {
+            guard lastObservationID.map({ observationID > $0 }) ?? true else { return nil }
+            lastObservationID = observationID
+            guard !scores.isEmpty, scores.allSatisfy({ $0.printDistance?.isFinite == true }) else {
+                candidate = nil; count = 0; return nil
+            }
+            let eligible = scores.filter { ($0.landmarkDistance ?? 0) <= ShotComposer.landmarkRejectionThreshold }
+                .sorted { $0.printDistance! < $1.printDistance! }
+            func isStrong(_ score: ReacquisitionScore) -> Bool {
+                guard let landmarks = score.landmarkDistance else { return false }
+                return score.printDistance! < strong.strongMatch && landmarks <= strong.strongMatchLandmark
+            }
+            guard eligible.filter(isStrong).count < 2, let winner = eligible.first,
+                  eligible.count < 2 || eligible[1].printDistance! >= winner.printDistance! * ShotComposer.marginRatio,
+                  winner.isExcluded
+                    ? isStrong(winner)
+                    : winner.printDistance! < (eligible.count == 1 ? ShotComposer.soloThreshold : ShotComposer.absoluteThreshold)
+            else {
+                candidate = nil; count = 0; return nil
+            }
+            count = candidate == winner.id ? count + 1 : 1
+            candidate = winner.id
+            return count >= ShotComposer.reacquisitionConsecutiveFrames
+                ? Decision(id: winner.id, strong: isStrong(winner)) : nil
         }
     }
 }
