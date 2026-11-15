@@ -347,6 +347,30 @@ final class ShotComposer: ObservableObject {
     /// multiple concurrent extracts queueing up on a slow Vision call.
     private var signatureCaptureInFlight: Bool = false
 
+    /// Set when the detector reported lock-identity ambiguity while tracking:
+    /// the lock may have swapped people, so the next capture must resemble
+    /// the acquisition anchors before the gallery accepts anything else.
+    private var galleryUnverifiedSince: TimeInterval?
+    /// The detector's ambiguity flag from the latest `tick`. A capture that
+    /// completes while it is set is discarded.
+    private var lastLockAmbiguityOpen = false
+    /// Captures refused by the admission check (diagnostics and tests).
+    private(set) var galleryRejectionCount = 0
+    #if DEBUG
+    /// Replaces only the Vision extraction; admission and gallery rules stay real.
+    var signatureCaptureForTesting: (@Sendable (CGRect) async -> IdentityEmbedding?)?
+    private(set) var signatureCaptureTaskForTesting: Task<Void, Never>?
+    var galleryForTesting: FaceSignatureGallery? {
+        switch lockState {
+        case .acquiring(_, let gallery, _), .tracking(_, let gallery), .hold(_, let gallery, _), .wideWaiting(let gallery):
+            return gallery
+        case .inactive:
+            return nil
+        }
+    }
+    var galleryUnverifiedForTesting: Bool { galleryUnverifiedSince != nil }
+    #endif
+
     /// Wall-clock of the last frame that upgraded the detection plan for a
     /// gallery refresh scan. Keeps the refresh to the capture throttle even
     /// when the subject's face is not visible (turned away, occluded) — see
@@ -609,9 +633,11 @@ final class ShotComposer: ObservableObject {
         isFresh: Bool = true,
         observationID: UInt64? = nil,
         observationTimestamp: TimeInterval? = nil,
-        excludedFromReacquisition: Set<UUID> = []
+        excludedFromReacquisition: Set<UUID> = [],
+        lockAmbiguityOpen: Bool = false
     ) -> TickOutcome {
         if isFresh { fallbackObservationID &+= 1 }
+        lastLockAmbiguityOpen = lockAmbiguityOpen
         let frameID = observationID ?? fallbackObservationID
         let sampleTime = observationTimestamp ?? timestamp
         let isRecovering: Bool = {
@@ -716,13 +742,21 @@ final class ShotComposer: ObservableObject {
                 // re-acquisition to ever work after a wide-pull.
                 if isFresh, lastGalleryObservationID != frameID {
                     lastGalleryObservationID = frameID
-                    maybeAppendToGallery(
-                    for: targetID,
-                    person: lockedDetection,
-                    pixelBuffer: pixelBuffer,
-                    gallery: gallery,
-                    timestamp: sampleTime
-                    )
+                    if lockAmbiguityOpen {
+                        // The lock may have swapped people: learn nothing new.
+                        if galleryUnverifiedSince == nil {
+                            galleryUnverifiedSince = sampleTime
+                            Self.logger.info("GALLERY unverified reason=lock_ambiguity target=\(String(targetID.uuidString.prefix(8)), privacy: .public)")
+                        }
+                    } else {
+                        maybeAppendToGallery(
+                        for: targetID,
+                        person: lockedDetection,
+                        pixelBuffer: pixelBuffer,
+                        gallery: gallery,
+                        timestamp: sampleTime
+                        )
+                    }
                 }
                 return .noChange
             }
@@ -820,47 +854,79 @@ final class ShotComposer: ObservableObject {
         let extractor = signatureExtractor
         let landmarkVector = person.faceLandmarkRatios
         let generation = lockGeneration
+        let scope = GalleryAdmission.scope(entryCount: gallery.size, unverified: galleryUnverifiedSince != nil)
+        let references = AdmissionReferences(embeddings: {
+            switch scope {
+            case .anchors: return gallery.anchors.map(\.embedding)
+            case .wholeGallery: return gallery.entries.map(\.embedding)
+            case nil: return []
+            }
+        }())
+        #if DEBUG
+        let injectedCapture = signatureCaptureForTesting
+        #endif
 
-        Task.detached(priority: .userInitiated) { @Sendable [weak self] in
-            let result = await Self.runSignatureCapture(
-                extractor: extractor,
-                bufferBox: bufferBox,
-                faceBox: faceBox
-            )
+        let job = Task.detached(priority: .userInitiated) { @Sendable [weak self] in
+            #if DEBUG
+            let result: SignatureCaptureResult
+            if let injectedCapture {
+                let embedding = await injectedCapture(faceBox)
+                result = SignatureCaptureResult(embedding: embedding, elapsedMs: 0,
+                    bestDistance: embedding.flatMap { IdentityEmbedding.bestDistance(from: $0, to: references.embeddings) })
+            } else {
+                result = await Self.runSignatureCapture(extractor: extractor, bufferBox: bufferBox,
+                                                        faceBox: faceBox, references: references)
+            }
+            #else
+            let result = await Self.runSignatureCapture(extractor: extractor, bufferBox: bufferBox,
+                                                        faceBox: faceBox, references: references)
+            #endif
             guard let strong = self else { return }
             await MainActor.run {
                 strong.signatureCaptureInFlight = false
                 guard strong.lockGeneration == generation else { return }
                 strong.applySignatureCaptureResult(
-                    print: result.print,
+                    result,
+                    scope: scope,
                     landmarkVector: landmarkVector,
-                    elapsedMs: result.elapsedMs,
                     targetID: targetID,
                     capturedAt: captureTimestamp
                 )
             }
         }
+        #if DEBUG
+        signatureCaptureTaskForTesting = job
+        #else
+        _ = job
+        #endif
     }
 
     /// Pure non-isolated extraction worker — no `self`, so no actor
     /// isolation is inherited. Performs the Vision request and returns
     /// the print + timing for the main-actor wrapper to apply.
-    /// A captured print crossing back to the main actor. Vision feature
-    /// prints are immutable after capture (see `FaceSignature`).
-    private nonisolated struct SignatureCaptureResult: @unchecked Sendable {
-        let print: VNFeaturePrintObservation?
+    /// A captured signature crossing back to the main actor, with its best
+    /// distance to the admission references (nil when there were none).
+    private nonisolated struct SignatureCaptureResult: Sendable {
+        let embedding: IdentityEmbedding?
         let elapsedMs: Double
+        let bestDistance: Float?
+    }
+
+    /// Gallery signatures a new capture is checked against; immutable.
+    private nonisolated struct AdmissionReferences: Sendable {
+        let embeddings: [IdentityEmbedding]
     }
 
     /// The gallery's prints handed to a detached scoring task; immutable.
     private nonisolated struct ReferencePrints: @unchecked Sendable {
-        let entries: [(print: VNFeaturePrintObservation, landmarks: LandmarkRatios?)]
+        let entries: [(print: IdentityEmbedding, landmarks: LandmarkRatios?)]
     }
 
     private nonisolated static func runSignatureCapture(
         extractor: FaceSignatureExtractor,
         bufferBox: SendablePixelBuffer,
-        faceBox: CGRect
+        faceBox: CGRect,
+        references: AdmissionReferences
     ) async -> SignatureCaptureResult {
         let started = CACurrentMediaTime()
         let print = await extractor.extractSignature(
@@ -868,24 +934,54 @@ final class ShotComposer: ObservableObject {
             faceBoundingBox: faceBox
         )
         let elapsedMs = (CACurrentMediaTime() - started) * 1000
-        return SignatureCaptureResult(print: print, elapsedMs: elapsedMs)
+        let embedding = print.map(IdentityEmbedding.visionPrint)
+        return SignatureCaptureResult(
+            embedding: embedding,
+            elapsedMs: elapsedMs,
+            bestDistance: embedding.flatMap { IdentityEmbedding.bestDistance(from: $0, to: references.embeddings) }
+        )
     }
 
     /// Main-actor side of signature application — runs the stale-state
-    /// guard and appends the new entry to the gallery (with FIFO eviction
-    /// at maxSize).
+    /// guard and the admission check, then appends the new entry to the
+    /// gallery (anchors kept, FIFO eviction of the rest at maxSize).
     private func applySignatureCaptureResult(
-        print: VNFeaturePrintObservation?,
+        _ result: SignatureCaptureResult,
+        scope: GalleryAdmission.Scope?,
         landmarkVector: LandmarkRatios?,
-        elapsedMs: Double,
         targetID: UUID,
         capturedAt: TimeInterval
     ) {
         signatureCaptureInFlight = false
-        guard let print else { return }
+        guard let embedding = result.embedding else { return }
+        let elapsedMs = result.elapsedMs
+
+        if let scope {
+            let target = String(targetID.uuidString.prefix(8))
+            let best = result.bestDistance.map { String(format: "%.3f", $0) } ?? "none"
+            let refusal: String? = {
+                // The lock became ambiguous while this capture was running.
+                if lastLockAmbiguityOpen { return "lock_ambiguity" }
+                // Checked against the whole gallery, but the gallery has since become unverified.
+                if scope == .wholeGallery && galleryUnverifiedSince != nil { return "stale_scope" }
+                if !GalleryAdmission.admits(bestDistance: result.bestDistance, threshold: Self.absoluteThreshold) {
+                    return scope == .anchors ? "anchor_mismatch" : "gallery_mismatch"
+                }
+                return nil
+            }()
+            if let refusal {
+                galleryRejectionCount += 1
+                Self.logger.info("SIGNATURE rejected reason=\(refusal, privacy: .public) target=\(target, privacy: .public) best=\(best, privacy: .public)")
+                return
+            }
+            if scope == .anchors, galleryUnverifiedSince != nil {
+                galleryUnverifiedSince = nil
+                Self.logger.info("GALLERY verified target=\(target, privacy: .public) best=\(best, privacy: .public)")
+            }
+        }
 
         let newSig = FaceSignature(
-            featurePrint: print,
+            embedding: embedding,
             landmarkVector: landmarkVector,
             capturedAt: capturedAt
         )
@@ -954,7 +1050,7 @@ final class ShotComposer: ObservableObject {
         reacquisitionBatchInFlight = true
         let generation = lockGeneration
         let visibilityRevision = recoveryVisibilityRevision
-        let references = ReferencePrints(entries: gallery.entries.map { (print: $0.featurePrint, landmarks: $0.landmarkVector) })
+        let references = ReferencePrints(entries: gallery.entries.map { (print: $0.embedding, landmarks: $0.landmarkVector) })
         let bufferBox = SendablePixelBuffer(value: pixelBuffer)
         let extractor = signatureExtractor
         #if DEBUG
@@ -1013,7 +1109,7 @@ final class ShotComposer: ObservableObject {
         bufferBox: SendablePixelBuffer,
         faceBox: CGRect,
         candidateLandmarks: LandmarkRatios?,
-        referenceEntries: [(print: VNFeaturePrintObservation, landmarks: LandmarkRatios?)]
+        referenceEntries: [(print: IdentityEmbedding, landmarks: LandmarkRatios?)]
     ) async -> (printDistance: Float, landmarkDistance: Float?)? {
         guard let candidatePrint = await extractor.extractSignature(
             from: bufferBox.value,
@@ -1023,7 +1119,7 @@ final class ShotComposer: ObservableObject {
         var best: Float = .infinity
         var bestLandmarks: LandmarkRatios? = nil
         for entry in referenceEntries {
-            if let d = FaceSignatureExtractor.distance(entry.print, candidatePrint), d < best {
+            if let d = IdentityEmbedding.distance(entry.print, .visionPrint(candidatePrint)), d < best {
                 best = d
                 bestLandmarks = entry.landmarks
             }
@@ -1131,6 +1227,7 @@ final class ShotComposer: ObservableObject {
     /// gallery reaches `readyThreshold` the FSM promotes to `tracking` (green
     /// box) and cropping begins. Accuracy/consistency over instant lock.
     func lockTarget(_ targetID: UUID) {
+        galleryUnverifiedSince = nil
         resetLead()
         lastSubjectHeight = nil
         visibleZoomHeight = nil

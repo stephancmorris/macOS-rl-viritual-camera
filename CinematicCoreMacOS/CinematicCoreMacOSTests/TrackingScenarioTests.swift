@@ -13,6 +13,7 @@ struct TrackingScenarioTests {
         var legacyWrongRuns = 0
         var meanHold = 0.0
         var meanVisibleHold = 0.0
+        var meanAmbiguityShare = 0.0
         var ends: [String: Int] = [:]
         var allOnSubject: Bool { ends["subject"] == 8 }
     }
@@ -28,10 +29,11 @@ struct TrackingScenarioTests {
             print("TRACKING-SCENARIO|\(name)|seed=\(seed)|legacyWrongSeconds=\(run.wrong)|latchedWrongSeconds=\(run.latchedWrong)|longestLatchedWrongSeconds=\(run.longestLatchedWrong)|unionSeconds=\(run.unionTime)|endsOn=\(run.final)|legacyEndsOn=\(run.legacyFinal)")
             result.meanHold += run.hold / Double(seeds.count)
             result.meanVisibleHold += run.holdVisible / Double(seeds.count)
+            result.meanAmbiguityShare += run.ambiguityShare / Double(seeds.count)
             result.ends[run.final, default: 0] += 1
         }
         let ends = result.ends.sorted { $0.key < $1.key }.map { "\($0.key)=\($0.value)" }.joined(separator: ",")
-        print("TRACKING-SCENARIO|\(name)|wrongRuns=\(result.wrongRuns)/\(seeds.count)|legacyWrongRuns=\(result.legacyWrongRuns)/\(seeds.count)|meanHoldSeconds=\(r2(result.meanHold))|meanHoldWhileVisibleSeconds=\(r2(result.meanVisibleHold))|endsOn=\(ends)")
+        print("TRACKING-SCENARIO|\(name)|wrongRuns=\(result.wrongRuns)/\(seeds.count)|legacyWrongRuns=\(result.legacyWrongRuns)/\(seeds.count)|meanHoldSeconds=\(r2(result.meanHold))|meanHoldWhileVisibleSeconds=\(r2(result.meanVisibleHold))|ambiguityOpenShare=\(r2(result.meanAmbiguityShare))|endsOn=\(ends)")
         return result
     }
 
@@ -76,6 +78,19 @@ struct TrackingScenarioTests {
             #expect(result.wrongRuns == 0)
         }
     }
+    /// Gallery learning pauses while the lock is ambiguous. With nobody else
+    /// in shot that must stay rare, or the gallery could never adapt.
+    @Test func lockAmbiguityStaysRareForOnePerson() throws {
+        let harness = TrackingScenarios()
+        let solo = harness.scenarios().filter { $0.make(ProbeRng(1)).count == 1 }
+        #expect(!solo.isEmpty)
+        for scenario in solo {
+            let share = try measure(scenario.name).meanAmbiguityShare
+            if TrackingScenarioOptions.wide { continue }
+            #expect(share < 0.30, "\(scenario.name) ambiguity open for \(share) of tracking time")
+        }
+    }
+
     @Test func smallSidestepRebinds() throws {
         let result = try measure("sidestepSmall_thenStill")
         if TrackingScenarioOptions.wide { return }

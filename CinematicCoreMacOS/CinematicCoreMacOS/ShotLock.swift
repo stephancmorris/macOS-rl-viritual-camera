@@ -20,7 +20,7 @@ extension ShotComposer {
     /// `Sendable`. It is not mutated after capture, so the struct can cross
     /// the re-acquisition task.
     struct FaceSignature: @unchecked Sendable {
-        let featurePrint: VNFeaturePrintObservation
+        let embedding: IdentityEmbedding
         /// Pose-invariant landmark geometry captured at the same moment.
         /// Nil when Vision returned no landmarks (rare; subject heavily
         /// turned). Re-acquisition falls back to face-print-only matching
@@ -62,16 +62,21 @@ extension ShotComposer {
         }
         var size: Int { entries.count }
 
-        /// Append a freshly-captured signature. When the gallery is full,
-        /// the oldest entry is evicted (FIFO sliding window) so the
-        /// reference adapts to slow lighting / wardrobe drift.
+        /// Append a freshly-captured signature. The first `readyThreshold`
+        /// entries are anchors: captured while the operator acquired the
+        /// subject, they are never evicted. When the gallery is full the
+        /// oldest non-anchor entry is evicted (FIFO sliding window), so the
+        /// rest adapts to slow lighting, pose and wardrobe drift.
         mutating func append(_ signature: FaceSignature) {
             entries.append(signature)
-            if entries.count > Self.maxSize {
-                entries.removeFirst(entries.count - Self.maxSize)
+            while entries.count > Self.maxSize {
+                entries.remove(at: Self.readyThreshold)
             }
             lastCaptureAt = signature.capturedAt
         }
+
+        /// The never-evicted acquisition entries.
+        var anchors: ArraySlice<FaceSignature> { entries.prefix(Self.readyThreshold) }
 
         /// Whether enough time has passed since the last capture to allow
         /// the next one. Throttles the fill so we don't hammer Vision.
