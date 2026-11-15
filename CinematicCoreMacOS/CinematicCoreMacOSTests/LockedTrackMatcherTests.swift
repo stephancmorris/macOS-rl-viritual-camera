@@ -16,6 +16,38 @@ import CoreGraphics
 @testable import Alfie
 
 struct LockedTrackMatcherTests {
+    @MainActor @Test func witnessedNeighbourSurvivesBriefAbsenceBeforeReaching() throws {
+        let detector = PersonDetector()
+        let subject = CGRect(x: 0.465, y: 0.25, width: 0.07, height: 0.30)
+        let neighbour = subject.offsetBy(dx: -1.2 * subject.width, dy: 0)
+        let reaching = CGRect(x: neighbour.minX, y: neighbour.minY,
+            width: neighbour.width * 1.6, height: neighbour.height)
+        func scan(_ elapsed: Double, _ boxes: [CGRect]) {
+            detector.updateTracking(rectObservations: boxes.map { VNHumanObservation(boundingBox: $0) },
+                poseObservations: [], faceObservations: [], timestamp: 1000 + elapsed)
+        }
+        scan(0, [subject, neighbour])
+        let lock = try #require(detector.detectedPersons.first { $0.boundingBox == subject }?.id)
+        let other = try #require(detector.detectedPersons.first { $0.boundingBox == neighbour }?.id)
+        detector.lockedTargetID = lock
+        scan(0.04, [subject, neighbour])
+        #expect(detector.witnessedOtherIDs().contains(other))
+        for frame in 2...9 { scan(Double(frame) * 0.04, [subject]) }
+        #expect(detector.witnessedOtherIDs().contains(other))
+        for frame in 10...29 {
+            scan(Double(frame) * 0.04, [reaching])
+            #expect(detector.trackMotion(for: lock)?.lastSeen == 1000.36)
+            #expect(detector.witnessedOtherIDs().contains(other))
+        }
+        // Track-life memory ends after the neighbour is unseen for a full second.
+        scan(2.20, [])
+        #expect(!detector.witnessedOtherIDs().contains(other))
+        scan(2.24, [neighbour])
+        #expect(!detector.detectedPersons.contains { $0.id == other })
+        #expect(detector.witnessedOtherIDs().isEmpty)
+    }
+
+
     @Test func stationarySliverOverlapCannotRebind() {
         let reference = CGRect(x: 0.465, y: 0.25, width: 0.07, height: 0.30)
         let candidate = reference.offsetBy(dx: 0.061, dy: 0)

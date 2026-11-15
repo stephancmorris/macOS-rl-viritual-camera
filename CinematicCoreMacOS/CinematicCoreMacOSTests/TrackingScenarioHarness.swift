@@ -171,6 +171,7 @@ final class ScenarioLoop {
         let lockedBox: CGRect?
         let visionBoxes: [CGRect]
         let passABound: Bool
+        let boundSources: Set<Int>
         let lockLastSeen: Double?
         let persons: [PersonDetector.DetectedPerson]
         let witnesses: Set<UUID>
@@ -310,7 +311,7 @@ final class ScenarioLoop {
             default: state = "other"
             }
             trace.append(ScanTrace(capturedAt: obsT, lockState: state, lockedBox: lockedBox,
-                visionBoxes: reportedBoxes, passABound: motion?.lastSeen == obsT,
+                visionBoxes: reportedBoxes, passABound: motion?.lastSeen == obsT, boundSources: lockedSources,
                 lockLastSeen: motion?.lastSeen, persons: persons, witnesses: detector.witnessedOtherIDs()))
         }
         return engine.tickInterpolation(now: t).crop
@@ -347,7 +348,7 @@ struct TrackingScenarios {
         return i.isNull ? 0 : Double(i.width) / Double(min(a.width, b.width))
     }
 
-    func run(_ sc: Scenario, seed: UInt64) throws -> (final: String, wrong: Double, hold: Double, holdVisible: Double, inputDigest: String, latchedWrong: Double, longestLatchedWrong: Double, unionTime: Double, legacyFinal: String) {
+    func run(_ sc: Scenario, seed: UInt64, provenanceEnabled: Bool = true) throws -> (final: String, wrong: Double, hold: Double, holdVisible: Double, inputDigest: String, latchedWrong: Double, longestLatchedWrong: Double, unionTime: Double, legacyFinal: String) {
         let rng = ProbeRng(seed)
         let actors = sc.make(rng)
         func hidden(_ i: Int, _ e: Double) -> Bool {
@@ -380,7 +381,7 @@ struct TrackingScenarios {
         var wrongFrames = 0, wrongStretch = 0, longestWrongStretch = 0, unionFrames = 0
         for frame in 1...Int((TrackingScenarioOptions.wide ? sc.duration : min(sc.duration, 15)) * fps) {
             let el = Double(frame) / fps
-            _ = loop.stepTagged(t: t0 + el) { t, roi in
+            let world: (Double, CGRect?) -> [SyntheticObservation] = { t, roi in
                 let e = t - self.t0
                 func jit(_ b: CGRect) -> CGRect {
                     let k = 1 + rng.gauss() * 0.01
@@ -414,6 +415,8 @@ struct TrackingScenarios {
                 recordInputs(out.map(\.box), time: t)
                 return out
             }
+            if provenanceEnabled { _ = loop.stepTagged(t: t0 + el, world: world) }
+            else { _ = loop.step(t: t0 + el) { t, roi in world(t, roi).map(\.box) } }
             if frame == 1, !TrackingScenarioOptions.wide { #expect(!loop.isHold) }
             if loop.trace.count > traceIndex {
                 let scan = loop.trace[traceIndex]
@@ -430,7 +433,7 @@ struct TrackingScenarios {
                     let actor = covered.flatMap { PersonDetector.iou(person.boundingBox, box(actors[$0], scan.capturedAt - t0)) > 0.3 ? $0 : nil }
                     return "\(person.id.uuidString.prefix(8)):actor=\(actor.map(String.init) ?? "none"),witness=\(scan.witnesses.contains(person.id)),lock=\(person.id == loop.id),x=\(r2(Double(person.boundingBox.midX), 4))"
                 }.joined(separator: ";")
-                print("TRACKING-TRACE|\(sc.name)|seed=\(seed)|t=\(r2(scan.capturedAt - t0, 3))|state=\(scan.lockState)|actor=\(actor.map(String.init) ?? "none")|vision=\(scan.visionBoxes.count)|passA=\(scan.passABound)|lastSeen=\(scan.lockLastSeen.map { r2($0 - t0, 3) } ?? "expired")|boxes=\(boxes)|tracks=\(tracks)")
+                print("TRACKING-TRACE|\(sc.name)|seed=\(seed)|t=\(r2(scan.capturedAt - t0, 3))|state=\(scan.lockState)|actor=\(actor.map(String.init) ?? "none")|vision=\(scan.visionBoxes.count)|passA=\(scan.passABound)|sources=\(scan.boundSources.sorted())|lastSeen=\(scan.lockLastSeen.map { r2($0 - t0, 3) } ?? "expired")|boxes=\(boxes)|tracks=\(tracks)")
                 traceIndex += 1
             }
             if loop.isTracking, let lb = loop.lockedBox {

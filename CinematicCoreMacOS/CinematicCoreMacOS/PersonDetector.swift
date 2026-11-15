@@ -286,9 +286,9 @@ final class PersonDetector: ObservableObject {
     private var lockLastBoundAt: TimeInterval?
 
     private func isWitness(_ track: TrackedPerson) -> Bool {
-        guard let lockLastBoundAt else { return false }
+        // Co-detection establishes identity for this live track. Weak matching,
+        // track expiry and a different non-nil lock still reset the evidence.
         return track.witnessCount >= 1
-            && lockLastBoundAt - track.lastWitnessedAt <= Self.lockedWitnessWindow
     }
 
     /// Only live track IDs are retained; a person unseen for the tracking timeout
@@ -343,7 +343,6 @@ final class PersonDetector: ObservableObject {
     nonisolated static let lockedPlausibleSpeedFraction: CGFloat = 0.3
     nonisolated static let lockedDistantCenterDistance: CGFloat = 0.5
     nonisolated static let lockedWitnessLean: CGFloat = 0.15
-    nonisolated static let lockedWitnessWindow: TimeInterval = 0.15
     nonisolated static let lockedWitnessOverlap: CGFloat = 0.5
     /// Three sightings at 25 detections/s span two 40 ms intervals.
     nonisolated static let lockedProbationDuration: TimeInterval = 0.07
