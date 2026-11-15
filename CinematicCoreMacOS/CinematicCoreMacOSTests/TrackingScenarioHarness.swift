@@ -158,7 +158,7 @@ final class ScenarioLoop {
     private var roiBox: CGRect?
     private var inFlight = false
     private var counter: UInt64 = 0
-    private var pending: (done: Double, capturedAt: Double, obsID: UInt64, boxes: [SyntheticObservation])?
+    private var pending: (done: Double, capturedAt: Double, obsID: UInt64, boxes: [SyntheticObservation], faces: Bool)?
     private var latest: (capturedAt: Double, obsID: UInt64, persons: [PersonDetector.DetectedPerson])?
     private var consumedID: UInt64?
     private var seq: UInt64 = 0
@@ -186,7 +186,24 @@ final class ScenarioLoop {
     /// The detector's lock-ambiguity window as passed to `tick` this frame.
     private(set) var ambiguityOpen = false
 
-    init(preset: ShotComposer.Config.ShotPreset, feel: ShotComposer.Config.TuningPreset, first: CGRect, t: Double) throws {
+    // Synthetic identity channel. Each face is graded from box provenance:
+    // the subject alone is a strong match, a box without the subject a
+    // strong mismatch, a union no evidence. At availability 0 nothing here
+    // runs and the loop is exactly as before.
+    let faceAvailability: Double
+    private var faceRng: ProbeRng
+    private var lastDelivered: [SyntheticObservation] = []
+    private var now = 0.0
+    private var evidenceQueue: [(due: Double, request: IdentityEvidenceRequest, tier: IdentityTier)] = []
+    static let identityLatency = 0.03
+    private(set) var identityRequests = 0
+    /// The bound box's sources each time a shadow veto was recorded.
+    private(set) var wouldVetoSources: [Set<Int>] = []
+
+    init(preset: ShotComposer.Config.ShotPreset, feel: ShotComposer.Config.TuningPreset, first: CGRect, t: Double,
+         faceAvailability: Double = 0, faceSeed: UInt64 = 0) throws {
+        self.faceAvailability = faceAvailability
+        faceRng = ProbeRng(faceSeed ^ 0xFACE)
         engine = try #require(CropEngine())
         detector.updateTracking(rectObservations: [VNHumanObservation(boundingBox: first)], poseObservations: [],
                                 faceObservations: [], timestamp: t)
@@ -198,8 +215,12 @@ final class ScenarioLoop {
         engine.qualityFloor = floor
         composer.qualityFloorHeightFraction = floor.minCropHeightFraction
         composer.lockTarget(id)
-        composer.forceTrackingForTesting()
+        composer.forceTrackingForTesting(readyGallery: faceAvailability > 0)
         commands.setTrackingOwnership(true)
+        if faceAvailability > 0 {
+            composer.identityEvidenceSchedulerForTesting = { [unowned self] request in self.queueEvidence(request) }
+            composer.identityWouldVetoForTesting = { [unowned self] in self.wouldVetoSources.append(self.lockedSources) }
+        }
         roiBox = first
         // Acquisition already observed the subject. Make that observation available immediately.
         // This also keeps the first scheduled scan in the tracking ROI, rather than
@@ -207,6 +228,23 @@ final class ScenarioLoop {
         reportedBoxes = [first]
         latest = (t, 1, detector.detectedPersons)
         seq = 1
+    }
+
+    /// A head-sized face box near the top of a body box (bottom-left origin).
+    static func faceBox(in body: CGRect) -> CGRect {
+        CGRect(x: body.midX - body.width * 0.2, y: body.maxY - body.height * 0.2,
+               width: body.width * 0.4, height: body.height * 0.15)
+    }
+
+    private func queueEvidence(_ request: IdentityEvidenceRequest) {
+        identityRequests += 1
+        let tier: IdentityTier = {
+            guard let person = latest?.persons.first(where: { $0.id == request.targetID }),
+                  let source = lastDelivered.first(where: { $0.box == person.boundingBox }) else { return .none }
+            if source.actors == [0] { return .strongMatch }
+            return source.actors.contains(0) ? .none : .strongMismatch
+        }()
+        evidenceQueue.append((now + Self.identityLatency, request, tier))
     }
 
     /// world(t, roi) returns the boxes Vision reports for the frame captured at t.
@@ -217,11 +255,20 @@ final class ScenarioLoop {
     }
 
     func stepTagged(t: Double, world: (Double, CGRect?) -> [SyntheticObservation]) -> CropEngine.CropRect {
+        now = t
+        while let next = evidenceQueue.first, next.due <= t {
+            evidenceQueue.removeFirst()
+            composer.finishIdentityEvidence(next.request, tier: next.tier)
+        }
         if let p = pending, p.done <= t {
             // PersonDetector.processFrame: updateTracking runs on the main actor when Vision returns,
             // stamped with the detection start time.
+            let faces: [VNFaceObservation] = p.faces ? p.boxes.compactMap { observation in
+                faceRng.uniform() < faceAvailability ? VNFaceObservation(boundingBox: Self.faceBox(in: observation.box)) : nil
+            } : []
             detector.updateTracking(rectObservations: p.boxes.map { VNHumanObservation(boundingBox: $0.box) },
-                                    poseObservations: [], faceObservations: [], timestamp: p.capturedAt)
+                                    poseObservations: [], faceObservations: faces, timestamp: p.capturedAt)
+            lastDelivered = p.boxes
             reportedBoxes = p.boxes.map(\.box)
             if detector.trackMotion(for: id)?.lastSeen == p.capturedAt,
                let bound = detector.detectedPersons.first(where: { $0.id == id }) {
@@ -249,7 +296,8 @@ final class ScenarioLoop {
             }
             inFlight = true
             seq &+= 1
-            pending = (t + visionLatency, t, seq, world(t, roi))
+            let faces = faceAvailability > 0 && composer.shouldRunIdentityVerifyScan(now: t)
+            pending = (t + visionLatency, t, seq, world(t, roi), faces)
         }
         var persons: [PersonDetector.DetectedPerson] = []
         var fresh = false
@@ -351,7 +399,7 @@ struct TrackingScenarios {
         return i.isNull ? 0 : Double(i.width) / Double(min(a.width, b.width))
     }
 
-    func run(_ sc: Scenario, seed: UInt64) throws -> (final: String, wrong: Double, hold: Double, holdVisible: Double, inputDigest: String, latchedWrong: Double, longestLatchedWrong: Double, unionTime: Double, legacyFinal: String, ambiguityShare: Double) {
+    func run(_ sc: Scenario, seed: UInt64, faceAvailability: Double = 0) throws -> (final: String, wrong: Double, hold: Double, holdVisible: Double, inputDigest: String, latchedWrong: Double, longestLatchedWrong: Double, unionTime: Double, legacyFinal: String, ambiguityShare: Double, identityRequests: Int, wouldVetoOnSubject: Int, wouldVetoOnOther: Int) {
         let rng = ProbeRng(seed)
         let actors = sc.make(rng)
         func hidden(_ i: Int, _ e: Double) -> Bool {
@@ -365,7 +413,8 @@ struct TrackingScenarios {
         func subjectVisible(_ e: Double) -> Bool {
             actors[0].present(e) && !hidden(0, e) && !actors[0].visionMiss(e)
         }
-        let loop = try ScenarioLoop(preset: .waistUp, feel: .steadyFollow, first: box(actors[0], 0), t: t0)
+        let loop = try ScenarioLoop(preset: .waistUp, feel: .steadyFollow, first: box(actors[0], 0), t: t0,
+                                    faceAvailability: faceAvailability, faceSeed: seed)
         loop.traceEnabled = TrackingScenarioOptions.trace && !TrackingScenarioOptions.wide
         var inputBytes = Data()
         func recordInputs(_ boxes: [CGRect], time: Double) {
@@ -469,7 +518,9 @@ struct TrackingScenarios {
         if seed == 40000 { print("TRACKING-INPUT-BASELINE|\(sc.name)|seed=\(seed)|digest=\(digest)|legacyWrong=\(wrong)|final=\(final)") }
         return (final, wrong, hold, holdVisible, digest, Double(wrongFrames) / fps,
                 Double(longestWrongStretch) / fps, Double(unionFrames) / fps, legacyFinal,
-                trackingFrames > 0 ? Double(ambiguousFrames) / Double(trackingFrames) : 0)
+                trackingFrames > 0 ? Double(ambiguousFrames) / Double(trackingFrames) : 0,
+                loop.identityRequests, loop.wouldVetoSources.filter { $0 == [0] }.count,
+                loop.wouldVetoSources.filter { !$0.contains(0) }.count)
     }
 
     @Test func pullbackActuallyWidensThePicture() throws {

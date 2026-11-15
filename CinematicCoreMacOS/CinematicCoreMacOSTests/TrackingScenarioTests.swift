@@ -91,6 +91,36 @@ struct TrackingScenarioTests {
         }
     }
 
+    /// Shadow face evidence must not change tracking at all, and a shadow veto
+    /// must never fire while the bound box is the subject alone.
+    @Test(arguments: [0.3, 0.7])
+    func shadowIdentityEvidence(availability: Double) throws {
+        let harness = TrackingScenarios()
+        for scenario in harness.scenarios() {
+            var requests = 0, onSubject = 0, onOther = 0, latched = 0
+            for seed in seeds {
+                let base = try harness.run(scenario, seed: seed)
+                let run = try harness.run(scenario, seed: seed, faceAvailability: availability)
+                #expect(run.inputDigest == base.inputDigest && run.final == base.final
+                        && run.latchedWrong == base.latchedWrong, "\(scenario.name) seed \(seed)")
+                requests += run.identityRequests
+                onSubject += run.wouldVetoOnSubject
+                onOther += run.wouldVetoOnOther
+                if run.latchedWrong > 0.2 { latched += 1 }
+            }
+            print("TRACKING-IDENTITY|\(scenario.name)|availability=\(availability)|requests=\(requests)|wouldVetoOnSubject=\(onSubject)|wouldVetoOnOther=\(onOther)|latchedWrongRuns=\(latched)/\(seeds.count)")
+            if TrackingScenarioOptions.wide { continue }
+            #expect(onSubject == 0, "\(scenario.name)")
+        }
+    }
+
+    @Test func zeroFaceAvailabilityMakesNoRequests() throws {
+        let harness = TrackingScenarios()
+        for scenario in harness.scenarios() {
+            #expect(try harness.run(scenario, seed: 40_000).identityRequests == 0, "\(scenario.name)")
+        }
+    }
+
     @Test func smallSidestepRebinds() throws {
         let result = try measure("sidestepSmall_thenStill")
         if TrackingScenarioOptions.wide { return }

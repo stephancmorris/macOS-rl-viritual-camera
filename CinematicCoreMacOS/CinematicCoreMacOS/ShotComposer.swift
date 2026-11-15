@@ -356,6 +356,43 @@ final class ShotComposer: ObservableObject {
     private var lastLockAmbiguityOpen = false
     /// Captures refused by the admission check (diagnostics and tests).
     private(set) var galleryRejectionCount = 0
+
+    // MARK: Identity verify window
+    //
+    // After an ambiguous moment, check the locked person's face against the
+    // gallery while tracking. Three consecutive strong matches verify the
+    // lock; three consecutive strong mismatches would veto it. In this phase
+    // the veto is shadow only: it is logged and counted, never acted on.
+
+    /// Every `identityVerifyCadence`-th detection while the window is open
+    /// upgrades to a face-including ROI scan, for at most
+    /// `identityVerifyMaxDuration`; after that the 0.4 s gallery-refresh scans
+    /// keep supplying evidence.
+    static let identityVerifyCadence = 3
+    static let identityVerifyMaxDuration: TimeInterval = 3.0
+    /// Consecutive observations needed to verify or (would-)veto.
+    static let identityConsecutive = 3
+    /// Wall-clock time the window opened; nil while closed.
+    private var identityVerifyOpenedAt: TimeInterval?
+    private var identityVerifyDetections = 0
+    private var identityEvidenceInFlight = false
+    private var lastIdentityObservationID: UInt64?
+    private var identityMatchStreak = 0
+    private var identityMismatchStreak = 0
+    private var identityWouldVetoLogged = false
+    /// Shadow vetoes recorded (diagnostics and tests).
+    private(set) var identityWouldVetoCount = 0
+    private var identityEmbedder: VisionFeaturePrintEmbedder {
+        VisionFeaturePrintEmbedder(extractor: signatureExtractor)
+    }
+    #if DEBUG
+    /// When set, evidence requests go here instead of to Vision; the caller
+    /// later answers each through `finishIdentityEvidence`.
+    var identityEvidenceSchedulerForTesting: ((IdentityEvidenceRequest) -> Void)?
+    /// Called when a shadow veto is recorded.
+    var identityWouldVetoForTesting: (() -> Void)?
+    var identityVerifyOpenForTesting: Bool { identityVerifyOpenedAt != nil }
+    #endif
     #if DEBUG
     /// Replaces only the Vision extraction; admission and gallery rules stay real.
     var signatureCaptureForTesting: (@Sendable (CGRect) async -> IdentityEmbedding?)?
@@ -474,6 +511,8 @@ final class ShotComposer: ObservableObject {
         lastGalleryObservationID = nil
         lastRecoveryObservationAt = nil
         lastGalleryRefreshAttemptAt = 0
+        closeIdentityVerify()
+        lastIdentityObservationID = nil
         // In-flight jobs retain their slot until they finish; generation guards
         // discard their results without allowing unbounded replacement work.
     }
@@ -740,6 +779,14 @@ final class ShotComposer: ObservableObject {
                 // Healthy tracking. Opportunistically fill / refresh the
                 // gallery — the gallery must reach `readyThreshold` for
                 // re-acquisition to ever work after a wide-pull.
+                if lockAmbiguityOpen, identityVerifyOpenedAt == nil {
+                    openIdentityVerify(at: timestamp, targetID: targetID)
+                }
+                if isFresh, identityVerifyOpenedAt != nil {
+                    scheduleIdentityEvidence(for: targetID, person: lockedDetection,
+                                             pixelBuffer: pixelBuffer, gallery: gallery,
+                                             observationID: frameID)
+                }
                 if isFresh, lastGalleryObservationID != frameID {
                     lastGalleryObservationID = frameID
                     if lockAmbiguityOpen {
@@ -836,6 +883,110 @@ final class ShotComposer: ObservableObject {
     /// The captured landmark ratios are also snapshotted into the signature
     /// at the same wall-clock moment so a gallery entry carries *both*
     /// signals captured from the same frame.
+    /// Returns true when this detection should include the face request so
+    /// the verify window gets evidence. Call once per scheduled detection.
+    func shouldRunIdentityVerifyScan(now: TimeInterval) -> Bool {
+        guard case .tracking = lockState, let opened = identityVerifyOpenedAt else { return false }
+        guard now - opened < Self.identityVerifyMaxDuration, !identityEvidenceInFlight else { return false }
+        identityVerifyDetections += 1
+        return identityVerifyDetections % Self.identityVerifyCadence == 1
+    }
+
+    private func openIdentityVerify(at time: TimeInterval, targetID: UUID) {
+        identityVerifyOpenedAt = time
+        identityVerifyDetections = 0
+        identityMatchStreak = 0
+        identityMismatchStreak = 0
+        identityWouldVetoLogged = false
+        Self.logger.info("IDENTITY verify-open target=\(String(targetID.uuidString.prefix(8)), privacy: .public)")
+    }
+
+    private func closeIdentityVerify() {
+        identityVerifyOpenedAt = nil
+        identityVerifyDetections = 0
+        identityMatchStreak = 0
+        identityMismatchStreak = 0
+        identityWouldVetoLogged = false
+    }
+
+    private func scheduleIdentityEvidence(
+        for targetID: UUID,
+        person: PersonDetector.DetectedPerson,
+        pixelBuffer: CVPixelBuffer?,
+        gallery: FaceSignatureGallery,
+        observationID: UInt64
+    ) {
+        guard let faceBox = person.faceBoundingBox, gallery.isReady else { return }
+        guard !identityEvidenceInFlight else { return }
+        if let last = lastIdentityObservationID, observationID <= last { return }
+        let request = IdentityEvidenceRequest(generation: lockGeneration, observationID: observationID,
+                                              targetID: targetID, faceBox: faceBox)
+        #if DEBUG
+        if let scheduler = identityEvidenceSchedulerForTesting {
+            identityEvidenceInFlight = true
+            scheduler(request)
+            return
+        }
+        #endif
+        guard let pixelBuffer else { return }
+        identityEvidenceInFlight = true
+        let references = FaceIdentityEvidence.references(from: gallery)
+        let faceHeight = CGFloat(CVPixelBufferGetHeight(pixelBuffer)) * faceBox.height
+        let landmarks = person.faceLandmarkRatios
+        let embedder = identityEmbedder
+        let bufferBox = SendablePixelBuffer(value: pixelBuffer)
+        Task.detached(priority: .userInitiated) { @Sendable [weak self] in
+            let embedding = await embedder.embed(pixelBuffer: bufferBox.value, faceBox: faceBox)
+            let tier = embedding.map {
+                FaceIdentityEvidence.tier(candidate: $0, landmarks: landmarks, faceHeightPixels: faceHeight,
+                                      references: references, thresholds: embedder.thresholds)
+            } ?? .none
+            guard let strong = self else { return }
+            await MainActor.run { _ = strong.finishIdentityEvidence(request, tier: tier) }
+        }
+    }
+
+    /// Completion gate for identity evidence. Results from a retired lock
+    /// generation, an older observation, another target, or a closed window
+    /// are refused. Returns whether the evidence was counted.
+    @discardableResult
+    func finishIdentityEvidence(_ request: IdentityEvidenceRequest, tier: IdentityTier) -> Bool {
+        identityEvidenceInFlight = false
+        guard request.generation == lockGeneration else { return false }
+        if let last = lastIdentityObservationID, request.observationID <= last { return false }
+        guard case .tracking(let current, _) = lockState, current == request.targetID,
+              identityVerifyOpenedAt != nil else { return false }
+        lastIdentityObservationID = request.observationID
+        switch tier {
+        case .strongMatch:
+            identityMatchStreak += 1
+            identityMismatchStreak = 0
+        case .strongMismatch:
+            identityMismatchStreak += 1
+            identityMatchStreak = 0
+        case .none:
+            identityMatchStreak = 0
+            identityMismatchStreak = 0
+        }
+        let target = String(request.targetID.uuidString.prefix(8))
+        if identityMatchStreak >= Self.identityConsecutive {
+            closeIdentityVerify()
+            if galleryUnverifiedSince != nil {
+                galleryUnverifiedSince = nil
+                Self.logger.info("GALLERY verified target=\(target, privacy: .public) by=identity")
+            }
+            Self.logger.info("IDENTITY verified target=\(target, privacy: .public)")
+        } else if identityMismatchStreak >= Self.identityConsecutive, !identityWouldVetoLogged {
+            identityWouldVetoLogged = true
+            identityWouldVetoCount += 1
+            Self.logger.info("IDENTITY would-veto target=\(target, privacy: .public) live=\(DeveloperFlags.identityVetoEnabled, privacy: .public)")
+            #if DEBUG
+            identityWouldVetoForTesting?()
+            #endif
+        }
+        return true
+    }
+
     private func maybeAppendToGallery(
         for targetID: UUID,
         person: PersonDetector.DetectedPerson,
