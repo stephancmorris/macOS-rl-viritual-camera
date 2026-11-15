@@ -31,10 +31,13 @@ struct SteadyCadenceTests {
                 }
                 rests.append(rest)
             }
-            // Same eight-seed median statistic as the existing rest tests.
             let median = rests.sorted()[4]
             restByNoise.append(median)
-            #expect(median <= 1.5, "fps=\(fps) latency=\(latency) noise=\(noise) rests=\(rests)")
+            let failedSeeds = rests.enumerated().filter { $0.element > 1.5 }.map { 9000 + $0.offset }
+            print("STEADY-SEEDS|fps=\(fps)|latencyMs=\(latency * 1000)|noise=\(noise)|notParked=\(failedSeeds.count)/8|failedSeeds=\(failedSeeds)|restMedian=\(median)|rests=\(rests)")
+            for (offset, rest) in rests.enumerated() {
+                #expect(rest <= 1.5, "fps=\(fps) latency=\(latency) noise=\(noise) seed=\(9000 + offset) rest=\(rest)")
+            }
         }
         var fastestParked = 0.0
         var observationRate = 0.0
@@ -84,33 +87,63 @@ struct SteadyCadenceTests {
         #expect(target == baseline)
     }
 
-    @Test(arguments: [false, true])
-    func irregularFreshTimesAndInvalidSamples(jittered: Bool) {
+    private func makeComposer() -> ShotComposer {
         let composer = ShotComposer()
         composer.config.cinematicFormat = .stage
         composer.config.shotPreset = .waistUp
         composer.config.apply(.steadyFollow)
-        let id = UUID()
-        func observe(_ t: Double, fresh: Bool = true) {
-            let person = PersonDetector.DetectedPerson(id: id,
-                boundingBox: scenarioBox(cx: 0.5), confidence: 1, timestamp: t,
-                poseKeypoints: nil, faceBoundingBox: nil, faceLandmarkRatios: nil)
-            _ = composer.compose(person: person, isFresh: fresh, observationTimestamp: t)
-        }
-        observe(start)
-        observe(start + 0.04)
-        for t in [start + 0.04, start, Double.nan, Double.infinity, -Double.infinity] {
-            observe(t)
+        return composer
+    }
+
+    private func observe(_ composer: ShotComposer, id: UUID, time: Double,
+                         fresh: Bool = true, center: Double = 0.5) {
+        let person = PersonDetector.DetectedPerson(id: id,
+            boundingBox: scenarioBox(cx: center), confidence: 1, timestamp: time,
+            poseKeypoints: nil, faceBoundingBox: nil, faceLandmarkRatios: nil)
+        _ = composer.compose(person: person, isFresh: fresh, observationTimestamp: time)
+    }
+
+    @Test(arguments: [false, true])
+    func irregularFreshTimesAndInvalidSamples(jittered: Bool) {
+        for longGap in [false, true] {
+            let composer = makeComposer(), id = UUID()
+            // Commit the initial framing before the measured settle window.
+            // Framing-change observations return before collecting settle evidence.
+            observe(composer, id: id, time: start - 0.04)
+            for frame in 0...5 {
+                observe(composer, id: id, time: start + Double(frame) * 0.04)
+                #expect(composer.steadyBand == nil)
+            }
+            for time in [start + 0.20, start + 0.12, Double.nan, Double.infinity, -Double.infinity] {
+                observe(composer, id: id, time: time)
+                #expect(composer.steadyBand == nil)
+            }
+            observe(composer, id: id, time: start + 0.24, fresh: false)
             #expect(composer.steadyBand == nil)
+            // 0.20 s exceeds steadyObservationGap (0.150 s).
+            observe(composer, id: id, time: start + (longGap ? 0.40 : 0.24))
+            #expect((composer.steadyBand != nil) == !longGap)
         }
-        observe(start + 0.08, fresh: false)
-        #expect(composer.steadyBand == nil)
-        var t = start + 0.04
+
+        let composer = makeComposer(), id = UUID()
+        var time = start
+        observe(composer, id: id, time: time)
         for i in 1...30 {
-            t += jittered ? 0.04 + (i.isMultiple(of: 2) ? 0.002 : -0.002) : (i.isMultiple(of: 2) ? 0.06 : 0.04)
-            observe(t)
+            time += jittered ? 0.04 + (i.isMultiple(of: 2) ? 0.002 : -0.002)
+                             : (i.isMultiple(of: 2) ? 0.06 : 0.04)
+            observe(composer, id: id, time: time)
             if composer.steadyBand != nil { break }
         }
         #expect(composer.steadyBand != nil)
+    }
+
+    @Test func walkingAtIrregularCadenceDoesNotPark() {
+        let composer = makeComposer(), id = UUID()
+        var time = start
+        for i in 0...160 {
+            if i > 0 { time += i.isMultiple(of: 2) ? 0.06 : 0.04 }
+            observe(composer, id: id, time: time, center: 0.3 + 0.05 * (time - start))
+            #expect(composer.steadyBand == nil)
+        }
     }
 }

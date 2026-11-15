@@ -1567,8 +1567,9 @@ final class ShotComposer: ObservableObject {
                     settleWindow.removeAll(keepingCapacity: true)
                 }
                 settleWindow.append((observationTimestamp, trackingCenter))
-                // Retain the boundary sample and enough real observations for
-                // the half-means, including at low detection cadences.
+                // Deliberate four-sample floor, accepted in review: below 10 Hz
+                // retaining only the boundary sample leaves three observations,
+                // so the four-sample half-mean requirement could never be met.
                 while settleWindow.count > 4,
                       observationTimestamp - settleWindow[1].time >= Self.settleConfirmation - 1e-9 {
                     settleWindow.removeFirst()
