@@ -61,6 +61,10 @@ datasets/
 # --- MediaPipe Models ---
 *.task
 
+# --- Face verification evaluation (owner-supplied footage; downloaded models) ---
+training/face_eval/
+*.onnx
+
 # --- Training Pipeline Output ---
 training/output/
 training/_downloads/
