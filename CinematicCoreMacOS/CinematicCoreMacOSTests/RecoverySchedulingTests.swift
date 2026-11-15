@@ -22,9 +22,10 @@ private actor PausedRecoveryWorker {
         if let request { return request }
         return await withCheckedContinuation { observer = $0 }
     }
-    func release() {
+    /// Releases the paused batch. Candidates absent from `distances` win at 0.10.
+    func release(_ distances: [UUID: Float] = [:]) {
         let scores = (request ?? []).map {
-            ShotComposer.ReacquisitionScore(id: $0, printDistance: 0.10, landmarkDistance: 0.01)
+            ShotComposer.ReacquisitionScore(id: $0, printDistance: distances[$0] ?? 0.10, landmarkDistance: 0.01)
         }
         let continuation = result
         result = nil; request = nil
@@ -66,11 +67,20 @@ struct RecoverySchedulingTests {
                 observationID: observation, observationTimestamp: time,
                 excludedFromReacquisition: excluded)
         }
-        func complete() async {
+        func complete(_ distances: [UUID: Float] = [:]) async {
             let task = composer.reacquisitionTaskForTesting
-            await worker.release()
+            await worker.release(distances)
             await task?.value
             #expect(!composer.reacquisitionBatchInFlightForTesting)
+        }
+        /// The candidates of the batch the last tick started. Records an issue
+        /// instead of waiting forever when no batch was scheduled.
+        func nextBatch() async -> [UUID]? {
+            guard composer.reacquisitionBatchInFlightForTesting else {
+                Issue.record("Expected a scoring batch to be in flight")
+                return nil
+            }
+            return await worker.started()
         }
         func recoverB() async {
             for _ in 0..<3 {
@@ -152,5 +162,81 @@ struct RecoverySchedulingTests {
         #expect(f.composer.manualLockedTargetID == newSubject)
         f.tick([])
         await f.recoverB()
+    }
+
+    // A stale batch delivered just after an evidence reset would otherwise be
+    // accepted (`ReacquisitionEvidence` forgets its last observation on reset)
+    // and count as one win, so the candidate would bind one batch early.
+    @Test func staleVisibilityResultIsNotCounted() async throws {
+        let f = try Fixture()
+        let c = UUID()
+        f.tick([f.a])
+        #expect(await f.nextBatch() == [f.a])
+        // C appears while A's batch is paused: the visible set changes, the
+        // revision bumps and the evidence resets.
+        f.tick([f.a, c])
+        await f.complete()
+        for _ in 0..<2 {
+            f.tick([f.a, c])
+            #expect(await f.nextBatch() == [f.a, c])
+            await f.complete([c: 0.60])
+        }
+        // This tick would drain a pending winner; two fresh wins are not enough.
+        f.tick([f.a, c])
+        #expect(f.composer.manualLockedTargetID != f.a)
+        #expect(await f.nextBatch() == [f.a, c])
+        await f.complete([c: 0.60])
+        f.tick([f.a, c])
+        #expect(f.composer.manualLockedTargetID == f.a)
+    }
+
+    // Through real scheduling, a lock change bumps the generation and the
+    // visibility revision together (`invalidateIdentityWork`), so either check
+    // rejects this batch. `staleGenerationAloneIsRejected` covers the
+    // generation check on its own.
+    @Test func staleGenerationResultIsNotCounted() async throws {
+        let f = try Fixture()
+        f.tick([f.a])
+        #expect(await f.nextBatch() == [f.a])
+        let generation = f.composer.identityGenerationForTesting
+        f.composer.lockTarget(UUID())
+        f.composer.forceTrackingForTesting(readyGallery: true)
+        f.tick([])
+        #expect(f.composer.identityGenerationForTesting != generation)
+        await f.complete()
+        for _ in 0..<2 {
+            f.tick([f.a])
+            #expect(await f.nextBatch() == [f.a])
+            await f.complete()
+        }
+        f.tick([f.a])
+        #expect(f.composer.manualLockedTargetID != f.a)
+        #expect(await f.nextBatch() == [f.a])
+        await f.complete()
+        f.tick([f.a])
+        #expect(f.composer.manualLockedTargetID == f.a)
+    }
+
+    // Production never changes the generation without the revision, so this
+    // drives the completion gate directly: a result carrying a retired
+    // generation but the current revision must still be refused.
+    @Test func staleGenerationAloneIsRejected() async throws {
+        let f = try Fixture()
+        f.tick([f.a])
+        #expect(await f.nextBatch() == [f.a])
+        await f.complete()
+        let revision = f.composer.recoveryVisibilityRevisionForTesting
+        let current = f.composer.identityGenerationForTesting
+        let winning = [ShotComposer.ReacquisitionScore(id: f.a, printDistance: 0.10, landmarkDistance: 0.01)]
+        for observation: UInt64 in 100..<103 {
+            #expect(!f.composer.finishReacquisitionScoring(generation: current &- 1,
+                visibilityRevision: revision, observationID: observation, scores: winning))
+        }
+        f.tick([f.a])
+        #expect(f.composer.manualLockedTargetID != f.a)
+        if f.composer.reacquisitionBatchInFlightForTesting {
+            _ = await f.nextBatch()
+            await f.complete()
+        }
     }
 }
