@@ -16,6 +16,23 @@ import CoreGraphics
 @testable import Alfie
 
 struct LockedTrackMatcherTests {
+    @Test func stationarySliverOverlapCannotRebind() {
+        let reference = CGRect(x: 0.465, y: 0.25, width: 0.07, height: 0.30)
+        let candidate = reference.offsetBy(dx: 0.061, dy: 0)
+        let overlap = PersonDetector.iou(reference, candidate)
+        #expect(overlap > 0 && overlap < PersonDetector.lockedDistantIoU)
+        var probation: PersonDetector.LockProbation?
+        for frame in 0...20 {
+            let time = Double(frame) * 0.04
+            let result = PersonDetector.resolveLockedAssignment(detections: [candidate], referenceBox: reference,
+                lockVelocityMagnitude: 0, timeSinceLockSeen: time + 0.4, otherTrackBoxes: [],
+                probation: probation, observationTimestamp: time)
+            #expect(result.assignedIndex == nil)
+            probation = result.probation
+        }
+    }
+
+
     @MainActor @Test func witnessesSurviveLockExpiryAndWideUntilANewLock() throws {
         let detector = PersonDetector()
         let subject = CGRect(x: 0.265, y: 0.25, width: 0.07, height: 0.30)
