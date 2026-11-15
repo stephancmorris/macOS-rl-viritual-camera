@@ -344,6 +344,10 @@ final class PersonDetector: ObservableObject {
     nonisolated static let lockedDistantCenterDistance: CGFloat = 0.5
     nonisolated static let lockedWitnessLean: CGFloat = 0.15
     nonisolated static let lockedWitnessOverlap: CGFloat = 0.5
+    nonisolated static let lockedTrajectoryNoiseFloor: CGFloat = 0.008
+    nonisolated static let lockedTrajectoryWidthTolerance: CGFloat = 0.25
+    nonisolated static let lockedTrajectoryPredictionHorizon: TimeInterval = 0.08
+    nonisolated static let lockedTrajectoryUncertainty: CGFloat = 0.5
     /// Three sightings at 25 detections/s span two 40 ms intervals.
     nonisolated static let lockedProbationDuration: TimeInterval = 0.07
     /// Eight sightings at the same cadence span seven intervals.
@@ -948,6 +952,18 @@ final class PersonDetector: ObservableObject {
                     guard id != lockedID, self.isWitness(track) else { return nil }
                     return predicted[id]
                 }
+                // A lone observation that fits both identities cannot safely
+                // update the witness either. Preserve its trajectory through
+                // this scan rather than transferring its ID to the subject.
+                if detections.count == 1,
+                   Self.lockedBoxIsAmbiguous(detections[0].boundingBox,
+                       reference: referenceBox, witnesses: witnessBoxes) {
+                    for (id, track) in trackedPersons where id != lockedID && self.isWitness(track) {
+                        if let box = predicted[id], Self.iou(detections[0].boundingBox, box) >= Self.lockedWitnessOverlap {
+                            usedTracks.insert(id)
+                        }
+                    }
+                }
                 let otherTrackBoxes = trackedPersons.compactMap { id, track -> CGRect? in
                     guard id != lockedID, !self.isWitness(track),
                           timestamp - track.firstSeen > 0.5,
@@ -1114,6 +1130,26 @@ final class PersonDetector: ObservableObject {
     ///   show plausible outward movement from the lock's last position.
     /// - Coasting candidates remain available to pass B, keeping other people's
     ///   tracks alive while the lock refuses to bind them.
+    nonisolated static func lockedBoxIsAmbiguous(_ candidate: CGRect, reference: CGRect,
+                                                 witnesses: [CGRect]) -> Bool {
+        iou(candidate, reference) >= lockedSameObjectIoU
+            && witnesses.contains { iou(candidate, $0) >= lockedWitnessOverlap }
+    }
+
+    private nonisolated static func breaksLockedTrajectory(_ candidate: CGRect, reference: CGRect,
+        velocity: CGVector, elapsed: TimeInterval, others: [CGRect]) -> Bool {
+        guard others.contains(where: {
+            hypot($0.midX - reference.midX, $0.midY - reference.midY) < lockedBaseJumpRadius
+        }) else { return false }
+        let horizon = CGFloat(min(max(elapsed, 0), lockedTrajectoryPredictionHorizon))
+        let innovation = hypot(candidate.midX - reference.midX - velocity.dx * horizon,
+                               candidate.midY - reference.midY - velocity.dy * horizon)
+        let speed = hypot(velocity.dx, velocity.dy)
+        let allowance = max(lockedTrajectoryNoiseFloor, reference.width * lockedTrajectoryWidthTolerance)
+            + speed * CGFloat(max(elapsed, 0)) * lockedTrajectoryUncertainty
+        return innovation > allowance
+    }
+
     nonisolated static func resolveLockedAssignment(
         detections: [CGRect],
         referenceBox: CGRect,
@@ -1142,7 +1178,24 @@ final class PersonDetector: ObservableObject {
             )
             guard score > 0 else { continue }
             let overlap = iou(box, referenceBox)
-            let explained = witnessBoxes.reduce(CGFloat(0)) { max($0, iou(box, $1)) }
+            if detections.count == 1,
+               lockedBoxIsAmbiguous(box, reference: referenceBox, witnesses: witnessBoxes) {
+                continue
+            }
+            // Simultaneous distinct detections compete for each witness's
+            // explanation; do not veto the subject when another box fits that
+            // witness better. A tie retains ambiguity.
+            let explained = witnessBoxes.reduce(CGFloat(0)) { best, witness in
+                let fit = iou(box, witness)
+                let betterReportedBox = detections.enumerated().contains {
+                    $0.offset != idx && iou($0.element, witness) > fit
+                }
+                return betterReportedBox ? best : max(best, fit)
+            }
+            if breaksLockedTrajectory(box, reference: referenceBox, velocity: lockVelocity,
+                elapsed: timeSinceLockSeen, others: witnessBoxes + otherTrackBoxes) {
+                continue
+            }
             let byLock = max(overlap, iou(box, predictedReference))
             // A witnessed other person never becomes the lock, even after a long pause.
             if explained >= lockedWitnessOverlap && (lockWasBoundLastScan ? explained > byLock + lockedWitnessLean : explained + lockedWitnessLean >= byLock) {

@@ -16,6 +16,33 @@ import CoreGraphics
 @testable import Alfie
 
 struct LockedTrackMatcherTests {
+    @Test func loneBoxPlausibleForLockAndWitnessFreezes() {
+        let ref = CGRect(x: 0.465, y: 0.25, width: 0.07, height: 0.30)
+        let result = PersonDetector.resolveLockedAssignment(detections: [ref], referenceBox: ref,
+            lockVelocityMagnitude: 0, timeSinceLockSeen: 0.04, otherTrackBoxes: [],
+            probation: nil, observationTimestamp: 1000.04,
+            witnessBoxes: [ref.offsetBy(dx: 0.01, dy: 0)])
+        #expect(result.assignedIndex == nil)
+    }
+
+    @Test func mergedBoxDoesNotOverwriteUnambiguousReference() {
+        let ref = CGRect(x: 0.465, y: 0.25, width: 0.07, height: 0.30)
+        let other = ref.offsetBy(dx: 0.04, dy: 0)
+        let result = PersonDetector.resolveLockedAssignment(detections: [ref.union(other)], referenceBox: ref,
+            lockVelocityMagnitude: 0, timeSinceLockSeen: 0.04, otherTrackBoxes: [],
+            probation: nil, observationTimestamp: 1000.04, witnessBoxes: [other])
+        #expect(result.assignedIndex == nil)
+    }
+
+    @Test func abruptTrajectoryBreakNearOtherTrackFreezes() {
+        let ref = CGRect(x: 0.465, y: 0.25, width: 0.07, height: 0.30)
+        let result = PersonDetector.resolveLockedAssignment(detections: [ref.offsetBy(dx: 0.035, dy: 0)],
+            referenceBox: ref, lockVelocityMagnitude: 0, timeSinceLockSeen: 0.04,
+            otherTrackBoxes: [ref.offsetBy(dx: 0.10, dy: 0)], probation: nil,
+            observationTimestamp: 1000.04)
+        #expect(result.assignedIndex == nil)
+    }
+
     @MainActor @Test func witnessedNeighbourSurvivesBriefAbsenceBeforeReaching() throws {
         let detector = PersonDetector()
         let subject = CGRect(x: 0.465, y: 0.25, width: 0.07, height: 0.30)

@@ -558,6 +558,23 @@ struct TrackingScenarios {
                     visionMiss: { $0 >= 2 && $0 < 2.4 })]
             })
         }
+        list.append(Scenario(name: "subjectOwnArmReach", duration: 6) { _ in
+            [Actor(x: still(0.5), shape: { e in
+                e >= 2 && e < 2.4 ? (1.6, 1, 0) : (1, 1, 0)
+            })]
+        })
+        list.append(Scenario(name: "subjectApproachesCamera", duration: 6) { _ in
+            [Actor(x: still(0.5), shape: { e in
+                let scale = 1 + 0.3 * max(0, min(1, (e - 2) / 0.5))
+                return (scale, scale, -(scale - 1) / 2)
+            })]
+        })
+        list.append(Scenario(name: "subjectHalfHiddenFor0.3s", duration: 6) { _ in
+            // Equal widths: >half horizontal overlap lasts 0.07 / speed = 0.3 s.
+            [Actor(x: still(0.5)),
+             Actor(x: { 0.5 + (0.07 / 0.3) * ($0 - 2.5) }, layer: 1,
+                   present: { $0 >= 1.5 && $0 <= 3.5 })]
+        })
         return list
     }
 

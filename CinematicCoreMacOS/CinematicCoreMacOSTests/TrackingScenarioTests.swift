@@ -90,10 +90,8 @@ struct TrackingScenarioTests {
     @Test func behindWalking() throws {
         let r = try measure("crossBehind_v0.10")
         if TrackingScenarioOptions.wide { return }
-        withKnownIssue("lock lost during overlap on main; explained in L-a, fixed by L-b") {
-            #expect(r.wrongRuns == 0)
-            #expect(r.allOnSubject)
-        }
+        #expect(r.wrongRuns == 0)
+        #expect(r.allOnSubject)
     }
     @Test func behindFast() throws {
         let r = try measure("crossBehind_v0.25")
@@ -110,9 +108,7 @@ struct TrackingScenarioTests {
     @Test func mergedBox() throws {
         let r = try measure("crossMergedBox_v0.10")
         if TrackingScenarioOptions.wide { return }
-        withKnownIssue("lock lost during overlap on main; explained in L-a, fixed by L-b") {
-            #expect(r.allOnSubject)
-        }
+        #expect(r.allOnSubject)
     }
     @Test func walkingSubjectCrossed() throws { try guardTarget("crossInFront_subjectWalking0.04", fraction: 0.5) }
     @Test func gesturesOneWidth() throws { try guardTarget("groupGestures_spacing1.0bw", fraction: 0.125) }
@@ -131,6 +127,14 @@ struct TrackingScenarioTests {
         #expect(r.meanHold <= 0.3)
     }
     @Test func walkerPastRow() throws { try target("walkerPastRowOfFour_gap0.3", fraction: 0.25, stage: "L5") }
+
+    @Test(arguments: ["subjectOwnArmReach", "subjectApproachesCamera", "subjectHalfHiddenFor0.3s"])
+    func identityCounterexamplesRemainOnSubject(name: String) throws {
+        let result = try measure(name)
+        if TrackingScenarioOptions.wide { return }
+        #expect(result.wrongRuns == 0)
+        #expect(result.allOnSubject)
+    }
 
     @Test func provenancePreservesInputBoxesAndLegacyMeasurements() throws {
         if TrackingScenarioOptions.wide { return }
