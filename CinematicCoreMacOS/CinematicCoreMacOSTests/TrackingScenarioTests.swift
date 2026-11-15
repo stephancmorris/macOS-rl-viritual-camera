@@ -82,7 +82,7 @@ struct TrackingScenarioTests {
     }
 
     @Test func frontSameSlow() throws { try guardTarget("crossInFront_size1.00_v0.05", fraction: 0) }
-    @Test func frontSameWalking() throws { try target("crossInFront_size1.00_v0.10", fraction: 0.25, stage: "L2") }
+    @Test func frontSameWalking() throws { try guardTarget("crossInFront_size1.00_v0.10", fraction: 0.25) }
     @Test func frontSameFast() throws { try guardTarget("crossInFront_size1.00_v0.25", fraction: 0.125) }
     @Test func frontSmallerSlow() throws { try guardTarget("crossInFront_size0.85_v0.05", fraction: 0) }
     @Test func frontSmallerWalking() throws { try guardTarget("crossInFront_size0.85_v0.10", fraction: 0) }
