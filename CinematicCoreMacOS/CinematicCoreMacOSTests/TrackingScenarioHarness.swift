@@ -243,7 +243,8 @@ final class ScenarioLoop {
         }
         lockedBox = persons.first(where: { $0.id == id })?.boundingBox
         _ = composer.tick(detections: persons, timestamp: t, pixelBuffer: nil, isFresh: fresh,
-                          observationID: obsID, observationTimestamp: obsT)
+                          observationID: obsID, observationTimestamp: obsT,
+                          excludedFromReacquisition: detector.witnessedOtherIDs())
         if case .tracking = composer.lockState, composer.steadyBand == nil, lastBand != nil { fastUntil = t + 0.5 }
         lastBand = composer.steadyBand
         isHold = { if case .hold = composer.lockState { return true }; return false }()

@@ -16,6 +16,30 @@ import CoreGraphics
 @testable import Alfie
 
 struct LockedTrackMatcherTests {
+    @MainActor @Test func witnessesSurviveLockExpiryAndWideUntilANewLock() throws {
+        let detector = PersonDetector()
+        let subject = CGRect(x: 0.265, y: 0.25, width: 0.07, height: 0.30)
+        let neighbour = subject.offsetBy(dx: 0.30, dy: 0)
+        func scan(_ time: Double, _ boxes: [CGRect]) {
+            detector.updateTracking(rectObservations: boxes.map { VNHumanObservation(boundingBox: $0) },
+                poseObservations: [], faceObservations: [], timestamp: time)
+        }
+        scan(1000, [subject, neighbour])
+        let lock = try #require(detector.detectedPersons.first?.id)
+        let other = try #require(detector.detectedPersons.last?.id)
+        #expect(lock != other)
+        detector.lockedTargetID = lock
+        scan(1000.04, [subject, neighbour])
+        #expect(detector.witnessedOtherIDs() == [other])
+        for frame in 1...38 { scan(1000.04 + Double(frame) * 0.04, [neighbour]) }
+        #expect(detector.trackMotion(for: lock) == nil)
+        #expect(detector.witnessedOtherIDs() == [other])
+        detector.lockedTargetID = nil
+        #expect(detector.witnessedOtherIDs() == [other])
+        detector.lockedTargetID = UUID()
+        #expect(detector.witnessedOtherIDs().isEmpty)
+    }
+
     @MainActor
     @Test func staleOtherTrackDoesNotBlockAReboundLock() throws {
         let detector = PersonDetector()

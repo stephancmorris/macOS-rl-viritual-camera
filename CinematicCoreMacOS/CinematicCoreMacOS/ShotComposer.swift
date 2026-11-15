@@ -419,12 +419,19 @@ final class ShotComposer: ObservableObject {
 
     private var reacquisitionEvidence = ReacquisitionEvidence()
     private var reacquisitionBatchInFlight = false
+    #if DEBUG
+    /// Replaces only the detached scoring batch; scheduling and completion gates remain real.
+    var reacquisitionScoringForTesting: (@Sendable ([UUID]) async -> [ReacquisitionScore])?
+    private(set) var reacquisitionTaskForTesting: Task<Void, Never>?
+    var reacquisitionBatchInFlightForTesting: Bool { reacquisitionBatchInFlight }
+    #endif
     private var recoveryVisibleIDs = Set<UUID>()
     private var recoveryVisibilityRevision: UInt64 = 0
     private var pendingReacquisition: UUID?
     private var lockGeneration: UInt64 = 0
     /// TEST-ONLY: token captured by an asynchronous identity job.
     var identityGenerationForTesting: UInt64 { lockGeneration }
+    var recoveryVisibilityRevisionForTesting: UInt64 { recoveryVisibilityRevision }
     private var fallbackObservationID: UInt64 = 0
     private var lastGalleryObservationID: UInt64?
     /// Capture time of the newest observation admitted to recovery evidence.
@@ -601,7 +608,8 @@ final class ShotComposer: ObservableObject {
         pixelBuffer: CVPixelBuffer?,
         isFresh: Bool = true,
         observationID: UInt64? = nil,
-        observationTimestamp: TimeInterval? = nil
+        observationTimestamp: TimeInterval? = nil,
+        excludedFromReacquisition: Set<UUID> = []
     ) -> TickOutcome {
         if isFresh { fallbackObservationID &+= 1 }
         let frameID = observationID ?? fallbackObservationID
@@ -638,7 +646,8 @@ final class ShotComposer: ObservableObject {
             case .hold(_, let stored, _), .wideWaiting(let stored): gallery = stored
             default: gallery = nil
             }
-            if let gallery, detections.contains(where: { $0.id == candidateID }) {
+            if let gallery, !excludedFromReacquisition.contains(candidateID),
+               detections.contains(where: { $0.id == candidateID }) {
                 lockState = .tracking(targetID: candidateID, gallery: gallery)
                 activeTargetID = candidateID
                 invalidateIdentityWork()
@@ -742,7 +751,8 @@ final class ShotComposer: ObservableObject {
             }
             if isFresh, gallery.isReady {
                 scheduleReacquisitionScoring(detections: detections, pixelBuffer: pixelBuffer,
-                    gallery: gallery, observationID: frameID)
+                    gallery: gallery, observationID: frameID,
+                    excludedFromReacquisition: excludedFromReacquisition)
             }
             // Hold window expired? Pull back to wide. Gallery is preserved
             // so re-acquisition can work when the subject returns.
@@ -772,7 +782,8 @@ final class ShotComposer: ObservableObject {
                 detections: detections,
                 pixelBuffer: pixelBuffer,
                 gallery: gallery,
-                observationID: frameID
+                observationID: frameID,
+                excludedFromReacquisition: excludedFromReacquisition
             )
             return .noChange
         }
@@ -924,9 +935,10 @@ final class ShotComposer: ObservableObject {
         detections: [PersonDetector.DetectedPerson],
         pixelBuffer: CVPixelBuffer?,
         gallery: FaceSignatureGallery,
-        observationID: UInt64
+        observationID: UInt64,
+        excludedFromReacquisition: Set<UUID>
     ) {
-        let candidates = detections.filter { $0.faceBoundingBox != nil }
+        let candidates = detections.filter { !excludedFromReacquisition.contains($0.id) && $0.faceBoundingBox != nil }
         let visibleIDs = Set(candidates.map(\.id))
         if recoveryVisibleIDs != visibleIDs {
             recoveryVisibleIDs = visibleIDs
@@ -945,15 +957,22 @@ final class ShotComposer: ObservableObject {
         let references = ReferencePrints(entries: gallery.entries.map { (print: $0.featurePrint, landmarks: $0.landmarkVector) })
         let bufferBox = SendablePixelBuffer(value: pixelBuffer)
         let extractor = signatureExtractor
-        Task.detached(priority: .userInitiated) { [weak self] in
+        #if DEBUG
+        let injectedWorker = reacquisitionScoringForTesting
+        #endif
+        let job = Task.detached(priority: .userInitiated) { [weak self] in
             var scores: [ReacquisitionScore] = []
-            for candidate in candidates {
-                let result = await Self.runReacquisitionScoring(extractor: extractor,
-                    bufferBox: bufferBox, faceBox: candidate.faceBoundingBox!,
-                    candidateLandmarks: candidate.faceLandmarkRatios, referenceEntries: references.entries)
-                scores.append(ReacquisitionScore(id: candidate.id,
-                    printDistance: result?.printDistance, landmarkDistance: result?.landmarkDistance))
+            #if DEBUG
+            if let injectedWorker {
+                scores = await injectedWorker(candidates.map(\.id))
+            } else {
+                scores = await Self.scoreReacquisitionCandidates(candidates, extractor: extractor,
+                    bufferBox: bufferBox, references: references)
             }
+            #else
+            scores = await Self.scoreReacquisitionCandidates(candidates, extractor: extractor,
+                bufferBox: bufferBox, references: references)
+            #endif
             let completedScores = scores
             guard let strong = self else { return }
             await MainActor.run {
@@ -965,6 +984,24 @@ final class ShotComposer: ObservableObject {
                 )
             }
         }
+        #if DEBUG
+        reacquisitionTaskForTesting = job
+        #endif
+    }
+
+    private nonisolated static func scoreReacquisitionCandidates(
+        _ candidates: [PersonDetector.DetectedPerson], extractor: FaceSignatureExtractor,
+        bufferBox: SendablePixelBuffer, references: ReferencePrints
+    ) async -> [ReacquisitionScore] {
+        var scores: [ReacquisitionScore] = []
+        for candidate in candidates {
+            let result = await Self.runReacquisitionScoring(extractor: extractor,
+                bufferBox: bufferBox, faceBox: candidate.faceBoundingBox!,
+                candidateLandmarks: candidate.faceLandmarkRatios, referenceEntries: references.entries)
+            scores.append(ReacquisitionScore(id: candidate.id,
+                printDistance: result?.printDistance, landmarkDistance: result?.landmarkDistance))
+        }
+        return scores
     }
 
     /// Pure non-isolated scoring worker. Extracts the candidate face
@@ -1127,8 +1164,11 @@ final class ShotComposer: ObservableObject {
     /// exactly as `tick()` does when the gallery reaches `readyThreshold`. Lets
     /// unit tests exercise post-lock behavior without running Vision. Never
     /// call from app code.
-    func forceTrackingForTesting() {
-        guard case .acquiring(let id, let gallery, _) = lockState else { return }
+    func forceTrackingForTesting(readyGallery: Bool = false) {
+        guard case .acquiring(let id, var gallery, _) = lockState else { return }
+        #if DEBUG
+        gallery.readyForTesting = readyGallery
+        #endif
         lockState = .tracking(targetID: id, gallery: gallery)
     }
 

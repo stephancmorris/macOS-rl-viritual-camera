@@ -49,7 +49,17 @@ extension ShotComposer {
         /// Below this, the gallery hasn't seen enough variation.
         static let readyThreshold: Int = 3
 
-        var isReady: Bool { entries.count >= Self.readyThreshold }
+        #if DEBUG
+        /// Synthetic scheduling tests need readiness without manufacturing Vision prints.
+        var readyForTesting = false
+        #endif
+
+        var isReady: Bool {
+            #if DEBUG
+            if readyForTesting { return true }
+            #endif
+            return entries.count >= Self.readyThreshold
+        }
         var size: Int { entries.count }
 
         /// Append a freshly-captured signature. When the gallery is full,
