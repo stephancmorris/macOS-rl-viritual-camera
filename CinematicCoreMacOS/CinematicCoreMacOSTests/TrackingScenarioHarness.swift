@@ -162,6 +162,8 @@ final class ScenarioLoop {
         let visionBoxes: [CGRect]
         let passABound: Bool
         let lockLastSeen: Double?
+        let persons: [PersonDetector.DetectedPerson]
+        let witnesses: Set<UUID>
     }
     var traceEnabled = false
     private(set) var trace: [ScanTrace] = []
@@ -243,7 +245,8 @@ final class ScenarioLoop {
         }
         lockedBox = persons.first(where: { $0.id == id })?.boundingBox
         _ = composer.tick(detections: persons, timestamp: t, pixelBuffer: nil, isFresh: fresh,
-                          observationID: obsID, observationTimestamp: obsT)
+                          observationID: obsID, observationTimestamp: obsT,
+                          excludedFromReacquisition: detector.witnessedOtherIDs())
         if case .tracking = composer.lockState, composer.steadyBand == nil, lastBand != nil { fastUntil = t + 0.5 }
         lastBand = composer.steadyBand
         isHold = { if case .hold = composer.lockState { return true }; return false }()
@@ -268,7 +271,7 @@ final class ScenarioLoop {
             }
             trace.append(ScanTrace(capturedAt: obsT, lockState: state, lockedBox: lockedBox,
                 visionBoxes: reportedBoxes, passABound: motion?.lastSeen == obsT,
-                lockLastSeen: motion?.lastSeen))
+                lockLastSeen: motion?.lastSeen, persons: persons, witnesses: detector.witnessedOtherIDs()))
         }
         return engine.tickInterpolation(now: t).crop
     }
@@ -367,7 +370,14 @@ struct TrackingScenarios {
                     }
                 }
                 let boxes = scan.visionBoxes.map { "\(r2(Double($0.midX), 4)),\(r2(Double($0.width), 4))" }.joined(separator: ";")
-                print("TRACKING-TRACE|\(sc.name)|seed=\(seed)|t=\(r2(scan.capturedAt - t0, 3))|state=\(scan.lockState)|actor=\(actor.map(String.init) ?? "none")|vision=\(scan.visionBoxes.count)|passA=\(scan.passABound)|lastSeen=\(scan.lockLastSeen.map { r2($0 - t0, 3) } ?? "expired")|boxes=\(boxes)")
+                let tracks = scan.persons.map { person in
+                    let covered = actors.indices.filter { actors[$0].present(scan.capturedAt - t0) }
+                        .max { PersonDetector.iou(person.boundingBox, box(actors[$0], scan.capturedAt - t0))
+                             < PersonDetector.iou(person.boundingBox, box(actors[$1], scan.capturedAt - t0)) }
+                    let actor = covered.flatMap { PersonDetector.iou(person.boundingBox, box(actors[$0], scan.capturedAt - t0)) > 0.3 ? $0 : nil }
+                    return "\(person.id.uuidString.prefix(8)):actor=\(actor.map(String.init) ?? "none"),witness=\(scan.witnesses.contains(person.id)),lock=\(person.id == loop.id),x=\(r2(Double(person.boundingBox.midX), 4))"
+                }.joined(separator: ";")
+                print("TRACKING-TRACE|\(sc.name)|seed=\(seed)|t=\(r2(scan.capturedAt - t0, 3))|state=\(scan.lockState)|actor=\(actor.map(String.init) ?? "none")|vision=\(scan.visionBoxes.count)|passA=\(scan.passABound)|lastSeen=\(scan.lockLastSeen.map { r2($0 - t0, 3) } ?? "expired")|boxes=\(boxes)|tracks=\(tracks)")
                 traceIndex += 1
             }
             if loop.isTracking, let lb = loop.lockedBox {
@@ -452,6 +462,22 @@ struct TrackingScenarios {
             for x in [0.34, 0.46, 0.58, 0.70] { a.append(Actor(x: still(x), layer: -1)) }
             return a
         })
+        list.append(Scenario(name: "groupStill_reach_subjectMissed", duration: 30) { _ in
+            func missed(_ t: Double) -> Bool {
+                let phase = t.truncatingRemainder(dividingBy: 5)
+                return phase >= 2 && phase < 2.4
+            }
+            let distance = 1.2 * 0.07
+            return [Actor(x: still(0.5), visionMiss: missed),
+                Actor(x: still(0.5 - distance), shape: { missed($0) ? (1.6, 1, 0) : (1, 1, 0) }),
+                Actor(x: still(0.5 + distance), shape: { missed($0) ? (1.6, 1, -0.6) : (1, 1, 0) })]
+        })
+        for (label, widths) in [("Small", 0.7), ("Large", 1.2)] {
+            list.append(Scenario(name: "sidestep\(label)_thenStill", duration: 6) { _ in
+                [Actor(x: { 0.5 + widths * 0.07 * max(0, min(1, ($0 - 2) / 0.4)) },
+                    visionMiss: { $0 >= 2 && $0 < 2.4 })]
+            })
+        }
         return list
     }
 

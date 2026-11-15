@@ -274,9 +274,29 @@ final class PersonDetector: ObservableObject {
             if lockedTargetID != oldValue {
                 lockProbation = nil
                 lockBoundInPreviousScan = true
-                for id in trackedPersons.keys { trackedPersons[id]?.witnessCount = 0 }
+                if let lockedTargetID {
+                    lockLastBoundAt = trackedPersons[lockedTargetID]?.lastSeen
+                    for id in trackedPersons.keys { trackedPersons[id]?.witnessCount = 0 }
+                }
             }
         }
+    }
+
+    /// Survives the locked track's expiry and the transition to wide-waiting.
+    private var lockLastBoundAt: TimeInterval?
+
+    private func isWitness(_ track: TrackedPerson) -> Bool {
+        guard let lockLastBoundAt else { return false }
+        return track.witnessCount >= 1
+            && lockLastBoundAt - track.lastWitnessedAt <= Self.lockedWitnessWindow
+    }
+
+    /// Only live track IDs are retained; a person unseen for the tracking timeout
+    /// returns as an unknown new track. A different non-nil operator lock resets this evidence.
+    func witnessedOtherIDs() -> Set<UUID> {
+        Set(trackedPersons.compactMap { id, track in
+            id != lockedTargetID && self.isWitness(track) ? id : nil
+        })
     }
 
     /// Probation state carried between frames for a discontinuous locked-track
@@ -318,6 +338,13 @@ final class PersonDetector: ObservableObject {
     /// A candidate overlapping the lock's last box by at least this IoU is the
     /// same physical object and is accepted instantly (no probation).
     nonisolated static let lockedSameObjectIoU: CGFloat = 0.30
+    nonisolated static let lockedDistantIoU: CGFloat = 0.10
+    nonisolated static let lockedDistantProbationDuration: TimeInterval = 0.16
+    nonisolated static let lockedPlausibleSpeedFraction: CGFloat = 0.3
+    nonisolated static let lockedDistantCenterDistance: CGFloat = 0.5
+    nonisolated static let lockedWitnessLean: CGFloat = 0.15
+    nonisolated static let lockedWitnessWindow: TimeInterval = 0.15
+    nonisolated static let lockedWitnessOverlap: CGFloat = 0.5
     /// Three sightings at 25 detections/s span two 40 ms intervals.
     nonisolated static let lockedProbationDuration: TimeInterval = 0.07
     /// Eight sightings at the same cadence span seven intervals.
@@ -826,7 +853,7 @@ final class PersonDetector: ObservableObject {
         // Two distinct boxes in the same scan establish that these are different people.
         if let lock = lockedTargetID, let locked = updatedPersons.first(where: { $0.id == lock }) {
             for person in updatedPersons where person.id != lock {
-                if Self.iou(person.boundingBox, locked.boundingBox) < 0.5 {
+                if Self.iou(person.boundingBox, locked.boundingBox) < Self.lockedWitnessOverlap {
                     trackedPersons[person.id]?.witnessCount += 1
                     trackedPersons[person.id]?.lastWitnessedAt = timestamp
                 }
@@ -916,18 +943,14 @@ final class PersonDetector: ObservableObject {
                     lockedTrack.lastVelocity.dx * lockedTrack.lastVelocity.dx
                     + lockedTrack.lastVelocity.dy * lockedTrack.lastVelocity.dy
                 ).squareRoot()
-                // Predicted boxes of other *established* tracks (alive > 0.5 s):
-                // the occluder guard's evidence that a candidate is better
-                // explained by someone else's track than by the stale lock box.
-                func isWitness(_ track: TrackedPerson) -> Bool {
-                    track.witnessCount >= 1 && lockedTrack.lastSeen - track.lastWitnessedAt <= 0.15
-                }
+                // Witnesses are distinct co-detected people, anchored to the lock's
+                // last bind. Other occluder evidence must also be established and fresh.
                 let witnessBoxes = trackedPersons.compactMap { id, track -> CGRect? in
-                    guard id != lockedID, isWitness(track) else { return nil }
+                    guard id != lockedID, self.isWitness(track) else { return nil }
                     return predicted[id]
                 }
                 let otherTrackBoxes = trackedPersons.compactMap { id, track -> CGRect? in
-                    guard id != lockedID, !isWitness(track),
+                    guard id != lockedID, !self.isWitness(track),
                           timestamp - track.firstSeen > 0.5,
                           track.lastSeen >= lockedTrack.lastSeen else { return nil }
                     return predicted[id]
@@ -947,6 +970,7 @@ final class PersonDetector: ObservableObject {
                 lockBoundInPreviousScan = resolution.assignedIndex != nil
                 lockProbation = resolution.probation
                 if let index = resolution.assignedIndex {
+                    lockLastBoundAt = timestamp
                     assignments[index] = lockedID
                     usedDetections.insert(index)
                     usedTracks.insert(lockedID)
@@ -1078,22 +1102,19 @@ final class PersonDetector: ObservableObject {
     /// box sequences.
     ///
     /// Policy:
-    ///  - **Adaptive gate**: candidates beyond `lockedBaseJumpRadius +
-    ///    velocity × timeUnseen` (capped at `lockedMaxJumpRadius`) score 0.
-    ///    A stationary subject keeps a tight radius; a moving subject occluded
-    ///    for a while may legitimately re-emerge displaced.
-    ///  - **Instant accept only for continuity**: the best candidate is
-    ///    accepted immediately iff it overlaps the lock's last box
-    ///    (IoU ≥ `lockedSameObjectIoU`), is not better explained by another
-    ///    established track (occluder guard), and beats the runner-up by
-    ///    `lockedScoreMargin`. This covers continuous tracking — the common
-    ///    case — with zero added latency.
-    ///  - **Probation otherwise**: a discontinuous candidate must persist for
-    ///    `lockedProbationDuration` of continuous observations
-    ///    (`lockedProbationDurationContested` when contested) before the lock
-    ///    re-binds. Until then the lock coasts: no assignment, and the
-    ///    candidate stays available to Pass B so its own track survives —
-    ///    which is what keeps the occluder guard's evidence alive.
+    /// - Gate by adaptive distance, capped at `lockedMaxJumpRadius`.
+    /// - Reject candidates explained by a witness before ranking; no amount of
+    ///   probation allows a known other person to take the lock.
+    /// - Rank continuity-overlap candidates ahead of discontinuous candidates,
+    ///   comparing scores and the acceptance margin inside the highest tier.
+    /// - Instant continuity acceptance also checks other-track evidence. The caller
+    ///   supplies only established tracks seen at or after the lock's last bind;
+    ///   stale duplicate tracks cannot block the subject's recovery.
+    /// - Otherwise require consecutive, fresh probation evidence. A distant
+    ///   candidate with overlap below `lockedDistantIoU` waits longer and must
+    ///   show plausible outward movement from the lock's last position.
+    /// - Coasting candidates remain available to pass B, keeping other people's
+    ///   tracks alive while the lock refuses to bind them.
     nonisolated static func resolveLockedAssignment(
         detections: [CGRect],
         referenceBox: CGRect,
@@ -1125,7 +1146,7 @@ final class PersonDetector: ObservableObject {
             let explained = witnessBoxes.reduce(CGFloat(0)) { max($0, iou(box, $1)) }
             let byLock = max(overlap, iou(box, predictedReference))
             // A witnessed other person never becomes the lock, even after a long pause.
-            if explained >= 0.5 && (lockWasBoundLastScan ? explained > byLock + 0.15 : explained + 0.15 >= byLock) {
+            if explained >= lockedWitnessOverlap && (lockWasBoundLastScan ? explained > byLock + lockedWitnessLean : explained + lockedWitnessLean >= byLock) {
                 continue
             }
             scored.append((idx, score, overlap >= lockedSameObjectIoU ? 1 : 0))
@@ -1157,10 +1178,10 @@ final class PersonDetector: ObservableObject {
             return LockedResolution(assignedIndex: best.index, probation: nil)
         }
 
-        let distant = iouRef == 0 && hypot(candidate.midX - referenceBox.midX, candidate.midY - referenceBox.midY) > referenceBox.width * 0.5
+        let distant = iouRef < lockedDistantIoU && hypot(candidate.midX - referenceBox.midX, candidate.midY - referenceBox.midY) > referenceBox.width * lockedDistantCenterDistance
         let required = iouOther > iouRef
             ? lockedProbationDurationContested
-            : (distant ? 0.16 : lockedProbationDuration)
+            : (distant ? lockedDistantProbationDuration : lockedProbationDuration)
         if let probation, iou(candidate, probation.candidateBox) > 0.5 {
             let dt = observationTimestamp - probation.lastObservedAt
             if dt <= lockedProbationObservationGap {
@@ -1170,7 +1191,7 @@ final class PersonDetector: ObservableObject {
                     let firstDistance = hypot(first.midX - referenceBox.midX, first.midY - referenceBox.midY)
                     let duration = observationTimestamp - probation.startedAt
                     let outwardSpeed = duration > 0 ? (distance - firstDistance) / duration : 0
-                    if !distant || outwardSpeed >= 0.3 * distance / CGFloat(max(timeSinceLockSeen, 1e-9)) {
+                    if !distant || outwardSpeed >= lockedPlausibleSpeedFraction * distance / CGFloat(max(timeSinceLockSeen, 1e-9)) {
                         return LockedResolution(assignedIndex: best.index, probation: nil)
                     }
                 }

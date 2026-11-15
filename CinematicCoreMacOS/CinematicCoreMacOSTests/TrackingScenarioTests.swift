@@ -11,6 +11,7 @@ struct TrackingScenarioTests {
     private struct Measurement {
         var wrongRuns = 0
         var meanHold = 0.0
+        var meanVisibleHold = 0.0
         var ends: [String: Int] = [:]
         var allOnSubject: Bool { ends["subject"] == 8 }
     }
@@ -23,10 +24,11 @@ struct TrackingScenarioTests {
             let run = try harness.run(scenario, seed: seed)
             if run.wrong > 0.2 { result.wrongRuns += 1 }
             result.meanHold += run.hold / Double(seeds.count)
+            result.meanVisibleHold += run.holdVisible / Double(seeds.count)
             result.ends[run.final, default: 0] += 1
         }
         let ends = result.ends.sorted { $0.key < $1.key }.map { "\($0.key)=\($0.value)" }.joined(separator: ",")
-        print("TRACKING-SCENARIO|\(name)|wrongRuns=\(result.wrongRuns)/\(seeds.count)|meanHoldSeconds=\(r2(result.meanHold))|endsOn=\(ends)")
+        print("TRACKING-SCENARIO|\(name)|wrongRuns=\(result.wrongRuns)/\(seeds.count)|meanHoldSeconds=\(r2(result.meanHold))|meanHoldWhileVisibleSeconds=\(r2(result.meanVisibleHold))|endsOn=\(ends)")
         return result
     }
 
@@ -60,6 +62,20 @@ struct TrackingScenarioTests {
             #expect(result.probation == nil)
             probation = result.probation
         }
+    }
+
+    @Test func reachingNeighboursDuringMiss() throws {
+        try guardTarget("groupStill_reach_subjectMissed", fraction: 0)
+    }
+    @Test func smallSidestepRebinds() throws {
+        let result = try measure("sidestepSmall_thenStill")
+        if TrackingScenarioOptions.wide { return }
+        #expect(result.allOnSubject)
+    }
+    @Test func largeSidestepCharacterisation() throws {
+        let result = try measure("sidestepLarge_thenStill")
+        if TrackingScenarioOptions.wide { return }
+        #expect(result.ends == ["hold": 8])
     }
 
     @Test func frontSameSlow() throws { try guardTarget("crossInFront_size1.00_v0.05", fraction: 0) }

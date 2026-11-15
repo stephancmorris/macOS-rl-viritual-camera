@@ -2318,7 +2318,8 @@ final class CameraManager: NSObject, ObservableObject {
                 pixelBuffer: detectionIsFresh ? observation.frame?.pixelBuffer : nil,
                 isFresh: detectionIsFresh,
                 observationID: observation.frame?.observationID,
-                observationTimestamp: observation.frame?.capturedAt
+                observationTimestamp: observation.frame?.capturedAt,
+                excludedFromReacquisition: personDetector.witnessedOtherIDs()
             )
             applyLockOutcome(lockOutcome)
         }
