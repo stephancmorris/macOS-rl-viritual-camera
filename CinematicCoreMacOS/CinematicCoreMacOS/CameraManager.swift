@@ -275,6 +275,7 @@ final class CameraManager: NSObject, ObservableObject {
     /// Padding multiplier applied to the locked subject's last box to form the
     /// tracking ROI, so a moving subject stays inside the scanned region.
     private nonisolated static let lockedROIPadding: CGFloat = 1.8
+    private nonisolated static let lockedROIHorizontalPadding: CGFloat = 3.0
 
     /// Last detected bounding box of the acquiring/locked subject. Updated
     /// every frame from detections and used to seed the next frame's ROI. This
@@ -1596,12 +1597,15 @@ final class CameraManager: NSObject, ObservableObject {
     /// Return to Wide shows; the Wide *preset* remains a capped crop
     /// (`FramingTuning.maximumCropHeight`) so the two stay distinct.
     private func widestSafeCrop() -> CropEngine.CropRect {
-        let outputAspect = shotComposer.config.outputAspectRatio
-        if lastAppliedSourceAspect > 0,
-           abs(lastAppliedSourceAspect - outputAspect) < 0.01 {
-            return .fullFrame
-        }
-        return .widest(aspect: shotComposer.normalizedAspect)
+        Self.widestSafeCrop(sourceAspect: lastAppliedSourceAspect,
+            outputAspect: shotComposer.config.outputAspectRatio,
+            normalizedAspect: shotComposer.normalizedAspect)
+    }
+
+    nonisolated static func widestSafeCrop(sourceAspect: CGFloat, outputAspect: CGFloat,
+                                           normalizedAspect: CGFloat) -> CropEngine.CropRect {
+        if sourceAspect > 0, abs(sourceAspect - outputAspect) < 0.01 { return .fullFrame }
+        return .widest(aspect: normalizedAspect)
     }
 
     /// An explicit operator command may restore the retained lock's authority.
@@ -1693,7 +1697,8 @@ final class CameraManager: NSObject, ObservableObject {
     /// consumed (fresh or repeat). Plain storage, never published.
     private(set) var lastObservationCapturedAt: TimeInterval?
     /// People in the newest *fresh* observation. While locked this counts the
-    /// subject ROI only, so 2+ means someone else is crossing the subject.
+    /// subject ROI only, so 2+ means someone is within about one and a half
+    /// body widths of the subject.
     private(set) var lastObservationPersonCount = 0
 
     // MARK: World model (read-only, C-01)
@@ -1824,8 +1829,10 @@ final class CameraManager: NSObject, ObservableObject {
             // head poses after lock. Without it the gallery stays frozen at
             // the 3 acquisition signatures and re-acquisition is stuck with
             // lectern-frontals only.
+            // The identity verify window, when open, asks for faces more often.
             if detectionRunsThisFrame,
-               shotComposer.shouldRunGalleryRefreshScan() {
+               shotComposer.shouldRunIdentityVerifyScan(now: CACurrentMediaTime())
+                || shotComposer.shouldRunGalleryRefreshScan() {
                 return PersonDetector.DetectionRequestPlan(
                     mode: .acquiring,
                     roi: lockedROI()
@@ -1864,6 +1871,33 @@ final class CameraManager: NSObject, ObservableObject {
         ).intersection(CGRect(x: 0, y: 0, width: 1, height: 1))
     }
 
+    /// Keep the ROI seed on the subject's latest box. While an identity veto
+    /// holds the lock the vetoed track is not the subject, so the seed stops
+    /// following it. Cleared when no subject is being followed.
+    func refreshSubjectROISeed(from persons: [PersonDetector.DetectedPerson]) {
+        if let subjectID = shotComposer.lockBindingTargetID,
+           let box = persons.first(where: { $0.id == subjectID })?.boundingBox {
+            lastSubjectROIBox = box
+        } else if shotComposer.manualLockedTargetID == nil {
+            lastSubjectROIBox = nil
+        }
+    }
+
+    /// Recovery has just bound someone out of a vetoed hold. The seed still
+    /// holds the vetoed person's box, and the next scan is an ROI scan, so
+    /// aim it at the person who was bound.
+    func reseedSubjectROIAfterVetoRecovery(wasVetoHeld: Bool, outcome: ShotComposer.TickOutcome,
+                                           persons: [PersonDetector.DetectedPerson]) {
+        guard wasVetoHeld, case .resumeTracking = outcome,
+              let boundID = shotComposer.manualLockedTargetID,
+              let box = persons.first(where: { $0.id == boundID })?.boundingBox else { return }
+        lastSubjectROIBox = box
+    }
+
+    #if DEBUG
+    var subjectROISeedForTesting: CGRect? { lastSubjectROIBox }
+    #endif
+
     /// Lead the locked subject using a snapshot of the track's measured motion.
     private func lockedROI() -> CGRect {
         let box = lastSubjectROIBox ?? shotComposer.currentTrackedBounds
@@ -1883,7 +1917,7 @@ final class CameraManager: NSObject, ObservableObject {
             let distance = min(speed * CGFloat(elapsed), box.width * 0.25)
             lead = CGVector(dx: velocity.dx / speed * distance, dy: velocity.dy / speed * distance)
         }
-        let w = min(box.width * lockedROIPadding, 1)
+        let w = min(box.width * lockedROIHorizontalPadding, 1)
         let h = min(box.height * lockedROIPadding, 1)
         return CGRect(x: box.midX + lead.dx - w / 2, y: box.midY + lead.dy - h / 2,
                       width: w, height: h).intersection(unit)
@@ -2238,7 +2272,8 @@ final class CameraManager: NSObject, ObservableObject {
         }
         // Hand the matcher the current operator lock so it can bind that track
         // first with a relaxed threshold (PersonDetector.swift assignTracks).
-        personDetector.lockedTargetID = shotComposer.manualLockedTargetID
+        // Nil while an identity veto holds the lock, so the vetoed track is not followed.
+        personDetector.lockedTargetID = shotComposer.lockBindingTargetID
 
         if detectionPlan.mode != .discovery, subjectDiscoveryToken != nil {
             retireSubjectDiscovery()
@@ -2291,14 +2326,7 @@ final class CameraManager: NSObject, ObservableObject {
         // Only refresh the ROI seed from a real detection. On a repeat frame the
         // box is unchanged anyway, and the `nil` branch could otherwise clear a
         // valid seed using stale state.
-        if detectionIsFresh {
-            if let subjectID = shotComposer.manualLockedTargetID,
-               let box = detectedPersons.first(where: { $0.id == subjectID })?.boundingBox {
-                lastSubjectROIBox = box
-            } else if shotComposer.manualLockedTargetID == nil {
-                lastSubjectROIBox = nil
-            }
-        }
+        if detectionIsFresh { refreshSubjectROISeed(from: detectedPersons) }
         Self.signposter.endInterval("detection", detectionInterval)
         if let frame = observation.frame {
             outputPort.recordObservationAge(CACurrentMediaTime() - frame.capturedAt)
@@ -2319,14 +2347,19 @@ final class CameraManager: NSObject, ObservableObject {
         // pixelBuffer is passed so the composer can capture face signatures
         // for re-acquisition.
         if activeMode != .autoPan && activeMode != .manualCrop {
+            let wasVetoHeld = shotComposer.isIdentityVetoHeld
             let lockOutcome = shotComposer.tick(
                 detections: detectedPersons,
                 timestamp: CACurrentMediaTime(),
                 pixelBuffer: detectionIsFresh ? observation.frame?.pixelBuffer : nil,
                 isFresh: detectionIsFresh,
                 observationID: observation.frame?.observationID,
-                observationTimestamp: observation.frame?.capturedAt
+                observationTimestamp: observation.frame?.capturedAt,
+                excludedFromReacquisition: personDetector.witnessedOtherIDs(),
+                lockAmbiguityOpen: personDetector.lockAmbiguityOpen,
+                lockAmbiguityReasons: personDetector.lockAmbiguityOpenReasons
             )
+            reseedSubjectROIAfterVetoRecovery(wasVetoHeld: wasVetoHeld, outcome: lockOutcome, persons: detectedPersons)
             applyLockOutcome(lockOutcome)
         }
 
@@ -2462,9 +2495,7 @@ final class CameraManager: NSObject, ObservableObject {
                 timestamp: timestampSeconds,
                 persons: detectedPersons,
                 currentCrop: cropEngine?.currentCrop ?? .fullFrame,
-                idealCrop: useMLAgent
-                    ? cinematicAgent.lastPredictedCrop
-                    : shotComposer.currentComputedCrop,
+                idealCrop: cropEngine?.targetCrop,
                 isInterpolating: cropEngine?.isInterpolating ?? false
             )
         }
@@ -3012,6 +3043,13 @@ final class CameraManager: NSObject, ObservableObject {
 extension CameraManager {
     var manualLockedTargetID: UUID? {
         shotComposer.manualLockedTargetID
+    }
+
+    /// The visible track that stands for the locked subject. Nil while an
+    /// identity veto holds the lock: the vetoed person is still in view, and
+    /// nothing may present them as the subject.
+    var subjectTrackID: UUID? {
+        shotComposer.lockBindingTargetID
     }
 
     var isManualTargetLockActive: Bool {

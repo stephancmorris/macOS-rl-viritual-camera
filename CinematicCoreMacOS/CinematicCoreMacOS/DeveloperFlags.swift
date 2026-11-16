@@ -62,6 +62,11 @@ enum DeveloperFlags {
     ///
     /// Set to 1 to restore per-frame detection for an A/B comparison.
     nonisolated static let detectionFrameInterval = 2
+    /// Face verification: act on three consecutive strong face mismatches by
+    /// holding the lock. Off in every build until the thresholds are set on
+    /// labelled footage, the owner's rig checks pass and the legal position on
+    /// processing faces is settled. While off, the veto is only logged.
+    nonisolated static let identityVetoEnabled = false
 
     /// How often (seconds) to drop Core Image's internal caches. 0 disables.
     ///
