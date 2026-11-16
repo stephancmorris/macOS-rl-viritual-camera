@@ -205,6 +205,27 @@ struct FaceIdentityLiveTests {
         #expect(f.camera.subjectROISeedForTesting == CameraFixture.box(x: 0.70))
     }
 
+    /// The vetoed person is still in view but is not the subject: the overlay
+    /// and the world model get no subject track. The lock itself still reads
+    /// as an ordinary hold, so lock gates and the Director are unchanged.
+    @Test func aVetoedHoldReportsNoSubjectTrack() {
+        let f = CameraFixture()
+        f.tick([(f.subject, 0.30)])
+        #expect(f.camera.subjectTrackID == f.subject)
+        #expect(f.composer.activeTargetID == f.subject)
+        #expect(f.camera.worldModelReading().lockedTrack == f.subject)
+        f.veto(x: 0.30)
+        f.tick([(f.subject, 0.30)])
+        #expect(f.camera.subjectTrackID == nil)
+        #expect(f.composer.activeTargetID == nil)
+        #expect(f.camera.worldModelReading().lockedTrack == nil)
+        #expect(f.camera.worldModelReading().lockPhase == .hold)
+        #expect(f.camera.manualLockedTargetID == f.subject)
+        let readings = f.camera.evidenceReadings(now: f.time)
+        #expect(readings.lockPhase == .hold)
+        #expect(readings.lockedTargetID == f.subject)
+    }
+
     // MARK: Strong-match recovery
 
     /// A witness's track can carry the subject after an ID swap. A strong

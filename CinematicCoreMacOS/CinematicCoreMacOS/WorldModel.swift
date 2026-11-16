@@ -230,7 +230,7 @@ extension CameraManager {
             isRunning: isRunning,
             sourceMissing: sourceMissing,
             lockPhase: recoveryState.phase,
-            lockedTrack: manualLockedTargetID,
+            lockedTrack: subjectTrackID,
             crop: CGRect(origin: rendered.origin, size: rendered.size),
             minimumCropHeight: Double(shotComposer.qualityFloorHeightFraction),
             observation: lastWorldObservation)

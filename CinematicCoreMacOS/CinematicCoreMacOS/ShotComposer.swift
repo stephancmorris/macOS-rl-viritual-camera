@@ -951,6 +951,8 @@ final class ShotComposer: ObservableObject {
     private func vetoLock(_ targetID: UUID) {
         guard case .tracking(let current, let gallery) = lockState, current == targetID else { return }
         identityVetoedIDs.insert(targetID)
+        // The vetoed track stays in view; it must stop reading as the subject.
+        if activeTargetID != nil { activeTargetID = nil }
         Self.logger.info("LOCK-STATE old=tracking new=hold reason=identity_veto target=\(String(targetID.uuidString.prefix(8)), privacy: .public)")
         invalidateIdentityWork()
         lockState = .hold(targetID: targetID, gallery: gallery, sinceTime: lastTickTimestamp)
@@ -959,6 +961,8 @@ final class ShotComposer: ObservableObject {
 
     /// The track the detector should bind first. Nil while the lock is held
     /// by an identity veto, so pass A stops following the vetoed track.
+    /// Also what the overlay and the world model report as the subject's
+    /// track: the vetoed person is still in view, but is not the subject.
     var lockBindingTargetID: UUID? {
         isIdentityVetoHeld ? nil : manualLockedTargetID
     }

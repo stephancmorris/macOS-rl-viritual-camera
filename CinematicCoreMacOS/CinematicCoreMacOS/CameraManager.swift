@@ -3038,6 +3038,13 @@ extension CameraManager {
         shotComposer.manualLockedTargetID
     }
 
+    /// The visible track that stands for the locked subject. Nil while an
+    /// identity veto holds the lock: the vetoed person is still in view, and
+    /// nothing may present them as the subject.
+    var subjectTrackID: UUID? {
+        shotComposer.lockBindingTargetID
+    }
+
     var isManualTargetLockActive: Bool {
         shotComposer.isManualLockActive
     }
