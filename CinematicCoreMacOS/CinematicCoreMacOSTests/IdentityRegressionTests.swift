@@ -315,3 +315,39 @@ struct AcquisitionDeadlineRegressionTests {
         #expect(composer.acquisitionFeedback != nil)
     }
 }
+
+@MainActor
+struct WitnessReacquisitionRegressionTests {
+    @Test(arguments: [true, false])
+    func pendingRecoveryHonoursWitnessExclusion(exclude: Bool) throws {
+        let composer = ShotComposer()
+        let subject = UUID(), candidate = UUID()
+        composer.lockTarget(subject)
+        composer.forceTrackingForTesting()
+        _ = composer.tick(detections: [], timestamp: 1000, pixelBuffer: nil)
+        guard case .hold = composer.lockState else { Issue.record("Expected hold before scoring"); return }
+        let generation = composer.identityGenerationForTesting
+        let revision = composer.recoveryVisibilityRevisionForTesting
+        for observation: UInt64 in 1...3 {
+            #expect(composer.finishReacquisitionScoring(generation: generation,
+                visibilityRevision: revision, observationID: observation,
+                scores: [.init(id: candidate, printDistance: 0.10, landmarkDistance: 0.01)]))
+        }
+        let person = PersonDetector.DetectedPerson(id: candidate,
+            boundingBox: CGRect(x: 0.4, y: 0.25, width: 0.07, height: 0.30),
+            confidence: 1, timestamp: 1000.1, poseKeypoints: nil,
+            faceBoundingBox: CGRect(x: 0.42, y: 0.5, width: 0.03, height: 0.04), faceLandmarkRatios: nil)
+        _ = composer.tick(detections: [person], timestamp: 1000.1, pixelBuffer: nil,
+            observationID: 4, excludedFromReacquisition: exclude ? [candidate] : [])
+        if exclude {
+            guard case .hold(let id, _, _) = composer.lockState else { Issue.record("Witness recovery must stay in hold"); return }
+            #expect(id == subject)
+            // The blocked pending result is discarded, not deferred until exclusion disappears.
+            _ = composer.tick(detections: [person], timestamp: 1000.12, pixelBuffer: nil, observationID: 5)
+            guard case .hold = composer.lockState else { Issue.record("Discarded recovery must not bind later"); return }
+        } else {
+            guard case .tracking(let id, _) = composer.lockState else { Issue.record("Unexcluded control must bind"); return }
+            #expect(id == candidate)
+        }
+    }
+}
