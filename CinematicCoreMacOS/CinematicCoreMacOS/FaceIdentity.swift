@@ -55,12 +55,15 @@ nonisolated struct VisionFeaturePrintEmbedder: IdentityEmbedder {
 }
 
 /// One identity check of the locked person's face, matched to its result by
-/// lock generation and observation.
+/// lock generation, verify epoch and observation.
 nonisolated struct IdentityEvidenceRequest: Sendable, Equatable {
     let generation: UInt64
     let observationID: UInt64
     let targetID: UUID
     let faceBox: CGRect
+    /// The verify window's epoch when the check was scheduled. A restart
+    /// moves the epoch on, so a check from before it is not counted.
+    var verifyEpoch: UInt64 = 0
 }
 
 nonisolated enum FaceIdentityEvidence {

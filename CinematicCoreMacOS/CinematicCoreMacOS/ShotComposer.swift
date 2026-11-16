@@ -354,6 +354,8 @@ final class ShotComposer: ObservableObject {
     /// The detector's ambiguity flag from the latest `tick`. A capture that
     /// completes while it is set is discarded.
     private var lastLockAmbiguityOpen = false
+    /// The detector's reasons for that flag, from the latest `tick`.
+    private var lastLockAmbiguityReasons: PersonDetector.LockAmbiguity = []
     /// Captures refused by the admission check (diagnostics and tests).
     private(set) var galleryRejectionCount = 0
 
@@ -370,6 +372,11 @@ final class ShotComposer: ObservableObject {
     /// keep supplying evidence.
     static let identityVerifyCadence = 3
     static let identityVerifyMaxDuration: TimeInterval = 3.0
+    /// While the detector's ambiguity stays open and the window has no
+    /// verdict, the scan burst starts again this long after it last started.
+    /// With the 3 s cap this bounds verify scans to half the time, so one
+    /// detection in six on average, however long a crowd keeps the lock ambiguous.
+    static let identityVerifyRearmInterval: TimeInterval = 6.0
     /// Consecutive observations needed to verify or (would-)veto.
     static let identityConsecutive = 3
     /// Wall-clock time the window opened; nil while closed.
@@ -380,6 +387,12 @@ final class ShotComposer: ObservableObject {
     private var identityMatchStreak = 0
     private var identityMismatchStreak = 0
     private var identityWouldVetoLogged = false
+    /// Moves on at every restart; evidence scheduled under an earlier epoch is refused.
+    private var identityVerifyEpoch: UInt64 = 0
+    /// The detector's ambiguity reasons seen since the window opened or restarted.
+    private var identityVerifyReasons: PersonDetector.LockAmbiguity = []
+    /// The ambiguity reasons behind the latest shadow veto (diagnostics and tests).
+    private(set) var lastIdentityWouldVetoReasons: PersonDetector.LockAmbiguity?
     /// Shadow vetoes recorded (diagnostics and tests).
     private(set) var identityWouldVetoCount = 0
     /// Tracks put on hold by a live identity veto. They cannot return on box
@@ -414,6 +427,7 @@ final class ShotComposer: ObservableObject {
     /// Called when a shadow veto is recorded.
     var identityWouldVetoForTesting: (() -> Void)?
     var identityVerifyOpenForTesting: Bool { identityVerifyOpenedAt != nil }
+    var identityVerifyEpochForTesting: UInt64 { identityVerifyEpoch }
     #endif
     #if DEBUG
     /// Replaces only the Vision extraction; admission and gallery rules stay real.
@@ -703,9 +717,11 @@ final class ShotComposer: ObservableObject {
         observationID: UInt64? = nil,
         observationTimestamp: TimeInterval? = nil,
         excludedFromReacquisition: Set<UUID> = [],
-        lockAmbiguityOpen: Bool = false
+        lockAmbiguityOpen: Bool = false,
+        lockAmbiguityReasons: PersonDetector.LockAmbiguity = []
     ) -> TickOutcome {
         if isFresh { fallbackObservationID &+= 1 }
+        lastLockAmbiguityReasons = lockAmbiguityOpen ? lockAmbiguityReasons : []
         // A new ambiguous moment: the detector's window has just opened.
         let ambiguityBegan = lockAmbiguityOpen && !lastLockAmbiguityOpen
         lastLockAmbiguityOpen = lockAmbiguityOpen
@@ -820,7 +836,11 @@ final class ShotComposer: ObservableObject {
                     openIdentityVerify(at: timestamp, targetID: targetID)
                 } else if ambiguityBegan, identityVerifyOpenedAt != nil {
                     restartIdentityVerify(at: timestamp, targetID: targetID)
+                } else if lockAmbiguityOpen, let opened = identityVerifyOpenedAt,
+                          timestamp - opened >= Self.identityVerifyRearmInterval {
+                    rearmIdentityVerifyScans(at: timestamp, targetID: targetID)
                 }
+                if identityVerifyOpenedAt != nil { identityVerifyReasons.formUnion(lastLockAmbiguityReasons) }
                 if isFresh, identityVerifyOpenedAt != nil {
                     scheduleIdentityEvidence(for: targetID, person: lockedDetection,
                                              pixelBuffer: pixelBuffer, gallery: gallery,
@@ -957,6 +977,7 @@ final class ShotComposer: ObservableObject {
         identityMatchStreak = 0
         identityMismatchStreak = 0
         identityWouldVetoLogged = false
+        identityVerifyReasons = []
         Self.logger.info("IDENTITY verify-open target=\(String(targetID.uuidString.prefix(8)), privacy: .public)")
     }
 
@@ -965,13 +986,27 @@ final class ShotComposer: ObservableObject {
     /// would leave a later swap with only the 0.4 s refresh scans. The scan
     /// cadence and cap restart, and the identity may have changed again, so
     /// the streaks start afresh and another shadow veto may be recorded.
+    /// Evidence already in flight was observed before this moment: the new
+    /// epoch retires it, so only later observations count towards the three.
     private func restartIdentityVerify(at time: TimeInterval, targetID: UUID) {
         identityVerifyOpenedAt = time
         identityVerifyDetections = 0
         identityMatchStreak = 0
         identityMismatchStreak = 0
         identityWouldVetoLogged = false
+        identityVerifyEpoch &+= 1
+        identityVerifyReasons = []
         Self.logger.info("IDENTITY verify-restart target=\(String(targetID.uuidString.prefix(8)), privacy: .public)")
+    }
+
+    /// The detector's ambiguity has stayed open (a crowd), so no new moment
+    /// restarts the window, yet its scan burst is spent. Start the burst
+    /// again. Only the scan cadence and cap restart: the streaks, the epoch
+    /// and evidence in flight are kept, so re-arming never delays a verdict.
+    private func rearmIdentityVerifyScans(at time: TimeInterval, targetID: UUID) {
+        identityVerifyOpenedAt = time
+        identityVerifyDetections = 0
+        Self.logger.info("IDENTITY verify-rearm target=\(String(targetID.uuidString.prefix(8)), privacy: .public)")
     }
 
     private func closeIdentityVerify() {
@@ -980,6 +1015,7 @@ final class ShotComposer: ObservableObject {
         identityMatchStreak = 0
         identityMismatchStreak = 0
         identityWouldVetoLogged = false
+        identityVerifyReasons = []
     }
 
     private func scheduleIdentityEvidence(
@@ -993,7 +1029,8 @@ final class ShotComposer: ObservableObject {
         guard !identityEvidenceInFlight else { return }
         if let last = lastIdentityObservationID, observationID <= last { return }
         let request = IdentityEvidenceRequest(generation: lockGeneration, observationID: observationID,
-                                              targetID: targetID, faceBox: faceBox)
+                                              targetID: targetID, faceBox: faceBox,
+                                              verifyEpoch: identityVerifyEpoch)
         #if DEBUG
         if let scheduler = identityEvidenceSchedulerForTesting {
             identityEvidenceInFlight = true
@@ -1020,12 +1057,14 @@ final class ShotComposer: ObservableObject {
     }
 
     /// Completion gate for identity evidence. Results from a retired lock
-    /// generation, an older observation, another target, or a closed window
-    /// are refused. Returns whether the evidence was counted.
+    /// generation, a verify epoch before the latest restart, an older
+    /// observation, another target, or a closed window are refused. The
+    /// in-flight slot is released first, on every path. Returns whether the
+    /// evidence was counted.
     @discardableResult
     func finishIdentityEvidence(_ request: IdentityEvidenceRequest, tier: IdentityTier) -> Bool {
         identityEvidenceInFlight = false
-        guard request.generation == lockGeneration else { return false }
+        guard request.generation == lockGeneration, request.verifyEpoch == identityVerifyEpoch else { return false }
         if let last = lastIdentityObservationID, request.observationID <= last { return false }
         guard case .tracking(let current, _) = lockState, current == request.targetID,
               identityVerifyOpenedAt != nil else { return false }
@@ -1052,7 +1091,8 @@ final class ShotComposer: ObservableObject {
         } else if identityMismatchStreak >= Self.identityConsecutive, !identityWouldVetoLogged {
             identityWouldVetoLogged = true
             identityWouldVetoCount += 1
-            Self.logger.info("IDENTITY would-veto target=\(target, privacy: .public) live=\(self.faceIdentityLive, privacy: .public)")
+            lastIdentityWouldVetoReasons = identityVerifyReasons
+            Self.logger.info("IDENTITY would-veto target=\(target, privacy: .public) live=\(self.faceIdentityLive, privacy: .public) reasons=\(self.identityVerifyReasons.logDescription, privacy: .public)")
             #if DEBUG
             identityWouldVetoForTesting?()
             #endif

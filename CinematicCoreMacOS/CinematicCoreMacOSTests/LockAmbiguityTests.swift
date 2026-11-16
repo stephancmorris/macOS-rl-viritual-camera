@@ -54,6 +54,7 @@ struct LockAmbiguityTests {
         rig.scan([rig.box(0.30), rig.box(0.35)])
         #expect(rig.detector.lockAmbiguityOpen)
         #expect(rig.reasons.contains(.overlap))
+        #expect(rig.detector.lockAmbiguityOpenReasons == [.overlap])
         let opened = rig.time
         while rig.time - opened < PersonDetector.lockAmbiguityQuietDuration - 0.05 {
             rig.scan([rig.box(0.30), rig.box(0.60)])
@@ -62,6 +63,7 @@ struct LockAmbiguityTests {
         rig.scan([rig.box(0.30), rig.box(0.60)])
         rig.scan([rig.box(0.30), rig.box(0.60)])
         #expect(!rig.detector.lockAmbiguityOpen)
+        #expect(rig.detector.lockAmbiguityOpenReasons.isEmpty)
     }
 
     @Test func coastRebindOpensOnlyWithSomeoneNearby() throws {

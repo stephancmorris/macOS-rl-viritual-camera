@@ -369,7 +369,8 @@ final class ScenarioLoop {
         let outcome = composer.tick(detections: persons, timestamp: t, pixelBuffer: nil, isFresh: fresh,
                           observationID: obsID, observationTimestamp: obsT,
                           excludedFromReacquisition: detector.witnessedOtherIDs(),
-                          lockAmbiguityOpen: ambiguityOpen)
+                          lockAmbiguityOpen: ambiguityOpen,
+                          lockAmbiguityReasons: detector.lockAmbiguityOpenReasons)
         if commands.admitRecovery(outcome) {
             engine.endZoom()
             switch outcome {
