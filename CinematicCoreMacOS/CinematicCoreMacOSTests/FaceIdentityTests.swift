@@ -67,7 +67,8 @@ struct FaceIdentityTests {
             composer.identityEvidenceSchedulerForTesting = { [unowned self] in self.requests.append($0) }
         }
 
-        func tick(present: Bool = true, face: Bool = true, ambiguous: Bool = false) {
+        func tick(present: Bool = true, face: Bool = true, ambiguous: Bool = false,
+                  reasons: PersonDetector.LockAmbiguity = []) {
             time += 0.04
             observation += 1
             let persons = present ? [PersonDetector.DetectedPerson(id: subject,
@@ -77,18 +78,19 @@ struct FaceIdentityTests {
                 faceLandmarkRatios: nil)] : []
             _ = composer.tick(detections: persons, timestamp: time, pixelBuffer: nil,
                               observationID: observation, observationTimestamp: time,
-                              lockAmbiguityOpen: ambiguous)
+                              lockAmbiguityOpen: ambiguous, lockAmbiguityReasons: reasons)
         }
 
         /// Answers the newest request, then ticks again to schedule the next.
+        /// `ambiguous` keeps the detector's window open across that tick.
         @discardableResult
-        func answer(_ tier: IdentityTier) -> Bool {
+        func answer(_ tier: IdentityTier, ambiguous: Bool = false) -> Bool {
             guard let request = requests.last else {
                 Issue.record("No identity request was scheduled")
                 return false
             }
             let counted = composer.finishIdentityEvidence(request, tier: tier)
-            tick()
+            tick(ambiguous: ambiguous)
             return counted
         }
     }
@@ -216,6 +218,22 @@ struct FaceIdentityTests {
         f.answer(.strongMatch)
         f.answer(.strongMatch)
         #expect(!f.composer.identityVerifyOpenForTesting)
+    }
+
+    // MARK: Shadow veto log
+
+    /// The shadow veto carries every detector reason seen during its window.
+    @Test func wouldVetoRecordsTheAmbiguityReasons() {
+        let f = Fixture()
+        f.tick(ambiguous: true, reasons: .overlap)
+        f.requests.last.map { _ = f.composer.finishIdentityEvidence($0, tier: .strongMismatch) }
+        f.tick(ambiguous: true, reasons: [.overlap, .coastRebind])
+        f.answer(.strongMismatch)
+        #expect(f.composer.lastIdentityWouldVetoReasons == nil)
+        f.answer(.strongMismatch)
+        #expect(f.composer.lastIdentityWouldVetoReasons == [.overlap, .coastRebind])
+        #expect(PersonDetector.LockAmbiguity([.overlap, .coastRebind]).logDescription == "coastRebind+overlap")
+        #expect(PersonDetector.LockAmbiguity([]).logDescription == "none")
     }
 
     @Test func closedWindowAsksForNoScans() {

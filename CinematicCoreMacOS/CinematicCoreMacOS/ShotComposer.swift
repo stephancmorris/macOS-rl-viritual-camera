@@ -354,6 +354,8 @@ final class ShotComposer: ObservableObject {
     /// The detector's ambiguity flag from the latest `tick`. A capture that
     /// completes while it is set is discarded.
     private var lastLockAmbiguityOpen = false
+    /// The detector's reasons for that flag, from the latest `tick`.
+    private var lastLockAmbiguityReasons: PersonDetector.LockAmbiguity = []
     /// Captures refused by the admission check (diagnostics and tests).
     private(set) var galleryRejectionCount = 0
 
@@ -380,6 +382,10 @@ final class ShotComposer: ObservableObject {
     private var identityMatchStreak = 0
     private var identityMismatchStreak = 0
     private var identityWouldVetoLogged = false
+    /// The detector's ambiguity reasons seen since the window opened or restarted.
+    private var identityVerifyReasons: PersonDetector.LockAmbiguity = []
+    /// The ambiguity reasons behind the latest shadow veto (diagnostics and tests).
+    private(set) var lastIdentityWouldVetoReasons: PersonDetector.LockAmbiguity?
     /// Shadow vetoes recorded (diagnostics and tests).
     private(set) var identityWouldVetoCount = 0
     private var identityEmbedder: VisionFeaturePrintEmbedder {
@@ -673,9 +679,11 @@ final class ShotComposer: ObservableObject {
         observationID: UInt64? = nil,
         observationTimestamp: TimeInterval? = nil,
         excludedFromReacquisition: Set<UUID> = [],
-        lockAmbiguityOpen: Bool = false
+        lockAmbiguityOpen: Bool = false,
+        lockAmbiguityReasons: PersonDetector.LockAmbiguity = []
     ) -> TickOutcome {
         if isFresh { fallbackObservationID &+= 1 }
+        lastLockAmbiguityReasons = lockAmbiguityOpen ? lockAmbiguityReasons : []
         // A new ambiguous moment: the detector's window has just opened.
         let ambiguityBegan = lockAmbiguityOpen && !lastLockAmbiguityOpen
         lastLockAmbiguityOpen = lockAmbiguityOpen
@@ -786,6 +794,7 @@ final class ShotComposer: ObservableObject {
                 } else if ambiguityBegan, identityVerifyOpenedAt != nil {
                     restartIdentityVerify(at: timestamp, targetID: targetID)
                 }
+                if identityVerifyOpenedAt != nil { identityVerifyReasons.formUnion(lastLockAmbiguityReasons) }
                 if isFresh, identityVerifyOpenedAt != nil {
                     scheduleIdentityEvidence(for: targetID, person: lockedDetection,
                                              pixelBuffer: pixelBuffer, gallery: gallery,
@@ -902,6 +911,7 @@ final class ShotComposer: ObservableObject {
         identityMatchStreak = 0
         identityMismatchStreak = 0
         identityWouldVetoLogged = false
+        identityVerifyReasons = []
         Self.logger.info("IDENTITY verify-open target=\(String(targetID.uuidString.prefix(8)), privacy: .public)")
     }
 
@@ -916,6 +926,7 @@ final class ShotComposer: ObservableObject {
         identityMatchStreak = 0
         identityMismatchStreak = 0
         identityWouldVetoLogged = false
+        identityVerifyReasons = []
         Self.logger.info("IDENTITY verify-restart target=\(String(targetID.uuidString.prefix(8)), privacy: .public)")
     }
 
@@ -925,6 +936,7 @@ final class ShotComposer: ObservableObject {
         identityMatchStreak = 0
         identityMismatchStreak = 0
         identityWouldVetoLogged = false
+        identityVerifyReasons = []
     }
 
     private func scheduleIdentityEvidence(
@@ -997,7 +1009,8 @@ final class ShotComposer: ObservableObject {
         } else if identityMismatchStreak >= Self.identityConsecutive, !identityWouldVetoLogged {
             identityWouldVetoLogged = true
             identityWouldVetoCount += 1
-            Self.logger.info("IDENTITY would-veto target=\(target, privacy: .public) live=\(DeveloperFlags.identityVetoEnabled, privacy: .public)")
+            lastIdentityWouldVetoReasons = identityVerifyReasons
+            Self.logger.info("IDENTITY would-veto target=\(target, privacy: .public) live=\(DeveloperFlags.identityVetoEnabled, privacy: .public) reasons=\(self.identityVerifyReasons.logDescription, privacy: .public)")
             #if DEBUG
             identityWouldVetoForTesting?()
             #endif
