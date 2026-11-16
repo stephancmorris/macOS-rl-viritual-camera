@@ -4,6 +4,7 @@
 // Each box is randomly missed 3% of the time. Box noise is 0.2% of the frame
 // on centre and 1% on size. None of this is measured from real Vision.
 
+import CryptoKit
 import CoreGraphics
 import Foundation
 import Testing
@@ -139,8 +140,17 @@ final class FramingLoop {
 // at 5cac138, for rule-based auto tracking. Main's #138 adds read-only world
 // observation bookkeeping; it does not change this tracking glue.
 // Re-copy from the control turn when #141 merges.
+/// Synthetic provenance is held only by the harness; the detector receives CGRects.
+struct SyntheticObservation {
+    let box: CGRect
+    let actors: Set<Int>
+}
+
 @MainActor
 final class ScenarioLoop {
+    let commands = CommandDispatcher()
+    private var programIsWide = false
+    private(set) var lockedSources: Set<Int> = [0]
     let detector = PersonDetector()
     let composer = ShotComposer()
     let engine: CropEngine
@@ -148,7 +158,7 @@ final class ScenarioLoop {
     private var roiBox: CGRect?
     private var inFlight = false
     private var counter: UInt64 = 0
-    private var pending: (done: Double, capturedAt: Double, obsID: UInt64, boxes: [CGRect])?
+    private var pending: (done: Double, capturedAt: Double, obsID: UInt64, boxes: [SyntheticObservation])?
     private var latest: (capturedAt: Double, obsID: UInt64, persons: [PersonDetector.DetectedPerson])?
     private var consumedID: UInt64?
     private var seq: UInt64 = 0
@@ -162,6 +172,8 @@ final class ScenarioLoop {
         let visionBoxes: [CGRect]
         let passABound: Bool
         let lockLastSeen: Double?
+        let persons: [PersonDetector.DetectedPerson]
+        let witnesses: Set<UUID>
     }
     var traceEnabled = false
     private(set) var trace: [ScanTrace] = []
@@ -185,6 +197,7 @@ final class ScenarioLoop {
         composer.qualityFloorHeightFraction = floor.minCropHeightFraction
         composer.lockTarget(id)
         composer.forceTrackingForTesting()
+        commands.setTrackingOwnership(true)
         roiBox = first
         // Acquisition already observed the subject. Make that observation available immediately.
         // This also keeps the first scheduled scan in the tracking ROI, rather than
@@ -196,12 +209,24 @@ final class ScenarioLoop {
 
     /// world(t, roi) returns the boxes Vision reports for the frame captured at t.
     func step(t: Double, world: (Double, CGRect?) -> [CGRect]) -> CropEngine.CropRect {
+        stepTagged(t: t) { capture, roi in
+            world(capture, roi).map { SyntheticObservation(box: $0, actors: [0]) }
+        }
+    }
+
+    func stepTagged(t: Double, world: (Double, CGRect?) -> [SyntheticObservation]) -> CropEngine.CropRect {
         if let p = pending, p.done <= t {
             // PersonDetector.processFrame: updateTracking runs on the main actor when Vision returns,
             // stamped with the detection start time.
-            detector.updateTracking(rectObservations: p.boxes.map { VNHumanObservation(boundingBox: $0) },
+            detector.updateTracking(rectObservations: p.boxes.map { VNHumanObservation(boundingBox: $0.box) },
                                     poseObservations: [], faceObservations: [], timestamp: p.capturedAt)
-            reportedBoxes = p.boxes
+            reportedBoxes = p.boxes.map(\.box)
+            if detector.trackMotion(for: id)?.lastSeen == p.capturedAt,
+               let bound = detector.detectedPersons.first(where: { $0.id == id }) {
+                if let input = p.boxes.first(where: { $0.box == bound.boundingBox }) {
+                    lockedSources = input.actors
+                } else { Issue.record("Fresh bound box has no input provenance") }
+            }
             latest = (p.capturedAt, p.obsID, detector.detectedPersons)
             pending = nil
             inFlight = false
@@ -242,9 +267,23 @@ final class ScenarioLoop {
             } else if composer.manualLockedTargetID == nil { roiBox = nil }
         }
         lockedBox = persons.first(where: { $0.id == id })?.boundingBox
-        _ = composer.tick(detections: persons, timestamp: t, pixelBuffer: nil, isFresh: fresh,
+        let outcome = composer.tick(detections: persons, timestamp: t, pixelBuffer: nil, isFresh: fresh,
                           observationID: obsID, observationTimestamp: obsT,
                           excludedFromReacquisition: detector.witnessedOtherIDs())
+        if commands.admitRecovery(outcome) {
+            engine.endZoom()
+            switch outcome {
+            case .pullBackToWide:
+                engine.clearZoomAdjustment()
+                composer.setVisibleZoomHeight(nil)
+                programIsWide = true
+                fastUntil = t + 0.5
+            case .resumeTracking, .acquired:
+                programIsWide = false
+                fastUntil = t + 0.5
+            case .noChange: break
+            }
+        }
         if case .tracking = composer.lockState, composer.steadyBand == nil, lastBand != nil { fastUntil = t + 0.5 }
         lastBand = composer.steadyBand
         isHold = { if case .hold = composer.lockState { return true }; return false }()
@@ -252,7 +291,10 @@ final class ScenarioLoop {
         let primary = composer.primaryPerson(from: persons)
         let smoothing: Float = t < fastUntil ? 0.25 : composer.config.smoothingFactor
         engine.applyFrameSmoothing(smoothing, operatorSetting: composer.config.smoothingFactor)
-        if let primary {
+        if programIsWide {
+            engine.setTargetCrop(CameraManager.widestSafeCrop(sourceAspect: 16.0 / 9.0,
+                outputAspect: composer.config.outputAspectRatio, normalizedAspect: composer.normalizedAspect))
+        } else if let primary {
             if let crop = composer.compose(person: primary, isFresh: fresh, observationTimestamp: obsT) {
                 lastTrackingCrop = crop
                 engine.setTargetCrop(crop)
@@ -269,7 +311,7 @@ final class ScenarioLoop {
             }
             trace.append(ScanTrace(capturedAt: obsT, lockState: state, lockedBox: lockedBox,
                 visionBoxes: reportedBoxes, passABound: motion?.lastSeen == obsT,
-                lockLastSeen: motion?.lastSeen))
+                lockLastSeen: motion?.lastSeen, persons: persons, witnesses: detector.witnessedOtherIDs()))
         }
         return engine.tickInterpolation(now: t).crop
     }
@@ -305,7 +347,7 @@ struct TrackingScenarios {
         return i.isNull ? 0 : Double(i.width) / Double(min(a.width, b.width))
     }
 
-    func run(_ sc: Scenario, seed: UInt64) throws -> (final: String, wrong: Double, hold: Double, holdVisible: Double) {
+    func run(_ sc: Scenario, seed: UInt64) throws -> (final: String, wrong: Double, hold: Double, holdVisible: Double, inputDigest: String, latchedWrong: Double, longestLatchedWrong: Double, unionTime: Double, legacyFinal: String) {
         let rng = ProbeRng(seed)
         let actors = sc.make(rng)
         func hidden(_ i: Int, _ e: Double) -> Bool {
@@ -321,12 +363,24 @@ struct TrackingScenarios {
         }
         let loop = try ScenarioLoop(preset: .waistUp, feel: .steadyFollow, first: box(actors[0], 0), t: t0)
         loop.traceEnabled = TrackingScenarioOptions.trace && !TrackingScenarioOptions.wide
+        var inputBytes = Data()
+        func recordInputs(_ boxes: [CGRect], time: Double) {
+            func append(_ bits: UInt64) {
+                var bits = bits.littleEndian
+                withUnsafeBytes(of: &bits) { inputBytes.append(contentsOf: $0) }
+            }
+            append(time.bitPattern); append(UInt64(boxes.count))
+            for b in boxes {
+                for v in [b.minX, b.minY, b.width, b.height] { append(Double(v).bitPattern) }
+            }
+        }
         var traceIndex = 0
         var on = 0
         var wrong = 0.0, hold = 0.0, holdVisible = 0.0
+        var wrongFrames = 0, wrongStretch = 0, longestWrongStretch = 0, unionFrames = 0
         for frame in 1...Int((TrackingScenarioOptions.wide ? sc.duration : min(sc.duration, 15)) * fps) {
             let el = Double(frame) / fps
-            _ = loop.step(t: t0 + el) { t, roi in
+            _ = loop.stepTagged(t: t0 + el) { t, roi in
                 let e = t - self.t0
                 func jit(_ b: CGRect) -> CGRect {
                     let k = 1 + rng.gauss() * 0.01
@@ -338,7 +392,7 @@ struct TrackingScenarios {
                     let i = b.intersection(roi)
                     return !i.isNull && Double(i.width * i.height) / Double(b.width * b.height) >= 0.8
                 }
-                var out: [CGRect] = []
+                var out: [SyntheticObservation] = []
                 var mergedWithSubject = Set<Int>()
                 if sc.overlap == .merged, actors[0].present(e) {
                     var u = self.box(actors[0], e)
@@ -347,7 +401,7 @@ struct TrackingScenarios {
                     }
                     if !mergedWithSubject.isEmpty {
                         mergedWithSubject.insert(0)
-                        if inROI(u), rng.uniform() > 0.03 { out.append(jit(u)) }
+                        if inROI(u), rng.uniform() > 0.03 { out.append(SyntheticObservation(box: jit(u), actors: mergedWithSubject)) }
                     }
                 }
                 for i in actors.indices where !mergedWithSubject.contains(i) {
@@ -355,8 +409,9 @@ struct TrackingScenarios {
                     guard a.present(e), !hidden(i, e), !a.visionMiss(e) else { continue }
                     let b = self.box(a, e)
                     guard inROI(b), rng.uniform() > 0.03 else { continue }
-                    out.append(jit(b))
+                    out.append(SyntheticObservation(box: jit(b), actors: [i]))
                 }
+                recordInputs(out.map(\.box), time: t)
                 return out
             }
             if frame == 1, !TrackingScenarioOptions.wide { #expect(!loop.isHold) }
@@ -368,7 +423,14 @@ struct TrackingScenarios {
                     }
                 }
                 let boxes = scan.visionBoxes.map { "\(r2(Double($0.midX), 4)),\(r2(Double($0.width), 4))" }.joined(separator: ";")
-                print("TRACKING-TRACE|\(sc.name)|seed=\(seed)|t=\(r2(scan.capturedAt - t0, 3))|state=\(scan.lockState)|actor=\(actor.map(String.init) ?? "none")|vision=\(scan.visionBoxes.count)|passA=\(scan.passABound)|lastSeen=\(scan.lockLastSeen.map { r2($0 - t0, 3) } ?? "expired")|boxes=\(boxes)")
+                let tracks = scan.persons.map { person in
+                    let covered = actors.indices.filter { actors[$0].present(scan.capturedAt - t0) }
+                        .max { PersonDetector.iou(person.boundingBox, box(actors[$0], scan.capturedAt - t0))
+                             < PersonDetector.iou(person.boundingBox, box(actors[$1], scan.capturedAt - t0)) }
+                    let actor = covered.flatMap { PersonDetector.iou(person.boundingBox, box(actors[$0], scan.capturedAt - t0)) > 0.3 ? $0 : nil }
+                    return "\(person.id.uuidString.prefix(8)):actor=\(actor.map(String.init) ?? "none"),witness=\(scan.witnesses.contains(person.id)),lock=\(person.id == loop.id),x=\(r2(Double(person.boundingBox.midX), 4))"
+                }.joined(separator: ";")
+                print("TRACKING-TRACE|\(sc.name)|seed=\(seed)|t=\(r2(scan.capturedAt - t0, 3))|state=\(scan.lockState)|actor=\(actor.map(String.init) ?? "none")|vision=\(scan.visionBoxes.count)|passA=\(scan.passABound)|lastSeen=\(scan.lockLastSeen.map { r2($0 - t0, 3) } ?? "expired")|boxes=\(boxes)|tracks=\(tracks)")
                 traceIndex += 1
             }
             if loop.isTracking, let lb = loop.lockedBox {
@@ -380,13 +442,37 @@ struct TrackingScenarios {
                 if bestIoU > 0.3 { on = best }
                 if on != 0 { wrong += 1 / fps }
             }
+            if loop.isTracking, loop.lockedBox != nil {
+                if !loop.lockedSources.contains(0) {
+                    wrongFrames += 1; wrongStretch += 1
+                    longestWrongStretch = max(longestWrongStretch, wrongStretch)
+                } else { wrongStretch = 0 }
+                if loop.lockedSources.count > 1 { unionFrames += 1 }
+            } else { wrongStretch = 0 }
             if loop.isHold {
                 hold += 1 / fps
                 if subjectVisible(el) { holdVisible += 1 / fps }
             }
         }
-        let final = loop.isHold ? "hold" : (loop.isTracking ? (on == 0 ? "subject" : "WRONG") : "wide")
-        return (final, wrong, hold, holdVisible)
+        let legacyFinal = loop.isHold ? "hold" : (loop.isTracking ? (on == 0 ? "subject" : "WRONG") : "wide")
+        let final = loop.isHold ? "hold" : (loop.isTracking ? (loop.lockedSources.contains(0) ? "subject" : "WRONG") : "wide")
+        let digest = SHA256.hash(data: inputBytes).map { String(format: "%02x", $0) }.joined()
+        if seed == 40000 { print("TRACKING-INPUT-BASELINE|\(sc.name)|seed=\(seed)|digest=\(digest)|legacyWrong=\(wrong)|final=\(final)") }
+        return (final, wrong, hold, holdVisible, digest, Double(wrongFrames) / fps,
+                Double(longestWrongStretch) / fps, Double(unionFrames) / fps, legacyFinal)
+    }
+
+    @Test func pullbackActuallyWidensThePicture() throws {
+        let loop = try ScenarioLoop(preset: .waistUp, feel: .steadyFollow,
+            first: scenarioBox(cx: 0.5), t: t0)
+        var crop = CropEngine.CropRect.fullFrame
+        for frame in 1...700 { crop = loop.step(t: t0 + Double(frame) / fps) { _, _ in [] } }
+        #expect(!loop.isTracking && !loop.isHold)
+        let wide = CameraManager.widestSafeCrop(sourceAspect: 16.0 / 9.0,
+            outputAspect: loop.composer.config.outputAspectRatio, normalizedAspect: loop.composer.normalizedAspect)
+        #expect(loop.engine.targetCrop == wide)
+        #expect(abs(crop.size.width - wide.size.width) < 0.001)
+        #expect(abs(crop.size.height - wide.size.height) < 0.001)
     }
 
     func scenarios() -> [Scenario] {
@@ -453,6 +539,22 @@ struct TrackingScenarios {
             for x in [0.34, 0.46, 0.58, 0.70] { a.append(Actor(x: still(x), layer: -1)) }
             return a
         })
+        list.append(Scenario(name: "groupStill_reach_subjectMissed", duration: 30) { _ in
+            func missed(_ t: Double) -> Bool {
+                let phase = t.truncatingRemainder(dividingBy: 5)
+                return phase >= 2 && phase < 2.4
+            }
+            let distance = 1.2 * 0.07
+            return [Actor(x: still(0.5), visionMiss: missed),
+                Actor(x: still(0.5 - distance), shape: { missed($0) ? (1.6, 1, 0) : (1, 1, 0) }),
+                Actor(x: still(0.5 + distance), shape: { missed($0) ? (1.6, 1, -0.6) : (1, 1, 0) })]
+        })
+        for (label, widths) in [("Small", 0.7), ("Large", 1.2)] {
+            list.append(Scenario(name: "sidestep\(label)_thenStill", duration: 6) { _ in
+                [Actor(x: { 0.5 + widths * 0.07 * max(0, min(1, ($0 - 2) / 0.4)) },
+                    visionMiss: { $0 >= 2 && $0 < 2.4 })]
+            })
+        }
         return list
     }
 

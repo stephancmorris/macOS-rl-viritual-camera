@@ -1588,12 +1588,15 @@ final class CameraManager: NSObject, ObservableObject {
     /// Return to Wide shows; the Wide *preset* remains a capped crop
     /// (`FramingTuning.maximumCropHeight`) so the two stay distinct.
     private func widestSafeCrop() -> CropEngine.CropRect {
-        let outputAspect = shotComposer.config.outputAspectRatio
-        if lastAppliedSourceAspect > 0,
-           abs(lastAppliedSourceAspect - outputAspect) < 0.01 {
-            return .fullFrame
-        }
-        return .widest(aspect: shotComposer.normalizedAspect)
+        Self.widestSafeCrop(sourceAspect: lastAppliedSourceAspect,
+            outputAspect: shotComposer.config.outputAspectRatio,
+            normalizedAspect: shotComposer.normalizedAspect)
+    }
+
+    nonisolated static func widestSafeCrop(sourceAspect: CGFloat, outputAspect: CGFloat,
+                                           normalizedAspect: CGFloat) -> CropEngine.CropRect {
+        if sourceAspect > 0, abs(sourceAspect - outputAspect) < 0.01 { return .fullFrame }
+        return .widest(aspect: normalizedAspect)
     }
 
     /// An explicit operator command may restore the retained lock's authority.

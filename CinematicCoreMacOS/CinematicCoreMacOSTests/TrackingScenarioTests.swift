@@ -10,7 +10,9 @@ struct TrackingScenarioTests {
 
     private struct Measurement {
         var wrongRuns = 0
+        var legacyWrongRuns = 0
         var meanHold = 0.0
+        var meanVisibleHold = 0.0
         var ends: [String: Int] = [:]
         var allOnSubject: Bool { ends["subject"] == 8 }
     }
@@ -21,12 +23,15 @@ struct TrackingScenarioTests {
         var result = Measurement()
         for seed in seeds {
             let run = try harness.run(scenario, seed: seed)
-            if run.wrong > 0.2 { result.wrongRuns += 1 }
+            if run.latchedWrong > 0.2 { result.wrongRuns += 1 }
+            if run.wrong > 0.2 { result.legacyWrongRuns += 1 }
+            print("TRACKING-SCENARIO|\(name)|seed=\(seed)|legacyWrongSeconds=\(run.wrong)|latchedWrongSeconds=\(run.latchedWrong)|longestLatchedWrongSeconds=\(run.longestLatchedWrong)|unionSeconds=\(run.unionTime)|endsOn=\(run.final)|legacyEndsOn=\(run.legacyFinal)")
             result.meanHold += run.hold / Double(seeds.count)
+            result.meanVisibleHold += run.holdVisible / Double(seeds.count)
             result.ends[run.final, default: 0] += 1
         }
         let ends = result.ends.sorted { $0.key < $1.key }.map { "\($0.key)=\($0.value)" }.joined(separator: ",")
-        print("TRACKING-SCENARIO|\(name)|wrongRuns=\(result.wrongRuns)/\(seeds.count)|meanHoldSeconds=\(r2(result.meanHold))|endsOn=\(ends)")
+        print("TRACKING-SCENARIO|\(name)|wrongRuns=\(result.wrongRuns)/\(seeds.count)|legacyWrongRuns=\(result.legacyWrongRuns)/\(seeds.count)|meanHoldSeconds=\(r2(result.meanHold))|meanHoldWhileVisibleSeconds=\(r2(result.meanVisibleHold))|endsOn=\(ends)")
         return result
     }
 
@@ -60,6 +65,26 @@ struct TrackingScenarioTests {
             #expect(result.probation == nil)
             probation = result.probation
         }
+    }
+
+    @Test func reachingNeighboursDuringMiss() throws {
+        // Target unchanged. It also fails on main's exact-zero rule; two box-only
+        // identity attempts did not solve it (#152), so it waits on face evidence.
+        let result = try measure("groupStill_reach_subjectMissed")
+        if TrackingScenarioOptions.wide { return }
+        withKnownIssue("Reach: a neighbour's extended box takes the lock during a subject miss; boxes alone have not solved it (#152)") {
+            #expect(result.wrongRuns == 0)
+        }
+    }
+    @Test func smallSidestepRebinds() throws {
+        let result = try measure("sidestepSmall_thenStill")
+        if TrackingScenarioOptions.wide { return }
+        #expect(result.allOnSubject)
+    }
+    @Test func largeSidestepCharacterisation() throws {
+        let result = try measure("sidestepLarge_thenStill")
+        if TrackingScenarioOptions.wide { return }
+        #expect(result.ends == ["hold": 8])
     }
 
     @Test func frontSameSlow() throws { try guardTarget("crossInFront_size1.00_v0.05", fraction: 0) }
@@ -112,4 +137,155 @@ struct TrackingScenarioTests {
         #expect(r.meanHold <= 0.3)
     }
     @Test func walkerPastRow() throws { try target("walkerPastRowOfFour_gap0.3", fraction: 0.25, stage: "L5") }
+
+    // Golden input digests: each one is the SHA-256 of every box the scenario
+    // feeds the detector at seed 40000, so a change to the tracking rules or
+    // the harness cannot quietly change what is being measured. They are not
+    // to be updated to make this test pass. A later rule change that moves
+    // them must regenerate them deliberately (run this test and copy the
+    // `TRACKING-INPUT-BASELINE` lines) and say why in its PR.
+    @Test func provenancePreservesInputBoxesAndLegacyMeasurements() throws {
+        if TrackingScenarioOptions.wide { return }
+        let harness = TrackingScenarios()
+        do {
+            let scenario = try #require(harness.scenarios().first { $0.name == "groupStill_reach_subjectMissed" })
+            let result = try harness.run(scenario, seed: 40000)
+            #expect(result.inputDigest == "7857750d79f11ce8c9cbccf8746290ca9581a4f08fe285eb8768c08cc79d0727", "groupStill_reach_subjectMissed")
+            #expect(result.wrong == 0.0)
+            #expect(result.legacyFinal == "subject")
+        }
+        do {
+            let scenario = try #require(harness.scenarios().first { $0.name == "sidestepSmall_thenStill" })
+            let result = try harness.run(scenario, seed: 40000)
+            #expect(result.inputDigest == "cddf87ff5371099ccd1bd1ffbbe4784b0884ed7e3f79e4597a26b98c6cd8b8bd", "sidestepSmall_thenStill")
+            #expect(result.wrong == 0.0)
+            #expect(result.legacyFinal == "subject")
+        }
+        do {
+            let scenario = try #require(harness.scenarios().first { $0.name == "sidestepLarge_thenStill" })
+            let result = try harness.run(scenario, seed: 40000)
+            #expect(result.inputDigest == "f308ec3d85e7d6454f25cce9b4ee25cf7d9f505f24510cb36c7a9faffa605364", "sidestepLarge_thenStill")
+            #expect(result.wrong == 0.0)
+            #expect(result.legacyFinal == "hold")
+        }
+        do {
+            let scenario = try #require(harness.scenarios().first { $0.name == "crossInFront_size1.00_v0.05" })
+            let result = try harness.run(scenario, seed: 40000)
+            #expect(result.inputDigest == "4b3806df65340e35b096bf170051c5a4a668e880f591c5b33b23c5a1ad074849", "crossInFront_size1.00_v0.05")
+            #expect(result.wrong == 0.0)
+            #expect(result.legacyFinal == "hold")
+        }
+        do {
+            let scenario = try #require(harness.scenarios().first { $0.name == "crossInFront_size1.00_v0.10" })
+            let result = try harness.run(scenario, seed: 40000)
+            #expect(result.inputDigest == "25af0ab563a83fc772641a112b39b2d006056992cf3e8ed8f844438ceed16383", "crossInFront_size1.00_v0.10")
+            #expect(result.wrong == 0.0)
+            #expect(result.legacyFinal == "subject")
+        }
+        do {
+            let scenario = try #require(harness.scenarios().first { $0.name == "crossInFront_size1.00_v0.25" })
+            let result = try harness.run(scenario, seed: 40000)
+            #expect(result.inputDigest == "302ab5d72605c56972837f3301fea7be4a06576ad9d51981d9f0ffe8fc110e37", "crossInFront_size1.00_v0.25")
+            #expect(result.wrong == 0.0)
+            #expect(result.legacyFinal == "subject")
+        }
+        do {
+            let scenario = try #require(harness.scenarios().first { $0.name == "crossInFront_size0.85_v0.05" })
+            let result = try harness.run(scenario, seed: 40000)
+            #expect(result.inputDigest == "05972b7e284c282bcfe727d0a8f13f19f44e76604c9f408e4f2138366c580bfe", "crossInFront_size0.85_v0.05")
+            #expect(result.wrong == 0.0)
+            #expect(result.legacyFinal == "hold")
+        }
+        do {
+            let scenario = try #require(harness.scenarios().first { $0.name == "crossInFront_size0.85_v0.10" })
+            let result = try harness.run(scenario, seed: 40000)
+            #expect(result.inputDigest == "f1d0ceb901a92d6a9816657c87c4e1102df0db2b5e4176f3a53be5f0b035c4c1", "crossInFront_size0.85_v0.10")
+            #expect(result.wrong == 0.0)
+            #expect(result.legacyFinal == "subject")
+        }
+        do {
+            let scenario = try #require(harness.scenarios().first { $0.name == "crossInFront_size0.85_v0.25" })
+            let result = try harness.run(scenario, seed: 40000)
+            #expect(result.inputDigest == "442cf33508fbd1db919099ba784f394e4c5a7d9759fa4750c9bcf49c17c9432f", "crossInFront_size0.85_v0.25")
+            #expect(result.wrong == 0.0)
+            #expect(result.legacyFinal == "subject")
+        }
+        do {
+            let scenario = try #require(harness.scenarios().first { $0.name == "crossBehind_v0.10" })
+            let result = try harness.run(scenario, seed: 40000)
+            #expect(result.inputDigest == "2d4485e06c3e1c412f94de8d6f33a16e62259149589f6e2d4d0c4586f8ccf64f", "crossBehind_v0.10")
+            #expect(result.wrong == 0.04)
+            #expect(result.legacyFinal == "subject")
+        }
+        do {
+            let scenario = try #require(harness.scenarios().first { $0.name == "crossBehind_v0.25" })
+            let result = try harness.run(scenario, seed: 40000)
+            #expect(result.inputDigest == "e89f0f63a7f591b0030590eeba2a89aee56ee8e635a0c054c217308be474fe66", "crossBehind_v0.25")
+            #expect(result.wrong == 0.0)
+            #expect(result.legacyFinal == "subject")
+        }
+        do {
+            let scenario = try #require(harness.scenarios().first { $0.name == "crossBothSeen_v0.10" })
+            let result = try harness.run(scenario, seed: 40000)
+            #expect(result.inputDigest == "ea35af690272697771a5a581dd5dd8c5b33a317284a025286f96493c612a3525", "crossBothSeen_v0.10")
+            #expect(result.wrong == 0.0)
+            #expect(result.legacyFinal == "subject")
+        }
+        do {
+            let scenario = try #require(harness.scenarios().first { $0.name == "crossMergedBox_v0.10" })
+            let result = try harness.run(scenario, seed: 40000)
+            #expect(result.inputDigest == "5b9e7d231fd389b20ecee4dae8232ec4b99c6033d76d600a8a048cd280a5490c", "crossMergedBox_v0.10")
+            #expect(result.wrong == 0.25999999999999995)
+            #expect(result.legacyFinal == "subject")
+        }
+        do {
+            let scenario = try #require(harness.scenarios().first { $0.name == "crossInFront_subjectWalking0.04" })
+            let result = try harness.run(scenario, seed: 40000)
+            #expect(result.inputDigest == "65696ca74ef5c2116f1f812fb5ba04e6a917525ac5fff0ab02e80e7b7344ab7d", "crossInFront_subjectWalking0.04")
+            #expect(result.wrong == 4.879999999999984)
+            #expect(result.legacyFinal == "hold")
+        }
+        do {
+            let scenario = try #require(harness.scenarios().first { $0.name == "groupGestures_spacing1.0bw" })
+            let result = try harness.run(scenario, seed: 40000)
+            #expect(result.inputDigest == "9e6263145fc1d395e6924f08321d08974cfdf373b9d4f9b557d61a170219b0b7", "groupGestures_spacing1.0bw")
+            #expect(result.wrong == 0.0)
+            #expect(result.legacyFinal == "subject")
+        }
+        do {
+            let scenario = try #require(harness.scenarios().first { $0.name == "groupGestures_spacing1.4bw" })
+            let result = try harness.run(scenario, seed: 40000)
+            #expect(result.inputDigest == "e71bcb40891e58849a44161e8cc4719c403b574c31bcc2c70b29edadad8d9793", "groupGestures_spacing1.4bw")
+            #expect(result.wrong == 0.0)
+            #expect(result.legacyFinal == "subject")
+        }
+        do {
+            let scenario = try #require(harness.scenarios().first { $0.name == "groupStill_subjectMissed0.4s_every5s" })
+            let result = try harness.run(scenario, seed: 40000)
+            #expect(result.inputDigest == "dd12dd4a71f01b227f1200d81553ec02c728641f3b1dc023afa337620edf67fc", "groupStill_subjectMissed0.4s_every5s")
+            #expect(result.wrong == 0.0)
+            #expect(result.legacyFinal == "subject")
+        }
+        do {
+            let scenario = try #require(harness.scenarios().first { $0.name == "walkerGap_v0.10_gap0.36_w0.070" })
+            let result = try harness.run(scenario, seed: 40000)
+            #expect(result.inputDigest == "64f329562a3e0fdcc985cc585b668d0136502a6c4bdfebddc50d132aa585f6f7", "walkerGap_v0.10_gap0.36_w0.070")
+            #expect(result.wrong == 0.0)
+            #expect(result.legacyFinal == "subject")
+        }
+        do {
+            let scenario = try #require(harness.scenarios().first { $0.name == "walkerGap_v0.15_gap0.20_w0.035" })
+            let result = try harness.run(scenario, seed: 40000)
+            #expect(result.inputDigest == "870039614a8a758855e4650dbb1cda3d112a57e9d9d587589d8a532e9363c947", "walkerGap_v0.15_gap0.20_w0.035")
+            #expect(result.wrong == 0.0)
+            #expect(result.legacyFinal == "subject")
+        }
+        do {
+            let scenario = try #require(harness.scenarios().first { $0.name == "walkerPastRowOfFour_gap0.3" })
+            let result = try harness.run(scenario, seed: 40000)
+            #expect(result.inputDigest == "1e7c1ee81716f2376cef83660909eb68424ae314706ae626d126447b1bbd2b34", "walkerPastRowOfFour_gap0.3")
+            #expect(result.wrong == 0.4000000000000001)
+            #expect(result.legacyFinal == "subject")
+        }
+    }
 }
