@@ -36,7 +36,8 @@ struct FreshOnlyComposeTests {
     private func picture(freshOnly: Bool, preset: ShotComposer.Config.ShotPreset, motion: FreshOnlyMotion,
                          fps: Double, detectionInterval: Int,
                          changePresetAtFrame: Int? = nil, composeOnCommand: Bool = false,
-                         zoomAtFrame: Int? = nil, composeWhileZoomMoves: Bool = false) throws -> [CropEngine.CropRect] {
+                         zoomAtFrame: Int? = nil, composeWhileZoomMoves: Bool = false,
+                         composeAfterBandExit: Bool = true) throws -> [CropEngine.CropRect] {
         let composer = ShotComposer()
         composer.config.cinematicFormat = .stage
         composer.config.shotPreset = preset
@@ -76,7 +77,8 @@ struct FreshOnlyComposeTests {
             let ruleComposes = rule.composes(
                 freshDetection: fresh,
                 framingChangePending: composeOnCommand && composer.framingChangePending,
-                zoomHeight: composeWhileZoomMoves ? engine.adjustedHeight : nil)
+                zoomHeight: composeWhileZoomMoves ? engine.adjustedHeight : nil,
+                steadyBandActive: composeAfterBandExit && composer.steadyBand != nil)
             let composes = !freshOnly || ruleComposes
             if fresh {
                 latestTime = now
@@ -180,6 +182,26 @@ struct FreshOnlyComposeTests {
         // The move really happened.
         #expect(today[today.count - 1].size.height < today[100].size.height - 0.01)
         let fixed = largestDifference(today, variant)
+        #expect(fixed.value < 1e-9, "largest crop difference \(fixed.value) at frame \(fixed.frame)")
+    }
+
+    /// Since the walking lead (main, November 2026): on the detection that
+    /// confirms a Steady Follow band exit the composer emits the target
+    /// without the lead, and adds the lead on its next call. Composing on
+    /// every frame, that call is the next frame. Without the rule's fourth
+    /// trigger it would wait for the next detection. This records how far
+    /// apart the two pictures get, and shows the trigger removes it.
+    @Test func aBandExitNeedsComposingOnTheNextFrame() throws {
+        let today = try picture(freshOnly: false, preset: .waistUp, motion: .stopAndGo, fps: 50, detectionInterval: 2)
+        let without = try picture(freshOnly: true, preset: .waistUp, motion: .stopAndGo, fps: 50, detectionInterval: 2,
+                                  composeAfterBandExit: false)
+        let with = try picture(freshOnly: true, preset: .waistUp, motion: .stopAndGo, fps: 50, detectionInterval: 2)
+        let differing = zip(today, without).enumerated().filter { $0.element.0 != $0.element.1 }.map(\.offset)
+        let worst = largestDifference(today, without)
+        print("FRESH-ONLY-GATE band exit: differing frames=\(differing.count) first=\(differing.first ?? -1) last=\(differing.last ?? -1) largest=\(worst.value) at=\(worst.frame)")
+        // The difference is real and small.
+        #expect(worst.value > 0 && worst.value < 0.01)
+        let fixed = largestDifference(today, with)
         #expect(fixed.value < 1e-9, "largest crop difference \(fixed.value) at frame \(fixed.frame)")
     }
 }

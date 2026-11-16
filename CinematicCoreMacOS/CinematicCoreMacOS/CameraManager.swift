@@ -2737,7 +2737,8 @@ final class CameraManager: NSObject, ObservableObject {
                     let composes = composeRule.composes(
                         freshDetection: detectionIsFresh,
                         framingChangePending: shotComposer.framingChangePending,
-                        zoomHeight: cropEngine.adjustedHeight)
+                        zoomHeight: cropEngine.adjustedHeight,
+                        steadyBandActive: shotComposer.steadyBand != nil)
                     if let primaryPerson {
                         if composes, let idealCrop = shotComposer.compose(
                             person: primaryPerson,
