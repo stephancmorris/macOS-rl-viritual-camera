@@ -706,6 +706,8 @@ final class ShotComposer: ObservableObject {
         lockAmbiguityOpen: Bool = false
     ) -> TickOutcome {
         if isFresh { fallbackObservationID &+= 1 }
+        // A new ambiguous moment: the detector's window has just opened.
+        let ambiguityBegan = lockAmbiguityOpen && !lastLockAmbiguityOpen
         lastLockAmbiguityOpen = lockAmbiguityOpen
         lastTickTimestamp = timestamp
         let frameID = observationID ?? fallbackObservationID
@@ -816,6 +818,8 @@ final class ShotComposer: ObservableObject {
                 // re-acquisition to ever work after a wide-pull.
                 if lockAmbiguityOpen, identityVerifyOpenedAt == nil {
                     openIdentityVerify(at: timestamp, targetID: targetID)
+                } else if ambiguityBegan, identityVerifyOpenedAt != nil {
+                    restartIdentityVerify(at: timestamp, targetID: targetID)
                 }
                 if isFresh, identityVerifyOpenedAt != nil {
                     scheduleIdentityEvidence(for: targetID, person: lockedDetection,
@@ -954,6 +958,20 @@ final class ShotComposer: ObservableObject {
         identityMismatchStreak = 0
         identityWouldVetoLogged = false
         Self.logger.info("IDENTITY verify-open target=\(String(targetID.uuidString.prefix(8)), privacy: .public)")
+    }
+
+    /// A new ambiguous moment while an earlier window is still undecided (for
+    /// example the face was turned away). Without this, a window past its cap
+    /// would leave a later swap with only the 0.4 s refresh scans. The scan
+    /// cadence and cap restart, and the identity may have changed again, so
+    /// the streaks start afresh and another shadow veto may be recorded.
+    private func restartIdentityVerify(at time: TimeInterval, targetID: UUID) {
+        identityVerifyOpenedAt = time
+        identityVerifyDetections = 0
+        identityMatchStreak = 0
+        identityMismatchStreak = 0
+        identityWouldVetoLogged = false
+        Self.logger.info("IDENTITY verify-restart target=\(String(targetID.uuidString.prefix(8)), privacy: .public)")
     }
 
     private func closeIdentityVerify() {

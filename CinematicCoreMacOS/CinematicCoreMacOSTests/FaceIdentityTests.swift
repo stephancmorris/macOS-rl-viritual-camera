@@ -173,6 +173,51 @@ struct FaceIdentityTests {
         #expect(late == [false, false, false])
     }
 
+    /// The first window ran out without a verdict (no usable face). A new
+    /// ambiguous moment later restarts its scans.
+    @Test func newAmbiguityRestartsAStalledWindow() {
+        let f = Fixture()
+        f.tick(face: false, ambiguous: true)
+        let pastCap = f.time + ShotComposer.identityVerifyMaxDuration + 0.1
+        #expect(!f.composer.shouldRunIdentityVerifyScan(now: pastCap))
+        f.time = pastCap
+        f.tick(face: false)
+        #expect(f.composer.identityVerifyOpenForTesting)
+        f.tick(face: false, ambiguous: true)
+        #expect(f.composer.shouldRunIdentityVerifyScan(now: f.time))
+    }
+
+    /// A second swap in the same tracking stretch records its own shadow
+    /// veto; continued mismatches within one moment do not.
+    @Test func aRestartAllowsAnotherShadowVeto() {
+        let f = Fixture()
+        f.tick(ambiguous: true)
+        for _ in 0..<3 { f.answer(.strongMismatch) }
+        #expect(f.composer.identityWouldVetoCount == 1)
+        for _ in 0..<3 { f.answer(.strongMismatch) }
+        #expect(f.composer.identityWouldVetoCount == 1)
+        f.tick(ambiguous: true)
+        f.answer(.strongMismatch)
+        f.answer(.strongMismatch)
+        #expect(f.composer.identityWouldVetoCount == 1)
+        f.answer(.strongMismatch)
+        #expect(f.composer.identityWouldVetoCount == 2)
+    }
+
+    /// A new ambiguous moment needs three fresh matches to verify.
+    @Test func aRestartNeedsFreshMatches() {
+        let f = Fixture()
+        f.tick(ambiguous: true)
+        f.answer(.strongMatch)
+        f.answer(.strongMatch)
+        f.tick(ambiguous: true)
+        f.answer(.strongMatch)
+        #expect(f.composer.identityVerifyOpenForTesting)
+        f.answer(.strongMatch)
+        f.answer(.strongMatch)
+        #expect(!f.composer.identityVerifyOpenForTesting)
+    }
+
     @Test func closedWindowAsksForNoScans() {
         let f = Fixture()
         f.tick(face: false)
