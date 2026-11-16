@@ -398,10 +398,30 @@ final class ShotComposer: ObservableObject {
     private(set) var lastIdentityWouldVetoReasons: PersonDetector.LockAmbiguity?
     /// Shadow vetoes recorded (diagnostics and tests).
     private(set) var identityWouldVetoCount = 0
+    /// Tracks put on hold by a live identity veto. They cannot return on box
+    /// evidence, and recovery binds them only on a strong face decision.
+    /// Cleared on any recovery bind, a new lock, or unlock.
+    private(set) var identityVetoedIDs = Set<UUID>()
+    /// Wall-clock time of the latest `tick`, for transitions made outside it.
+    private var lastTickTimestamp: TimeInterval = 0
+    /// Whether face identity acts (live veto, strong-match recovery). Off in
+    /// every build until `DeveloperFlags.identityVetoEnabled` is turned on;
+    /// tests and the harness may override it in Debug.
+    private var faceIdentityLive: Bool {
+        #if DEBUG
+        return identityVetoEnabledForTesting ?? DeveloperFlags.identityVetoEnabled
+        #else
+        return DeveloperFlags.identityVetoEnabled
+        #endif
+    }
     private var identityEmbedder: VisionFeaturePrintEmbedder {
         VisionFeaturePrintEmbedder(extractor: signatureExtractor)
     }
     #if DEBUG
+    var identityVetoEnabledForTesting: Bool?
+    /// When set, recovery scoring requests go here instead of to Vision; the
+    /// caller later answers each through `finishReacquisitionScoring`.
+    var reacquisitionSchedulerForTesting: ((ReacquisitionRequest) -> Void)?
     /// When set, evidence requests go here instead of to Vision; the caller
     /// later answers each through `finishIdentityEvidence`.
     var identityEvidenceSchedulerForTesting: ((IdentityEvidenceRequest) -> Void)?
@@ -505,7 +525,13 @@ final class ShotComposer: ObservableObject {
     #endif
     private var recoveryVisibleIDs = Set<UUID>()
     private var recoveryVisibilityRevision: UInt64 = 0
-    private var pendingReacquisition: UUID?
+    /// A recovery decision queued for the next tick. `strong` says it came
+    /// from strong-tier face evidence; the two are set and cleared together.
+    private struct PendingReacquisition {
+        let id: UUID
+        let strong: Bool
+    }
+    private var pendingReacquisition: PendingReacquisition?
     private var lockGeneration: UInt64 = 0
     /// TEST-ONLY: token captured by an asynchronous identity job.
     var identityGenerationForTesting: UInt64 { lockGeneration }
@@ -555,8 +581,14 @@ final class ShotComposer: ObservableObject {
               recoveryVisibilityRevision == visibilityRevision else { return false }
         switch lockState {
         case .hold, .wideWaiting:
-            pendingReacquisition = reacquisitionEvidence.consider(
-                observationID: observationID, scores: scores)
+            if faceIdentityLive {
+                let decision = reacquisitionEvidence.decide(observationID: observationID, scores: scores,
+                                                            strong: identityEmbedder.thresholds)
+                pendingReacquisition = decision.map { PendingReacquisition(id: $0.id, strong: $0.strong) }
+            } else {
+                pendingReacquisition = reacquisitionEvidence.consider(observationID: observationID, scores: scores)
+                    .map { PendingReacquisition(id: $0, strong: false) }
+            }
             return true
         default: return false
         }
@@ -698,6 +730,7 @@ final class ShotComposer: ObservableObject {
         // A new ambiguous moment: the detector's window has just opened.
         let ambiguityBegan = lockAmbiguityOpen && !lastLockAmbiguityOpen
         lastLockAmbiguityOpen = lockAmbiguityOpen
+        lastTickTimestamp = timestamp
         let frameID = observationID ?? fallbackObservationID
         let sampleTime = observationTimestamp ?? timestamp
         let isRecovering: Bool = {
@@ -725,17 +758,21 @@ final class ShotComposer: ObservableObject {
         // Drain any async re-acquisition decision queued from a prior frame's
         // background task. Doing this first keeps all state transitions
         // visible in this single switch.
-        if let candidateID = pendingReacquisition {
+        if let decision = pendingReacquisition {
             pendingReacquisition = nil
+            let candidateID = decision.id
+            let strongDecision = decision.strong
             let gallery: FaceSignatureGallery?
             switch lockState {
             case .hold(_, let stored, _), .wideWaiting(let stored): gallery = stored
             default: gallery = nil
             }
-            if let gallery, !excludedFromReacquisition.contains(candidateID),
+            let blocked = excludedFromReacquisition.contains(candidateID) || identityVetoedIDs.contains(candidateID)
+            if let gallery, !blocked || strongDecision,
                detections.contains(where: { $0.id == candidateID }) {
                 lockState = .tracking(targetID: candidateID, gallery: gallery)
                 activeTargetID = candidateID
+                identityVetoedIDs.removeAll()
                 invalidateIdentityWork()
                 enterSteadyFollowing()
                 return .resumeTracking
@@ -852,7 +889,7 @@ final class ShotComposer: ObservableObject {
         case .hold(let targetID, let gallery, let sinceTime):
             // If the subject reappears within the hold window, snap back
             // to tracking and resume framing.
-            if detections.contains(where: { $0.id == targetID }) {
+            if !identityVetoedIDs.contains(targetID), detections.contains(where: { $0.id == targetID }) {
                 Self.logger.info("LOCK-STATE old=hold new=tracking reason=subject_returned")
                 lockState = .tracking(targetID: targetID, gallery: gallery)
                 return .noChange
@@ -910,6 +947,37 @@ final class ShotComposer: ObservableObject {
     /// The captured landmark ratios are also snapshotted into the signature
     /// at the same wall-clock moment so a gallery entry carries *both*
     /// signals captured from the same frame.
+    /// A live identity veto: the tracked person's face is strongly not the
+    /// subject's. Hold the shot, and stop the detector following that track.
+    /// Face evidence never switches Program to another person here; only
+    /// recovery from hold or wide can bind someone, under its own rules.
+    private func vetoLock(_ targetID: UUID) {
+        guard case .tracking(let current, let gallery) = lockState, current == targetID else { return }
+        identityVetoedIDs.insert(targetID)
+        // The vetoed track stays in view; it must stop reading as the subject.
+        if activeTargetID != nil { activeTargetID = nil }
+        Self.logger.info("LOCK-STATE old=tracking new=hold reason=identity_veto target=\(String(targetID.uuidString.prefix(8)), privacy: .public)")
+        invalidateIdentityWork()
+        lockState = .hold(targetID: targetID, gallery: gallery, sinceTime: lastTickTimestamp)
+        enterSteadyFollowing()
+    }
+
+    /// The track the detector should bind first. Nil while the lock is held
+    /// by an identity veto, so pass A stops following the vetoed track.
+    /// Also what the overlay and the world model report as the subject's
+    /// track: the vetoed person is still in view, but is not the subject.
+    var lockBindingTargetID: UUID? {
+        isIdentityVetoHeld ? nil : manualLockedTargetID
+    }
+
+    /// The lock is on hold because of an identity veto, with the vetoed
+    /// track possibly still in view. Everything else reads it as an ordinary
+    /// hold whose subject is out of sight.
+    var isIdentityVetoHeld: Bool {
+        if case .hold(let id, _, _) = lockState { return identityVetoedIDs.contains(id) }
+        return false
+    }
+
     /// Returns true when this detection should include the face request so
     /// the verify window gets evidence. Call once per scheduled detection.
     func shouldRunIdentityVerifyScan(now: TimeInterval) -> Bool {
@@ -1040,10 +1108,11 @@ final class ShotComposer: ObservableObject {
             identityWouldVetoLogged = true
             identityWouldVetoCount += 1
             lastIdentityWouldVetoReasons = identityVerifyReasons
-            Self.logger.info("IDENTITY would-veto target=\(target, privacy: .public) live=\(DeveloperFlags.identityVetoEnabled, privacy: .public) reasons=\(self.identityVerifyReasons.logDescription, privacy: .public)")
+            Self.logger.info("IDENTITY would-veto target=\(target, privacy: .public) live=\(self.faceIdentityLive, privacy: .public) reasons=\(self.identityVerifyReasons.logDescription, privacy: .public)")
             #if DEBUG
             identityWouldVetoForTesting?()
             #endif
+            if faceIdentityLive { vetoLock(request.targetID) }
         }
         return true
     }
@@ -1118,6 +1187,14 @@ final class ShotComposer: ObservableObject {
     /// the print + timing for the main-actor wrapper to apply.
     /// A captured signature crossing back to the main actor, with its best
     /// distance to the admission references (nil when there were none).
+    /// One recovery scoring batch, for the synchronous test scheduler.
+    nonisolated struct ReacquisitionRequest: Sendable {
+        let generation: UInt64
+        let visibilityRevision: UInt64
+        let observationID: UInt64
+        let candidates: [(id: UUID, isExcluded: Bool)]
+    }
+
     private nonisolated struct SignatureCaptureResult: Sendable {
         let embedding: IdentityEmbedding?
         let elapsedMs: Double
@@ -1246,7 +1323,14 @@ final class ShotComposer: ObservableObject {
         observationID: UInt64,
         excludedFromReacquisition: Set<UUID>
     ) {
-        let candidates = detections.filter { !excludedFromReacquisition.contains($0.id) && $0.faceBoundingBox != nil }
+        // While face identity is live, witnesses and vetoed tracks are scored
+        // too, marked excluded: they count as runners-up, and only a strong
+        // decision may bind them. Otherwise they are not scored at all.
+        let blockedIDs = excludedFromReacquisition.union(identityVetoedIDs)
+        let live = faceIdentityLive
+        let candidates = detections.filter {
+            $0.faceBoundingBox != nil && (live || !blockedIDs.contains($0.id))
+        }
         let visibleIDs = Set(candidates.map(\.id))
         if recoveryVisibleIDs != visibleIDs {
             recoveryVisibleIDs = visibleIDs
@@ -1254,6 +1338,17 @@ final class ShotComposer: ObservableObject {
             reacquisitionEvidence.reset()
             pendingReacquisition = nil
         }
+        #if DEBUG
+        if let scheduler = reacquisitionSchedulerForTesting {
+            guard !candidates.isEmpty else { reacquisitionEvidence.reset(); return }
+            guard !reacquisitionBatchInFlight else { return }
+            reacquisitionBatchInFlight = true
+            scheduler(ReacquisitionRequest(generation: lockGeneration, visibilityRevision: recoveryVisibilityRevision,
+                observationID: observationID,
+                candidates: candidates.map { ($0.id, live && blockedIDs.contains($0.id)) }))
+            return
+        }
+        #endif
         guard !candidates.isEmpty, let pixelBuffer else {
             reacquisitionEvidence.reset()
             return
@@ -1262,6 +1357,10 @@ final class ShotComposer: ObservableObject {
         reacquisitionBatchInFlight = true
         let generation = lockGeneration
         let visibilityRevision = recoveryVisibilityRevision
+        let excludedIDs = live ? blockedIDs : []
+        let bufferHeight = Double(CVPixelBufferGetHeight(pixelBuffer))
+        let faceHeights = Dictionary(candidates.map { ($0.id, Double($0.faceBoundingBox?.height ?? 0) * bufferHeight) },
+                                     uniquingKeysWith: { first, _ in first })
         let references = ReferencePrints(entries: gallery.entries.map { (print: $0.embedding, landmarks: $0.landmarkVector) })
         let bufferBox = SendablePixelBuffer(value: pixelBuffer)
         let extractor = signatureExtractor
@@ -1281,7 +1380,11 @@ final class ShotComposer: ObservableObject {
             scores = await Self.scoreReacquisitionCandidates(candidates, extractor: extractor,
                 bufferBox: bufferBox, references: references)
             #endif
-            let completedScores = scores
+            let completedScores = scores.map {
+                ReacquisitionScore(id: $0.id, printDistance: $0.printDistance,
+                                   landmarkDistance: $0.landmarkDistance, isExcluded: excludedIDs.contains($0.id),
+                                   faceHeightPixels: faceHeights[$0.id])
+            }
             guard let strong = self else { return }
             await MainActor.run {
                 _ = strong.finishReacquisitionScoring(
@@ -1440,6 +1543,7 @@ final class ShotComposer: ObservableObject {
     /// box) and cropping begins. Accuracy/consistency over instant lock.
     func lockTarget(_ targetID: UUID) {
         galleryUnverifiedSince = nil
+        identityVetoedIDs.removeAll()
         resetLead()
         lastSubjectHeight = nil
         visibleZoomHeight = nil
@@ -1464,6 +1568,7 @@ final class ShotComposer: ObservableObject {
     /// Operator pressed Return to Wide / unlock — discard all lock state.
     func clearManualLock() {
         Self.logger.info("LOCK-STATE old=\(self.lockStateName, privacy: .public) new=inactive reason=operator_release")
+        identityVetoedIDs.removeAll()
         lockState = .inactive
         invalidateIdentityWork()
         enterSteadyFollowing()

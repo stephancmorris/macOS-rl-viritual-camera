@@ -114,6 +114,42 @@ struct TrackingScenarioTests {
         }
     }
 
+    /// Face identity acting (veto, strong-match recovery), harness only.
+    /// Compared with today's face recovery at the same availability (faces
+    /// reach hold/wide recovery, identity not live) and with no faces at all.
+    /// Acting must never raise latched-wrong runs above either; at
+    /// availability 0 nothing changes.
+    @Test(arguments: [0.0, 0.3, 0.7])
+    func liveIdentityEvidence(availability: Double) throws {
+        let harness = TrackingScenarios()
+        for scenario in harness.scenarios() {
+            var wrong = [0, 0, 0], wrongSeconds = [0.0, 0.0, 0.0], hold = [0.0, 0.0, 0.0]
+            var ends: [[String: Int]] = [[:], [:], [:]]
+            for seed in seeds {
+                let runs = [
+                    try harness.run(scenario, seed: seed),
+                    try harness.run(scenario, seed: seed, faceAvailability: availability, faceRecovery: true),
+                    try harness.run(scenario, seed: seed, faceAvailability: availability, faceRecovery: true,
+                                    identityLive: true),
+                ]
+                if availability == 0 {
+                    #expect(runs[2].inputDigest == runs[0].inputDigest && runs[2].final == runs[0].final
+                            && runs[2].latchedWrong == runs[0].latchedWrong, "\(scenario.name) seed \(seed)")
+                }
+                for (i, run) in runs.enumerated() {
+                    if run.latchedWrong > 0.2 { wrong[i] += 1 }
+                    wrongSeconds[i] += run.latchedWrong / Double(seeds.count)
+                    hold[i] += run.holdVisible / Double(seeds.count)
+                    ends[i][run.final, default: 0] += 1
+                }
+            }
+            func list(_ e: [String: Int]) -> String { e.sorted { $0.key < $1.key }.map { "\($0.key)=\($0.value)" }.joined(separator: ",") }
+            print("TRACKING-LIVE|\(scenario.name)|availability=\(availability)|latchedWrongRuns=\(wrong[0])/\(wrong[1])/\(wrong[2])|latchedWrongSeconds=\(r2(wrongSeconds[0]))/\(r2(wrongSeconds[1]))/\(r2(wrongSeconds[2]))|holdWhileVisible=\(r2(hold[0]))/\(r2(hold[1]))/\(r2(hold[2]))|endsOn=\(list(ends[0]))/\(list(ends[1]))/\(list(ends[2]))")
+            if TrackingScenarioOptions.wide { continue }
+            #expect(wrong[2] <= wrong[0] && wrong[2] <= wrong[1], "\(scenario.name)")
+        }
+    }
+
     @Test func zeroFaceAvailabilityMakesNoRequests() throws {
         let harness = TrackingScenarios()
         for scenario in harness.scenarios() {

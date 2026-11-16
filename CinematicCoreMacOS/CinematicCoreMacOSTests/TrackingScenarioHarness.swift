@@ -196,18 +196,27 @@ final class ScenarioLoop {
     private var now = 0.0
     private var evidenceQueue: [(due: Double, request: IdentityEvidenceRequest, tier: IdentityTier)] = []
     static let identityLatency = 0.03
+    private var recoveryQueue: [(due: Double, request: ShotComposer.ReacquisitionRequest)] = []
+    /// Faces also reach hold/wide recovery scoring (today's face recovery).
+    /// Off, faces only feed the verify window.
+    let faceRecovery: Bool
+    /// The lock's current track. Face recovery can bind a different ID.
+    private(set) var currentLockID: UUID
     private(set) var identityRequests = 0
     /// The bound box's sources each time a shadow veto was recorded.
     private(set) var wouldVetoSources: [Set<Int>] = []
 
     init(preset: ShotComposer.Config.ShotPreset, feel: ShotComposer.Config.TuningPreset, first: CGRect, t: Double,
-         faceAvailability: Double = 0, faceSeed: UInt64 = 0) throws {
+         faceAvailability: Double = 0, faceSeed: UInt64 = 0, faceRecovery: Bool = false,
+         identityLive: Bool = false) throws {
+        self.faceRecovery = faceRecovery && faceAvailability > 0
         self.faceAvailability = faceAvailability
         faceRng = ProbeRng(faceSeed ^ 0xFACE)
         engine = try #require(CropEngine())
         detector.updateTracking(rectObservations: [VNHumanObservation(boundingBox: first)], poseObservations: [],
                                 faceObservations: [], timestamp: t)
         id = try #require(detector.detectedPersons.first?.id)
+        currentLockID = id
         composer.config.cinematicFormat = .stage
         composer.config.shotPreset = preset
         composer.config.apply(feel)
@@ -217,6 +226,12 @@ final class ScenarioLoop {
         composer.lockTarget(id)
         composer.forceTrackingForTesting(readyGallery: faceAvailability > 0)
         commands.setTrackingOwnership(true)
+        if identityLive { composer.identityVetoEnabledForTesting = true }
+        if self.faceRecovery {
+            composer.reacquisitionSchedulerForTesting = { [unowned self] request in
+                self.recoveryQueue.append((self.now + Self.identityLatency, request))
+            }
+        }
         if faceAvailability > 0 {
             composer.identityEvidenceSchedulerForTesting = { [unowned self] request in self.queueEvidence(request) }
             composer.identityWouldVetoForTesting = { [unowned self] in self.wouldVetoSources.append(self.lockedSources) }
@@ -236,15 +251,33 @@ final class ScenarioLoop {
                width: body.width * 0.4, height: body.height * 0.15)
     }
 
+    /// The source actors of a person's box in the latest observation.
+    private func sources(of personID: UUID) -> Set<Int>? {
+        guard let person = latest?.persons.first(where: { $0.id == personID }) else { return nil }
+        return lastDelivered.first(where: { $0.box == person.boundingBox })?.actors
+    }
+
     private func queueEvidence(_ request: IdentityEvidenceRequest) {
         identityRequests += 1
         let tier: IdentityTier = {
-            guard let person = latest?.persons.first(where: { $0.id == request.targetID }),
-                  let source = lastDelivered.first(where: { $0.box == person.boundingBox }) else { return .none }
-            if source.actors == [0] { return .strongMatch }
-            return source.actors.contains(0) ? .none : .strongMismatch
+            guard let actors = sources(of: request.targetID) else { return .none }
+            if actors == [0] { return .strongMatch }
+            return actors.contains(0) ? .none : .strongMismatch
         }()
         evidenceQueue.append((now + Self.identityLatency, request, tier))
+    }
+
+    /// Recovery scores graded the same way: the subject alone scores as a
+    /// strong match, anyone else as clearly different, a union as unknown.
+    private func recoveryScores(for request: ShotComposer.ReacquisitionRequest) -> [ShotComposer.ReacquisitionScore] {
+        request.candidates.map { candidate in
+            let actors = sources(of: candidate.id)
+            let distance: Float? = actors.map { $0 == [0] ? 0.10 : ($0.contains(0) ? nil : 0.80) } ?? nil
+            // The harness has no pixels; faces are taken as usable (above the 64 px gate).
+            return ShotComposer.ReacquisitionScore(id: candidate.id, printDistance: distance,
+                landmarkDistance: actors == [0] ? 0.01 : 0.05, isExcluded: candidate.isExcluded,
+                faceHeightPixels: 80)
+        }
     }
 
     /// world(t, roi) returns the boxes Vision reports for the frame captured at t.
@@ -260,6 +293,13 @@ final class ScenarioLoop {
             evidenceQueue.removeFirst()
             composer.finishIdentityEvidence(next.request, tier: next.tier)
         }
+        while let next = recoveryQueue.first, next.due <= t {
+            recoveryQueue.removeFirst()
+            composer.finishReacquisitionScoring(generation: next.request.generation,
+                visibilityRevision: next.request.visibilityRevision,
+                observationID: next.request.observationID, scores: recoveryScores(for: next.request))
+        }
+        if let lock = composer.manualLockedTargetID { currentLockID = lock }
         if let p = pending, p.done <= t {
             // PersonDetector.processFrame: updateTracking runs on the main actor when Vision returns,
             // stamped with the detection start time.
@@ -270,8 +310,8 @@ final class ScenarioLoop {
                                     poseObservations: [], faceObservations: faces, timestamp: p.capturedAt)
             lastDelivered = p.boxes
             reportedBoxes = p.boxes.map(\.box)
-            if detector.trackMotion(for: id)?.lastSeen == p.capturedAt,
-               let bound = detector.detectedPersons.first(where: { $0.id == id }) {
+            if detector.trackMotion(for: currentLockID)?.lastSeen == p.capturedAt,
+               let bound = detector.detectedPersons.first(where: { $0.id == currentLockID }) {
                 if let input = p.boxes.first(where: { $0.box == bound.boundingBox }) {
                     lockedSources = input.actors
                 } else { Issue.record("Fresh bound box has no input provenance") }
@@ -285,18 +325,26 @@ final class ScenarioLoop {
             counter &+= 1
             due = CameraManager.detectionSlotIsDue(eligibleFrameCount: counter, interval: 2)
         }
-        detector.lockedTargetID = composer.manualLockedTargetID
+        detector.lockedTargetID = composer.lockBindingTargetID
         if due {
             var roi: CGRect?
             if case .tracking = composer.lockState {
-                let motion = detector.trackMotion(for: id)
+                let motion = detector.trackMotion(for: currentLockID)
                 roi = CameraManager.lockedSearchRegion(box: roiBox ?? composer.currentTrackedBounds,
                                                        velocity: motion?.velocity ?? .zero,
                                                        elapsed: motion.map { t - $0.lastSeen } ?? 0)
             }
             inFlight = true
             seq &+= 1
-            let faces = faceAvailability > 0 && composer.shouldRunIdentityVerifyScan(now: t)
+            // Recovery scans are full-frame with faces; tracking adds faces on verify scans.
+            let recovering: Bool = {
+                switch composer.lockState {
+                case .hold, .wideWaiting: return true
+                default: return false
+                }
+            }()
+            let faces = faceAvailability > 0
+                && ((faceRecovery && recovering) || composer.shouldRunIdentityVerifyScan(now: t))
             pending = (t + visionLatency, t, seq, world(t, roi), faces)
         }
         var persons: [PersonDetector.DetectedPerson] = []
@@ -312,17 +360,22 @@ final class ScenarioLoop {
         } else { latest = nil }
         freshThisFrame = fresh
         if fresh {
-            if let sid = composer.manualLockedTargetID, let b = persons.first(where: { $0.id == sid })?.boundingBox {
+            // CameraManager.refreshSubjectROISeed
+            if let sid = composer.lockBindingTargetID, let b = persons.first(where: { $0.id == sid })?.boundingBox {
                 roiBox = b
             } else if composer.manualLockedTargetID == nil { roiBox = nil }
         }
-        lockedBox = persons.first(where: { $0.id == id })?.boundingBox
+        let wasVetoHeld = composer.isIdentityVetoHeld
+        lockedBox = persons.first(where: { $0.id == currentLockID })?.boundingBox
         ambiguityOpen = detector.lockAmbiguityOpen
         let outcome = composer.tick(detections: persons, timestamp: t, pixelBuffer: nil, isFresh: fresh,
                           observationID: obsID, observationTimestamp: obsT,
                           excludedFromReacquisition: detector.witnessedOtherIDs(),
                           lockAmbiguityOpen: ambiguityOpen,
                           lockAmbiguityReasons: detector.lockAmbiguityOpenReasons)
+        // CameraManager.reseedSubjectROIAfterVetoRecovery
+        if wasVetoHeld, case .resumeTracking = outcome, let bound = composer.manualLockedTargetID,
+           let b = persons.first(where: { $0.id == bound })?.boundingBox { roiBox = b }
         if commands.admitRecovery(outcome) {
             engine.endZoom()
             switch outcome {
@@ -354,7 +407,7 @@ final class ScenarioLoop {
             }
         } else if let lastTrackingCrop { engine.setTargetCrop(lastTrackingCrop) }
         if fresh, traceEnabled, let obsT {
-            let motion = detector.trackMotion(for: id)
+            let motion = detector.trackMotion(for: currentLockID)
             let state: String
             switch composer.lockState {
             case .tracking: state = "tracking"
@@ -400,7 +453,8 @@ struct TrackingScenarios {
         return i.isNull ? 0 : Double(i.width) / Double(min(a.width, b.width))
     }
 
-    func run(_ sc: Scenario, seed: UInt64, faceAvailability: Double = 0) throws -> (final: String, wrong: Double, hold: Double, holdVisible: Double, inputDigest: String, latchedWrong: Double, longestLatchedWrong: Double, unionTime: Double, legacyFinal: String, ambiguityShare: Double, identityRequests: Int, wouldVetoOnSubject: Int, wouldVetoOnOther: Int) {
+    func run(_ sc: Scenario, seed: UInt64, faceAvailability: Double = 0, faceRecovery: Bool = false,
+             identityLive: Bool = false) throws -> (final: String, wrong: Double, hold: Double, holdVisible: Double, inputDigest: String, latchedWrong: Double, longestLatchedWrong: Double, unionTime: Double, legacyFinal: String, ambiguityShare: Double, identityRequests: Int, wouldVetoOnSubject: Int, wouldVetoOnOther: Int) {
         let rng = ProbeRng(seed)
         let actors = sc.make(rng)
         func hidden(_ i: Int, _ e: Double) -> Bool {
@@ -415,7 +469,8 @@ struct TrackingScenarios {
             actors[0].present(e) && !hidden(0, e) && !actors[0].visionMiss(e)
         }
         let loop = try ScenarioLoop(preset: .waistUp, feel: .steadyFollow, first: box(actors[0], 0), t: t0,
-                                    faceAvailability: faceAvailability, faceSeed: seed)
+                                    faceAvailability: faceAvailability, faceSeed: seed,
+                                    faceRecovery: faceRecovery, identityLive: identityLive)
         loop.traceEnabled = TrackingScenarioOptions.trace && !TrackingScenarioOptions.wide
         var inputBytes = Data()
         func recordInputs(_ boxes: [CGRect], time: Double) {
