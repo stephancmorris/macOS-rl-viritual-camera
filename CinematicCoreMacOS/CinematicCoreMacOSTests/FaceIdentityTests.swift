@@ -199,6 +199,8 @@ struct FaceIdentityTests {
         for _ in 0..<3 { f.answer(.strongMismatch) }
         #expect(f.composer.identityWouldVetoCount == 1)
         f.tick(ambiguous: true)
+        // The check in flight across the restart is from before it: not counted.
+        #expect(!f.answer(.strongMismatch))
         f.answer(.strongMismatch)
         f.answer(.strongMismatch)
         #expect(f.composer.identityWouldVetoCount == 1)
@@ -213,11 +215,31 @@ struct FaceIdentityTests {
         f.answer(.strongMatch)
         f.answer(.strongMatch)
         f.tick(ambiguous: true)
+        // The check in flight across the restart is from before it: not counted.
+        #expect(!f.answer(.strongMatch))
+        f.answer(.strongMatch)
         f.answer(.strongMatch)
         #expect(f.composer.identityVerifyOpenForTesting)
         f.answer(.strongMatch)
-        f.answer(.strongMatch)
         #expect(!f.composer.identityVerifyOpenForTesting)
+    }
+
+    /// Evidence scheduled before a restart was observed before the new
+    /// ambiguous moment. It is refused, its slot is released, and the next
+    /// observation is scheduled under the new epoch.
+    @Test func aRestartRetiresEvidenceInFlight() throws {
+        let f = Fixture()
+        f.tick(ambiguous: true)
+        let before = try #require(f.requests.last)
+        f.tick()
+        f.tick(ambiguous: true)
+        #expect(f.requests.count == 1)
+        #expect(!f.composer.finishIdentityEvidence(before, tier: .strongMismatch))
+        f.tick()
+        let after = try #require(f.requests.last)
+        #expect(f.requests.count == 2)
+        #expect(after.verifyEpoch == before.verifyEpoch + 1)
+        #expect(f.composer.finishIdentityEvidence(after, tier: .strongMismatch))
     }
 
     // MARK: Shadow veto log
