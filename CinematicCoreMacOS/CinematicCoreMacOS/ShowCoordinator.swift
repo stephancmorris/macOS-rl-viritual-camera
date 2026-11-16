@@ -162,8 +162,10 @@ final class ShowCoordinator: ObservableObject {
          directorRunSheet: RunSheet? = nil, operatorModes: OperatorModeStore? = nil,
          workloadPolicyEnabled: Bool = DeveloperFlags.runtimeWorkloadPolicy,
          workloadCPUReading: (@Sendable () -> ProcessCPUClock.Reading)? = nil,
-         cameraDeviceSource: CameraManager.DeviceSource = .live) {
+         cameraDeviceSource: CameraManager.DeviceSource = .live,
+         directorCapabilities: DirectorCapabilities = .full) {
         self.cameraDeviceSource = cameraDeviceSource
+        self.directorCapabilities = directorCapabilities
         self.operatorModes = operatorModes ?? OperatorModeStore()
         self.workloadPolicy = workloadPolicyEnabled ? DegradePolicy() : nil
         if let workloadCPUReading { self.workloadCPU = ProcessCPUClock(read: workloadCPUReading) }
@@ -345,6 +347,8 @@ final class ShowCoordinator: ObservableObject {
 
     /// Optional, explicitly budgeted metadata storage; no implicit I/O defaults.
     private let initialDirectorShadowLog: DirectorShadowLog?
+    /// What the Director may do in this build (C-04). Tests may ask for less.
+    let directorCapabilities: DirectorCapabilities
     private let initialDirectorRunSheet: RunSheet?
     /// Read-only export access must not instantiate the lazy Director.
     var shadowLogForExport: DirectorShadowLog? { initialDirectorShadowLog }
@@ -362,6 +366,7 @@ final class ShowCoordinator: ObservableObject {
     private(set) lazy var director = DirectorController(
         show: self, clock: { [weak self] in self?.clock() ?? CACurrentMediaTime() },
         qualifiedLevels: { [weak self] in self?.qualifiedDirectorLevels ?? [] },
+        capabilities: directorCapabilities,
         shadowLog: initialDirectorShadowLog, runSheet: initialDirectorRunSheet)
 
     /// Start the Director's shadow when the flag allows it. Every launch is Manual.

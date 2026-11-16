@@ -24,6 +24,8 @@ final class DirectorBackupExecution {
     }
     private weak var show: ShowCoordinator?
     private weak var controller: DirectorController?
+    /// No controller, no capability: the effect paths fail closed.
+    private var capabilities: DirectorCapabilities { controller?.capabilities ?? .shadowOnly }
     private var configuration: Configuration?
     private var policy = BackupFallbackPolicy()
     private var fault: Fault?
@@ -71,7 +73,7 @@ final class DirectorBackupExecution {
     /// reservation afterward binds exactly that resulting paused authority.
     @discardableResult
     func sourceLoss(_ channel: ChannelID) -> Bool {
-        guard DeveloperFlags.allowDirectorAuto, let show, let controller,
+        guard capabilities.auto, let show, let controller,
               controller.isAttached, controller.authority.level == .backup, let configuration else { return false }
         guard channel == show.programChannel else {
             retire(for: .sourceLoss(channel))
@@ -99,7 +101,7 @@ final class DirectorBackupExecution {
     /// destination/admission faults still use their ordinary controller path.
     @discardableResult
     func routerStateChanged(_ state: ProgramRouter.State) -> Bool {
-        guard DeveloperFlags.allowDirectorAuto, let show, let controller,
+        guard capabilities.auto, let show, let controller,
               controller.isAttached, controller.authority.level == .backup, configuration != nil else { return false }
         switch state {
         case .holding:
@@ -123,7 +125,7 @@ final class DirectorBackupExecution {
     /// Called only by ShowCoordinator at its synchronous Take boundary. It
     /// consumes the matching permit before all remaining technical checks.
     func consume(_ permit: BackupFallbackPolicy.Permit, now: TimeInterval) -> ProgramRouter.HoldWindow? {
-        guard DeveloperFlags.allowDirectorAuto, let show, let controller, controller.isAttached, let configuration,
+        guard capabilities.auto, let show, let controller, controller.isAttached, let configuration,
               let window = show.router.holdWindow,
               let snapshot = snapshot(now: now, window: window),
               policy.consume(permit, snapshot: snapshot, now: now,
