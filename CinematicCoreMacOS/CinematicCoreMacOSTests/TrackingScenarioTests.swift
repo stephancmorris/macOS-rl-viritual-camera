@@ -153,6 +153,12 @@ struct TrackingScenarioTests {
     }
     @Test func walkerPastRow() throws { try target("walkerPastRowOfFour_gap0.3", fraction: 0.25, stage: "L5") }
 
+    // Golden input digests: each one is the SHA-256 of every box the scenario
+    // feeds the detector at seed 40000, so a change to the tracking rules or
+    // the harness cannot quietly change what is being measured. They are not
+    // to be updated to make this test pass. A later rule change that moves
+    // them must regenerate them deliberately (run this test and copy the
+    // `TRACKING-INPUT-BASELINE` lines) and say why in its PR.
     @Test func provenancePreservesInputBoxesAndLegacyMeasurements() throws {
         if TrackingScenarioOptions.wide { return }
         let harness = TrackingScenarios()
