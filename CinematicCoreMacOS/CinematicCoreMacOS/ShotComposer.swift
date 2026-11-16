@@ -960,8 +960,15 @@ final class ShotComposer: ObservableObject {
     /// The track the detector should bind first. Nil while the lock is held
     /// by an identity veto, so pass A stops following the vetoed track.
     var lockBindingTargetID: UUID? {
-        if case .hold(let id, _, _) = lockState, identityVetoedIDs.contains(id) { return nil }
-        return manualLockedTargetID
+        isIdentityVetoHeld ? nil : manualLockedTargetID
+    }
+
+    /// The lock is on hold because of an identity veto, with the vetoed
+    /// track possibly still in view. Everything else reads it as an ordinary
+    /// hold whose subject is out of sight.
+    var isIdentityVetoHeld: Bool {
+        if case .hold(let id, _, _) = lockState { return identityVetoedIDs.contains(id) }
+        return false
     }
 
     /// Returns true when this detection should include the face request so

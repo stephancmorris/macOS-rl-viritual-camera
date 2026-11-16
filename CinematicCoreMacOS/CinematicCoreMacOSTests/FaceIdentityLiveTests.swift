@@ -121,6 +121,90 @@ struct FaceIdentityLiveTests {
         #expect(f.composer.identityVetoedIDs.isEmpty)
     }
 
+    // MARK: What a vetoed hold reports
+
+    /// A camera whose composer is driven the way `processFrame` drives it:
+    /// refresh the ROI seed, tick, then re-seed after a veto recovery.
+    @MainActor private final class CameraFixture {
+        let camera = TestHardware.makeCamera()
+        var composer: ShotComposer { camera.shotComposer }
+        let subject = UUID()
+        let other = UUID()
+        var evidence: [IdentityEvidenceRequest] = []
+        var recovery: [ShotComposer.ReacquisitionRequest] = []
+        var time = 1000.0
+        var observation: UInt64 = 0
+
+        init() {
+            composer.identityVetoEnabledForTesting = true
+            composer.lockTarget(subject)
+            composer.forceTrackingForTesting(readyGallery: true)
+            composer.identityEvidenceSchedulerForTesting = { [unowned self] in self.evidence.append($0) }
+            composer.reacquisitionSchedulerForTesting = { [unowned self] in self.recovery.append($0) }
+        }
+
+        static func box(x: Double) -> CGRect { CGRect(x: x, y: 0.25, width: 0.07, height: 0.30) }
+
+        @discardableResult
+        func tick(_ people: [(id: UUID, x: Double)], ambiguous: Bool = false) -> ShotComposer.TickOutcome {
+            time += 0.04
+            observation += 1
+            let persons = people.map {
+                PersonDetector.DetectedPerson(id: $0.id, boundingBox: Self.box(x: $0.x), confidence: 1,
+                    timestamp: time, poseKeypoints: nil,
+                    faceBoundingBox: CGRect(x: $0.x + 0.02, y: 0.48, width: 0.03, height: 0.04),
+                    faceLandmarkRatios: nil)
+            }
+            camera.refreshSubjectROISeed(from: persons)
+            let wasVetoHeld = composer.isIdentityVetoHeld
+            let outcome = composer.tick(detections: persons, timestamp: time, pixelBuffer: nil,
+                                        observationID: observation, observationTimestamp: time,
+                                        lockAmbiguityOpen: ambiguous)
+            camera.reseedSubjectROIAfterVetoRecovery(wasVetoHeld: wasVetoHeld, outcome: outcome, persons: persons)
+            _ = composer.primaryPerson(from: persons)
+            return outcome
+        }
+
+        /// Three strong mismatches on the tracked subject at `x`.
+        func veto(x: Double) {
+            tick([(subject, x)], ambiguous: true)
+            for _ in 0..<3 {
+                guard let request = evidence.last else { Issue.record("No identity request"); return }
+                composer.finishIdentityEvidence(request, tier: .strongMismatch)
+                tick([(subject, x)])
+            }
+        }
+    }
+
+    /// Not fixed in the first review: the seed kept following the vetoed
+    /// track, so the first ROI scan after recovery could aim at that person.
+    @Test func roiSeedLeavesTheVetoedTrackAndFollowsTheRecoveryBind() {
+        let f = CameraFixture()
+        f.tick([(f.subject, 0.30)])
+        #expect(f.camera.subjectROISeedForTesting == CameraFixture.box(x: 0.30))
+        f.veto(x: 0.30)
+        #expect(f.composer.isIdentityVetoHeld)
+        // The vetoed person walks on; the real subject appears elsewhere.
+        var outcome = f.tick([(f.subject, 0.50), (f.other, 0.70)])
+        #expect(f.camera.subjectROISeedForTesting == CameraFixture.box(x: 0.30))
+        for _ in 0..<4 {
+            guard case .noChange = outcome, let request = f.recovery.last else { break }
+            let scores = request.candidates.map {
+                ShotComposer.ReacquisitionScore(id: $0.id, printDistance: $0.id == f.other ? 0.10 : 0.80,
+                    landmarkDistance: 0.01, isExcluded: $0.isExcluded, faceHeightPixels: 80)
+            }
+            f.composer.finishReacquisitionScoring(generation: request.generation,
+                visibilityRevision: request.visibilityRevision, observationID: request.observationID, scores: scores)
+            outcome = f.tick([(f.subject, 0.50), (f.other, 0.70)])
+        }
+        guard case .resumeTracking = outcome else {
+            Issue.record("Recovery did not bind the other track")
+            return
+        }
+        #expect(f.composer.manualLockedTargetID == f.other)
+        #expect(f.camera.subjectROISeedForTesting == CameraFixture.box(x: 0.70))
+    }
+
     // MARK: Strong-match recovery
 
     /// A witness's track can carry the subject after an ID swap. A strong

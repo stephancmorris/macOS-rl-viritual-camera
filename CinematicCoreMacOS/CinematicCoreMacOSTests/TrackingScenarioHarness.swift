@@ -360,10 +360,12 @@ final class ScenarioLoop {
         } else { latest = nil }
         freshThisFrame = fresh
         if fresh {
-            if let sid = composer.manualLockedTargetID, let b = persons.first(where: { $0.id == sid })?.boundingBox {
+            // CameraManager.refreshSubjectROISeed
+            if let sid = composer.lockBindingTargetID, let b = persons.first(where: { $0.id == sid })?.boundingBox {
                 roiBox = b
             } else if composer.manualLockedTargetID == nil { roiBox = nil }
         }
+        let wasVetoHeld = composer.isIdentityVetoHeld
         lockedBox = persons.first(where: { $0.id == currentLockID })?.boundingBox
         ambiguityOpen = detector.lockAmbiguityOpen
         let outcome = composer.tick(detections: persons, timestamp: t, pixelBuffer: nil, isFresh: fresh,
@@ -371,6 +373,9 @@ final class ScenarioLoop {
                           excludedFromReacquisition: detector.witnessedOtherIDs(),
                           lockAmbiguityOpen: ambiguityOpen,
                           lockAmbiguityReasons: detector.lockAmbiguityOpenReasons)
+        // CameraManager.reseedSubjectROIAfterVetoRecovery
+        if wasVetoHeld, case .resumeTracking = outcome, let bound = composer.manualLockedTargetID,
+           let b = persons.first(where: { $0.id == bound })?.boundingBox { roiBox = b }
         if commands.admitRecovery(outcome) {
             engine.endZoom()
             switch outcome {
