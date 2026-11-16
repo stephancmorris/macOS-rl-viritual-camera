@@ -142,9 +142,9 @@ final class ShotComposer: ObservableObject {
     /// @Published but written compare-before-write only (transition publish).
     @Published private(set) var hasActiveTarget: Bool = false
 
-    /// The most recently computed crop. Plain per-frame storage — logic
-    /// readers (training recorder) read this synchronously; UI reads the
-    /// 15 Hz `displayedComputedCrop` mirror instead.
+    /// Most recent raw, unled composition before hold adjustment, including
+    /// computations that emit no new target. This is not the camera target.
+    /// Logic reads it synchronously; UI uses the 15 Hz `displayedComputedCrop` mirror.
     private(set) var currentComputedCrop: CropEngine.CropRect?
 
     /// The tighter subject box used to derive the visible program crop.
@@ -249,17 +249,34 @@ final class ShotComposer: ObservableObject {
     /// domain so their feel does not change with camera/detection cadence.
     private var bandExitStartedAt: TimeInterval?
     private var bandExitLastObservationAt: TimeInterval?
-    private var settleStartedAt: TimeInterval?
-    private var settleLastObservationAt: TimeInterval?
-    /// Position the settle detector is measuring dwell around. Position-based
-    /// settling (not velocity): the Vision bbox center jitters a few tenths of
-    /// a percent per frame even for a perfectly still subject, which reads as
-    /// a nonzero velocity EWMA forever — so dwell-in-a-radius is the signal.
-    private var settleAnchor: CGPoint?
+    /// Fresh capture centres used to compare the older and newer half means.
+    private var settleWindow: [(time: TimeInterval, center: CGPoint)] = []
+    private static let walkerLeadTime: TimeInterval = 0.15
+    private var leadEvidenceIsTimed = false
+    private var leadSpeed: CGFloat = 0
+    private var leadLastX: CGFloat?
+    private var leadLastTime: TimeInterval?
+
+    private func resetLead() {
+        leadSpeed = 0
+        leadLastX = nil
+        leadLastTime = nil
+    }
+
+    private func leading(_ crop: CropEngine.CropRect) -> CropEngine.CropRect {
+        guard config.shotPreset != .wide else { return crop }
+        let ramp = min(1, max(0, (abs(leadSpeed) - 0.03) / 0.03))
+        let gain = ramp * ramp * (3 - 2 * ramp)
+        let limit = crop.size.width * 0.25
+        let shift = min(limit, max(-limit, leadSpeed * Self.walkerLeadTime * gain))
+        var result = crop
+        result.origin.x += shift
+        return clampCropToFrame(result)
+    }
 
     /// Confirmation periods preserve the former two- and twelve-frame feel at
     /// the 50 fps show standard without making slower input look stickier.
-    private static let bandExitConfirmation: TimeInterval = 2.0 / 50.0
+    private static let bandExitConfirmation: TimeInterval = 0.030
     private static let settleConfirmation: TimeInterval = 12.0 / 50.0
     /// A long gap means the camera has no continuous evidence of a settled or
     /// out-of-band subject. 150 ms admits 25/50/60 fps sources while rejecting
@@ -280,12 +297,10 @@ final class ShotComposer: ObservableObject {
     /// reset for the Steady Following machine (reset / lock-loss / mode change),
     /// and safe to call per frame from the legacy gate (compare-before-write).
     private func enterSteadyFollowing() {
+        settleWindow.removeAll(keepingCapacity: true)
         steadyState = .following
         bandExitStartedAt = nil
         bandExitLastObservationAt = nil
-        settleStartedAt = nil
-        settleLastObservationAt = nil
-        settleAnchor = nil
         if steadyBand != nil { steadyBand = nil }
     }
 
@@ -295,9 +310,6 @@ final class ShotComposer: ObservableObject {
         steadyState = .holding
         bandExitStartedAt = nil
         bandExitLastObservationAt = nil
-        settleStartedAt = nil
-        settleLastObservationAt = nil
-        settleAnchor = nil
         let band = SteadyBand(
             centerX: center.x,
             width: config.steadyBandWidth * min(max(programCropWidth, 0), 1)
@@ -334,6 +346,104 @@ final class ShotComposer: ObservableObject {
     /// Whether a signature capture is currently in flight. Prevents
     /// multiple concurrent extracts queueing up on a slow Vision call.
     private var signatureCaptureInFlight: Bool = false
+
+    /// Set when the detector reported lock-identity ambiguity while tracking:
+    /// the lock may have swapped people, so the next capture must resemble
+    /// the acquisition anchors before the gallery accepts anything else.
+    private var galleryUnverifiedSince: TimeInterval?
+    /// The detector's ambiguity flag from the latest `tick`. A capture that
+    /// completes while it is set is discarded.
+    private var lastLockAmbiguityOpen = false
+    /// The detector's reasons for that flag, from the latest `tick`.
+    private var lastLockAmbiguityReasons: PersonDetector.LockAmbiguity = []
+    /// Captures refused by the admission check (diagnostics and tests).
+    private(set) var galleryRejectionCount = 0
+
+    // MARK: Identity verify window
+    //
+    // After an ambiguous moment, check the locked person's face against the
+    // gallery while tracking. Three consecutive strong matches verify the
+    // lock; three consecutive strong mismatches would veto it. In this phase
+    // the veto is shadow only: it is logged and counted, never acted on.
+
+    /// Every `identityVerifyCadence`-th detection while the window is open
+    /// upgrades to a face-including ROI scan, for at most
+    /// `identityVerifyMaxDuration`; after that the 0.4 s gallery-refresh scans
+    /// keep supplying evidence.
+    static let identityVerifyCadence = 3
+    static let identityVerifyMaxDuration: TimeInterval = 3.0
+    /// While the detector's ambiguity stays open and the window has no
+    /// verdict, the scan burst starts again this long after it last started.
+    /// For an undecided window, with the 3 s cap, this bounds verify scans to
+    /// half the time: about one detection in six on average. A window that
+    /// keeps verifying closes and reopens on the next ambiguous tick with a
+    /// fresh burst, so a crowded scene can reach about one detection in three;
+    /// a soak test should expect that.
+    static let identityVerifyRearmInterval: TimeInterval = 6.0
+    /// Consecutive observations needed to verify or (would-)veto.
+    static let identityConsecutive = 3
+    /// Wall-clock time the window opened; nil while closed.
+    private var identityVerifyOpenedAt: TimeInterval?
+    private var identityVerifyDetections = 0
+    private var identityEvidenceInFlight = false
+    private var lastIdentityObservationID: UInt64?
+    private var identityMatchStreak = 0
+    private var identityMismatchStreak = 0
+    private var identityWouldVetoLogged = false
+    /// Moves on at every restart; evidence scheduled under an earlier epoch is refused.
+    private var identityVerifyEpoch: UInt64 = 0
+    /// The detector's ambiguity reasons seen since the window opened or restarted.
+    private var identityVerifyReasons: PersonDetector.LockAmbiguity = []
+    /// The ambiguity reasons behind the latest shadow veto (diagnostics and tests).
+    private(set) var lastIdentityWouldVetoReasons: PersonDetector.LockAmbiguity?
+    /// Shadow vetoes recorded (diagnostics and tests).
+    private(set) var identityWouldVetoCount = 0
+    /// Tracks put on hold by a live identity veto. They cannot return on box
+    /// evidence, and recovery binds them only on a strong face decision.
+    /// Cleared on any recovery bind, a new lock, or unlock.
+    private(set) var identityVetoedIDs = Set<UUID>()
+    /// Wall-clock time of the latest `tick`, for transitions made outside it.
+    private var lastTickTimestamp: TimeInterval = 0
+    /// Whether face identity acts (live veto, strong-match recovery). Off in
+    /// every build until `DeveloperFlags.identityVetoEnabled` is turned on;
+    /// tests and the harness may override it in Debug.
+    private var faceIdentityLive: Bool {
+        #if DEBUG
+        return identityVetoEnabledForTesting ?? DeveloperFlags.identityVetoEnabled
+        #else
+        return DeveloperFlags.identityVetoEnabled
+        #endif
+    }
+    private var identityEmbedder: VisionFeaturePrintEmbedder {
+        VisionFeaturePrintEmbedder(extractor: signatureExtractor)
+    }
+    #if DEBUG
+    var identityVetoEnabledForTesting: Bool?
+    /// When set, recovery scoring requests go here instead of to Vision; the
+    /// caller later answers each through `finishReacquisitionScoring`.
+    var reacquisitionSchedulerForTesting: ((ReacquisitionRequest) -> Void)?
+    /// When set, evidence requests go here instead of to Vision; the caller
+    /// later answers each through `finishIdentityEvidence`.
+    var identityEvidenceSchedulerForTesting: ((IdentityEvidenceRequest) -> Void)?
+    /// Called when a shadow veto is recorded.
+    var identityWouldVetoForTesting: (() -> Void)?
+    var identityVerifyOpenForTesting: Bool { identityVerifyOpenedAt != nil }
+    var identityVerifyEpochForTesting: UInt64 { identityVerifyEpoch }
+    #endif
+    #if DEBUG
+    /// Replaces only the Vision extraction; admission and gallery rules stay real.
+    var signatureCaptureForTesting: (@Sendable (CGRect) async -> IdentityEmbedding?)?
+    private(set) var signatureCaptureTaskForTesting: Task<Void, Never>?
+    var galleryForTesting: FaceSignatureGallery? {
+        switch lockState {
+        case .acquiring(_, let gallery, _), .tracking(_, let gallery), .hold(_, let gallery, _), .wideWaiting(let gallery):
+            return gallery
+        case .inactive:
+            return nil
+        }
+    }
+    var galleryUnverifiedForTesting: Bool { galleryUnverifiedSince != nil }
+    #endif
 
     /// Wall-clock of the last frame that upgraded the detection plan for a
     /// gallery refresh scan. Keeps the refresh to the capture throttle even
@@ -407,12 +517,25 @@ final class ShotComposer: ObservableObject {
 
     private var reacquisitionEvidence = ReacquisitionEvidence()
     private var reacquisitionBatchInFlight = false
+    #if DEBUG
+    /// Replaces only the detached scoring batch; scheduling and completion gates remain real.
+    var reacquisitionScoringForTesting: (@Sendable ([UUID]) async -> [ReacquisitionScore])?
+    private(set) var reacquisitionTaskForTesting: Task<Void, Never>?
+    var reacquisitionBatchInFlightForTesting: Bool { reacquisitionBatchInFlight }
+    #endif
     private var recoveryVisibleIDs = Set<UUID>()
     private var recoveryVisibilityRevision: UInt64 = 0
-    private var pendingReacquisition: UUID?
+    /// A recovery decision queued for the next tick. `strong` says it came
+    /// from strong-tier face evidence; the two are set and cleared together.
+    private struct PendingReacquisition {
+        let id: UUID
+        let strong: Bool
+    }
+    private var pendingReacquisition: PendingReacquisition?
     private var lockGeneration: UInt64 = 0
     /// TEST-ONLY: token captured by an asynchronous identity job.
     var identityGenerationForTesting: UInt64 { lockGeneration }
+    var recoveryVisibilityRevisionForTesting: UInt64 { recoveryVisibilityRevision }
     private var fallbackObservationID: UInt64 = 0
     private var lastGalleryObservationID: UInt64?
     /// Capture time of the newest observation admitted to recovery evidence.
@@ -431,6 +554,8 @@ final class ShotComposer: ObservableObject {
         lastGalleryObservationID = nil
         lastRecoveryObservationAt = nil
         lastGalleryRefreshAttemptAt = 0
+        closeIdentityVerify()
+        lastIdentityObservationID = nil
         // In-flight jobs retain their slot until they finish; generation guards
         // discard their results without allowing unbounded replacement work.
     }
@@ -456,8 +581,14 @@ final class ShotComposer: ObservableObject {
               recoveryVisibilityRevision == visibilityRevision else { return false }
         switch lockState {
         case .hold, .wideWaiting:
-            pendingReacquisition = reacquisitionEvidence.consider(
-                observationID: observationID, scores: scores)
+            if faceIdentityLive {
+                let decision = reacquisitionEvidence.decide(observationID: observationID, scores: scores,
+                                                            strong: identityEmbedder.thresholds)
+                pendingReacquisition = decision.map { PendingReacquisition(id: $0.id, strong: $0.strong) }
+            } else {
+                pendingReacquisition = reacquisitionEvidence.consider(observationID: observationID, scores: scores)
+                    .map { PendingReacquisition(id: $0, strong: false) }
+            }
             return true
         default: return false
         }
@@ -589,9 +720,17 @@ final class ShotComposer: ObservableObject {
         pixelBuffer: CVPixelBuffer?,
         isFresh: Bool = true,
         observationID: UInt64? = nil,
-        observationTimestamp: TimeInterval? = nil
+        observationTimestamp: TimeInterval? = nil,
+        excludedFromReacquisition: Set<UUID> = [],
+        lockAmbiguityOpen: Bool = false,
+        lockAmbiguityReasons: PersonDetector.LockAmbiguity = []
     ) -> TickOutcome {
         if isFresh { fallbackObservationID &+= 1 }
+        lastLockAmbiguityReasons = lockAmbiguityOpen ? lockAmbiguityReasons : []
+        // A new ambiguous moment: the detector's window has just opened.
+        let ambiguityBegan = lockAmbiguityOpen && !lastLockAmbiguityOpen
+        lastLockAmbiguityOpen = lockAmbiguityOpen
+        lastTickTimestamp = timestamp
         let frameID = observationID ?? fallbackObservationID
         let sampleTime = observationTimestamp ?? timestamp
         let isRecovering: Bool = {
@@ -619,16 +758,21 @@ final class ShotComposer: ObservableObject {
         // Drain any async re-acquisition decision queued from a prior frame's
         // background task. Doing this first keeps all state transitions
         // visible in this single switch.
-        if let candidateID = pendingReacquisition {
+        if let decision = pendingReacquisition {
             pendingReacquisition = nil
+            let candidateID = decision.id
+            let strongDecision = decision.strong
             let gallery: FaceSignatureGallery?
             switch lockState {
             case .hold(_, let stored, _), .wideWaiting(let stored): gallery = stored
             default: gallery = nil
             }
-            if let gallery, detections.contains(where: { $0.id == candidateID }) {
+            let blocked = excludedFromReacquisition.contains(candidateID) || identityVetoedIDs.contains(candidateID)
+            if let gallery, !blocked || strongDecision,
+               detections.contains(where: { $0.id == candidateID }) {
                 lockState = .tracking(targetID: candidateID, gallery: gallery)
                 activeTargetID = candidateID
+                identityVetoedIDs.removeAll()
                 invalidateIdentityWork()
                 enterSteadyFollowing()
                 return .resumeTracking
@@ -693,15 +837,37 @@ final class ShotComposer: ObservableObject {
                 // Healthy tracking. Opportunistically fill / refresh the
                 // gallery — the gallery must reach `readyThreshold` for
                 // re-acquisition to ever work after a wide-pull.
+                if lockAmbiguityOpen, identityVerifyOpenedAt == nil {
+                    openIdentityVerify(at: timestamp, targetID: targetID)
+                } else if ambiguityBegan, identityVerifyOpenedAt != nil {
+                    restartIdentityVerify(at: timestamp, targetID: targetID)
+                } else if lockAmbiguityOpen, let opened = identityVerifyOpenedAt,
+                          timestamp - opened >= Self.identityVerifyRearmInterval {
+                    rearmIdentityVerifyScans(at: timestamp, targetID: targetID)
+                }
+                if identityVerifyOpenedAt != nil { identityVerifyReasons.formUnion(lastLockAmbiguityReasons) }
+                if isFresh, identityVerifyOpenedAt != nil {
+                    scheduleIdentityEvidence(for: targetID, person: lockedDetection,
+                                             pixelBuffer: pixelBuffer, gallery: gallery,
+                                             observationID: frameID)
+                }
                 if isFresh, lastGalleryObservationID != frameID {
                     lastGalleryObservationID = frameID
-                    maybeAppendToGallery(
-                    for: targetID,
-                    person: lockedDetection,
-                    pixelBuffer: pixelBuffer,
-                    gallery: gallery,
-                    timestamp: sampleTime
-                    )
+                    if lockAmbiguityOpen {
+                        // The lock may have swapped people: learn nothing new.
+                        if galleryUnverifiedSince == nil {
+                            galleryUnverifiedSince = sampleTime
+                            Self.logger.info("GALLERY unverified reason=lock_ambiguity target=\(String(targetID.uuidString.prefix(8)), privacy: .public)")
+                        }
+                    } else {
+                        maybeAppendToGallery(
+                        for: targetID,
+                        person: lockedDetection,
+                        pixelBuffer: pixelBuffer,
+                        gallery: gallery,
+                        timestamp: sampleTime
+                        )
+                    }
                 }
                 return .noChange
             }
@@ -723,14 +889,15 @@ final class ShotComposer: ObservableObject {
         case .hold(let targetID, let gallery, let sinceTime):
             // If the subject reappears within the hold window, snap back
             // to tracking and resume framing.
-            if detections.contains(where: { $0.id == targetID }) {
+            if !identityVetoedIDs.contains(targetID), detections.contains(where: { $0.id == targetID }) {
                 Self.logger.info("LOCK-STATE old=hold new=tracking reason=subject_returned")
                 lockState = .tracking(targetID: targetID, gallery: gallery)
                 return .noChange
             }
             if isFresh, gallery.isReady {
                 scheduleReacquisitionScoring(detections: detections, pixelBuffer: pixelBuffer,
-                    gallery: gallery, observationID: frameID)
+                    gallery: gallery, observationID: frameID,
+                    excludedFromReacquisition: excludedFromReacquisition)
             }
             // Hold window expired? Pull back to wide. Gallery is preserved
             // so re-acquisition can work when the subject returns.
@@ -760,7 +927,8 @@ final class ShotComposer: ObservableObject {
                 detections: detections,
                 pixelBuffer: pixelBuffer,
                 gallery: gallery,
-                observationID: frameID
+                observationID: frameID,
+                excludedFromReacquisition: excludedFromReacquisition
             )
             return .noChange
         }
@@ -779,6 +947,176 @@ final class ShotComposer: ObservableObject {
     /// The captured landmark ratios are also snapshotted into the signature
     /// at the same wall-clock moment so a gallery entry carries *both*
     /// signals captured from the same frame.
+    /// A live identity veto: the tracked person's face is strongly not the
+    /// subject's. Hold the shot, and stop the detector following that track.
+    /// Face evidence never switches Program to another person here; only
+    /// recovery from hold or wide can bind someone, under its own rules.
+    private func vetoLock(_ targetID: UUID) {
+        guard case .tracking(let current, let gallery) = lockState, current == targetID else { return }
+        identityVetoedIDs.insert(targetID)
+        // The vetoed track stays in view; it must stop reading as the subject.
+        if activeTargetID != nil { activeTargetID = nil }
+        Self.logger.info("LOCK-STATE old=tracking new=hold reason=identity_veto target=\(String(targetID.uuidString.prefix(8)), privacy: .public)")
+        invalidateIdentityWork()
+        lockState = .hold(targetID: targetID, gallery: gallery, sinceTime: lastTickTimestamp)
+        enterSteadyFollowing()
+    }
+
+    /// The track the detector should bind first. Nil while the lock is held
+    /// by an identity veto, so pass A stops following the vetoed track.
+    /// Also what the overlay and the world model report as the subject's
+    /// track: the vetoed person is still in view, but is not the subject.
+    var lockBindingTargetID: UUID? {
+        isIdentityVetoHeld ? nil : manualLockedTargetID
+    }
+
+    /// The lock is on hold because of an identity veto, with the vetoed
+    /// track possibly still in view. Everything else reads it as an ordinary
+    /// hold whose subject is out of sight.
+    var isIdentityVetoHeld: Bool {
+        if case .hold(let id, _, _) = lockState { return identityVetoedIDs.contains(id) }
+        return false
+    }
+
+    /// Returns true when this detection should include the face request so
+    /// the verify window gets evidence. Call once per scheduled detection.
+    func shouldRunIdentityVerifyScan(now: TimeInterval) -> Bool {
+        guard case .tracking = lockState, let opened = identityVerifyOpenedAt else { return false }
+        guard now - opened < Self.identityVerifyMaxDuration, !identityEvidenceInFlight else { return false }
+        identityVerifyDetections += 1
+        return identityVerifyDetections % Self.identityVerifyCadence == 1
+    }
+
+    private func openIdentityVerify(at time: TimeInterval, targetID: UUID) {
+        identityVerifyOpenedAt = time
+        identityVerifyDetections = 0
+        identityMatchStreak = 0
+        identityMismatchStreak = 0
+        identityWouldVetoLogged = false
+        identityVerifyReasons = []
+        Self.logger.info("IDENTITY verify-open target=\(String(targetID.uuidString.prefix(8)), privacy: .public)")
+    }
+
+    /// A new ambiguous moment while an earlier window is still undecided (for
+    /// example the face was turned away). Without this, a window past its cap
+    /// would leave a later swap with only the 0.4 s refresh scans. The scan
+    /// cadence and cap restart, and the identity may have changed again, so
+    /// the streaks start afresh and another shadow veto may be recorded.
+    /// Evidence already in flight was observed before this moment: the new
+    /// epoch retires it, so only later observations count towards the three.
+    private func restartIdentityVerify(at time: TimeInterval, targetID: UUID) {
+        identityVerifyOpenedAt = time
+        identityVerifyDetections = 0
+        identityMatchStreak = 0
+        identityMismatchStreak = 0
+        identityWouldVetoLogged = false
+        identityVerifyEpoch &+= 1
+        identityVerifyReasons = []
+        Self.logger.info("IDENTITY verify-restart target=\(String(targetID.uuidString.prefix(8)), privacy: .public)")
+    }
+
+    /// The detector's ambiguity has stayed open (a crowd), so no new moment
+    /// restarts the window, yet its scan burst is spent. Start the burst
+    /// again. Only the scan cadence and cap restart: the streaks, the epoch
+    /// and evidence in flight are kept, so re-arming never delays a verdict.
+    private func rearmIdentityVerifyScans(at time: TimeInterval, targetID: UUID) {
+        identityVerifyOpenedAt = time
+        identityVerifyDetections = 0
+        Self.logger.info("IDENTITY verify-rearm target=\(String(targetID.uuidString.prefix(8)), privacy: .public)")
+    }
+
+    private func closeIdentityVerify() {
+        identityVerifyOpenedAt = nil
+        identityVerifyDetections = 0
+        identityMatchStreak = 0
+        identityMismatchStreak = 0
+        identityWouldVetoLogged = false
+        identityVerifyReasons = []
+    }
+
+    private func scheduleIdentityEvidence(
+        for targetID: UUID,
+        person: PersonDetector.DetectedPerson,
+        pixelBuffer: CVPixelBuffer?,
+        gallery: FaceSignatureGallery,
+        observationID: UInt64
+    ) {
+        guard let faceBox = person.faceBoundingBox, gallery.isReady else { return }
+        guard !identityEvidenceInFlight else { return }
+        if let last = lastIdentityObservationID, observationID <= last { return }
+        let request = IdentityEvidenceRequest(generation: lockGeneration, observationID: observationID,
+                                              targetID: targetID, faceBox: faceBox,
+                                              verifyEpoch: identityVerifyEpoch)
+        #if DEBUG
+        if let scheduler = identityEvidenceSchedulerForTesting {
+            identityEvidenceInFlight = true
+            scheduler(request)
+            return
+        }
+        #endif
+        guard let pixelBuffer else { return }
+        identityEvidenceInFlight = true
+        let references = FaceIdentityEvidence.references(from: gallery)
+        let faceHeight = CGFloat(CVPixelBufferGetHeight(pixelBuffer)) * faceBox.height
+        let landmarks = person.faceLandmarkRatios
+        let embedder = identityEmbedder
+        let bufferBox = SendablePixelBuffer(value: pixelBuffer)
+        Task.detached(priority: .userInitiated) { @Sendable [weak self] in
+            let embedding = await embedder.embed(pixelBuffer: bufferBox.value, faceBox: faceBox)
+            let tier = embedding.map {
+                FaceIdentityEvidence.tier(candidate: $0, landmarks: landmarks, faceHeightPixels: faceHeight,
+                                      references: references, thresholds: embedder.thresholds)
+            } ?? .none
+            guard let strong = self else { return }
+            await MainActor.run { _ = strong.finishIdentityEvidence(request, tier: tier) }
+        }
+    }
+
+    /// Completion gate for identity evidence. Results from a retired lock
+    /// generation, a verify epoch before the latest restart, an older
+    /// observation, another target, or a closed window are refused. The
+    /// in-flight slot is released first, on every path. Returns whether the
+    /// evidence was counted.
+    @discardableResult
+    func finishIdentityEvidence(_ request: IdentityEvidenceRequest, tier: IdentityTier) -> Bool {
+        identityEvidenceInFlight = false
+        guard request.generation == lockGeneration, request.verifyEpoch == identityVerifyEpoch else { return false }
+        if let last = lastIdentityObservationID, request.observationID <= last { return false }
+        guard case .tracking(let current, _) = lockState, current == request.targetID,
+              identityVerifyOpenedAt != nil else { return false }
+        lastIdentityObservationID = request.observationID
+        switch tier {
+        case .strongMatch:
+            identityMatchStreak += 1
+            identityMismatchStreak = 0
+        case .strongMismatch:
+            identityMismatchStreak += 1
+            identityMatchStreak = 0
+        case .none:
+            identityMatchStreak = 0
+            identityMismatchStreak = 0
+        }
+        let target = String(request.targetID.uuidString.prefix(8))
+        if identityMatchStreak >= Self.identityConsecutive {
+            closeIdentityVerify()
+            if galleryUnverifiedSince != nil {
+                galleryUnverifiedSince = nil
+                Self.logger.info("GALLERY verified target=\(target, privacy: .public) by=identity")
+            }
+            Self.logger.info("IDENTITY verified target=\(target, privacy: .public)")
+        } else if identityMismatchStreak >= Self.identityConsecutive, !identityWouldVetoLogged {
+            identityWouldVetoLogged = true
+            identityWouldVetoCount += 1
+            lastIdentityWouldVetoReasons = identityVerifyReasons
+            Self.logger.info("IDENTITY would-veto target=\(target, privacy: .public) live=\(self.faceIdentityLive, privacy: .public) reasons=\(self.identityVerifyReasons.logDescription, privacy: .public)")
+            #if DEBUG
+            identityWouldVetoForTesting?()
+            #endif
+            if faceIdentityLive { vetoLock(request.targetID) }
+        }
+        return true
+    }
+
     private func maybeAppendToGallery(
         for targetID: UUID,
         person: PersonDetector.DetectedPerson,
@@ -797,47 +1135,87 @@ final class ShotComposer: ObservableObject {
         let extractor = signatureExtractor
         let landmarkVector = person.faceLandmarkRatios
         let generation = lockGeneration
+        let scope = GalleryAdmission.scope(entryCount: gallery.size, unverified: galleryUnverifiedSince != nil)
+        let references = AdmissionReferences(embeddings: {
+            switch scope {
+            case .anchors: return gallery.anchors.map(\.embedding)
+            case .wholeGallery: return gallery.entries.map(\.embedding)
+            case nil: return []
+            }
+        }())
+        #if DEBUG
+        let injectedCapture = signatureCaptureForTesting
+        #endif
 
-        Task.detached(priority: .userInitiated) { @Sendable [weak self] in
-            let result = await Self.runSignatureCapture(
-                extractor: extractor,
-                bufferBox: bufferBox,
-                faceBox: faceBox
-            )
+        let job = Task.detached(priority: .userInitiated) { @Sendable [weak self] in
+            #if DEBUG
+            let result: SignatureCaptureResult
+            if let injectedCapture {
+                let embedding = await injectedCapture(faceBox)
+                result = SignatureCaptureResult(embedding: embedding, elapsedMs: 0,
+                    bestDistance: embedding.flatMap { IdentityEmbedding.bestDistance(from: $0, to: references.embeddings) })
+            } else {
+                result = await Self.runSignatureCapture(extractor: extractor, bufferBox: bufferBox,
+                                                        faceBox: faceBox, references: references)
+            }
+            #else
+            let result = await Self.runSignatureCapture(extractor: extractor, bufferBox: bufferBox,
+                                                        faceBox: faceBox, references: references)
+            #endif
             guard let strong = self else { return }
             await MainActor.run {
                 strong.signatureCaptureInFlight = false
                 guard strong.lockGeneration == generation else { return }
                 strong.applySignatureCaptureResult(
-                    print: result.print,
+                    result,
+                    scope: scope,
                     landmarkVector: landmarkVector,
-                    elapsedMs: result.elapsedMs,
                     targetID: targetID,
                     capturedAt: captureTimestamp
                 )
             }
         }
+        #if DEBUG
+        signatureCaptureTaskForTesting = job
+        #else
+        _ = job
+        #endif
     }
 
     /// Pure non-isolated extraction worker — no `self`, so no actor
     /// isolation is inherited. Performs the Vision request and returns
     /// the print + timing for the main-actor wrapper to apply.
-    /// A captured print crossing back to the main actor. Vision feature
-    /// prints are immutable after capture (see `FaceSignature`).
-    private nonisolated struct SignatureCaptureResult: @unchecked Sendable {
-        let print: VNFeaturePrintObservation?
+    /// A captured signature crossing back to the main actor, with its best
+    /// distance to the admission references (nil when there were none).
+    /// One recovery scoring batch, for the synchronous test scheduler.
+    nonisolated struct ReacquisitionRequest: Sendable {
+        let generation: UInt64
+        let visibilityRevision: UInt64
+        let observationID: UInt64
+        let candidates: [(id: UUID, isExcluded: Bool)]
+    }
+
+    private nonisolated struct SignatureCaptureResult: Sendable {
+        let embedding: IdentityEmbedding?
         let elapsedMs: Double
+        let bestDistance: Float?
+    }
+
+    /// Gallery signatures a new capture is checked against; immutable.
+    private nonisolated struct AdmissionReferences: Sendable {
+        let embeddings: [IdentityEmbedding]
     }
 
     /// The gallery's prints handed to a detached scoring task; immutable.
     private nonisolated struct ReferencePrints: @unchecked Sendable {
-        let entries: [(print: VNFeaturePrintObservation, landmarks: LandmarkRatios?)]
+        let entries: [(print: IdentityEmbedding, landmarks: LandmarkRatios?)]
     }
 
     private nonisolated static func runSignatureCapture(
         extractor: FaceSignatureExtractor,
         bufferBox: SendablePixelBuffer,
-        faceBox: CGRect
+        faceBox: CGRect,
+        references: AdmissionReferences
     ) async -> SignatureCaptureResult {
         let started = CACurrentMediaTime()
         let print = await extractor.extractSignature(
@@ -845,24 +1223,54 @@ final class ShotComposer: ObservableObject {
             faceBoundingBox: faceBox
         )
         let elapsedMs = (CACurrentMediaTime() - started) * 1000
-        return SignatureCaptureResult(print: print, elapsedMs: elapsedMs)
+        let embedding = print.map(IdentityEmbedding.visionPrint)
+        return SignatureCaptureResult(
+            embedding: embedding,
+            elapsedMs: elapsedMs,
+            bestDistance: embedding.flatMap { IdentityEmbedding.bestDistance(from: $0, to: references.embeddings) }
+        )
     }
 
     /// Main-actor side of signature application — runs the stale-state
-    /// guard and appends the new entry to the gallery (with FIFO eviction
-    /// at maxSize).
+    /// guard and the admission check, then appends the new entry to the
+    /// gallery (anchors kept, FIFO eviction of the rest at maxSize).
     private func applySignatureCaptureResult(
-        print: VNFeaturePrintObservation?,
+        _ result: SignatureCaptureResult,
+        scope: GalleryAdmission.Scope?,
         landmarkVector: LandmarkRatios?,
-        elapsedMs: Double,
         targetID: UUID,
         capturedAt: TimeInterval
     ) {
         signatureCaptureInFlight = false
-        guard let print else { return }
+        guard let embedding = result.embedding else { return }
+        let elapsedMs = result.elapsedMs
+
+        if let scope {
+            let target = String(targetID.uuidString.prefix(8))
+            let best = result.bestDistance.map { String(format: "%.3f", $0) } ?? "none"
+            let refusal: String? = {
+                // The lock became ambiguous while this capture was running.
+                if lastLockAmbiguityOpen { return "lock_ambiguity" }
+                // Checked against the whole gallery, but the gallery has since become unverified.
+                if scope == .wholeGallery && galleryUnverifiedSince != nil { return "stale_scope" }
+                if !GalleryAdmission.admits(bestDistance: result.bestDistance, threshold: Self.absoluteThreshold) {
+                    return scope == .anchors ? "anchor_mismatch" : "gallery_mismatch"
+                }
+                return nil
+            }()
+            if let refusal {
+                galleryRejectionCount += 1
+                Self.logger.info("SIGNATURE rejected reason=\(refusal, privacy: .public) target=\(target, privacy: .public) best=\(best, privacy: .public)")
+                return
+            }
+            if scope == .anchors, galleryUnverifiedSince != nil {
+                galleryUnverifiedSince = nil
+                Self.logger.info("GALLERY verified target=\(target, privacy: .public) best=\(best, privacy: .public)")
+            }
+        }
 
         let newSig = FaceSignature(
-            featurePrint: print,
+            embedding: embedding,
             landmarkVector: landmarkVector,
             capturedAt: capturedAt
         )
@@ -912,9 +1320,17 @@ final class ShotComposer: ObservableObject {
         detections: [PersonDetector.DetectedPerson],
         pixelBuffer: CVPixelBuffer?,
         gallery: FaceSignatureGallery,
-        observationID: UInt64
+        observationID: UInt64,
+        excludedFromReacquisition: Set<UUID>
     ) {
-        let candidates = detections.filter { $0.faceBoundingBox != nil }
+        // While face identity is live, witnesses and vetoed tracks are scored
+        // too, marked excluded: they count as runners-up, and only a strong
+        // decision may bind them. Otherwise they are not scored at all.
+        let blockedIDs = excludedFromReacquisition.union(identityVetoedIDs)
+        let live = faceIdentityLive
+        let candidates = detections.filter {
+            $0.faceBoundingBox != nil && (live || !blockedIDs.contains($0.id))
+        }
         let visibleIDs = Set(candidates.map(\.id))
         if recoveryVisibleIDs != visibleIDs {
             recoveryVisibleIDs = visibleIDs
@@ -922,6 +1338,17 @@ final class ShotComposer: ObservableObject {
             reacquisitionEvidence.reset()
             pendingReacquisition = nil
         }
+        #if DEBUG
+        if let scheduler = reacquisitionSchedulerForTesting {
+            guard !candidates.isEmpty else { reacquisitionEvidence.reset(); return }
+            guard !reacquisitionBatchInFlight else { return }
+            reacquisitionBatchInFlight = true
+            scheduler(ReacquisitionRequest(generation: lockGeneration, visibilityRevision: recoveryVisibilityRevision,
+                observationID: observationID,
+                candidates: candidates.map { ($0.id, live && blockedIDs.contains($0.id)) }))
+            return
+        }
+        #endif
         guard !candidates.isEmpty, let pixelBuffer else {
             reacquisitionEvidence.reset()
             return
@@ -930,19 +1357,34 @@ final class ShotComposer: ObservableObject {
         reacquisitionBatchInFlight = true
         let generation = lockGeneration
         let visibilityRevision = recoveryVisibilityRevision
-        let references = ReferencePrints(entries: gallery.entries.map { (print: $0.featurePrint, landmarks: $0.landmarkVector) })
+        let excludedIDs = live ? blockedIDs : []
+        let bufferHeight = Double(CVPixelBufferGetHeight(pixelBuffer))
+        let faceHeights = Dictionary(candidates.map { ($0.id, Double($0.faceBoundingBox?.height ?? 0) * bufferHeight) },
+                                     uniquingKeysWith: { first, _ in first })
+        let references = ReferencePrints(entries: gallery.entries.map { (print: $0.embedding, landmarks: $0.landmarkVector) })
         let bufferBox = SendablePixelBuffer(value: pixelBuffer)
         let extractor = signatureExtractor
-        Task.detached(priority: .userInitiated) { [weak self] in
+        #if DEBUG
+        let injectedWorker = reacquisitionScoringForTesting
+        #endif
+        let job = Task.detached(priority: .userInitiated) { [weak self] in
             var scores: [ReacquisitionScore] = []
-            for candidate in candidates {
-                let result = await Self.runReacquisitionScoring(extractor: extractor,
-                    bufferBox: bufferBox, faceBox: candidate.faceBoundingBox!,
-                    candidateLandmarks: candidate.faceLandmarkRatios, referenceEntries: references.entries)
-                scores.append(ReacquisitionScore(id: candidate.id,
-                    printDistance: result?.printDistance, landmarkDistance: result?.landmarkDistance))
+            #if DEBUG
+            if let injectedWorker {
+                scores = await injectedWorker(candidates.map(\.id))
+            } else {
+                scores = await Self.scoreReacquisitionCandidates(candidates, extractor: extractor,
+                    bufferBox: bufferBox, references: references)
             }
-            let completedScores = scores
+            #else
+            scores = await Self.scoreReacquisitionCandidates(candidates, extractor: extractor,
+                bufferBox: bufferBox, references: references)
+            #endif
+            let completedScores = scores.map {
+                ReacquisitionScore(id: $0.id, printDistance: $0.printDistance,
+                                   landmarkDistance: $0.landmarkDistance, isExcluded: excludedIDs.contains($0.id),
+                                   faceHeightPixels: faceHeights[$0.id])
+            }
             guard let strong = self else { return }
             await MainActor.run {
                 _ = strong.finishReacquisitionScoring(
@@ -953,6 +1395,24 @@ final class ShotComposer: ObservableObject {
                 )
             }
         }
+        #if DEBUG
+        reacquisitionTaskForTesting = job
+        #endif
+    }
+
+    private nonisolated static func scoreReacquisitionCandidates(
+        _ candidates: [PersonDetector.DetectedPerson], extractor: FaceSignatureExtractor,
+        bufferBox: SendablePixelBuffer, references: ReferencePrints
+    ) async -> [ReacquisitionScore] {
+        var scores: [ReacquisitionScore] = []
+        for candidate in candidates {
+            let result = await Self.runReacquisitionScoring(extractor: extractor,
+                bufferBox: bufferBox, faceBox: candidate.faceBoundingBox!,
+                candidateLandmarks: candidate.faceLandmarkRatios, referenceEntries: references.entries)
+            scores.append(ReacquisitionScore(id: candidate.id,
+                printDistance: result?.printDistance, landmarkDistance: result?.landmarkDistance))
+        }
+        return scores
     }
 
     /// Pure non-isolated scoring worker. Extracts the candidate face
@@ -964,7 +1424,7 @@ final class ShotComposer: ObservableObject {
         bufferBox: SendablePixelBuffer,
         faceBox: CGRect,
         candidateLandmarks: LandmarkRatios?,
-        referenceEntries: [(print: VNFeaturePrintObservation, landmarks: LandmarkRatios?)]
+        referenceEntries: [(print: IdentityEmbedding, landmarks: LandmarkRatios?)]
     ) async -> (printDistance: Float, landmarkDistance: Float?)? {
         guard let candidatePrint = await extractor.extractSignature(
             from: bufferBox.value,
@@ -974,7 +1434,7 @@ final class ShotComposer: ObservableObject {
         var best: Float = .infinity
         var bestLandmarks: LandmarkRatios? = nil
         for entry in referenceEntries {
-            if let d = FaceSignatureExtractor.distance(entry.print, candidatePrint), d < best {
+            if let d = IdentityEmbedding.distance(entry.print, .visionPrint(candidatePrint)), d < best {
                 best = d
                 bestLandmarks = entry.landmarks
             }
@@ -1002,6 +1462,9 @@ final class ShotComposer: ObservableObject {
         observationTimestamp: TimeInterval? = nil
     ) -> CropEngine.CropRect? {
         guard config.isEnabled else { return nil }
+        // Prediction requires capture-time evidence, never the timing of synchronous calls.
+        leadEvidenceIsTimed = observationTimestamp != nil
+        if !leadEvidenceIsTimed { resetLead() }
         let sampleTime = observationTimestamp ?? CACurrentMediaTime()
 
         let subjectBounds = person.boundingBox.standardized
@@ -1042,6 +1505,7 @@ final class ShotComposer: ObservableObject {
 
     /// Reset state (e.g., when switching subjects or losing track)
     func reset(clearManualLock: Bool = false) {
+        resetLead()
         invalidateIdentityWork()
         acquisitionFeedback = nil
         lastAcceptedCenter = nil
@@ -1078,6 +1542,9 @@ final class ShotComposer: ObservableObject {
     /// gallery reaches `readyThreshold` the FSM promotes to `tracking` (green
     /// box) and cropping begins. Accuracy/consistency over instant lock.
     func lockTarget(_ targetID: UUID) {
+        galleryUnverifiedSince = nil
+        identityVetoedIDs.removeAll()
+        resetLead()
         lastSubjectHeight = nil
         visibleZoomHeight = nil
         acquisitionFeedback = nil
@@ -1101,6 +1568,7 @@ final class ShotComposer: ObservableObject {
     /// Operator pressed Return to Wide / unlock — discard all lock state.
     func clearManualLock() {
         Self.logger.info("LOCK-STATE old=\(self.lockStateName, privacy: .public) new=inactive reason=operator_release")
+        identityVetoedIDs.removeAll()
         lockState = .inactive
         invalidateIdentityWork()
         enterSteadyFollowing()
@@ -1110,8 +1578,11 @@ final class ShotComposer: ObservableObject {
     /// exactly as `tick()` does when the gallery reaches `readyThreshold`. Lets
     /// unit tests exercise post-lock behavior without running Vision. Never
     /// call from app code.
-    func forceTrackingForTesting() {
-        guard case .acquiring(let id, let gallery, _) = lockState else { return }
+    func forceTrackingForTesting(readyGallery: Bool = false) {
+        guard case .acquiring(let id, var gallery, _) = lockState else { return }
+        #if DEBUG
+        gallery.readyForTesting = readyGallery
+        #endif
         lockState = .tracking(targetID: id, gallery: gallery)
     }
 
@@ -1181,6 +1652,20 @@ final class ShotComposer: ObservableObject {
         isFresh: Bool,
         observationTimestamp: TimeInterval
     ) -> CropEngine.CropRect? {
+        if isFresh, leadEvidenceIsTimed, observationTimestamp.isFinite,
+           leadLastTime == nil || observationTimestamp > leadLastTime! {
+            if let last = leadLastTime, let x = leadLastX {
+                let dt = observationTimestamp - last
+                if dt > Self.steadyObservationGap {
+                    leadSpeed = 0
+                } else {
+                    let instant = (trackingCenter.x - x) / dt
+                    leadSpeed += (instant - leadSpeed) * (1 - exp(-dt / 0.15))
+                }
+            }
+            leadLastX = trackingCenter.x
+            leadLastTime = observationTimestamp
+        }
         let tuning = framingTuning
         let aspect = normalizedAspect
 
@@ -1461,7 +1946,7 @@ final class ShotComposer: ObservableObject {
             lastAcceptedCenter = trackingCenter
             lastAppliedFramingFingerprint = fingerprint
             if !hasActiveTarget { hasActiveTarget = true }
-            return clampedCrop
+            return framingChanged ? clampedCrop : leading(clampedCrop)
         }
 
         // Steady Following: a two-state machine, active only for the Steady
@@ -1528,48 +2013,48 @@ final class ShotComposer: ObservableObject {
             return nil
 
         case .following:
-            // Position-based settle detection: velocity EWMA never reads as
-            // zero (Vision bbox jitter alone registers ~0.1–0.3 frame-widths/s
-            // for a still subject), so settling is dwell-in-a-radius instead.
-            // Once the subject stays within `settleRadius` of the anchor for
-            // `settleConfirmation` of capture time, re-enter holding,
-            // centered on the ANCHOR (not the instantaneous jittered center),
-            // and accept one final centering target.
-            //
-            // Fresh detections only. A repeated detection sits at *exactly* the
-            // anchor, so every repeat would be a guaranteed increment — at
-            // interval 2 half the evidence for "they have stopped moving" would
-            // be manufactured by the detection cadence, and the camera would
-            // park about twice as readily as it does today.
-            if isFresh {
-                if let anchor = settleAnchor,
-                   hypot(trackingCenter.x - anchor.x, trackingCenter.y - anchor.y) <= settleRadius {
-                    let isContinuous = settleLastObservationAt.map {
-                        observationTimestamp >= $0
-                            && observationTimestamp - $0 <= Self.steadyObservationGap
-                    } ?? true
-                    if !isContinuous { settleStartedAt = observationTimestamp }
-                } else {
-                    settleAnchor = trackingCenter
-                    settleStartedAt = observationTimestamp
+            // Compare means from continuous fresh evidence: noise averages out,
+            // while a steady drift keeps the two halves separated.
+            if isFresh, observationTimestamp.isFinite,
+               settleWindow.last.map({ observationTimestamp > $0.time }) ?? true {
+                if let last = settleWindow.last, observationTimestamp - last.time > Self.steadyObservationGap {
+                    settleWindow.removeAll(keepingCapacity: true)
                 }
-                if settleStartedAt == nil { settleStartedAt = observationTimestamp }
-                settleLastObservationAt = observationTimestamp
-                if let startedAt = settleStartedAt,
-                   observationTimestamp - startedAt >= Self.settleConfirmation,
-                   let anchor = settleAnchor {
-                    enterSteadyHolding(centeredOn: anchor, programCropWidth: clampedCrop.size.width)
-                    lastAcceptedCenter = anchor
-                    lastAppliedFramingFingerprint = fingerprint
-                    if !hasActiveTarget { hasActiveTarget = true }
-                    return clampedCrop
+                settleWindow.append((observationTimestamp, trackingCenter))
+                // Deliberate four-sample floor, accepted in review: below 10 Hz
+                // retaining only the boundary sample leaves three observations,
+                // so the four-sample half-mean requirement could never be met.
+                while settleWindow.count > 4,
+                      observationTimestamp - settleWindow[1].time >= Self.settleConfirmation - 1e-9 {
+                    settleWindow.removeFirst()
+                }
+                if settleWindow.count >= 4,
+                   observationTimestamp - settleWindow[0].time >= Self.settleConfirmation - 1e-9 {
+                    func mean(_ values: ArraySlice<(time: TimeInterval, center: CGPoint)>) -> CGPoint {
+                        let sum = values.reduce(CGPoint.zero) { CGPoint(x: $0.x + $1.center.x, y: $0.y + $1.center.y) }
+                        return CGPoint(x: sum.x / CGFloat(values.count), y: sum.y / CGFloat(values.count))
+                    }
+                    let split = settleWindow.count / 2
+                    let older = mean(settleWindow[..<split])
+                    let newer = mean(settleWindow[split...])
+                    if hypot(newer.x - older.x, newer.y - older.y) <= settleRadius * 0.5 {
+                        let anchor = mean(settleWindow[...])
+                        enterSteadyHolding(centeredOn: anchor, programCropWidth: clampedCrop.size.width)
+                        lastAcceptedCenter = anchor
+                        lastAppliedFramingFingerprint = fingerprint
+                        if !hasActiveTarget { hasActiveTarget = true }
+                        var resting = clampedCrop
+                        resting.origin.x += anchor.x - trackingCenter.x
+                        resting.origin.y += anchor.y - trackingCenter.y
+                        return clampCropToFrame(resting)
+                    }
                 }
             }
             // Keep following — emit a target every frame.
             lastAcceptedCenter = trackingCenter
             lastAppliedFramingFingerprint = fingerprint
             if !hasActiveTarget { hasActiveTarget = true }
-            return clampedCrop
+            return leading(clampedCrop)
         }
     }
 

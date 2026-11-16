@@ -57,6 +57,8 @@ extension CameraManager {
             lockPhase: phase,
             galleryReady: galleryReady,
             trackingOwnsControl: recovery.trackingOwnsControl,
+            // The lock episode's ID, not a visible track: an identity-vetoed hold
+            // reads exactly like an ordinary hold, so the Director's evidence does not change.
             lockedTargetID: manualLockedTargetID,
             subjectSpeed: speed,
             holdingSteady: steady,
