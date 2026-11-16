@@ -273,8 +273,10 @@ final class ScenarioLoop {
         request.candidates.map { candidate in
             let actors = sources(of: candidate.id)
             let distance: Float? = actors.map { $0 == [0] ? 0.10 : ($0.contains(0) ? nil : 0.80) } ?? nil
+            // The harness has no pixels; faces are taken as usable (above the 64 px gate).
             return ShotComposer.ReacquisitionScore(id: candidate.id, printDistance: distance,
-                landmarkDistance: actors == [0] ? 0.01 : 0.05, isExcluded: candidate.isExcluded)
+                landmarkDistance: actors == [0] ? 0.01 : 0.05, isExcluded: candidate.isExcluded,
+                faceHeightPixels: 80)
         }
     }
 

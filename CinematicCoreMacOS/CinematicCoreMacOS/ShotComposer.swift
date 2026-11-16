@@ -1302,6 +1302,9 @@ final class ShotComposer: ObservableObject {
         let generation = lockGeneration
         let visibilityRevision = recoveryVisibilityRevision
         let excludedIDs = live ? blockedIDs : []
+        let bufferHeight = Double(CVPixelBufferGetHeight(pixelBuffer))
+        let faceHeights = Dictionary(candidates.map { ($0.id, Double($0.faceBoundingBox?.height ?? 0) * bufferHeight) },
+                                     uniquingKeysWith: { first, _ in first })
         let references = ReferencePrints(entries: gallery.entries.map { (print: $0.embedding, landmarks: $0.landmarkVector) })
         let bufferBox = SendablePixelBuffer(value: pixelBuffer)
         let extractor = signatureExtractor
@@ -1323,7 +1326,8 @@ final class ShotComposer: ObservableObject {
             #endif
             let completedScores = scores.map {
                 ReacquisitionScore(id: $0.id, printDistance: $0.printDistance,
-                                   landmarkDistance: $0.landmarkDistance, isExcluded: excludedIDs.contains($0.id))
+                                   landmarkDistance: $0.landmarkDistance, isExcluded: excludedIDs.contains($0.id),
+                                   faceHeightPixels: faceHeights[$0.id])
             }
             guard let strong = self else { return }
             await MainActor.run {

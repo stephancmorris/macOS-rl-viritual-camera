@@ -60,11 +60,11 @@ struct FaceIdentityLiveTests {
 
         /// Answers the newest recovery batch: candidates absent from
         /// `distances` score as clearly different (0.80).
-        func answer(_ distances: [UUID: Float], landmarks: Float = 0.01) {
+        func answer(_ distances: [UUID: Float], landmarks: Float = 0.01, faceHeight: Double = 80) {
             guard let request = recovery.last else { Issue.record("No recovery request"); return }
             let scores = request.candidates.map {
                 ShotComposer.ReacquisitionScore(id: $0.id, printDistance: distances[$0.id] ?? 0.80,
-                    landmarkDistance: landmarks, isExcluded: $0.isExcluded)
+                    landmarkDistance: landmarks, isExcluded: $0.isExcluded, faceHeightPixels: faceHeight)
             }
             composer.finishReacquisitionScoring(generation: request.generation,
                 visibilityRevision: request.visibilityRevision, observationID: request.observationID, scores: scores)
@@ -168,7 +168,8 @@ struct FaceIdentityLiveTests {
         var evidence = ShotComposer.ReacquisitionEvidence()
         let witness = UUID()
         func batch(_ distance: Float) -> [ShotComposer.ReacquisitionScore] {
-            [ShotComposer.ReacquisitionScore(id: witness, printDistance: distance, landmarkDistance: 0.01, isExcluded: true)]
+            [ShotComposer.ReacquisitionScore(id: witness, printDistance: distance, landmarkDistance: 0.01,
+                                             isExcluded: true, faceHeightPixels: 80)]
         }
         for observation: UInt64 in 1...4 {
             #expect(evidence.decide(observationID: observation, scores: batch(0.52), strong: .featurePrintProvisional) == nil)
@@ -177,6 +178,49 @@ struct FaceIdentityLiveTests {
         #expect(evidence.decide(observationID: 6, scores: batch(0.10), strong: .featurePrintProvisional) == nil)
         #expect(evidence.decide(observationID: 7, scores: batch(0.10), strong: .featurePrintProvisional)
                 == .init(id: witness, strong: true))
+    }
+
+    /// Review fix: excluded faces must not loosen a lone candidate's
+    /// threshold. 0.58 is refused at the solo 0.55 even with a witness in shot.
+    @Test func loneCandidateKeepsTheSoloThreshold() {
+        let f = Fixture()
+        let a = UUID(), witness = UUID()
+        f.tick([])
+        for _ in 0..<4 {
+            f.tick([a, witness], excluded: [witness])
+            f.answer([a: 0.58, witness: 0.80], landmarks: 0.05)
+        }
+        f.tick([a, witness], excluded: [witness])
+        #expect(f.isHold)
+    }
+
+    /// Review fix: a face below the 64 px gate is never strong, so it cannot
+    /// bind a witness however close its print.
+    @Test func smallFaceGivesNoStrongDecision() {
+        let f = Fixture()
+        let witness = UUID()
+        f.tick([])
+        for _ in 0..<5 {
+            f.tick([witness], excluded: [witness])
+            f.answer([witness: 0.10], faceHeight: 40)
+        }
+        f.tick([witness], excluded: [witness])
+        #expect(f.isHold)
+    }
+
+    /// Review fix: a strong override needs every observation behind the
+    /// decision to be strong. Weak, weak, strong for someone who becomes a
+    /// witness before the drain must not bind them.
+    @Test func strongOverrideNeedsEveryObservationStrong() {
+        let f = Fixture()
+        let a = UUID()
+        f.tick([])
+        for distance: Float in [0.52, 0.52, 0.10] {
+            f.tick([a])
+            f.answer([a: distance])
+        }
+        f.tick([a], excluded: [a])
+        #expect(f.isHold)
     }
 
     /// An excluded face now counts as a runner-up. Not live, it is not scored

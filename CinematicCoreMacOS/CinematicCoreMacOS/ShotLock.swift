@@ -107,6 +107,9 @@ extension ShotComposer {
         let landmarkDistance: Float?
         /// A witness or identity-vetoed person: only a strong decision may bind them.
         var isExcluded = false
+        /// Face height in source pixels. Strong-tier evidence needs at least the
+        /// embedder's minimum; nil (unknown) is never strong.
+        var faceHeightPixels: Double? = nil
     }
 
     /// One decision per completed observation, after ALL visible candidates were scored.
@@ -115,7 +118,10 @@ extension ShotComposer {
         private(set) var count = 0
         private var lastObservationID: UInt64?
 
-        mutating func reset() { candidate = nil; count = 0; lastObservationID = nil }
+        /// Consecutive strong-tier observations of `candidate` (face-identity rules only).
+        private var strongStreak = 0
+
+        mutating func reset() { candidate = nil; count = 0; strongStreak = 0; lastObservationID = nil }
 
         mutating func consider(observationID: UInt64, scores: [ReacquisitionScore]) -> UUID? {
             // Results can complete out of order when a session/target changes.
@@ -160,26 +166,34 @@ extension ShotComposer {
             guard lastObservationID.map({ observationID > $0 }) ?? true else { return nil }
             lastObservationID = observationID
             guard !scores.isEmpty, scores.allSatisfy({ $0.printDistance?.isFinite == true }) else {
-                candidate = nil; count = 0; return nil
+                candidate = nil; count = 0; strongStreak = 0; return nil
             }
             let eligible = scores.filter { ($0.landmarkDistance ?? 0) <= ShotComposer.landmarkRejectionThreshold }
                 .sorted { $0.printDistance! < $1.printDistance! }
             func isStrong(_ score: ReacquisitionScore) -> Bool {
-                guard let landmarks = score.landmarkDistance else { return false }
+                guard let landmarks = score.landmarkDistance, let height = score.faceHeightPixels,
+                      height >= Double(strong.minFaceHeightPixels) else { return false }
                 return score.printDistance! < strong.strongMatch && landmarks <= strong.strongMatchLandmark
             }
+            // Excluded faces sharpen the margin but must not loosen a lone
+            // candidate's threshold: solo versus absolute counts only the
+            // faces that could themselves be bound without strong evidence.
+            let lone = eligible.filter { !$0.isExcluded }.count == 1
             guard eligible.filter(isStrong).count < 2, let winner = eligible.first,
                   eligible.count < 2 || eligible[1].printDistance! >= winner.printDistance! * ShotComposer.marginRatio,
                   winner.isExcluded
                     ? isStrong(winner)
-                    : winner.printDistance! < (eligible.count == 1 ? ShotComposer.soloThreshold : ShotComposer.absoluteThreshold)
+                    : winner.printDistance! < (lone ? ShotComposer.soloThreshold : ShotComposer.absoluteThreshold)
             else {
-                candidate = nil; count = 0; return nil
+                candidate = nil; count = 0; strongStreak = 0; return nil
             }
-            count = candidate == winner.id ? count + 1 : 1
+            let continuing = candidate == winner.id
+            count = continuing ? count + 1 : 1
+            // A decision is strong only if every observation behind it was.
+            strongStreak = isStrong(winner) ? (continuing ? strongStreak + 1 : 1) : 0
             candidate = winner.id
             return count >= ShotComposer.reacquisitionConsecutiveFrames
-                ? Decision(id: winner.id, strong: isStrong(winner)) : nil
+                ? Decision(id: winner.id, strong: strongStreak >= ShotComposer.reacquisitionConsecutiveFrames) : nil
         }
     }
 }
