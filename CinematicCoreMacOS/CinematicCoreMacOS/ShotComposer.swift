@@ -399,8 +399,6 @@ final class ShotComposer: ObservableObject {
     /// evidence, and recovery binds them only on a strong face decision.
     /// Cleared on any recovery bind, a new lock, or unlock.
     private(set) var identityVetoedIDs = Set<UUID>()
-    /// Whether the queued recovery decision came from strong-tier face evidence.
-    private var pendingReacquisitionStrong = false
     /// Wall-clock time of the latest `tick`, for transitions made outside it.
     private var lastTickTimestamp: TimeInterval = 0
     /// Whether face identity acts (live veto, strong-match recovery). Off in
@@ -524,7 +522,13 @@ final class ShotComposer: ObservableObject {
     #endif
     private var recoveryVisibleIDs = Set<UUID>()
     private var recoveryVisibilityRevision: UInt64 = 0
-    private var pendingReacquisition: UUID?
+    /// A recovery decision queued for the next tick. `strong` says it came
+    /// from strong-tier face evidence; the two are set and cleared together.
+    private struct PendingReacquisition {
+        let id: UUID
+        let strong: Bool
+    }
+    private var pendingReacquisition: PendingReacquisition?
     private var lockGeneration: UInt64 = 0
     /// TEST-ONLY: token captured by an asynchronous identity job.
     var identityGenerationForTesting: UInt64 { lockGeneration }
@@ -577,12 +581,10 @@ final class ShotComposer: ObservableObject {
             if faceIdentityLive {
                 let decision = reacquisitionEvidence.decide(observationID: observationID, scores: scores,
                                                             strong: identityEmbedder.thresholds)
-                pendingReacquisition = decision?.id
-                pendingReacquisitionStrong = decision?.strong ?? false
+                pendingReacquisition = decision.map { PendingReacquisition(id: $0.id, strong: $0.strong) }
             } else {
-                pendingReacquisition = reacquisitionEvidence.consider(
-                    observationID: observationID, scores: scores)
-                pendingReacquisitionStrong = false
+                pendingReacquisition = reacquisitionEvidence.consider(observationID: observationID, scores: scores)
+                    .map { PendingReacquisition(id: $0, strong: false) }
             }
             return true
         default: return false
@@ -753,10 +755,10 @@ final class ShotComposer: ObservableObject {
         // Drain any async re-acquisition decision queued from a prior frame's
         // background task. Doing this first keeps all state transitions
         // visible in this single switch.
-        if let candidateID = pendingReacquisition {
+        if let decision = pendingReacquisition {
             pendingReacquisition = nil
-            let strongDecision = pendingReacquisitionStrong
-            pendingReacquisitionStrong = false
+            let candidateID = decision.id
+            let strongDecision = decision.strong
             let gallery: FaceSignatureGallery?
             switch lockState {
             case .hold(_, let stored, _), .wideWaiting(let stored): gallery = stored
