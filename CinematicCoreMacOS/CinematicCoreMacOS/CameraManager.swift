@@ -2455,9 +2455,7 @@ final class CameraManager: NSObject, ObservableObject {
                 timestamp: timestampSeconds,
                 persons: detectedPersons,
                 currentCrop: cropEngine?.currentCrop ?? .fullFrame,
-                idealCrop: useMLAgent
-                    ? cinematicAgent.lastPredictedCrop
-                    : shotComposer.currentComputedCrop,
+                idealCrop: cropEngine?.targetCrop,
                 isInterpolating: cropEngine?.isInterpolating ?? false
             )
         }

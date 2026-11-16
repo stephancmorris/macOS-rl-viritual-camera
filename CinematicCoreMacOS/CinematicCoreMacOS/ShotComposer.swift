@@ -142,9 +142,9 @@ final class ShotComposer: ObservableObject {
     /// @Published but written compare-before-write only (transition publish).
     @Published private(set) var hasActiveTarget: Bool = false
 
-    /// The most recently computed crop. Plain per-frame storage — logic
-    /// readers (training recorder) read this synchronously; UI reads the
-    /// 15 Hz `displayedComputedCrop` mirror instead.
+    /// Most recent raw, unled composition before hold adjustment, including
+    /// computations that emit no new target. This is not the camera target.
+    /// Logic reads it synchronously; UI uses the 15 Hz `displayedComputedCrop` mirror.
     private(set) var currentComputedCrop: CropEngine.CropRect?
 
     /// The tighter subject box used to derive the visible program crop.
@@ -1567,13 +1567,15 @@ final class ShotComposer: ObservableObject {
                     settleWindow.removeAll(keepingCapacity: true)
                 }
                 settleWindow.append((observationTimestamp, trackingCenter))
-                settleWindow.removeAll { observationTimestamp - $0.time > Self.settleConfirmation + 1e-9 }
+                // Deliberate four-sample floor, accepted in review: below 10 Hz
+                // retaining only the boundary sample leaves three observations,
+                // so the four-sample half-mean requirement could never be met.
+                while settleWindow.count > 4,
+                      observationTimestamp - settleWindow[1].time >= Self.settleConfirmation - 1e-9 {
+                    settleWindow.removeFirst()
+                }
                 if settleWindow.count >= 4,
-                   observationTimestamp - settleWindow[0].time >= 0.21,
-                   // Keep the transition within one observation of the former dwell.
-                   observationTimestamp - settleWindow[0].time
-                    + (settleWindow.last!.time - settleWindow[settleWindow.count - 2].time)
-                    >= Self.settleConfirmation - 1e-9 {
+                   observationTimestamp - settleWindow[0].time >= Self.settleConfirmation - 1e-9 {
                     func mean(_ values: ArraySlice<(time: TimeInterval, center: CGPoint)>) -> CGPoint {
                         let sum = values.reduce(CGPoint.zero) { CGPoint(x: $0.x + $1.center.x, y: $0.y + $1.center.y) }
                         return CGPoint(x: sum.x / CGFloat(values.count), y: sum.y / CGFloat(values.count))
