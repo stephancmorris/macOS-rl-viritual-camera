@@ -2322,7 +2322,8 @@ final class CameraManager: NSObject, ObservableObject {
                 isFresh: detectionIsFresh,
                 observationID: observation.frame?.observationID,
                 observationTimestamp: observation.frame?.capturedAt,
-                excludedFromReacquisition: personDetector.witnessedOtherIDs()
+                excludedFromReacquisition: personDetector.witnessedOtherIDs(),
+                lockAmbiguityOpen: personDetector.lockAmbiguityOpen
             )
             applyLockOutcome(lockOutcome)
         }

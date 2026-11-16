@@ -183,6 +183,8 @@ final class ScenarioLoop {
     var isHold = false
     var isTracking = true
     var freshThisFrame = false
+    /// The detector's lock-ambiguity window as passed to `tick` this frame.
+    private(set) var ambiguityOpen = false
 
     init(preset: ShotComposer.Config.ShotPreset, feel: ShotComposer.Config.TuningPreset, first: CGRect, t: Double) throws {
         engine = try #require(CropEngine())
@@ -267,9 +269,11 @@ final class ScenarioLoop {
             } else if composer.manualLockedTargetID == nil { roiBox = nil }
         }
         lockedBox = persons.first(where: { $0.id == id })?.boundingBox
+        ambiguityOpen = detector.lockAmbiguityOpen
         let outcome = composer.tick(detections: persons, timestamp: t, pixelBuffer: nil, isFresh: fresh,
                           observationID: obsID, observationTimestamp: obsT,
-                          excludedFromReacquisition: detector.witnessedOtherIDs())
+                          excludedFromReacquisition: detector.witnessedOtherIDs(),
+                          lockAmbiguityOpen: ambiguityOpen)
         if commands.admitRecovery(outcome) {
             engine.endZoom()
             switch outcome {
@@ -347,7 +351,7 @@ struct TrackingScenarios {
         return i.isNull ? 0 : Double(i.width) / Double(min(a.width, b.width))
     }
 
-    func run(_ sc: Scenario, seed: UInt64) throws -> (final: String, wrong: Double, hold: Double, holdVisible: Double, inputDigest: String, latchedWrong: Double, longestLatchedWrong: Double, unionTime: Double, legacyFinal: String) {
+    func run(_ sc: Scenario, seed: UInt64) throws -> (final: String, wrong: Double, hold: Double, holdVisible: Double, inputDigest: String, latchedWrong: Double, longestLatchedWrong: Double, unionTime: Double, legacyFinal: String, ambiguityShare: Double) {
         let rng = ProbeRng(seed)
         let actors = sc.make(rng)
         func hidden(_ i: Int, _ e: Double) -> Bool {
@@ -377,6 +381,7 @@ struct TrackingScenarios {
         var traceIndex = 0
         var on = 0
         var wrong = 0.0, hold = 0.0, holdVisible = 0.0
+        var trackingFrames = 0, ambiguousFrames = 0
         var wrongFrames = 0, wrongStretch = 0, longestWrongStretch = 0, unionFrames = 0
         for frame in 1...Int((TrackingScenarioOptions.wide ? sc.duration : min(sc.duration, 15)) * fps) {
             let el = Double(frame) / fps
@@ -442,6 +447,10 @@ struct TrackingScenarios {
                 if bestIoU > 0.3 { on = best }
                 if on != 0 { wrong += 1 / fps }
             }
+            if loop.isTracking {
+                trackingFrames += 1
+                if loop.ambiguityOpen { ambiguousFrames += 1 }
+            }
             if loop.isTracking, loop.lockedBox != nil {
                 if !loop.lockedSources.contains(0) {
                     wrongFrames += 1; wrongStretch += 1
@@ -459,7 +468,8 @@ struct TrackingScenarios {
         let digest = SHA256.hash(data: inputBytes).map { String(format: "%02x", $0) }.joined()
         if seed == 40000 { print("TRACKING-INPUT-BASELINE|\(sc.name)|seed=\(seed)|digest=\(digest)|legacyWrong=\(wrong)|final=\(final)") }
         return (final, wrong, hold, holdVisible, digest, Double(wrongFrames) / fps,
-                Double(longestWrongStretch) / fps, Double(unionFrames) / fps, legacyFinal)
+                Double(longestWrongStretch) / fps, Double(unionFrames) / fps, legacyFinal,
+                trackingFrames > 0 ? Double(ambiguousFrames) / Double(trackingFrames) : 0)
     }
 
     @Test func pullbackActuallyWidensThePicture() throws {
