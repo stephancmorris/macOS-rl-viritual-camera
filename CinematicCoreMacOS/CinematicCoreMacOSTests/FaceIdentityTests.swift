@@ -242,6 +242,70 @@ struct FaceIdentityTests {
         #expect(f.composer.finishIdentityEvidence(after, tier: .strongMismatch))
     }
 
+    // MARK: Ambiguity that never closes (a crowd)
+
+    /// Steps continuous ambiguity at the 25 Hz detection rate and reports
+    /// which detections were upgraded to verify scans.
+    private static func scans(_ f: Fixture, seconds: Double, ambiguous: Bool = true) -> [Bool] {
+        (0..<Int((seconds / 0.04).rounded())).map { _ in
+            f.tick(face: false, ambiguous: ambiguous)
+            return f.composer.shouldRunIdentityVerifyScan(now: f.time)
+        }
+    }
+
+    /// The detector's window stays open, so nothing restarts the verify
+    /// window; its scan burst starts again after the re-arm interval.
+    @Test func persistentAmbiguityRearmsTheScanBurst() {
+        let f = Fixture()
+        f.tick(face: false, ambiguous: true)
+        let opened = f.time
+        #expect(Self.scans(f, seconds: 1).contains(true))
+        f.time = opened + ShotComposer.identityVerifyMaxDuration + 0.5
+        #expect(!Self.scans(f, seconds: 1).contains(true))
+        f.time = opened + ShotComposer.identityVerifyRearmInterval + 0.1
+        #expect(Self.scans(f, seconds: 1).contains(true))
+    }
+
+    /// The load bound: with ambiguity open for 30 s and never a usable face,
+    /// verify scans stay at one detection in six.
+    @Test func rearmedScansStayWithinTheLoadBound() {
+        let f = Fixture()
+        let all = Self.scans(f, seconds: 30)
+        let share = ShotComposer.identityVerifyMaxDuration / ShotComposer.identityVerifyRearmInterval
+            / Double(ShotComposer.identityVerifyCadence)
+        let upgraded = all.filter { $0 }.count
+        // One scan of slack per burst for where a burst's edge falls.
+        #expect(Double(upgraded) <= Double(all.count) * share + 6)
+        // Five bursts of about 25 scans: the re-arm did happen.
+        #expect(upgraded >= 100)
+    }
+
+    /// Once the detector's window has closed, a spent burst stays spent.
+    @Test func rearmNeedsAmbiguityStillOpen() {
+        let f = Fixture()
+        _ = Self.scans(f, seconds: 0.2)
+        let opened = f.time
+        f.time = opened + ShotComposer.identityVerifyRearmInterval
+        let quiet = Self.scans(f, seconds: 1, ambiguous: false)
+        #expect(f.composer.identityVerifyOpenForTesting)
+        #expect(!quiet.contains(true))
+    }
+
+    /// Re-arming restarts only the scans. Matches counted before it still
+    /// count, and so does the check in flight across it.
+    @Test func rearmKeepsStreaksAndEvidenceInFlight() {
+        let f = Fixture()
+        f.tick(ambiguous: true)
+        f.answer(.strongMatch, ambiguous: true)
+        f.answer(.strongMatch, ambiguous: true)
+        let epoch = f.composer.identityVerifyEpochForTesting
+        f.time += ShotComposer.identityVerifyRearmInterval
+        f.tick(face: false, ambiguous: true)
+        #expect(f.composer.identityVerifyEpochForTesting == epoch)
+        #expect(f.answer(.strongMatch))
+        #expect(!f.composer.identityVerifyOpenForTesting)
+    }
+
     // MARK: Shadow veto log
 
     /// The shadow veto carries every detector reason seen during its window.

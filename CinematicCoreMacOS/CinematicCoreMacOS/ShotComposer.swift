@@ -372,6 +372,11 @@ final class ShotComposer: ObservableObject {
     /// keep supplying evidence.
     static let identityVerifyCadence = 3
     static let identityVerifyMaxDuration: TimeInterval = 3.0
+    /// While the detector's ambiguity stays open and the window has no
+    /// verdict, the scan burst starts again this long after it last started.
+    /// With the 3 s cap this bounds verify scans to half the time, so one
+    /// detection in six on average, however long a crowd keeps the lock ambiguous.
+    static let identityVerifyRearmInterval: TimeInterval = 6.0
     /// Consecutive observations needed to verify or (would-)veto.
     static let identityConsecutive = 3
     /// Wall-clock time the window opened; nil while closed.
@@ -796,6 +801,9 @@ final class ShotComposer: ObservableObject {
                     openIdentityVerify(at: timestamp, targetID: targetID)
                 } else if ambiguityBegan, identityVerifyOpenedAt != nil {
                     restartIdentityVerify(at: timestamp, targetID: targetID)
+                } else if lockAmbiguityOpen, let opened = identityVerifyOpenedAt,
+                          timestamp - opened >= Self.identityVerifyRearmInterval {
+                    rearmIdentityVerifyScans(at: timestamp, targetID: targetID)
                 }
                 if identityVerifyOpenedAt != nil { identityVerifyReasons.formUnion(lastLockAmbiguityReasons) }
                 if isFresh, identityVerifyOpenedAt != nil {
@@ -934,6 +942,16 @@ final class ShotComposer: ObservableObject {
         identityVerifyEpoch &+= 1
         identityVerifyReasons = []
         Self.logger.info("IDENTITY verify-restart target=\(String(targetID.uuidString.prefix(8)), privacy: .public)")
+    }
+
+    /// The detector's ambiguity has stayed open (a crowd), so no new moment
+    /// restarts the window, yet its scan burst is spent. Start the burst
+    /// again. Only the scan cadence and cap restart: the streaks, the epoch
+    /// and evidence in flight are kept, so re-arming never delays a verdict.
+    private func rearmIdentityVerifyScans(at time: TimeInterval, targetID: UUID) {
+        identityVerifyOpenedAt = time
+        identityVerifyDetections = 0
+        Self.logger.info("IDENTITY verify-rearm target=\(String(targetID.uuidString.prefix(8)), privacy: .public)")
     }
 
     private func closeIdentityVerify() {
