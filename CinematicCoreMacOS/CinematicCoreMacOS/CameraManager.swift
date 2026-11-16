@@ -1820,8 +1820,10 @@ final class CameraManager: NSObject, ObservableObject {
             // head poses after lock. Without it the gallery stays frozen at
             // the 3 acquisition signatures and re-acquisition is stuck with
             // lectern-frontals only.
+            // The identity verify window, when open, asks for faces more often.
             if detectionRunsThisFrame,
-               shotComposer.shouldRunGalleryRefreshScan() {
+               shotComposer.shouldRunIdentityVerifyScan(now: CACurrentMediaTime())
+                || shotComposer.shouldRunGalleryRefreshScan() {
                 return PersonDetector.DetectionRequestPlan(
                     mode: .acquiring,
                     roi: lockedROI()
@@ -2323,7 +2325,8 @@ final class CameraManager: NSObject, ObservableObject {
                 observationID: observation.frame?.observationID,
                 observationTimestamp: observation.frame?.capturedAt,
                 excludedFromReacquisition: personDetector.witnessedOtherIDs(),
-                lockAmbiguityOpen: personDetector.lockAmbiguityOpen
+                lockAmbiguityOpen: personDetector.lockAmbiguityOpen,
+                lockAmbiguityReasons: personDetector.lockAmbiguityOpenReasons
             )
             applyLockOutcome(lockOutcome)
         }

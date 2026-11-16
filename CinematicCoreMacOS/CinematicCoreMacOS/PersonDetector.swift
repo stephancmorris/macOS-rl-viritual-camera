@@ -311,6 +311,16 @@ final class PersonDetector: ObservableObject {
         static let overlap = LockAmbiguity(rawValue: 1 << 2)
         /// The bound box grew in one scan as if two people merged.
         static let merge = LockAmbiguity(rawValue: 1 << 3)
+
+        /// For logs: the reasons joined with "+", or "none".
+        var logDescription: String {
+            let names: [(LockAmbiguity, String)] = [
+                (.probationAccept, "probationAccept"), (.coastRebind, "coastRebind"),
+                (.overlap, "overlap"), (.merge, "merge")
+            ]
+            let present = names.filter { contains($0.0) }.map(\.1)
+            return present.isEmpty ? "none" : present.joined(separator: "+")
+        }
     }
 
     /// When the current ambiguity window opened; nil while closed.
@@ -333,6 +343,12 @@ final class PersonDetector: ObservableObject {
     var lockAmbiguityOpen: Bool {
         guard let lastTrackingTimestamp else { return false }
         return lockAmbiguity(at: lastTrackingTimestamp).open
+    }
+
+    /// Why the ambiguity window is open as of the newest observation; empty while closed.
+    var lockAmbiguityOpenReasons: LockAmbiguity {
+        guard let lastTrackingTimestamp else { return [] }
+        return lockAmbiguity(at: lastTrackingTimestamp).reasons
     }
 
     private func noteLockAmbiguity(_ reason: LockAmbiguity, at timestamp: TimeInterval) {
