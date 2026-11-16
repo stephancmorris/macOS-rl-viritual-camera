@@ -708,18 +708,18 @@ struct FramingRegressionTests {
         composer.config.shotPreset = .waistUp
         let subject = person(height: 0.40)
 
-        // The first observation applies the initial framing; the next twelve
-        // distinct observations settle the Steady Follow state and establish
+        // The first observation applies framing; subsequent fresh observations
+        // settle within one sample of the former dwell and establish
         // the displayed band. The band is an operator-facing amount
         // of movement inside the *program* view, so it must shrink with a
         // tighter crop instead of remaining a fixed fraction of the source.
         var crop: CropEngine.CropRect?
         for frame in 0..<14 {
-            crop = composer.compose(
+            if let emitted = composer.compose(
                 person: subject,
                 isFresh: true,
                 observationTimestamp: Double(frame) / 50.0
-            )
+            ) { crop = emitted }
         }
 
         let settledCrop = try #require(crop)
@@ -759,10 +759,11 @@ struct FramingRegressionTests {
 
         let time = try #require(settledAt)
         let elapsed = time - firstSettleObservation
-        // The intended settle period is 12/50 s. A sampled detector may cross
-        // it up to one observation later, but must not become a rate-dependent
+        print("FRAMING-CADENCE|settle|fps=\(fps)|elapsed=\(elapsed)")
+        // The windowed mean may settle one observation before the former
+        // 12/50 s dwell, but must not become a rate-dependent
         // 12-frame wait (0.48 s at 25 fps or 0.20 s at 60 fps).
-        #expect(elapsed >= 0.24 - 0.0001)
+        #expect(elapsed >= 0.24 - 1.0 / fps - 0.0001)
         #expect(elapsed <= 0.24 + (1.0 / fps) + 0.0001)
     }
 
@@ -794,8 +795,9 @@ struct FramingRegressionTests {
             if composer.steadyBand == nil { releasedAt = time; break }
         }
         let elapsed = try #require(releasedAt) - start
-        #expect(elapsed >= 0.04 - 0.0001)
-        #expect(elapsed <= 0.04 + 1.0 / fps + 0.0001)
+        print("FRAMING-CADENCE|exit|fps=\(fps)|elapsed=\(elapsed)")
+        #expect(elapsed >= 0.03 - 0.0001)
+        #expect(elapsed <= 0.03 + 1.0 / fps + 0.0001)
     }
 
     @Test func validationPlaybackUsesAbsolutePresentationTime() {

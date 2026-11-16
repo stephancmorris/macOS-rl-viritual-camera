@@ -448,7 +448,7 @@ struct LivePanePicture: View {
                 detectedPersons: channel.personDetector.displayedPersons,
                 showDetections: true,
                 activeTargetID: channel.shotComposer.activeTargetID,
-                manualLockedTargetID: channel.manualLockedTargetID,
+                manualLockedTargetID: channel.subjectTrackID,
                 acquiringTargetID: channel.shotComposer.acquiringTargetID,
                 trackedSubjectRect: channel.shotComposer.displayedTrackedBounds,
                 onTapPoint: tapHandler,

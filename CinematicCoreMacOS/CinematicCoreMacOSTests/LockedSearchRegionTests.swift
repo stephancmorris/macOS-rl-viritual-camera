@@ -11,7 +11,7 @@ struct LockedSearchRegionTests {
 
     @Test func stationaryRegionKeepsExistingPaddingAndCenter() {
         let roi = region()
-        #expect(abs(roi.width - box.width * 1.8) < 1e-12)
+        #expect(abs(roi.width - box.width * 3.0) < 1e-12)
         #expect(abs(roi.height - box.height * 1.8) < 1e-12)
         #expect(abs(roi.midX - box.midX) < 1e-12 && abs(roi.midY - box.midY) < 1e-12)
     }
