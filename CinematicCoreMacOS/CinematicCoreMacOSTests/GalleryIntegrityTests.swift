@@ -181,6 +181,32 @@ struct GalleryIntegrityTests {
         #expect(f.composer.galleryUnverifiedForTesting)
     }
 
+    /// A capture of the tracked face is in flight when a live identity veto
+    /// lands. The hold keeps the same target, so only the retired generation
+    /// stops it reaching the gallery.
+    @Test func captureInFlightAtAVetoIsDiscarded() async throws {
+        let f = try Fixture()
+        await f.acquire()
+        var requests: [IdentityEvidenceRequest] = []
+        f.composer.identityVetoEnabledForTesting = true
+        f.composer.identityEvidenceSchedulerForTesting = { requests.append($0) }
+        await f.tick(ambiguous: true)
+        let paused = PausedCapture()
+        f.composer.signatureCaptureForTesting = { _ in await paused.capture() }
+        let before = f.size
+        for _ in 0..<3 {
+            f.composer.finishIdentityEvidence(try #require(requests.last), tier: .strongMismatch)
+            await f.tick(waitForCapture: false)
+        }
+        await paused.started()
+        #expect(f.composer.isIdentityVetoHeld)
+        let task = f.composer.signatureCaptureTaskForTesting
+        await paused.release(.vector(Self.drift))
+        await task?.value
+        #expect(f.size == before)
+        #expect(f.composer.galleryUnverifiedForTesting)
+    }
+
     @Test func admissionScopes() {
         let ready = ShotComposer.FaceSignatureGallery.readyThreshold
         #expect(GalleryAdmission.scope(entryCount: ready - 1, unverified: true) == nil)

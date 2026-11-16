@@ -121,6 +121,71 @@ struct FaceIdentityLiveTests {
         #expect(f.composer.identityVetoedIDs.isEmpty)
     }
 
+    // MARK: Veto follow-through
+
+    /// The hold runs out and the shot goes wide with the vetoed person still
+    /// in view. They stay blocked: no return on boxes during the hold, no
+    /// weak face match in hold or wide. Only a strong match binds them.
+    @Test func vetoedTrackStaysBlockedThroughHoldAndWide() {
+        let f = Fixture()
+        f.veto()
+        let vetoedAt = f.time
+        while f.time - vetoedAt < ShotComposer.holdDuration + 0.2 {
+            f.tick([f.subject])
+            f.answer([f.subject: 0.52])
+            #expect(f.boundID == nil)
+        }
+        guard case .wideWaiting = f.composer.lockState else {
+            Issue.record("The vetoed hold did not pull back to wide")
+            return
+        }
+        #expect(f.composer.identityVetoedIDs == [f.subject])
+        for _ in 0..<6 {
+            f.tick([f.subject])
+            f.answer([f.subject: 0.52])
+        }
+        f.tick([f.subject])
+        #expect(f.boundID == nil)
+        for _ in 0..<3 {
+            f.tick([f.subject])
+            f.answer([f.subject: 0.10])
+        }
+        f.tick([f.subject])
+        #expect(f.boundID == f.subject)
+        #expect(f.composer.identityVetoedIDs.isEmpty)
+    }
+
+    @Test func aNewLockClearsTheVetoedSet() {
+        let f = Fixture()
+        f.veto()
+        f.composer.lockTarget(UUID())
+        #expect(f.composer.identityVetoedIDs.isEmpty)
+        #expect(!f.composer.isIdentityVetoHeld)
+    }
+
+    @Test func unlockClearsTheVetoedSet() {
+        let f = Fixture()
+        f.veto()
+        f.composer.clearManualLock()
+        #expect(f.composer.identityVetoedIDs.isEmpty)
+        #expect(f.composer.lockBindingTargetID == nil)
+    }
+
+    /// Identity results from before the veto change nothing afterwards,
+    /// whether replayed or newer than anything counted.
+    @Test func identityEvidenceFromBeforeTheVetoIsRefused() throws {
+        let f = Fixture()
+        let generation = f.composer.identityGenerationForTesting
+        f.veto()
+        let last = try #require(f.evidence.last)
+        let later = IdentityEvidenceRequest(generation: generation, observationID: f.observation + 1,
+                                            targetID: f.subject, faceBox: .zero, verifyEpoch: last.verifyEpoch)
+        #expect(!f.composer.finishIdentityEvidence(last, tier: .strongMatch))
+        #expect(!f.composer.finishIdentityEvidence(later, tier: .strongMatch))
+        #expect(f.isHold)
+        #expect(f.composer.identityVetoedIDs == [f.subject])
+    }
+
     // MARK: What a vetoed hold reports
 
     /// A camera whose composer is driven the way `processFrame` drives it:
