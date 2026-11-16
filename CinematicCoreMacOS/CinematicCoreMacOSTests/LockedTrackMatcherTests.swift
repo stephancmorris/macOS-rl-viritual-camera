@@ -12,9 +12,70 @@
 import Testing
 import Foundation
 import CoreGraphics
+@preconcurrency import Vision
 @testable import Alfie
 
 struct LockedTrackMatcherTests {
+    @Test func stationarySliverOverlapCannotRebind() {
+        let reference = CGRect(x: 0.465, y: 0.25, width: 0.07, height: 0.30)
+        let candidate = reference.offsetBy(dx: 0.061, dy: 0)
+        let overlap = PersonDetector.iou(reference, candidate)
+        #expect(overlap > 0 && overlap < PersonDetector.lockedDistantIoU)
+        var probation: PersonDetector.LockProbation?
+        for frame in 0...20 {
+            let time = Double(frame) * 0.04
+            let result = PersonDetector.resolveLockedAssignment(detections: [candidate], referenceBox: reference,
+                lockVelocityMagnitude: 0, timeSinceLockSeen: time + 0.4, otherTrackBoxes: [],
+                probation: probation, observationTimestamp: time)
+            #expect(result.assignedIndex == nil)
+            probation = result.probation
+        }
+    }
+
+
+    @MainActor @Test func witnessesSurviveLockExpiryAndWideUntilANewLock() throws {
+        let detector = PersonDetector()
+        let subject = CGRect(x: 0.265, y: 0.25, width: 0.07, height: 0.30)
+        let neighbour = subject.offsetBy(dx: 0.30, dy: 0)
+        func scan(_ time: Double, _ boxes: [CGRect]) {
+            detector.updateTracking(rectObservations: boxes.map { VNHumanObservation(boundingBox: $0) },
+                poseObservations: [], faceObservations: [], timestamp: time)
+        }
+        scan(1000, [subject, neighbour])
+        let lock = try #require(detector.detectedPersons.first?.id)
+        let other = try #require(detector.detectedPersons.last?.id)
+        #expect(lock != other)
+        detector.lockedTargetID = lock
+        scan(1000.04, [subject, neighbour])
+        #expect(detector.witnessedOtherIDs() == [other])
+        for frame in 1...38 { scan(1000.04 + Double(frame) * 0.04, [neighbour]) }
+        #expect(detector.trackMotion(for: lock) == nil)
+        #expect(detector.witnessedOtherIDs() == [other])
+        detector.lockedTargetID = nil
+        #expect(detector.witnessedOtherIDs() == [other])
+        detector.lockedTargetID = UUID()
+        #expect(detector.witnessedOtherIDs().isEmpty)
+    }
+
+    @MainActor
+    @Test func staleOtherTrackDoesNotBlockAReboundLock() throws {
+        let detector = PersonDetector()
+        func box(_ x: Double) -> CGRect { CGRect(x: x - 0.035, y: 0.25, width: 0.07, height: 0.30) }
+        func scan(_ t: Double, _ xs: [Double]) {
+            detector.updateTracking(rectObservations: xs.map { VNHumanObservation(boundingBox: box($0)) },
+                poseObservations: [], faceObservations: [], timestamp: t)
+        }
+        scan(1000, [0.30, 0.36])
+        let lock = try #require(detector.detectedPersons.first?.id)
+        detector.lockedTargetID = lock
+        for i in 1...15 { scan(1000 + Double(i) * 0.04, [0.30, 0.36]) }
+        // The lock advances while its old neighbour is no longer observed.
+        scan(1000.64, [0.32])
+        #expect(detector.detectedPersons.first?.id == lock)
+        scan(1000.68, [0.35])
+        #expect(detector.detectedPersons.first?.id == lock)
+    }
+
 
     // MARK: - Helpers
 
@@ -118,51 +179,18 @@ struct LockedTrackMatcherTests {
 
     // MARK: - 4. Discontinuous candidate inside radius (probation path)
 
-    @Test func discontinuousCandidateInsideRadiusRequiresProbationFrames() {
-        // Center 0.10 from the narrow reference (inside the 0.12 base
-        // radius), narrow enough that IoU with the reference box is exactly 0.
+    @Test func stationaryDiscontinuousCandidateNeverRebinds() {
         let candidate = Self.nonOverlappingCandidate(distanceFromReferenceCenter: 0.10)
-        #expect(PersonDetector.iou(candidate, Self.narrowReferenceBox) == 0, "precondition: candidate must not overlap reference")
-
-        var probation: PersonDetector.LockProbation? = nil
-
-        // First sighting at 0 ms starts probation.
-        var resolution = PersonDetector.resolveLockedAssignment(
-            detections: [candidate],
-            referenceBox: Self.narrowReferenceBox,
-            lockVelocityMagnitude: 0,
-            timeSinceLockSeen: 0.033,
-            otherTrackBoxes: [],
-            probation: probation, observationTimestamp: 0
-        )
-        #expect(resolution.assignedIndex == nil)
-        #expect(resolution.probation?.startedAt == 0)
-        probation = resolution.probation
-
-        // Second sighting at 40 ms still coasts.
-        resolution = PersonDetector.resolveLockedAssignment(
-            detections: [candidate],
-            referenceBox: Self.narrowReferenceBox,
-            lockVelocityMagnitude: 0,
-            timeSinceLockSeen: 0.033,
-            otherTrackBoxes: [],
-            probation: probation, observationTimestamp: 0.04
-        )
-        #expect(resolution.assignedIndex == nil)
-        #expect(resolution.probation?.lastObservedAt == 0.04)
-        probation = resolution.probation
-
-        // Third sighting at 80 ms accepts, preserving the 25 Hz baseline.
-        resolution = PersonDetector.resolveLockedAssignment(
-            detections: [candidate],
-            referenceBox: Self.narrowReferenceBox,
-            lockVelocityMagnitude: 0,
-            timeSinceLockSeen: 0.033,
-            otherTrackBoxes: [],
-            probation: probation, observationTimestamp: 0.08
-        )
-        #expect(resolution.assignedIndex == 0)
-        #expect(resolution.probation == nil)
+        var probation: PersonDetector.LockProbation?
+        for frame in 0...20 {
+            let t = Double(frame) * 0.04
+            let result = PersonDetector.resolveLockedAssignment(detections: [candidate],
+                referenceBox: Self.narrowReferenceBox, lockVelocityMagnitude: 0,
+                timeSinceLockSeen: t + 0.033, otherTrackBoxes: [], probation: probation,
+                observationTimestamp: t)
+            #expect(result.assignedIndex == nil)
+            probation = result.probation
+        }
     }
 
     // MARK: - 5. Contested candidate (occluder)
@@ -203,8 +231,8 @@ struct LockedTrackMatcherTests {
             otherTrackBoxes: [occluder],
             probation: probation, observationTimestamp: 0.28
         )
-        #expect(finalResolution.assignedIndex == 0)
-        #expect(finalResolution.probation == nil)
+        #expect(finalResolution.assignedIndex == nil)
+        #expect(finalResolution.probation != nil)
     }
 
     // MARK: - 6. Two people crossing (margin fail)

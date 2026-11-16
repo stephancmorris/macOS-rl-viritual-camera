@@ -53,7 +53,8 @@ final class DirectorSubjectConsole {
                     case .centralPresenter: provenance = .alfie(.centralPresenter)
                     }
                 } else { provenance = .operatorNomination }
-                if !candidates.contains(where: { $0.id == selectedID }) {
+                // A vetoed track is still a candidate but is not the subject: read as out of sight.
+                if !candidates.contains(where: { $0.id == selectedID }) || channel.shotComposer.isIdentityVetoHeld {
                     selected = nil
                     if phase == .tracking || phase == .acquiring { phase = .unavailable }
                 }

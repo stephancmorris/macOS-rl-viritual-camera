@@ -92,7 +92,7 @@ struct ContentView: View {
                     showDetections: true,
                     cropRect: cameraManager.activeMode != .wide ? cameraManager.cropEngine?.displayedCrop : nil,
                     activeTargetID: cameraManager.shotComposer.activeTargetID,
-                    manualLockedTargetID: cameraManager.manualLockedTargetID,
+                    manualLockedTargetID: cameraManager.subjectTrackID,
                     acquiringTargetID: cameraManager.shotComposer.acquiringTargetID,
                     trackedSubjectRect: cameraManager.shotComposer.displayedTrackedBounds,
                     isRecovering: cameraManager.recoveryState.isRecovering,

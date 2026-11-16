@@ -875,6 +875,23 @@ struct MotionLoopTests {
     // Decided by the owner (11 Nov 2026): a framing command reaches the
     // picture one frame later than it did. This pins it at exactly one.
 
+    @Test func theCoreCanPreviewATargetWithoutApplyingIt() {
+        // The training recorder logs the target a control turn just composed.
+        // The capture queue applies it one step later, so the controller asks
+        // the core what it will become.
+        let core = CropMotionCore()
+        core.qualityFloor = .forSource(height: 1080)
+        let floor = core.qualityFloor.minCropHeightFraction
+        let tight = CropEngine.CropRect(center: CGPoint(x: 0.5, y: 0.5),
+                                        size: CGSize(width: floor / 4, height: floor / 4))
+        let before = core.targetCrop
+        let preview = core.targetAfterApplying(tight)
+        #expect(core.targetCrop == before)
+        #expect(preview.size.height >= floor)
+        core.setTargetCrop(tight)
+        #expect(core.targetCrop == preview)
+    }
+
     @Test func aFramingCommandThatLandsInAControlTurnIsUsedByTheNextRenderedFrame() async throws {
         // The real camera, tracking a subject. 1080-line frames, so the
         // quality floor leaves room between the two presets.

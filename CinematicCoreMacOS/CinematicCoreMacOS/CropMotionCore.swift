@@ -446,6 +446,15 @@ nonisolated final class CropMotionCore: @unchecked Sendable {
         get { read { $0.targetCrop } }
         set { write { $0.targetCrop = newValue } }
     }
+    /// The target the state would hold after `setTargetCrop(crop)` (zoom
+    /// size and quality floor applied), without changing anything.
+    func targetAfterApplying(_ crop: CropRect) -> CropRect {
+        read { state in
+            var copy = state
+            copy.setTargetCrop(crop)
+            return copy.targetCrop
+        }
+    }
     var revision: UInt64 { read { $0.revision } }
     var currentFlags: Flags { read { $0.flags } }
     var qualityFloor: QualityFloor {
