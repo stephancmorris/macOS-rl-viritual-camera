@@ -374,8 +374,11 @@ final class ShotComposer: ObservableObject {
     static let identityVerifyMaxDuration: TimeInterval = 3.0
     /// While the detector's ambiguity stays open and the window has no
     /// verdict, the scan burst starts again this long after it last started.
-    /// With the 3 s cap this bounds verify scans to half the time, so one
-    /// detection in six on average, however long a crowd keeps the lock ambiguous.
+    /// For an undecided window, with the 3 s cap, this bounds verify scans to
+    /// half the time: about one detection in six on average. A window that
+    /// keeps verifying closes and reopens on the next ambiguous tick with a
+    /// fresh burst, so a crowded scene can reach about one detection in three;
+    /// a soak test should expect that.
     static let identityVerifyRearmInterval: TimeInterval = 6.0
     /// Consecutive observations needed to verify or (would-)veto.
     static let identityConsecutive = 3
