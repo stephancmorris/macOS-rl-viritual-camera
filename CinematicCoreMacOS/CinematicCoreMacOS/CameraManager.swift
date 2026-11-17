@@ -1242,6 +1242,8 @@ final class CameraManager: NSObject, ObservableObject {
     }
     /// Test seam: mark the source missing as a hot unplug would.
     func setSourceMissingForTesting(_ missing: Bool) { sourceMissing = missing }
+    /// Test seam: a world-model scan as if the frame path had recorded it.
+    func setWorldObservationForTesting(_ observation: WorldModel.Observation?) { lastWorldObservation = observation }
 
     func setDeviceLeaseForTesting(_ lease: CaptureDeviceRegistry.Lease?) { deviceLease = lease }
     /// Test seam: feed one captured buffer through the frame path.
