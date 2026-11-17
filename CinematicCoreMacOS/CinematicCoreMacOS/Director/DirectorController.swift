@@ -77,7 +77,25 @@ final class DirectorController: ObservableObject, DirectorConsoleControlling {
         let target: String?
         init(_ event: DirectorShadowRecord.Event) { stage = event.stage; reasons = event.reasons; target = event.target }
     }
-    private var lastShadowAbstention: ShadowAbstentionKey?
+    /// A would-prepare or would-cut, by input and shot.
+    private struct ShadowTargetKey: Equatable {
+        let target: ChannelID
+        let shot: DirectorShot
+    }
+    /// What the shadow last wrote for each side of the judge. Reset to write
+    /// the judge's position again.
+    private struct ShadowPosition {
+        var abstentions: [DirectorShadowRecord.Stage?: ShadowAbstentionKey] = [:]
+        var wouldPrepare: ShadowTargetKey?
+        var wouldCut: ShadowTargetKey?
+    }
+    private var shadowPosition = ShadowPosition()
+    /// Decision core, stage 3: the shadow judge. It returns values only.
+    private var decisionCore = DirectorDecisionCore()
+    /// The parameters group the shadow judge's records name. The version
+    /// rises whenever the style or preferences behind it change.
+    private struct ShadowJudgeKey: Equatable { let preferencesVersion: Int; let style: DirectorStyle }
+    private var shadowJudgeBinding: (key: ShadowJudgeKey, version: UInt64)?
     private lazy var subjectConsole = DirectorSubjectConsole(show: show)
     private let judgeShadow = DirectorJudgeShadow()
     private var captureBindingProvider: DirectorShadowRecorder.CaptureBindingProvider?
@@ -93,6 +111,10 @@ final class DirectorController: ObservableObject, DirectorConsoleControlling {
     private(set) lazy var backupExecution = DirectorBackupExecution(show: show, controller: self)
     private(set) lazy var onAirMoves = DirectorOnAirMoveExecution(show: show, controller: self)
     private let cutReadinessParameters: DirectorReadiness.Parameters?
+    /// The named study set the shadow judge runs with and its records name.
+    /// nil unless this Director was built with that set and actually runs its
+    /// adapter and readiness values; without it the judge does not run.
+    private let shadowJudgeStudy: DirectorStudyParameters?
     private(set) var policyRevision: UInt64 = 0
     private(set) var nominationRevision: UInt64 = 0
     #if DEBUG
@@ -126,6 +148,7 @@ final class DirectorController: ObservableObject, DirectorConsoleControlling {
          capabilities: DirectorCapabilities = .full,
          adapterParameters: DirectorEvidenceAdapter.Parameters? = nil,
          cutReadinessParameters: DirectorReadiness.Parameters? = nil,
+         studyParameters: DirectorStudyParameters? = nil,
          shadowLog: DirectorShadowLog? = nil,
          runSheet: RunSheet? = nil,
          log: ((String) -> Void)? = nil) {
@@ -137,8 +160,17 @@ final class DirectorController: ObservableObject, DirectorConsoleControlling {
         self.capabilities = capabilities
         // The level ceiling: no record qualifies a level this build cannot run.
         self.qualifiedLevels = { capabilities.ceiling(qualifiedLevels()) }
+        // A named study set supplies the values not passed explicitly.
+        let adapterParameters = adapterParameters ?? studyParameters?.adapter
+        let cutReadinessParameters = cutReadinessParameters ?? studyParameters?.readiness
         self.cutReadinessParameters = cutReadinessParameters
         self.adapter = adapterParameters.map(DirectorEvidenceAdapter.init(parameters:))
+        self.shadowJudgeStudy = studyParameters.flatMap { study in
+            guard adapterParameters == study.adapter, let readiness = cutReadinessParameters,
+                  DirectorShadowRecord.ReadinessParameters(readiness) == DirectorShadowRecord.ReadinessParameters(study.readiness)
+            else { return nil }
+            return study
+        }
         self.log = log ?? { Self.logger.notice("[DIRECTOR] \($0, privacy: .public)") }
         // Every launch starts Manual (U2); nothing is restored.
         self.directorSection = .atLaunch(qualified: Self.qualification(capabilities.ceiling(qualifiedLevels())))
@@ -150,7 +182,8 @@ final class DirectorController: ObservableObject, DirectorConsoleControlling {
     /// Install every ingress hook and start ticking. Idempotent.
     func attach() {
         guard let show else { return }
-        lastShadowAbstention = nil
+        shadowPosition = .init()
+        decisionCore = .init()
         latestScene = nil
         sceneBuilder.begin(at: clock())
         if !isAttached, !authority.paused {
@@ -188,7 +221,7 @@ final class DirectorController: ObservableObject, DirectorConsoleControlling {
     }
 
     func detach() {
-        lastShadowAbstention = nil
+        shadowPosition = .init()
         shadowStopCapture = nil
         shadowShowStopCapture = nil
         let wasAttached = isAttached
@@ -397,8 +430,98 @@ final class DirectorController: ObservableObject, DirectorConsoleControlling {
                 emitShadow(DirectorShadowRecorder.judgeComparison, authority: authority, judgeObservation: comparison)
             }
         } else if !cutExecution.isConfigured {
-            emitShadowAbstentionOnChange(DirectorShadowRecorder.noCutPolicy, authority: authority)
+            recordShadowJudge(now: now)
         }
+    }
+
+    /// Decision core, stage 3: run the existing rules against this tick's
+    /// scene and record what they would do, on change only. It prepares
+    /// nothing, sends no command and never Takes. Without a named study set, a
+    /// scene, a style or the parameters a record must name, it records that no
+    /// cut policy ran, as before. Studies that supply their own values and
+    /// bindings (tests, Debug rehearsals) therefore see no judge records.
+    private func recordShadowJudge(now: TimeInterval) {
+        guard let study = shadowJudgeStudy, let scene = latestScene, scene.now == now,
+              let programShot = scene.programShot, scene.style != nil,
+              let parameters = shadowJudgeParameters(study) else {
+            emitShadowAbstentionOnChange(DirectorShadowRecorder.noCutPolicy, authority: authority)
+            return
+        }
+        let snapshot = currentTakeSnapshot(now: now)
+        let outcome = decisionCore.evaluate(scene, live: snapshot.live, parameters: study, judge: RuleJudge())
+        let previewInput = scene.preview.flatMap { scene.input($0) }
+        let timeline = DirectorShotPolicy.Timeline(programShot: programShot, programStartedAt: scene.programStartedAt,
+            lastWideAt: scene.lastWideAt, history: scene.history,
+            candidates: previewInput.map { [DirectorDecisionCore.prepared($0)] } ?? [], now: now)
+        let prepareReadiness = previewInput.flatMap {
+            DirectorDecisionCore.prepareReadiness($0, take: scene.previewTake, readiness: study.readiness)
+        }
+        func evaluation(cut: Bool) -> DirectorShadowRecorder.Evaluation {
+            .init(now: now, parameters: parameters, sample: previewInput?.sample, revisions: previewInput?.revisions,
+                  adapter: adapter, readinessInputs: cut ? snapshot.readinessInputs : nil,
+                  prepareReadiness: prepareReadiness, cutReadiness: cut ? snapshot.measuredReadiness : nil,
+                  timeline: timeline, cutJudgeObservation: cut ? outcome.cutJudgeObservation : nil)
+        }
+
+        switch outcome.prepare {
+        case .chosen(let chosen):
+            let key = ShadowTargetKey(target: chosen.candidate.channel, shot: chosen.candidate.shot)
+            if shadowPosition.wouldPrepare != key,
+               let request = decisionCore.shadowRequest(for: chosen, scene: scene, authorityEpoch: authority.epoch,
+                   policyRevision: policyRevision, nominationRevision: nominationRevision),
+               emitShadow(DirectorShadowRecorder.preparation(request), authority: authority, evaluation: evaluation(cut: false)) {
+                shadowPosition.wouldPrepare = key
+                shadowPosition.abstentions[.prepare] = nil
+            }
+        case .abstain(let reason):
+            if emitShadowAbstentionOnChange(DirectorShadowRecorder.preparationAbstention(reason), authority: authority,
+                                            evaluation: evaluation(cut: false)) {
+                shadowPosition.wouldPrepare = nil
+            }
+        }
+
+        switch outcome.cut {
+        case .cut(let plan)?:
+            let key = ShadowTargetKey(target: plan.preview, shot: plan.candidate.shot)
+            if shadowPosition.wouldCut != key,
+               emitShadow(DirectorShadowRecorder.cut(.cut(plan)), authority: authority, evaluation: evaluation(cut: true)) {
+                shadowPosition.wouldCut = key
+                shadowPosition.abstentions[.cut] = nil
+            }
+        case .abstain(let reason)?:
+            if emitShadowAbstentionOnChange(DirectorShadowRecorder.cut(.abstain(reason)), authority: authority,
+                                            evaluation: evaluation(cut: true)) {
+                shadowPosition.wouldCut = nil
+            }
+        case nil:
+            if emitShadowAbstentionOnChange(DirectorShadowRecorder.noPreviewCut, authority: authority,
+                                            evaluation: evaluation(cut: true)) {
+                shadowPosition.wouldCut = nil
+            }
+        }
+    }
+
+    /// The study parameters the shadow judge's records name. The record
+    /// has no field for the set's name; its readiness and adapter values are
+    /// shadowV1's. The version rises when the style or preferences change, or
+    /// when another producer wrote a newer one, so no record is refused as a
+    /// changed group under an old version.
+    private func shadowJudgeParameters(_ study: DirectorStudyParameters) -> DirectorShadowRecorder.Parameters? {
+        guard let show, let recorder = shadowRecorder, let kind = recorder.evidenceClass(of: show),
+              let style = effectiveStyle, let preferences else { return nil }
+        let key = ShadowJudgeKey(preferencesVersion: preferences.version, style: style)
+        let latest = recorder.latestParametersVersion ?? 0
+        var version = shadowJudgeBinding?.version ?? 0
+        if shadowJudgeBinding?.key != key || latest > version {
+            let base = max(version, latest)
+            guard base < .max else { return nil }
+            version = base + 1
+        }
+        guard let parameters = captureParameters(.init(parametersVersion: version, provenance: [kind]),
+                  readiness: study.readiness, judgeMaximumAge: study.judgeMaximumAge,
+                  minimumProbability: study.minimumProbability) else { return nil }
+        shadowJudgeBinding = (key, version)
+        return parameters
     }
 
     private func evidenceEvent(_ event: DirectorEvidenceAdapter.Event, preview: ChannelID?) {
@@ -441,7 +564,7 @@ final class DirectorController: ObservableObject, DirectorConsoleControlling {
         if event.kind == .operatorAction {
             shadowStopCapture = nil; shadowShowStopCapture = nil
             // Re-state the judge's position next to every operator action.
-            lastShadowAbstention = nil
+            shadowPosition = .init()
         }
         guard let show else { return false }
         let requiresBinding = hasCaptureBindingProvider
@@ -461,11 +584,12 @@ final class DirectorController: ObservableObject, DirectorConsoleControlling {
     /// on every tick. The key is kept only when the record was accepted, so a
     /// dropped record is tried again on the next tick.
     @discardableResult private func emitShadowAbstentionOnChange(_ event: DirectorShadowRecord.Event,
-                                                                 authority before: DirectorAuthority) -> Bool {
+                                                                 authority before: DirectorAuthority,
+                                                                 evaluation: DirectorShadowRecorder.Evaluation? = nil) -> Bool {
         let key = ShadowAbstentionKey(event)
-        guard key != lastShadowAbstention else { return false }
-        guard emitShadow(event, authority: before) else { return false }
-        lastShadowAbstention = key
+        guard key != shadowPosition.abstentions[event.stage] else { return false }
+        guard emitShadow(event, authority: before, evaluation: evaluation) else { return false }
+        shadowPosition.abstentions[event.stage] = key
         return true
     }
 
@@ -919,7 +1043,8 @@ final class DirectorController: ObservableObject, DirectorConsoleControlling {
         if event == .policyChanged { policyRevision &+= 1 }
         if event == .nominationChanged { nominationRevision &+= 1 }
         if event == .restart {
-            shadowStopCapture = nil; shadowShowStopCapture = nil; lastShadowAbstention = nil
+            shadowStopCapture = nil; shadowShowStopCapture = nil
+            shadowPosition = .init(); decisionCore = .init(); shadowJudgeBinding = nil
             shadowRecorder?.restart()
         }
         appliedEvents.append(event)

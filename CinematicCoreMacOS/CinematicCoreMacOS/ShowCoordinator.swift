@@ -367,9 +367,9 @@ final class ShowCoordinator: ObservableObject {
         show: self, clock: { [weak self] in self?.clock() ?? CACurrentMediaTime() },
         qualifiedLevels: { [weak self] in self?.qualifiedDirectorLevels ?? [] },
         capabilities: directorCapabilities,
-        // DC-6: the evidence adapter runs with provisional study values.
-        adapterParameters: DirectorStudyParameters.shadowV1.adapter,
-        cutReadinessParameters: DirectorStudyParameters.shadowV1.readiness,
+        // DC-6: the evidence adapter and the shadow judge run with
+        // provisional study values.
+        studyParameters: .shadowV1,
         shadowLog: initialDirectorShadowLog, runSheet: initialDirectorRunSheet)
 
     /// Start the Director's shadow when the flag allows it. Every launch is Manual.
