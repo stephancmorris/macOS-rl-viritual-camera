@@ -33,13 +33,13 @@ REASONS = {
 # Schema 3 (decision core, stage 4): one code per Director cause. Schema 1/2
 # records keep the original vocabulary above and refuse these.
 REASONS_V3 = {
-    'policy': 'previewIsSafeWide alreadyPrepared noCutDue',
+    'policy': 'previewIsSafeWide alreadyPrepared noCutDue presetUnavailable',
     'judge': 'judgeDeclined',
     'readiness': 'operatorAdjusting learningSubject recoveringSubject previewNotReady',
     'selection': 'preferredLength programUncertain wideDue',
     'authorityRefusal': 'takeNotAllowed',
     'speech': 'noWakePrefix unrecognized subjectNotLocked lowConfidence duplicateUtterance cancelledByManualCommand targetUnavailable missingUtteranceStart invalidToken muted stopped sessionChanged roleChanged targetRebound sourceChanged expired cancelledByWide cancelledByTake cancelledByMute',
-    'worldModel': 'notAssigned sourceMissing notObserved partialView stale ambiguous',
+    'worldModel': 'notAssigned sourceMissing notObserved partialView stale ambiguous nobody noLecternZone',
 }
 
 

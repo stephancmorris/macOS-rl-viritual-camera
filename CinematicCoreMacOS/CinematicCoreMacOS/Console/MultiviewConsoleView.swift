@@ -27,6 +27,8 @@ struct MultiviewConsoleView<Strip: View, Pill: View>: View {
     var directorControls: AnyView?
     /// Alfie's status. Nil until the live console is given a director controller.
     var director: NextShotStatus.DirectorSection?
+    /// Typed commands in the next-shot panel; nil hides them.
+    var commandField: AnyView?
 
     init(
         snapshot: ConsoleSnapshot,
@@ -61,7 +63,8 @@ struct MultiviewConsoleView<Strip: View, Pill: View>: View {
                     .environment(\.colorScheme, .dark)
                     .place(layout.programPane)
 
-                NextShotPanel(status: NextShotStatus.make(snapshot, availability: availability).withDirector(director))
+                NextShotPanel(status: NextShotStatus.make(snapshot, availability: availability).withDirector(director),
+                              commandField: commandField)
                     .place(layout.nextPanel)
 
                 TakeBarView(

@@ -236,13 +236,13 @@ New codes, valid only in schema 3 records:
 
 | Domain | New codes |
 | --- | --- |
-| `policy` | `previewIsSafeWide`, `alreadyPrepared`, `noCutDue` (the cut rules found no timing reason yet) |
+| `policy` | `previewIsSafeWide`, `alreadyPrepared`, `noCutDue` (the cut rules found no timing reason yet), `presetUnavailable` (the input's format has no such shot; stage 5) |
 | `judge` | `judgeDeclined` (the judge did not pick the prepared shot for a cut) |
 | `readiness` | `operatorAdjusting`, `learningSubject`, `recoveringSubject`, `previewNotReady` (a cut's readiness check failed) |
 | `selection` | `preferredLength`, `programUncertain`, `wideDue`: a `wouldCut` record's `reason`, replacing `observation.unclassified` |
 | `authorityRefusal` | `takeNotAllowed` (the level does not allow a cut) |
 | `speech` (new domain) | the 19 `SpeechRejection` cases, by name |
-| `worldModel` (new domain) | `notAssigned`, `sourceMissing`, `notObserved`, `partialView`, `stale`, `ambiguous`; the payload (region, age, track IDs) is never recorded |
+| `worldModel` (new domain) | `notAssigned`, `sourceMissing`, `notObserved`, `partialView`, `stale`, `ambiguous`; the payload (region, age, track IDs) is never recorded. Stage 5 adds `nobody` (a full, fresh look found no one) and `noLecternZone` (no calibrated lectern zone) |
 
 Rules:
 
