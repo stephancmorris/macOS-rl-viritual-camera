@@ -1,5 +1,5 @@
 {
-  "version": 2,
+  "version": 3,
   "objects": {
     "Context": {
       "inputs": "[String]",
@@ -316,7 +316,9 @@
       "readiness",
       "selection",
       "observation",
-      "authorityRefusal"
+      "authorityRefusal",
+      "speech",
+      "worldModel"
     ],
     "ReasonCode": [
       "authorityRevoked",
@@ -359,7 +361,41 @@
       "notQualified",
       "prerequisites",
       "paused",
-      "exhausted"
+      "exhausted",
+      "previewIsSafeWide",
+      "alreadyPrepared",
+      "operatorAdjusting",
+      "learningSubject",
+      "recoveringSubject",
+      "takeNotAllowed",
+      "previewNotReady",
+      "noCutDue",
+      "judgeDeclined",
+      "preferredLength",
+      "programUncertain",
+      "wideDue",
+      "noWakePrefix",
+      "unrecognized",
+      "subjectNotLocked",
+      "duplicateUtterance",
+      "cancelledByManualCommand",
+      "targetUnavailable",
+      "missingUtteranceStart",
+      "invalidToken",
+      "muted",
+      "stopped",
+      "sessionChanged",
+      "roleChanged",
+      "targetRebound",
+      "sourceChanged",
+      "cancelledByWide",
+      "cancelledByTake",
+      "cancelledByMute",
+      "notAssigned",
+      "notObserved",
+      "partialView",
+      "stale",
+      "ambiguous"
     ],
     "SegmentType": [
       "presenter",
@@ -374,6 +410,7 @@
   },
   "supportedVersions": [
     1,
-    2
+    2,
+    3
   ]
 }

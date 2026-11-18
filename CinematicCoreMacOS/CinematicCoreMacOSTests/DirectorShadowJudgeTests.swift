@@ -156,6 +156,8 @@ import Testing
         #expect(cut.event.target == "input-2")
         #expect(cut.event.shot == .init(.init(preset: .stage(.waistUp))))
         #expect(cut.eventTime == 106)
+        #expect(cut.schemaVersion == 3)
+        #expect(cut.event.reason == .init(domain: .selection, code: .preferredLength))
         #expect(cut.parameters.status == .available)
         #expect(cut.context.programStartedAt == 100 && cut.context.level == .off)
         #expect(cut.judgements.first?.judgeKind == .rules)
@@ -187,6 +189,7 @@ import Testing
         let rows = try await records(r)
         #expect(cuts(rows).count == 1)
         #expect(cuts(rows).first?.eventTime == 102)
+        #expect(cuts(rows).first?.event.reason == .init(domain: .selection, code: .programUncertain))
     }
 
     // MARK: Prepare
@@ -197,13 +200,14 @@ import Testing
         tick(r, until: 4)
         var rows = try await records(r)
         #expect(r.controller.adapter?.state(for: .b)?.identity == .acquiring)
-        let learning = abstentions(rows, .prepare, .identityUncertain)
+        let learning = abstentions(rows, .prepare, .learningSubject)
         #expect(learning.count == 1)
+        #expect(learning.first?.event.reasons == [.init(domain: .readiness, code: .learningSubject)])
         #expect(prepares(rows).isEmpty)
         r.b.directorPerceptionForTesting = .init(phase: .tracking, galleryReady: true, holdingSteady: true, subjectSpeed: 0)
         tick(r, until: 8)
         rows = try await records(r)
-        #expect(abstentions(rows, .prepare, .identityUncertain).count == 1)
+        #expect(abstentions(rows, .prepare, .learningSubject).count == 1)
         #expect(prepares(rows).count == 1)
         let prepare = try #require(prepares(rows).first)
         #expect(prepare.event.target == "input-2")
