@@ -25,6 +25,16 @@ struct ModePickerGallerySnapshotTests {
             name: "mode-\(mode.rawValue)-\(count)", dark: dark, width: 900, height: 300)
     }
 
+    /// Review of #123: Multi Cam starts from its setup's A/B slots, so the
+    /// shared camera choice is never offered there.
+    @Test func cameraChoiceIsOfferedOnlyForSingleCamAndWebcam() {
+        #expect(OperatorModePicker.showsCameraChoice(mode: .singleCam, style: .stoppedScreen))
+        #expect(OperatorModePicker.showsCameraChoice(mode: .webcam, style: .stoppedScreen))
+        #expect(!OperatorModePicker.showsCameraChoice(mode: .multiCam, style: .stoppedScreen))
+        #expect(!OperatorModePicker.showsCameraChoice(mode: .singleCam, style: .setupHeader))
+        #expect(!OperatorModePicker.showsCameraChoice(mode: .multiCam, style: .setupHeader))
+    }
+
     @Test func unavailableVoiceOverIncludesCameraCount() throws {
         let cameras = OperatorModeChoice.Cameras(count: 1, hasBuiltIn: true)
         let choice = try #require(OperatorModeChoice.choices(available: OperatorMode.allCases,

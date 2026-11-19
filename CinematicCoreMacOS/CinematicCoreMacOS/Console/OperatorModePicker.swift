@@ -49,7 +49,9 @@ struct OperatorModePicker: View {
     var body: some View {
         VStack(spacing: 10) {
             content
-            if let cameraChoice { OperatorCameraChoiceView(choice: cameraChoice) }
+            if let cameraChoice, Self.showsCameraChoice(mode: store.mode, style: style) {
+                OperatorCameraChoiceView(choice: cameraChoice)
+            }
         }
             .onChange(of: store.mode) { _, _ in refusal = nil }
             .onChange(of: isMultiCamEnabled) { wasEnabled, isEnabled in
@@ -151,6 +153,13 @@ struct OperatorModePicker: View {
         guard !choice.isEnabled else { return choice.mode.title }
         let count = cameras.count == 0 ? "no cameras found" : cameras.count == 1 ? "one camera found" : "\(cameras.count) cameras found"
         return "\(choice.mode.title), unavailable, \(count)"
+    }
+
+    /// The shared camera choice drives `selectedCamera`, which only Single
+    /// Cam and Webcam start from. Multi Cam starts from its setup's A/B slot
+    /// pickers, so its header never shows this choice (review of #123).
+    static func showsCameraChoice(mode: OperatorMode, style: Style) -> Bool {
+        mode != .multiCam && style != .setupHeader
     }
 
     /// The same offer rule for the segments and menu commands; a retained

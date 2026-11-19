@@ -100,7 +100,9 @@ struct ContentView: View {
     }
 
     private var stoppedCameraChoice: OperatorCameraChoice? {
-        guard isStopped, cameraManager.preferredInputSource == .liveCamera else { return nil }
+        // Multi Cam starts from its setup's A/B slots, not `selectedCamera`.
+        guard isStopped, operatorModes.mode != .multiCam,
+              cameraManager.preferredInputSource == .liveCamera else { return nil }
         return OperatorCameraChoice(selectedID: cameraManager.selectedCamera?.uniqueID,
             name: cameraManager.selectedCamera?.name ?? "No camera selected",
             options: cameraManager.availableCameras.map { .init(id: $0.uniqueID, name: $0.name) },
