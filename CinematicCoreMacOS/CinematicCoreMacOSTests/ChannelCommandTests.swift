@@ -16,7 +16,7 @@ import Testing
 struct ChannelCommandTests {
     /// Show with A (Program) and B (Preview), both marked running.
     private func twoChannelShow() -> ShowCoordinator {
-        let show = ShowCoordinator(programOutput: ProgramOutputManager(sinks: []))
+        let show = TestHardware.makeShow(programOutput: ProgramOutputManager(sinks: []))
         let b = show.addChannel(.b)
         show.channelA.setRunningForTesting(true)
         b.setRunningForTesting(true)
@@ -43,7 +43,7 @@ struct ChannelCommandTests {
     }
 
     @Test func singleChannelShowTargetsProgram() {
-        let show = ShowCoordinator(programOutput: ProgramOutputManager(sinks: []))
+        let show = TestHardware.makeShow(programOutput: ProgramOutputManager(sinks: []))
         #expect(show.previewChannel == nil)
         #expect(show.controlTarget == .a)
     }

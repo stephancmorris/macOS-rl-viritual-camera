@@ -122,6 +122,8 @@ final class LiveShowSetupModel: ObservableObject {
                 self.setup.setStandard(Self.standard(in: self.defaults))
             }
             .store(in: &cancellables)
+        // Isolated sources must not subscribe to physical camera notifications.
+        guard channelA.observesCameraDeviceNotifications else { return }
         // Hot-plug: re-enumerate (discovery only; no session opens).
         for name in [AVCaptureDevice.wasConnectedNotification, AVCaptureDevice.wasDisconnectedNotification] {
             NotificationCenter.default.publisher(for: name)

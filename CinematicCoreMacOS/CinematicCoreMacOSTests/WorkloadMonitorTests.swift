@@ -81,7 +81,7 @@ nonisolated final class FakeCPUSource: @unchecked Sendable {
 struct WorkloadPolicyShowTests {
     private func show(enabled: Bool) -> ShowCoordinator {
         let defaults = UserDefaults(suiteName: "alfie-workload-\(UUID().uuidString)")!
-        return ShowCoordinator(programOutput: ProgramOutputManager(sinks: []),
+        return TestHardware.makeShow(programOutput: ProgramOutputManager(sinks: []),
                                admissionRecords: AdmissionRecordStore(defaults: defaults),
                                operatorModes: OperatorModeStore(defaults: defaults, multiviewEnabled: true),
                                workloadPolicyEnabled: enabled)
@@ -92,7 +92,7 @@ struct WorkloadPolicyShowTests {
     @Test func goingLiveRestartsTheCPUSpan() {
         let defaults = UserDefaults(suiteName: "alfie-workload-cpu-\(UUID().uuidString)")!
         let source = FakeCPUSource(cores: 4)
-        let show = ShowCoordinator(programOutput: ProgramOutputManager(sinks: []),
+        let show = TestHardware.makeShow(programOutput: ProgramOutputManager(sinks: []),
                                    admissionRecords: AdmissionRecordStore(defaults: defaults),
                                    operatorModes: OperatorModeStore(defaults: defaults, multiviewEnabled: true),
                                    workloadPolicyEnabled: true, workloadCPUReading: source.read)

@@ -62,6 +62,11 @@ enum DeveloperFlags {
     ///
     /// Set to 1 to restore per-frame detection for an A/B comparison.
     nonisolated static let detectionFrameInterval = 2
+    /// Face verification: act on three consecutive strong face mismatches by
+    /// holding the lock. Off in every build until the thresholds are set on
+    /// labelled footage, the owner's rig checks pass and the legal position on
+    /// processing faces is settled. While off, the veto is only logged.
+    nonisolated static let identityVetoEnabled = false
 
     /// How often (seconds) to drop Core Image's internal caches. 0 disables.
     ///
@@ -140,14 +145,27 @@ enum DeveloperFlags {
     /// the curve from a replay.
     nonisolated static let easedAutoPan = false
 
-    /// DEVELOPMENT ONLY for now — on in Debug builds, off in Release until the
-    /// owner decides (S3 B-03). Runs the Auto Director in shadow alongside the
-    /// show: it watches, logs `[DIRECTOR]` lines and publishes console status,
-    /// and has no camera effects. Every launch still starts Manual.
+    /// Runs the Auto Director in shadow alongside the show: it watches, logs
+    /// `[DIRECTOR]` lines, keeps its notes and publishes console status. It
+    /// has no camera effects. Every launch still starts Manual.
+    ///
+    /// Always on in Debug. In Release it is opt-in (C-04, approved by the
+    /// owner on 16 November 2026): off unless the operator turned on "Record
+    /// a Director shadow" in Settings › General. The setting is read once,
+    /// the first time this is asked, so a change takes effect at the next
+    /// launch. Release stays shadow-only whatever this says: Assist, Auto and
+    /// Backup are compiled out below, and `DirectorCapabilities` caps the level.
+    nonisolated static let directorShadowSettingKey = "directorShadowRecordingEnabled"
+
+    /// The rule behind `runDirectorShadow`, as a function a test can call.
+    nonisolated static func directorShadowRuns(debugBuild: Bool, defaults: UserDefaults) -> Bool {
+        debugBuild || defaults.bool(forKey: directorShadowSettingKey)
+    }
+
     #if DEBUG
     nonisolated static let runDirectorShadow = true
     #else
-    nonisolated static let runDirectorShadow = false
+    nonisolated static let runDirectorShadow = directorShadowRuns(debugBuild: false, defaults: .standard)
     #endif
     /// B-07/B-08: automatic Take is a Debug-only capability. Qualification,
     /// current readiness and a one-shot permit remain mandatory.
@@ -163,6 +181,26 @@ enum DeveloperFlags {
     nonisolated static let allowDirectorAssist = true
     #else
     nonisolated static let allowDirectorAssist = false
+    #endif
+
+    /// DEVELOPMENT ONLY — on in Debug builds, always off in Release (decision
+    /// core, stage 5). A text field in the next-shot panel takes typed
+    /// commands for Preview: "camera two, the person on the left, waist up".
+    /// A command is the operator acting; it never reaches Program and never Takes.
+    #if DEBUG
+    nonisolated static let typedCommands = true
+    #else
+    nonisolated static let typedCommands = false
+    #endif
+
+    /// DEVELOPMENT ONLY — off in every build until the owner turns it on in
+    /// Debug for a measured comparison; always off in Release (decision core,
+    /// stage 7). On, the app's Director runs the study set `shadowV2`: the
+    /// second rule judge (people fit, segment fit) in place of the first.
+    #if DEBUG
+    nonisolated static let judgeTwo = false
+    #else
+    nonisolated static let judgeTwo = false
     #endif
 
 }

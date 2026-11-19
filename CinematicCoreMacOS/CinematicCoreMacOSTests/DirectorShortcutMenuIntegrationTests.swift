@@ -134,7 +134,7 @@ struct DirectorShortcutMenuIntegrationTests {
     }
 
     @Test func disabledAdvanceMenuDoesNotPreemptTheActualLiveConsoleHeader() throws {
-        let show = ShowCoordinator(programOutput: ProgramOutputManager(sinks: []),
+        let show = TestHardware.makeShow(programOutput: ProgramOutputManager(sinks: []),
             qualificationRecords: DirectorQualificationStore(storage: nil, acceptsInjectedRecords: false))
         var section = NextShotStatus.DirectorSection.atLaunch(qualified: .none)
         section.runSheet = .init(current: "Opening", next: "Discussion")

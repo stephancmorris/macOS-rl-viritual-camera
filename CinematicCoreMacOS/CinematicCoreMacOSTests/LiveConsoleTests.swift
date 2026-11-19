@@ -20,7 +20,7 @@ import Testing
 @MainActor
 struct LiveConsoleTests {
     private func show() -> ShowCoordinator {
-        ShowCoordinator(
+        TestHardware.makeShow(
             programOutput: ProgramOutputManager(sinks: []),
             admissionRecords: AdmissionRecordStore(defaults: UserDefaults(suiteName: "alfie-live-\(UUID().uuidString)")!))
     }
@@ -33,7 +33,7 @@ struct LiveConsoleTests {
     /// thinned; an operator action's own refresh always runs.
     @Test func reducedWorkloadNeverDropsAnActionsRefresh() {
         let defaults = UserDefaults(suiteName: "alfie-live-workload-\(UUID().uuidString)")!
-        let show = ShowCoordinator(programOutput: ProgramOutputManager(sinks: []),
+        let show = TestHardware.makeShow(programOutput: ProgramOutputManager(sinks: []),
                                    admissionRecords: AdmissionRecordStore(defaults: defaults),
                                    operatorModes: OperatorModeStore(defaults: defaults, multiviewEnabled: true),
                                    workloadPolicyEnabled: true)

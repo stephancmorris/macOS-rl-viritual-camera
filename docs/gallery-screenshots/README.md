@@ -56,6 +56,8 @@ There is one capture per macOS display setting (UX F4), forced with `alfieDispla
 | Reduce Motion | [light](a11y-reduce-motion-light.png) | [dark](a11y-reduce-motion-dark.png) |
 | Differentiate Without Colour | [light](a11y-differentiate-without-colour-light.png) | [dark](a11y-differentiate-without-colour-dark.png) |
 
+Since Track A (J3), the pill shows its lock glyph beside the word "Locked" in every setting, so the Differentiate Without Colour capture now matches standard for the lock.
+
 ## Operator pill
 
 | Target | Capture |
@@ -63,6 +65,16 @@ There is one capture per macOS display setting (UX F4), forced with `alfieDispla
 | Current single camera | [pill-single.png](pill-single.png) |
 | Camera B Preview | [pill-preview.png](pill-preview.png) |
 | Camera A editing live | [pill-editing-live.png](pill-editing-live.png) |
+
+## Track A: Single Cam and Webcam
+
+`TrackAGallerySnapshotTests` draws these over a **synthetic** gradient, dark at the left and bright at the right, so scrims show over both extremes. They are not camera pictures, and footage stays dark in every appearance.
+
+| Scene | Capture | Reduce Transparency |
+| --- | --- | --- |
+| J3: a candidate under the pointer, the recovery hint and the first-lock tip | [track-a-tracking.png](track-a-tracking.png) | [opaque scrims](track-a-tracking-reduce-transparency.png) |
+| J5: the three Alfie camera use states and the one-time meeting-app note | [track-a-webcam.png](track-a-webcam.png) | [opaque](track-a-webcam-reduce-transparency.png) |
+| J4 and J12: the grouped pill (not running, so its controls show their unavailable floor), every lock state with its glyph, and the pill's hold-to-stop phases | [track-a-pill.png](track-a-pill.png) | — |
 
 ## Director
 

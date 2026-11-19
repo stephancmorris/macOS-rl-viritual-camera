@@ -4,7 +4,7 @@ import Testing
 
 @MainActor struct BuiltInCameraTestConfigurationTests {
     private func show() -> ShowCoordinator {
-        ShowCoordinator(programOutput: ProgramOutputManager(sinks: []))
+        TestHardware.makeShow(programOutput: ProgramOutputManager(sinks: []))
     }
 
     @Test func explicitTestChoiceAppliesToAttachedAndFutureInputs() {

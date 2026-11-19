@@ -131,7 +131,7 @@ nonisolated private final class ShadowUTCClock: @unchecked Sendable {
     @Test func controllerLogsManualTakeAttemptAndRefusalWithOneActionIDWithoutEffects() async throws {
         let base = root(); defer { try? FileManager.default.removeItem(at: base) }
         let utc = date, log = try DirectorShadowLog(directory: base, limits: limits, utcClock: { utc })
-        let show = ShowCoordinator(programOutput: ProgramOutputManager(sinks: []),
+        let show = TestHardware.makeShow(programOutput: ProgramOutputManager(sinks: []),
             qualificationRecords: DirectorQualificationStore(storage: nil, acceptsInjectedRecords: false), directorShadowLog: log)
         show.clock = { 100 }
         show.director.shadowRecorder?.provenanceForTesting = [.synthetic]
@@ -154,7 +154,7 @@ nonisolated private final class ShadowUTCClock: @unchecked Sendable {
     @Test func automaticSafetyPauseIsNotLabelledAsAnOperatorTakeover() async throws {
         let base = root(); defer { try? FileManager.default.removeItem(at: base) }
         let utc = date, log = try DirectorShadowLog(directory: base, limits: limits, utcClock: { utc })
-        let show = ShowCoordinator(programOutput: ProgramOutputManager(sinks: []),
+        let show = TestHardware.makeShow(programOutput: ProgramOutputManager(sinks: []),
             qualificationRecords: DirectorQualificationStore(storage: nil, acceptsInjectedRecords: false), directorShadowLog: log)
         show.clock = { 100 }
         let b = show.addChannel(.b)
@@ -200,7 +200,7 @@ nonisolated private final class ShadowUTCClock: @unchecked Sendable {
         let utc = date, log = try DirectorShadowLog(directory: base,
             limits: .init(maximumRecordBytes: 8192, maximumQueuedBytes: 262144,
                 maximumFileBytes: 262144, maximumStoreBytes: 524288), utcClock: { utc })
-        let show = ShowCoordinator(programOutput: ProgramOutputManager(sinks: [AcceptedSink()]),
+        let show = TestHardware.makeShow(programOutput: ProgramOutputManager(sinks: [AcceptedSink()]),
             qualificationRecords: DirectorQualificationStore(storage: nil, acceptsInjectedRecords: false), directorShadowLog: log)
         show.clock = { 100 }; show.router.clock = { 100 }
         let b = show.addChannel(.b)
@@ -261,7 +261,7 @@ nonisolated private final class ShadowUTCClock: @unchecked Sendable {
     @Test func completedTakeRecordsActualRoleSwapWithoutCallingAnAttemptACompletedCut() async throws {
         let base = root(); defer { try? FileManager.default.removeItem(at: base) }
         let utc = date, log = try DirectorShadowLog(directory: base, limits: limits, utcClock: { utc })
-        let show = ShowCoordinator(programOutput: ProgramOutputManager(sinks: [AcceptedSink()]),
+        let show = TestHardware.makeShow(programOutput: ProgramOutputManager(sinks: [AcceptedSink()]),
             qualificationRecords: DirectorQualificationStore(storage: nil, acceptsInjectedRecords: false), directorShadowLog: log)
         show.clock = { 100 }; show.router.clock = { 100 }
         let b = show.addChannel(.b)

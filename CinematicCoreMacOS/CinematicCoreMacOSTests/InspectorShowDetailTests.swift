@@ -20,7 +20,7 @@ import Testing
 @MainActor
 struct InspectorShowDetailTests {
     private func show() -> ShowCoordinator {
-        ShowCoordinator(
+        TestHardware.makeShow(
             programOutput: ProgramOutputManager(sinks: []),
             admissionRecords: AdmissionRecordStore(defaults: UserDefaults(suiteName: "alfie-inspector-\(UUID().uuidString)")!))
     }

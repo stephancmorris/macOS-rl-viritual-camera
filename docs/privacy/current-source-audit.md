@@ -16,7 +16,7 @@
 | Offline readiness / evaluation tooling | Operator-supplied clips/annotations and explicitly selected metadata datasets are separate inputs. Readiness CSV includes clip filenames/metrics; Director tools distinguish synthetic, recorded and live provenance. | Owners supply consent, splits and retention. Synthetic tests do not establish media consent, calibrated identity/readiness, editorial quality or rig qualification. |
 | Explicit diagnostic metrics export | `diagnostics_export.py` reads only a selected soak CSV and optional matching memory CSV, then writes a new local JSON projection in a separate existing folder. No manifest, raw text log, recording or media is read or copied. | Operator invocation and destination are required. Source files are unchanged. The fixed numeric/enum allowlist omits identity, wall-clock values/filenames, notes, paths, arbitrary metadata, picture geometry and person counts. There is no upload or automatic expiry for the operator-controlled exported copy. Workload patterns can still identify a session. |
 
-The app resolves Documents/Library through FileManager's app-domain locations in the sandbox. The inspected app entitlements contain sandbox, camera, app group, IOSurface and system-extension installation capabilities, with no microphone or network entitlement. A source search found no `URLSession`, `NWConnection`, audio-capture or speech-recognizer path in the app/shared/extension Swift folders. Neither observation proves zero OS/service traffic or third-party/receiving-client behavior. Dependency and actual signed-bundle review remain necessary.
+The app resolves Documents/Library through FileManager's app-domain locations in the sandbox. The app entitlements file contains sandbox, camera, app group, IOSurface and system-extension installation capabilities. The earlier inventory inspected that file only: at the 9 November 2026 baseline (`9b82f10`), both app build configurations also enabled microphone, USB-device and read-only user-selected-file access through Xcode build settings. The F-01 source change disables microphone and USB-device access in both configurations; source inspection found no audio-capture or direct USB-device API use. Read-only user-selected-file access is retained in both configurations for `ValidationClipPlaybackView.chooseClip()` (`NSOpenPanel`). Incoming and outgoing network access remain disabled. CI now requires the `allow-entitlement-change` label for changes to resource-access, selected-file or outgoing-network build settings as well as entitlement files. These are source/build-setting findings; effective entitlements in a freshly signed export still need attended verification. A source search found no `URLSession`, `NWConnection`, audio-capture or speech-recognizer path in the app/shared/extension Swift folders. Neither observation proves zero OS/service traffic or third-party/receiving-client behavior. Dependency and actual signed-bundle review remain necessary.
 
 ### Diagnostic session ownership
 
@@ -84,3 +84,15 @@ The recorder's shutdown gate was immediate once its async Stop method entered, b
 ### Runtime source ownership — 24 October 2026 repair
 
 Camera owners now have a random ID allocated once per instance. Local admission and Director capture/Stop provenance compare this token rather than an allocator address, which was observed being reused after a camera owner was released. The token stays in these in-memory bindings: it is not a new shadow-record field, saved setting, media identifier or export alias. Export regressions explicitly check that actual owner-token values are absent. This does not change consent, data collection, retention or any qualification decision.
+
+
+### Director shadow storage — 16 November 2026 (C-04 stage 2)
+
+The app now supplies the shadow log itself. Where the Director's shadow runs, `DirectorShadowLog.forShow` creates one log per launch in App Documents/CinematicCore/Diagnostics, as `director_shadow_<session>.jsonl`, and passes it to the show. Today the shadow runs in Debug builds only; a Release build creates no log.
+
+- **Contents:** the existing validated `DirectorShadowRecord` schema. Inputs are written as aliases, not device names. No pixels.
+- **Budget (`DirectorShadowLog.showLimits`):** a record up to 16 KB, a session file up to 64 MB, the whole store up to 512 MB. These are ceilings, not a measured rate.
+- **Retention:** the existing 30 days (`DirectorShadowLog.retention`).
+- **Failure:** if the log cannot be created the show starts without it and one `[DIRECTOR]` notice is logged.
+- **Still pending:** the size of a real service's file, read at an attended rehearsal; a Settings line that says whether recording is on (C-04 stage 3).
+\n

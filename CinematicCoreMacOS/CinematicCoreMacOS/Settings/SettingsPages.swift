@@ -15,6 +15,7 @@ import SwiftUI
 struct GeneralSettingsPage: View {
     @ObservedObject var systemExtensionManager: SystemExtensionActivationManager
     @AppStorage(AppAppearance.userDefaultsKey) private var appearanceRaw = AppAppearance.system.rawValue
+    @AppStorage(DeveloperFlags.directorShadowSettingKey) private var directorShadowEnabled = false
 
     private var appearance: AppAppearance {
         AppAppearance(rawValue: appearanceRaw) ?? .system
@@ -45,6 +46,20 @@ struct GeneralSettingsPage: View {
                 SettingsRow(title: "Build") { SettingsValueText(buildString) }
                 SettingsRow(title: "Camera extension") { SettingsValueText(extensionStatus) }
                 SettingsRow(title: "GPU") { SettingsValueText(gpuName) }
+            }
+
+            SettingsSectionLabel("Director shadow")
+            SettingsCard {
+                SettingsRow(title: DirectorShadowSetting.title, detail: DirectorShadowSetting.detail) {
+                    Toggle(DirectorShadowSetting.title, isOn: $directorShadowEnabled)
+                        .toggleStyle(.switch)
+                        .labelsHidden()
+                }
+                SettingsRow(title: "This launch") {
+                    SettingsValueText(DirectorShadowSetting.status(
+                        runningNow: DeveloperFlags.runDirectorShadow, savedSetting: directorShadowEnabled,
+                        debugBuild: DirectorShadowSetting.debugBuild))
+                }
             }
         }
     }

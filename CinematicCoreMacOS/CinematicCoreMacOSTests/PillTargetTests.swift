@@ -18,7 +18,7 @@ import Testing
 @MainActor
 struct PillTargetTests {
     private func show() -> ShowCoordinator {
-        ShowCoordinator(
+        TestHardware.makeShow(
             programOutput: ProgramOutputManager(sinks: []),
             admissionRecords: AdmissionRecordStore(defaults: UserDefaults(suiteName: "alfie-pill-\(UUID().uuidString)")!))
     }
@@ -138,7 +138,7 @@ struct PillTargetTests {
     }
 
     @Test func singleCameraKeepsTodaysDirectPath() {
-        let manager = CameraManager()
+        let manager = TestHardware.makeCamera()
         manager.setRunningForTesting(true)
         let pill = PillCommandSink(cameraManager: manager, show: nil)
         #expect(pill.send(.setMode(.manualCrop)) == .accepted)
@@ -200,7 +200,7 @@ struct PillTargetTests {
     private let availableWidth: CGFloat = 1232
 
     private func pillWidth(_ target: ControlTarget, _ style: OperatorPill.ChipStyle, format: ShotComposer.Config.CinematicFormat = .stage) -> CGFloat {
-        let manager = CameraManager()
+        let manager = TestHardware.makeCamera()
         manager.shotComposer.config.cinematicFormat = format
         return NSHostingView(rootView: OperatorPill(
             cameraManager: manager, controlTarget: target, show: nil, chipStyle: style)).fittingSize.width
@@ -222,7 +222,7 @@ struct PillTargetTests {
     /// compact stays available for narrower hosts. Rule is static: the
     /// console's minimum width is 1280, so it never needs to switch at runtime.
     @Test func consoleDefaultsToTheFullChipAndItFits() {
-        let manager = CameraManager()
+        let manager = TestHardware.makeCamera()
         manager.shotComposer.config.cinematicFormat = .stage
         let pill = OperatorPill(cameraManager: manager, controlTarget: .editingLive(channel: .a), show: nil)
         #expect(pill.chipStyle == .full)

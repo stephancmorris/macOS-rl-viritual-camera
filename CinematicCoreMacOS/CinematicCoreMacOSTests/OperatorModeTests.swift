@@ -73,7 +73,7 @@ struct OperatorModeStoreTests {
     }
 
     private func show(_ store: OperatorModeStore) -> ShowCoordinator {
-        ShowCoordinator(
+        TestHardware.makeShow(
             programOutput: ProgramOutputManager(sinks: []),
             admissionRecords: AdmissionRecordStore(defaults: UserDefaults(suiteName: "alfie-mode-\(UUID().uuidString)")!),
             operatorModes: store)

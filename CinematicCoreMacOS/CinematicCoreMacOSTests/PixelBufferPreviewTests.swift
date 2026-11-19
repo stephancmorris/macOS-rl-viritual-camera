@@ -64,4 +64,62 @@ import Testing
         var next: CVPixelBuffer?
         #expect(CVPixelBufferPoolCreatePixelBufferWithAuxAttributes(kCFAllocatorDefault, pool, Self.threshold, &next) == kCVReturnSuccess)
     }
+
+    // MARK: D-01: sampled previews
+
+    @Test func sampledViewKeepsTheShownBufferUntilItSamplesTheNextOne() throws {
+        let pool = try makePool()
+        let view = SampledPixelBufferLayerView()
+        var upstream: CVPixelBuffer?
+        CVPixelBufferPoolCreatePixelBufferWithAuxAttributes(kCFAllocatorDefault, pool, Self.threshold, &upstream)
+        let shown = try #require(upstream)
+        let shownID = try surfaceID(shown)
+        var latest: CVPixelBuffer? = shown
+        view.source = { latest }
+        view.sample()
+        #expect(view.displayed === shown)
+
+        // The frame path replaces its plain storage before the view samples again.
+        latest = nil
+        upstream = nil
+        var next: CVPixelBuffer?
+        let status = CVPixelBufferPoolCreatePixelBufferWithAuxAttributes(kCFAllocatorDefault, pool, Self.threshold, &next)
+        if status == kCVReturnSuccess, let next {
+            #expect(try surfaceID(next) != shownID)
+        } else {
+            #expect(status == kCVReturnWouldExceedAllocationThreshold)
+        }
+        #expect(view.displayed === shown)
+
+        // The next sample replaces it; only then may the pool vend again.
+        view.sample()
+        #expect(view.displayed == nil)
+    }
+
+    @Test func samplingTheSameBufferDoesNoLayerWork() throws {
+        let pool = try makePool()
+        let view = SampledPixelBufferLayerView()
+        var buffer: CVPixelBuffer?
+        CVPixelBufferPoolCreatePixelBufferWithAuxAttributes(kCFAllocatorDefault, pool, Self.threshold, &buffer)
+        let shown = try #require(buffer)
+        view.source = { shown }
+        view.sample()
+        let contents = view.layer?.contents as AnyObject?
+        view.sample()
+        #expect((view.layer?.contents as AnyObject?) === contents)
+        #expect(view.displayed === shown)
+    }
+
+    @Test func thePictureBuffersAreNotPublished() {
+        // A `@Published` property is stored as `_name`. Since D-02 path 2 the
+        // two buffers are not stored on the camera at all: the capture queue
+        // stores them in the frame mailbox and the camera reads them from it.
+        let camera = TestHardware.makeCamera()
+        let labels = Set(Mirror(reflecting: camera).children.compactMap(\.label))
+        #expect(!labels.contains("_currentFrameBuffer"))
+        #expect(!labels.contains("_croppedFrameBuffer"))
+        #expect(labels.contains("frameMailbox"))
+        #expect(!labels.contains("_frameMailbox"))
+        #expect(camera.currentFrameBuffer == nil && camera.croppedFrameBuffer == nil)
+    }
 }

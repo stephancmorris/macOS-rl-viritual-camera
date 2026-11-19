@@ -113,7 +113,7 @@ struct DirectorModeControlTests {
 
     @Test func worksWithAnyControllerAndTheLiveDirector() throws {
         _ = DirectorModeControl(controller: OtherController())
-        let show = ShowCoordinator(programOutput: ProgramOutputManager(sinks: []),
+        let show = TestHardware.makeShow(programOutput: ProgramOutputManager(sinks: []),
             qualificationRecords: DirectorQualificationStore(storage: nil, acceptsInjectedRecords: false))
         let live = DirectorModeControl(controller: show.director, ownsShortcut: false)
         let host = NSHostingView(rootView: live.frame(width: 800))

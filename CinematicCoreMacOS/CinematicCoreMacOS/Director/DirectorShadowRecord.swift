@@ -4,7 +4,10 @@ import Foundation
 /// Construction must call validated(); encoding and decoding also validate.
 /// B-04 owns bounded storage, 30-day expiry and explicit local export.
 nonisolated struct DirectorShadowRecord: Codable, Equatable, Sendable {
-    static let currentSchemaVersion = 2
+    /// 3 (decision core, stage 4): reason codes for every Director cause,
+    /// including a cut's timing reason, and the speech and world-model domains.
+    static let currentSchemaVersion = 4
+    static let supportedSchemaVersions = [1, 2, 3, 4]
     enum ValidationError: Error, Equatable { case invalidRecord, mixedProvenance, unknownField }
     enum EvidenceClass: String, Codable, CaseIterable, Equatable, Sendable { case synthetic, recorded, live }
     enum ExecutionMode: String, Codable, CaseIterable, Equatable, Sendable { case shadow, observing }
@@ -13,6 +16,7 @@ nonisolated struct DirectorShadowRecord: Codable, Equatable, Sendable {
     enum Preset: String, Codable, CaseIterable, Equatable, Sendable { case wide, fullBody, waistUp, tight }
     enum ParameterStatus: String, Codable, CaseIterable, Equatable, Sendable { case available, unavailable, invalid }
     enum LockPhase: String, Codable, CaseIterable, Equatable, Sendable { case inactive, acquiring, tracking, hold, wideWaiting }
+    enum PeopleCoverage: String, Codable, CaseIterable, Equatable, Sendable { case none, region, fullFrame }
     enum Identity: String, Codable, CaseIterable, Equatable, Sendable { case confirmed, acquiring, holding, lost, ambiguous, unavailable }
     enum IdentitySource: String, Codable, CaseIterable, Equatable, Sendable { case adapter, sampleClassifier }
     enum JudgeKind: String, Codable, CaseIterable, Equatable, Sendable { case rules, recorded, learned }
@@ -25,8 +29,8 @@ nonisolated struct DirectorShadowRecord: Codable, Equatable, Sendable {
     enum ActionOutcome: String, Codable, CaseIterable, Equatable, Sendable { case accepted, completed, refused, unobserved }
     enum OperatorAction: String, Codable, CaseIterable, Equatable, Sendable { case take, detect, cancelDetect, selectSubject, unlock, resumeTracking, setMode, selectPreset, beginZoom, endZoom, moveManualCenter, returnToWide, startSession, stopSession, settingsChanged, formatChanged, editLive, setLevel, handToAlfie, takeOver, cancelNextCut, advanceSegment, overrideSubject, otherManualAction }
     enum ReadinessReason: String, Codable, CaseIterable, Equatable, Sendable { case compositionUnavailable, evidenceUnavailable, takeUnavailable, invalidParameters, invalidEvidence, identityUncertain, framingUnsettled, moving, cropMoving }
-    enum ReasonDomain: String, Codable, CaseIterable, Equatable, Sendable { case proposalStale, policy, judge, readiness, selection, observation, authorityRefusal }
-    enum ReasonCode: String, Codable, CaseIterable, Equatable, Sendable { case authorityRevoked, routeChanged, sourceRestarted, shotChangedByOperator, targetBecameProgram, sourceMissing, expired, requestReplaced, policyChanged, nominationChanged, evidenceUnavailable, invalidInput, minimumDuration, noEligibleCandidate, repetition, movement, noPreview, lowConfidence, notRecorded, nothingAllowed, invalidJudgement, compositionUnavailable, takeUnavailable, invalidParameters, invalidEvidence, identityUncertain, framingUnsettled, moving, cropMoving, advisoryWideReminder, advisoryMaximumDwell, subjectEvidence, unclassified, parametersUnavailable, parametersInvalid, judgementStale, cutPolicyUnavailable, notQualified, prerequisites, paused, exhausted }
+    enum ReasonDomain: String, Codable, CaseIterable, Equatable, Sendable { case proposalStale, policy, judge, readiness, selection, observation, authorityRefusal, speech, worldModel }
+    enum ReasonCode: String, Codable, CaseIterable, Equatable, Sendable { case authorityRevoked, routeChanged, sourceRestarted, shotChangedByOperator, targetBecameProgram, sourceMissing, expired, requestReplaced, policyChanged, nominationChanged, evidenceUnavailable, invalidInput, minimumDuration, noEligibleCandidate, repetition, movement, noPreview, lowConfidence, notRecorded, nothingAllowed, invalidJudgement, compositionUnavailable, takeUnavailable, invalidParameters, invalidEvidence, identityUncertain, framingUnsettled, moving, cropMoving, advisoryWideReminder, advisoryMaximumDwell, subjectEvidence, unclassified, parametersUnavailable, parametersInvalid, judgementStale, cutPolicyUnavailable, notQualified, prerequisites, paused, exhausted, previewIsSafeWide, alreadyPrepared, operatorAdjusting, learningSubject, recoveringSubject, takeNotAllowed, previewNotReady, noCutDue, judgeDeclined, preferredLength, programUncertain, wideDue, noWakePrefix, unrecognized, subjectNotLocked, duplicateUtterance, cancelledByManualCommand, targetUnavailable, missingUtteranceStart, invalidToken, muted, stopped, sessionChanged, roleChanged, targetRebound, sourceChanged, cancelledByWide, cancelledByTake, cancelledByMute, notAssigned, notObserved, partialView, stale, ambiguous, nobody, noLecternZone, presetUnavailable, peopleFit, peopleUnknown, segmentPrefersWide, segmentHolds }
     struct Context: Codable, Equatable, Sendable {
         let inputs: [String]
         let program: String
@@ -67,7 +71,10 @@ nonisolated struct DirectorShadowRecord: Codable, Equatable, Sendable {
         let adapter: AdapterParameters?
         let judgeMaximumAge: Double?
         let minimumProbability: Double?
-        enum CodingKeys: String, CodingKey, CaseIterable { case status, parametersVersion, preferencesVersion, resolvedStyle, readiness, adapter, judgeMaximumAge, minimumProbability }
+        /// Schema 4: the second rule judge's values, present only when it ran.
+        var peopleFitSpan: Double? = nil
+        var peopleMaximumAge: Double? = nil
+        enum CodingKeys: String, CodingKey, CaseIterable { case status, parametersVersion, preferencesVersion, resolvedStyle, readiness, adapter, judgeMaximumAge, minimumProbability, peopleFitSpan, peopleMaximumAge }
     }
     struct Style: Codable, Equatable, Sendable {
         let minimumShotDuration: Double
@@ -116,7 +123,13 @@ nonisolated struct DirectorShadowRecord: Codable, Equatable, Sendable {
         let prepareReadiness: ReadinessSummary?
         let cutReadiness: ReadinessSummary?
         let revisions: Revisions?
-        enum CodingKeys: String, CodingKey, CaseIterable { case channel, sampledAt, lockPhase, trackingOwnsControl, galleryReady, hasLockedTarget, observationAge, subjectSpeed, holdingSteady, cropConverged, operatorGestureInProgress, observedPersonCount, identity, identitySource, adapterEvidenceAvailable, settledSince, framingSettledFor, prepareReadiness, cutReadiness, revisions }
+        /// Schema 4 (decision DC-4): how many people the camera's newest scan
+        /// saw, what it covered, and the subject's place counted from the left
+        /// (0 is leftmost). Counts and a rank, never boxes.
+        var peopleCount: Int? = nil
+        var peopleCoverage: PeopleCoverage? = nil
+        var subjectRank: Int? = nil
+        enum CodingKeys: String, CodingKey, CaseIterable { case channel, sampledAt, lockPhase, trackingOwnsControl, galleryReady, hasLockedTarget, observationAge, subjectSpeed, holdingSteady, cropConverged, operatorGestureInProgress, observedPersonCount, identity, identitySource, adapterEvidenceAvailable, settledSince, framingSettledFor, prepareReadiness, cutReadiness, revisions, peopleCount, peopleCoverage, subjectRank }
     }
     struct ReadinessSummary: Codable, Equatable, Sendable {
         let isReady: Bool
@@ -236,7 +249,7 @@ nonisolated struct DirectorShadowRecord: Codable, Equatable, Sendable {
             value.map { $0.isReady == $0.reasons.isEmpty } ?? true
         }
         let diagnostic = parameters.status == .invalid && (event.kind == .abstention || event.kind == .operatorAction)
-        try require([1, Self.currentSchemaVersion].contains(schemaVersion) && scalar(eventTime))
+        try require(Self.supportedSchemaVersions.contains(schemaVersion) && scalar(eventTime))
         try require(schemaVersion != 1 || scorerInputs == nil)
         try require(Self.validUTC(recordedAtUTC))
         try require(!context.inputs.isEmpty && Set(context.inputs).count == context.inputs.count &&
@@ -259,6 +272,22 @@ nonisolated struct DirectorShadowRecord: Codable, Equatable, Sendable {
             try require(p.minimumCutSettledTime >= p.minimumSettledTime && p.maximumCutMotion <= p.maximumMotion)
         }
         if let p = parameters.adapter { try require([p.maximumObservationAge, p.debounce, p.stillSpeed].allSatisfy { scalar($0) }) }
+        // Schema 4 fields: absent before 4; the judge's values come as a pair.
+        try require((parameters.peopleFitSpan == nil) == (parameters.peopleMaximumAge == nil))
+        if let span = parameters.peopleFitSpan { try require(scalar(span) && span > 0) }
+        if let age = parameters.peopleMaximumAge { try require(scalar(age)) }
+        for e in evidence {
+            try require((e.peopleCount == nil) == (e.peopleCoverage == nil))
+            if let count = e.peopleCount { try require(count >= 0) }
+            if let rank = e.subjectRank {
+                guard let count = e.peopleCount else { throw ValidationError.invalidRecord }
+                try require(rank >= 0 && rank < count)
+            }
+        }
+        if schemaVersion < 4 {
+            try require(parameters.peopleFitSpan == nil &&
+                evidence.allSatisfy { $0.peopleCount == nil && $0.peopleCoverage == nil && $0.subjectRank == nil })
+        }
         // Only these paths can be marked invalid, and only when the scalar was omitted.
         var optionalNumbers: [String: Bool] = [:]
         func register(_ path: String, _ absent: Bool) { optionalNumbers[path] = absent }
@@ -308,16 +337,16 @@ nonisolated struct DirectorShadowRecord: Codable, Equatable, Sendable {
                     let c = item.candidate
                     try require(context.inputs.contains(c.channel) && shot(c.shot) && probability(c.subjectConfidence) && scalar(c.movement) && probability(item.probability))
                     try require(j.judgeKind != .rules || item.probability == nil)
-                    try require(item.reason.isValid)
+                    try require(item.reason.isValid(in: schemaVersion))
                     register("judgements[\(i)].outcome.ranked[\(k)].candidate.subjectConfidence", c.subjectConfidence == nil)
                     register("judgements[\(i)].outcome.ranked[\(k)].candidate.movement", c.movement == nil)
                     register("judgements[\(i)].outcome.ranked[\(k)].probability", item.probability == nil)
                 }
             case .abstain:
-                try require(j.outcome.ranked == nil && j.outcome.reason?.isValid == true)
+                try require(j.outcome.ranked == nil && j.outcome.reason?.isValid(in: schemaVersion) == true)
             }
             try require((j.gateResult == .abstained) == (j.gateReason != nil))
-            try require(j.gateReason.map { $0.isValid } ?? true)
+            try require(j.gateReason.map { $0.isValid(in: schemaVersion) } ?? true)
             if j.gateResult == .accepted {
                 guard let rank = j.acceptedRank, let items = j.outcome.ranked else { throw ValidationError.invalidRecord }
                 try require(items.indices.contains(rank))
@@ -327,8 +356,8 @@ nonisolated struct DirectorShadowRecord: Codable, Equatable, Sendable {
         try require(invalidFields == Array(Set(invalidFields)).sorted() && invalidFields.allSatisfy { optionalNumbers[$0] == true })
         try require(known(event.target) && known(event.programAfter) && known(event.previewAfter))
         try require(event.shot.map(shot) ?? true)
-        try require(event.reason.map { $0.isValid } ?? true)
-        try require(event.reasons.map { $0.allSatisfy(\.isValid) } ?? true)
+        try require(event.reason.map { $0.isValid(in: schemaVersion) } ?? true)
+        try require(event.reasons.map { $0.allSatisfy { $0.isValid(in: schemaVersion) } } ?? true)
         if let index = event.judgementIndex { try require(judgements.indices.contains(index)) }
         try require(scalar(event.proposalCreatedAt))
         // Non-payload optionals must be absent even for programmatic construction.
@@ -465,6 +494,8 @@ nonisolated extension DirectorShadowRecord.ParameterContext {
         readiness = try c.decodeIfPresent(DirectorShadowRecord.ReadinessParameters.self, forKey: .readiness)
         adapter = try c.decodeIfPresent(DirectorShadowRecord.AdapterParameters.self, forKey: .adapter)
         judgeMaximumAge = try c.decodeIfPresent(Double.self, forKey: .judgeMaximumAge)
+        peopleFitSpan = try c.decodeIfPresent(Double.self, forKey: .peopleFitSpan)
+        peopleMaximumAge = try c.decodeIfPresent(Double.self, forKey: .peopleMaximumAge)
         minimumProbability = try c.decodeIfPresent(Double.self, forKey: .minimumProbability)
     }
 }
@@ -531,6 +562,9 @@ nonisolated extension DirectorShadowRecord.EvidenceSummary {
         prepareReadiness = try c.decodeIfPresent(DirectorShadowRecord.ReadinessSummary.self, forKey: .prepareReadiness)
         cutReadiness = try c.decodeIfPresent(DirectorShadowRecord.ReadinessSummary.self, forKey: .cutReadiness)
         revisions = try c.decodeIfPresent(DirectorShadowRecord.Revisions.self, forKey: .revisions)
+        peopleCount = try c.decodeIfPresent(Int.self, forKey: .peopleCount)
+        peopleCoverage = try c.decodeIfPresent(DirectorShadowRecord.PeopleCoverage.self, forKey: .peopleCoverage)
+        subjectRank = try c.decodeIfPresent(Int.self, forKey: .subjectRank)
     }
 }
 
@@ -693,8 +727,14 @@ nonisolated extension DirectorShadowRecord.Event {
     }
 }
 nonisolated extension DirectorShadowRecord.Reason {
-    var isValid: Bool {
-        let allowed: Set<DirectorShadowRecord.ReasonCode>
+    /// Valid in the newest schema.
+    var isValid: Bool { isValid(in: DirectorShadowRecord.currentSchemaVersion) }
+
+    /// Schema 1 and 2 keep their original vocabulary; schema 3 adds codes
+    /// and the speech and world-model domains.
+    func isValid(in schemaVersion: Int) -> Bool {
+        let original = schemaVersion < 3
+        var allowed: Set<DirectorShadowRecord.ReasonCode>
         switch domain {
         case .proposalStale: allowed = [.authorityRevoked, .routeChanged, .sourceRestarted, .shotChangedByOperator, .targetBecameProgram, .sourceMissing, .expired, .requestReplaced, .policyChanged, .nominationChanged, .evidenceUnavailable]
         case .policy: allowed = [.invalidInput, .minimumDuration, .noEligibleCandidate, .repetition, .movement, .noPreview]
@@ -703,6 +743,33 @@ nonisolated extension DirectorShadowRecord.Reason {
         case .selection: allowed = [.advisoryWideReminder, .advisoryMaximumDwell, .subjectEvidence, .unclassified]
         case .observation: allowed = [.parametersUnavailable, .parametersInvalid, .judgementStale, .cutPolicyUnavailable, .unclassified]
         case .authorityRefusal: allowed = [.notQualified, .prerequisites, .paused, .exhausted]
+        case .speech: allowed = []
+        case .worldModel: allowed = []
+        }
+        if !original {
+            switch domain {
+            case .policy: allowed.formUnion([.previewIsSafeWide, .alreadyPrepared, .noCutDue, .presetUnavailable])
+            case .judge: allowed.formUnion([.judgeDeclined])
+            case .readiness: allowed.formUnion([.operatorAdjusting, .learningSubject, .recoveringSubject, .previewNotReady])
+            case .selection: allowed.formUnion([.preferredLength, .programUncertain, .wideDue])
+            case .authorityRefusal: allowed.formUnion([.takeNotAllowed])
+            case .speech:
+                allowed.formUnion([.noWakePrefix, .unrecognized, .subjectNotLocked, .lowConfidence, .duplicateUtterance,
+                    .cancelledByManualCommand, .targetUnavailable, .missingUtteranceStart, .invalidToken, .muted,
+                    .stopped, .sessionChanged, .roleChanged, .targetRebound, .sourceChanged, .expired,
+                    .cancelledByWide, .cancelledByTake, .cancelledByMute])
+            case .worldModel: allowed.formUnion([.notAssigned, .sourceMissing, .notObserved, .partialView, .stale, .ambiguous,
+                .nobody, .noLecternZone])
+            case .proposalStale, .observation: break
+            }
+        }
+        // Schema 4 (decision core, stage 7): the second rule judge's reasons.
+        if schemaVersion >= 4 {
+            switch domain {
+            case .judge: allowed.formUnion([.peopleFit, .peopleUnknown])
+            case .policy: allowed.formUnion([.segmentPrefersWide, .segmentHolds])
+            default: break
+            }
         }
         return allowed.contains(code)
     }
@@ -848,6 +915,10 @@ nonisolated extension DirectorShadowRecord.Reason {
         case .notRecorded: self.init(domain: .judge, code: .notRecorded)
         case .nothingAllowed: self.init(domain: .judge, code: .nothingAllowed)
         case .invalidJudgement: self.init(domain: .judge, code: .invalidJudgement)
+        case .peopleFit: self.init(domain: .judge, code: .peopleFit)
+        case .peopleUnknown: self.init(domain: .judge, code: .peopleUnknown)
+        case .segmentPrefersWide: self.init(domain: .policy, code: .segmentPrefersWide)
+        case .segmentHolds: self.init(domain: .policy, code: .segmentHolds)
         }
     }
 }
@@ -974,7 +1045,7 @@ nonisolated extension DirectorShadowRecord {
     private func validateScorerInputs() throws {
         guard let scorerInputs else { return }
         func require(_ valid: Bool) throws { if !valid { throw ValidationError.invalidRecord } }
-        try require(schemaVersion == 2 && parameters.status == .available && !scorerInputs.isEmpty)
+        try require(schemaVersion >= 2 && parameters.status == .available && !scorerInputs.isEmpty)
         var previousJudgement = -1, previousRank = -1
         var groups: [Int: [ScorerInput]] = [:]
         for input in scorerInputs {

@@ -1,5 +1,5 @@
 {
-  "version": 2,
+  "version": 4,
   "objects": {
     "Context": {
       "inputs": "[String]",
@@ -38,7 +38,9 @@
       "readiness": "ReadinessParameters?",
       "adapter": "AdapterParameters?",
       "judgeMaximumAge": "Double?",
-      "minimumProbability": "Double?"
+      "minimumProbability": "Double?",
+      "peopleFitSpan": "Double?",
+      "peopleMaximumAge": "Double?"
     },
     "Style": {
       "minimumShotDuration": "Double",
@@ -83,7 +85,10 @@
       "framingSettledFor": "Double?",
       "prepareReadiness": "ReadinessSummary?",
       "cutReadiness": "ReadinessSummary?",
-      "revisions": "Revisions?"
+      "revisions": "Revisions?",
+      "peopleCount": "Int?",
+      "peopleCoverage": "PeopleCoverage?",
+      "subjectRank": "Int?"
     },
     "ReadinessSummary": {
       "isReady": "Bool",
@@ -316,7 +321,9 @@
       "readiness",
       "selection",
       "observation",
-      "authorityRefusal"
+      "authorityRefusal",
+      "speech",
+      "worldModel"
     ],
     "ReasonCode": [
       "authorityRevoked",
@@ -359,7 +366,48 @@
       "notQualified",
       "prerequisites",
       "paused",
-      "exhausted"
+      "exhausted",
+      "previewIsSafeWide",
+      "alreadyPrepared",
+      "operatorAdjusting",
+      "learningSubject",
+      "recoveringSubject",
+      "takeNotAllowed",
+      "previewNotReady",
+      "noCutDue",
+      "judgeDeclined",
+      "preferredLength",
+      "programUncertain",
+      "wideDue",
+      "noWakePrefix",
+      "unrecognized",
+      "subjectNotLocked",
+      "duplicateUtterance",
+      "cancelledByManualCommand",
+      "targetUnavailable",
+      "missingUtteranceStart",
+      "invalidToken",
+      "muted",
+      "stopped",
+      "sessionChanged",
+      "roleChanged",
+      "targetRebound",
+      "sourceChanged",
+      "cancelledByWide",
+      "cancelledByTake",
+      "cancelledByMute",
+      "notAssigned",
+      "notObserved",
+      "partialView",
+      "stale",
+      "ambiguous",
+      "nobody",
+      "noLecternZone",
+      "presetUnavailable",
+      "peopleFit",
+      "peopleUnknown",
+      "segmentPrefersWide",
+      "segmentHolds"
     ],
     "SegmentType": [
       "presenter",
@@ -370,10 +418,17 @@
     ],
     "ExportRetention": [
       "explicitExport"
+    ],
+    "PeopleCoverage": [
+      "none",
+      "region",
+      "fullFrame"
     ]
   },
   "supportedVersions": [
     1,
-    2
+    2,
+    3,
+    4
   ]
 }

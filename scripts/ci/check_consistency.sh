@@ -1,6 +1,6 @@
 #!/bin/bash
 # App/extension version match, Mach service prefix, Debug-only flags, and
-# entitlement diffs. No credentials. Entitlement diffs are allowed when the
+# entitlement/capability-setting diffs. No credentials. Diffs are allowed when the
 # pull request carries the label allow-entitlement-change.
 set -euo pipefail
 
@@ -33,7 +33,8 @@ fi
 echo "Mach service prefix ok"
 
 flags="CinematicCoreMacOS/CinematicCoreMacOS/DeveloperFlags.swift"
-for name in allowRehearsalOutput allowInjectedQualification allowStageBelowShowRate; do
+for name in allowRehearsalOutput allowInjectedQualification allowStageBelowShowRate \
+    allowDirectorAuto allowDirectorAssist typedCommands judgeTwo; do
   if ! awk -v name="$name" '
     $0 ~ "#else" { in_else = 1 }
     $0 ~ "#endif" { in_else = 0 }
@@ -68,4 +69,13 @@ if [[ -n "$diff" ]]; then
   echo "$diff" >&2
   exit 1
 fi
-echo "entitlements unchanged"
+# Xcode can synthesize entitlements from build settings even when the
+# .entitlements file is unchanged. Include conditional .xcconfig assignments.
+capability_diff="$(git diff --no-ext-diff --unified=0 "$base" -- '*.pbxproj' '*.xcconfig' \
+  | grep -E '^[+-][[:space:]]*"?(ENABLE_RESOURCE_ACCESS_[A-Z0-9_]+|ENABLE_USER_SELECTED_FILES|ENABLE_OUTGOING_NETWORK_CONNECTIONS)(\[[^]]+\])*"?[[:space:]]*=' || true)"
+if [[ -n "$capability_diff" ]]; then
+  echo "capability build settings changed without the allow-entitlement-change label:" >&2
+  echo "$capability_diff" >&2
+  exit 1
+fi
+echo "entitlements and capability build settings unchanged"

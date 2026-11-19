@@ -9,7 +9,7 @@ import Testing
 struct InspectorWorkloadTests {
     private func show(enabled: Bool) -> ShowCoordinator {
         let defaults = UserDefaults(suiteName: "alfie-inspector-workload-\(UUID().uuidString)")!
-        return ShowCoordinator(
+        return TestHardware.makeShow(
             programOutput: ProgramOutputManager(sinks: []),
             admissionRecords: AdmissionRecordStore(defaults: defaults),
             operatorModes: OperatorModeStore(defaults: defaults, multiviewEnabled: true),

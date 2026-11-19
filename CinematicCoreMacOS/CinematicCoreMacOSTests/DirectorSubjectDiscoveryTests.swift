@@ -171,7 +171,7 @@ struct DirectorSubjectDiscoveryTests {
               timestamp: 100, poseKeypoints: nil, faceBoundingBox: nil, faceLandmarkRatios: nil)
     }
     private func rig() -> (ShowCoordinator, CameraManager, ContextBox) {
-        let show = ShowCoordinator(programOutput: ProgramOutputManager(sinks: []),
+        let show = TestHardware.makeShow(programOutput: ProgramOutputManager(sinks: []),
             qualificationRecords: DirectorQualificationStore(storage: nil, acceptsInjectedRecords: false))
         let b = show.addChannel(.b), context = ContextBox()
         b.setRunningForTesting(true)
@@ -282,7 +282,8 @@ struct DirectorSubjectDiscoveryTests {
     @Test(.timeLimit(.minutes(1))) func cancellingDiscoveryWaiterPreservesRenderWaiterAndRunningPermits() async throws {
         let scheduler = FrameWorkScheduler()
         let perceptionGrant = await scheduler.acquire(.perception, for: .a)
-        let renderGrant = await scheduler.acquire(.render, for: .a)
+        // Render slots are per camera, so B's render waiter waits behind B's own render.
+        let renderGrant = await scheduler.acquire(.render, for: .b)
         let perception = try #require(perceptionGrant)
         let render = try #require(renderGrant)
         let discoveryWaiter = Task { await scheduler.acquire(.perception, for: .b) }

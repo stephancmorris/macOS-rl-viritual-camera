@@ -23,7 +23,7 @@ import Testing
         let utc = try #require(DirectorShadowExportManifest.utcDate("2026-10-21T00:00:00.000Z"))
         let log = try DirectorShadowLog(directory: root, limits: .init(maximumRecordBytes: 16384,
             maximumQueuedBytes: 65536, maximumFileBytes: 65536, maximumStoreBytes: 131072), utcClock: { utc })
-        let show = ShowCoordinator(programOutput: ProgramOutputManager(sinks: []),
+        let show = TestHardware.makeShow(programOutput: ProgramOutputManager(sinks: []),
             qualificationRecords: DirectorQualificationStore(storage: nil, acceptsInjectedRecords: false))
         show.clock = { 100 }; show.channelA.setRunningForTesting(true); show.addChannel(.b).setRunningForTesting(true)
         let controller = DirectorController(show: show, ticker: Ticker(), clock: { 100 }, shadowLog: log, log: { _ in })
@@ -50,7 +50,7 @@ import Testing
 
     @Test(arguments: ["missing", "wrongPreview", "oldEvidence", "future", "wrongProgram", "wrongParameters"])
     func incompatibleContextCannotBeRecordedAsABEvidence(_ bad: String) {
-        let show = ShowCoordinator(programOutput: ProgramOutputManager(sinks: []),
+        let show = TestHardware.makeShow(programOutput: ProgramOutputManager(sinks: []),
             qualificationRecords: DirectorQualificationStore(storage: nil, acceptsInjectedRecords: false))
         show.clock = { 100 }; show.channelA.setRunningForTesting(true); show.addChannel(.b).setRunningForTesting(true)
         let trial = DirectorJudgeShadow()

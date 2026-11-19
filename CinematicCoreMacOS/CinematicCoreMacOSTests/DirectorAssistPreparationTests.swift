@@ -10,9 +10,10 @@ import Testing
         .init(readiness: .init(minimumSettledTime: 0, maximumMotion: 0.2, cutOnMotionAllowed: false,
               minimumCutSettledTime: 1, maximumCutMotion: 0.1), maximumRequestAge: age, onePreparationPerTenure: one)
     }
-    private func rig() -> Rig {
-        let show = ShowCoordinator(programOutput: ProgramOutputManager(sinks: []),
-            qualificationRecords: DirectorQualificationStore(storage: nil, acceptsInjectedRecords: false))
+    private func rig(capabilities: DirectorCapabilities = .full) -> Rig {
+        let show = TestHardware.makeShow(programOutput: ProgramOutputManager(sinks: []),
+            qualificationRecords: DirectorQualificationStore(storage: nil, acceptsInjectedRecords: false),
+            directorCapabilities: capabilities)
         let clock = Clock(), subject = UUID(), b = show.addChannel(.b)
         show.clock = { clock.now }
         show.channelA.setRunningForTesting(true); b.setRunningForTesting(true)
@@ -23,12 +24,24 @@ import Testing
         }
         show.director.assistPreparation.readinessForTesting = .init(reasons: [])
         show.director.attach()
-        #expect(show.director.setLevel(.assist) == .accepted)
+        #expect((show.director.setLevel(.assist) == .accepted) == capabilities.assist)
         return .init(show: show, clock: clock, subject: subject)
     }
     private func request(_ r: Rig, shot: DirectorShot = .init(preset: .stage(.fullBody)), one: Bool = true) throws -> DirectorPreparation.Request {
         try #require(r.show.director.assistPreparation.enqueue(shot, configuration: configuration(one: one)))
     }
+    /// C-04: the same rig that prepares Preview below, in a build that may only watch.
+    @Test func aShadowOnlyBuildNeverPreparesPreview() {
+        let r = rig(capabilities: .shadowOnly), b = r.show.channel(.b)!
+        let before = b.revisions, aBefore = r.show.channelA.revisions
+        #expect(r.show.director.authority.level == .off)
+        #expect(r.show.director.assistPreparation.enqueue(.init(preset: .stage(.fullBody)), configuration: configuration()) == nil)
+        let result = r.show.director.preparePreview(.init(preset: .stage(.fullBody)), configuration: configuration())
+        if case .committed = result { Issue.record("A shadow-only build prepared Preview") }
+        #expect(b.revisions == before && r.show.channelA.revisions == aBefore)
+        #expect(r.show.director.directorSection.prepared == nil)
+    }
+
     @Test func actualDispatchMatchesReceiptAndChangesOnlyPreviewWhileKeepingTheLock() throws {
         let r = rig(), b = r.show.channel(.b)!, aBefore = r.show.channelA.revisions, before = b.revisions
         let result = r.show.director.preparePreview(.init(preset: .stage(.fullBody)), configuration: configuration())

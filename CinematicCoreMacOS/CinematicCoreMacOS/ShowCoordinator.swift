@@ -39,9 +39,20 @@ final class ShowCoordinator: ObservableObject {
 
     /// Exclusive device leases shared by every channel (DEVICES).
     let deviceRegistry = CaptureDeviceRegistry()
+    private let cameraDeviceSource: CameraManager.DeviceSource
 
     /// Fair, bounded render / perception admission across channels (SCHEDULER).
     let workScheduler = FrameWorkScheduler()
+
+    /// What every camera currently sees (C-01). Plain storage, sampled by
+    /// `refreshWorldModel()`; deliberately not published.
+    var worldModel = WorldModel()
+
+    /// Census bookkeeping (C-01 path 2): at most one census in flight per
+    /// camera, when each camera's last one started, and plain counters.
+    var censusInFlight: [ChannelID: Task<Bool, Never>] = [:]
+    var lastCensusStartedAt: [ChannelID: TimeInterval] = [:]
+    var censusStats = WorldModel.CensusStats()
 
     var channelA: CameraManager { channels[.a]! }
 
@@ -156,7 +167,11 @@ final class ShowCoordinator: ObservableObject {
          qualificationRecords: DirectorQualificationStore? = nil, directorShadowLog: DirectorShadowLog? = nil,
          directorRunSheet: RunSheet? = nil, operatorModes: OperatorModeStore? = nil,
          workloadPolicyEnabled: Bool = DeveloperFlags.runtimeWorkloadPolicy,
-         workloadCPUReading: (@Sendable () -> ProcessCPUClock.Reading)? = nil) {
+         workloadCPUReading: (@Sendable () -> ProcessCPUClock.Reading)? = nil,
+         cameraDeviceSource: CameraManager.DeviceSource = .live,
+         directorCapabilities: DirectorCapabilities = .full) {
+        self.cameraDeviceSource = cameraDeviceSource
+        self.directorCapabilities = directorCapabilities
         self.operatorModes = operatorModes ?? OperatorModeStore()
         self.workloadPolicy = workloadPolicyEnabled ? DegradePolicy() : nil
         if let workloadCPUReading { self.workloadCPU = ProcessCPUClock(read: workloadCPUReading) }
@@ -172,7 +187,7 @@ final class ShowCoordinator: ObservableObject {
         self.router = ProgramRouter(output: output, programChannel: .a)
         let router = self.router
         workScheduler.isProgram = { router.isProgram($0) }
-        let a = CameraManager(channelID: .a, programOutput: output, outputPort: router.port(for: .a))
+        let a = CameraManager(channelID: .a, programOutput: output, outputPort: router.port(for: .a), deviceSource: cameraDeviceSource)
         a.deviceRegistry = deviceRegistry
         a.workScheduler = workScheduler
         self.operatorModes.apply(to: a)
@@ -258,7 +273,7 @@ final class ShowCoordinator: ObservableObject {
     @discardableResult
     func addChannel(_ id: ChannelID) -> CameraManager {
         if let existing = channels[id] { return existing }
-        let channel = CameraManager(channelID: id, programOutput: programOutput, outputPort: router.port(for: id))
+        let channel = CameraManager(channelID: id, programOutput: programOutput, outputPort: router.port(for: id), deviceSource: cameraDeviceSource)
         channel.deviceRegistry = deviceRegistry
         channel.workScheduler = workScheduler
         operatorModes.apply(to: channel)
@@ -338,6 +353,8 @@ final class ShowCoordinator: ObservableObject {
 
     /// Optional, explicitly budgeted metadata storage; no implicit I/O defaults.
     private let initialDirectorShadowLog: DirectorShadowLog?
+    /// What the Director may do in this build (C-04). Tests may ask for less.
+    let directorCapabilities: DirectorCapabilities
     private let initialDirectorRunSheet: RunSheet?
     /// Read-only export access must not instantiate the lazy Director.
     var shadowLogForExport: DirectorShadowLog? { initialDirectorShadowLog }
@@ -355,7 +372,15 @@ final class ShowCoordinator: ObservableObject {
     private(set) lazy var director = DirectorController(
         show: self, clock: { [weak self] in self?.clock() ?? CACurrentMediaTime() },
         qualifiedLevels: { [weak self] in self?.qualifiedDirectorLevels ?? [] },
+        capabilities: directorCapabilities,
+        // DC-6: the evidence adapter and the shadow judge run with
+        // provisional study values.
+        studyParameters: DeveloperFlags.judgeTwo ? .shadowV2 : .shadowV1,
         shadowLog: initialDirectorShadowLog, runSheet: initialDirectorRunSheet)
+
+    /// Decision core, stage 5: typed commands for Preview. The console only
+    /// shows the field when `DeveloperFlags.typedCommands` is on.
+    private(set) lazy var typedCommands = TypedCommandController(show: self)
 
     /// Start the Director's shadow when the flag allows it. Every launch is Manual.
     func startDirectorShadow() {

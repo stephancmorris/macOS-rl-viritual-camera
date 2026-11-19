@@ -16,7 +16,7 @@ import Testing
 @MainActor
 struct ChannelIsolationTests {
     private func show() -> ShowCoordinator {
-        ShowCoordinator(programOutput: ProgramOutputManager(sinks: []))
+        TestHardware.makeShow(programOutput: ProgramOutputManager(sinks: []))
     }
 
     private func buffer() throws -> CVPixelBuffer {
@@ -107,7 +107,7 @@ struct ChannelIsolationTests {
     }
 
     @Test func shotRevisionTracksAdmittedDiscreteCommands() {
-        let manager = CameraManager(channelID: .a, programOutput: ProgramOutputManager(sinks: []), routed: true)
+        let manager = TestHardware.makeCamera(channelID: .a, programOutput: ProgramOutputManager(sinks: []), routed: true)
         manager.setRunningForTesting(true)
         let before = manager.shotRevision
         #expect(manager.dispatch(manager.makeCommand(.selectPreset(.stage(.waistUp)))) == .accepted)

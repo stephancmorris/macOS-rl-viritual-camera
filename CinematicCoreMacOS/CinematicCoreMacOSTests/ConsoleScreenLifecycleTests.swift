@@ -18,7 +18,7 @@ struct ConsoleScreenLifecycleTests {
     private func show(_ mode: OperatorMode = .multiCam) -> ShowCoordinator {
         let defaults = UserDefaults(suiteName: "alfie-screen-lifecycle-\(UUID().uuidString)")!
         defaults.set(mode.rawValue, forKey: OperatorModeStore.key)
-        return ShowCoordinator(
+        return TestHardware.makeShow(
             programOutput: ProgramOutputManager(sinks: []),
             admissionRecords: AdmissionRecordStore(defaults: defaults),
             operatorModes: OperatorModeStore(defaults: defaults, multiviewEnabled: true))
