@@ -70,6 +70,8 @@ final class DirectorCutExecution {
 
     private weak var show: ShowCoordinator?
     private weak var controller: DirectorController?
+    /// No controller, no capability: the effect paths fail closed.
+    private var capabilities: DirectorCapabilities { controller?.capabilities ?? .shadowOnly }
     private var configuration: Configuration?
     private var context: ContextProvider?
     private var scheduler: (any DirectorCutDeadlineScheduling)?
@@ -181,7 +183,7 @@ final class DirectorCutExecution {
         defer {
             if wantsCapture && !captureAccounted { controller?.shadowRecorder?.log.noteDropped() }
         }
-        guard DeveloperFlags.allowDirectorAuto, c.isValid, let controller, controller.isAttached,
+        guard capabilities.auto, c.isValid, let controller, controller.isAttached,
               let show, !show.editLive, now.isFinite, now >= 0,
               let context = context?(now), context.timeline.now == now,
               context.program == show.programChannel,

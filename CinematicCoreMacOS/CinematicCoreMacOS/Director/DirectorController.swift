@@ -93,6 +93,8 @@ final class DirectorController: ObservableObject, DirectorConsoleControlling {
     private let ticker: DirectorTicker
     private let clock: () -> TimeInterval
     private let qualifiedLevels: () -> Set<DirectorAuthority.Level>
+    /// What this Director may do (C-04). Fixed for its lifetime.
+    let capabilities: DirectorCapabilities
     private let log: (String) -> Void
 
     private var pauseReason: Section.PauseReason?
@@ -108,6 +110,7 @@ final class DirectorController: ObservableObject, DirectorConsoleControlling {
          ticker: DirectorTicker = TaskDirectorTicker(),
          clock: @escaping () -> TimeInterval = { CACurrentMediaTime() },
          qualifiedLevels: @escaping () -> Set<DirectorAuthority.Level> = { [] },
+         capabilities: DirectorCapabilities = .full,
          adapterParameters: DirectorEvidenceAdapter.Parameters? = nil,
          cutReadinessParameters: DirectorReadiness.Parameters? = nil,
          shadowLog: DirectorShadowLog? = nil,
@@ -118,12 +121,14 @@ final class DirectorController: ObservableObject, DirectorConsoleControlling {
         if let shadowLog { self.shadowRecorder = DirectorShadowRecorder(log: shadowLog) }
         self.ticker = ticker
         self.clock = clock
-        self.qualifiedLevels = qualifiedLevels
+        self.capabilities = capabilities
+        // The level ceiling: no record qualifies a level this build cannot run.
+        self.qualifiedLevels = { capabilities.ceiling(qualifiedLevels()) }
         self.cutReadinessParameters = cutReadinessParameters
         self.adapter = adapterParameters.map(DirectorEvidenceAdapter.init(parameters:))
         self.log = log ?? { Self.logger.notice("[DIRECTOR] \($0, privacy: .public)") }
         // Every launch starts Manual (U2); nothing is restored.
-        self.directorSection = .atLaunch(qualified: Self.qualification(qualifiedLevels()))
+        self.directorSection = .atLaunch(qualified: Self.qualification(capabilities.ceiling(qualifiedLevels())))
         refreshSection()
     }
 
@@ -522,13 +527,13 @@ final class DirectorController: ObservableObject, DirectorConsoleControlling {
     /// Called by B-08 only after a fresh cut decision. No production timing
     /// defaults: the caller supplies the permit lease from approved parameters.
     func issueTakePermit(now: TimeInterval, validity: TimeInterval) -> TakePermit? {
-        guard DeveloperFlags.allowDirectorAuto else { return nil }
+        guard capabilities.auto else { return nil }
         return takePermits.issue(live: currentTakeState(now: now), now: now, validity: validity)
     }
 
     func consumeTakePermit(_ permit: TakePermit, now: TimeInterval) -> Bool {
         // Even a disabled path consumes/discards its own matching attempt.
-        guard DeveloperFlags.allowDirectorAuto else { takePermits.discard(permit); return false }
+        guard capabilities.auto else { takePermits.discard(permit); return false }
         if case .admitted = takePermits.consume(permit, live: currentTakeState(now: now), now: now) { return true }
         return false
     }
@@ -694,7 +699,7 @@ final class DirectorController: ObservableObject, DirectorConsoleControlling {
     func issueNoticePermit(_ token: CutNotice.Token, notice: inout CutNotice,
                            decision: CutPolicy.Decision, now: TimeInterval,
                            validity: TimeInterval) -> TakePermit? {
-        guard DeveloperFlags.allowDirectorAuto else { notice.retire(); return nil }
+        guard capabilities.auto else { notice.retire(); return nil }
         return notice.fire(token, decision: decision, live: currentTakeState(now: now), now: now,
                            permitValidity: validity, issuer: &takePermits)
     }
@@ -792,6 +797,8 @@ final class DirectorController: ObservableObject, DirectorConsoleControlling {
 
     @discardableResult
     func overrideSubject(_ request: DirectorSubjectOverrideRequest) -> DirectorControlResult {
+        // A shadow-only Director sends no command, not even one the operator starts here.
+        guard capabilities.assist else { return .refused("Subject selection by the Director is not available in this build") }
         guard isAttached, let show, let camera = show.channel(request.channel),
               let pick = subjectConsole.picks(now: clock())[request.channel], request.matches(pick) else {
             return .refused("The camera or subject view changed; select again")
@@ -895,6 +902,13 @@ final class DirectorController: ObservableObject, DirectorConsoleControlling {
     var prerequisitesOverride: (() -> DirectorAuthority.Prerequisites)?
 
     func prerequisites() -> DirectorAuthority.Prerequisites {
+        // The level ceiling holds whatever supplied the prerequisites.
+        var result = uncappedPrerequisites()
+        result.qualifiedLevels = capabilities.ceiling(result.qualifiedLevels)
+        return result
+    }
+
+    private func uncappedPrerequisites() -> DirectorAuthority.Prerequisites {
         if let prerequisitesOverride { return prerequisitesOverride() }
         guard let show else {
             return .init(nominationsCurrent: false, previewAvailable: false, sourcesHealthy: false,

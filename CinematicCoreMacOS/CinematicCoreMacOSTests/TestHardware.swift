@@ -19,12 +19,13 @@ enum TestHardware {
                          directorRunSheet: RunSheet? = nil, operatorModes: OperatorModeStore? = nil,
                          workloadPolicyEnabled: Bool = DeveloperFlags.runtimeWorkloadPolicy,
                          workloadCPUReading: (@Sendable () -> ProcessCPUClock.Reading)? = nil,
-                         cameraDeviceSource: CameraManager.DeviceSource = .isolated) -> ShowCoordinator {
+                         cameraDeviceSource: CameraManager.DeviceSource = .isolated,
+                         directorCapabilities: DirectorCapabilities = .full) -> ShowCoordinator {
         let show = ShowCoordinator(programOutput: programOutput ?? ProgramOutputManager(sinks: []),
             admissionRecords: admissionRecords, qualificationRecords: qualificationRecords,
             directorShadowLog: directorShadowLog, directorRunSheet: directorRunSheet, operatorModes: operatorModes,
             workloadPolicyEnabled: workloadPolicyEnabled, workloadCPUReading: workloadCPUReading,
-            cameraDeviceSource: cameraDeviceSource)
+            cameraDeviceSource: cameraDeviceSource, directorCapabilities: directorCapabilities)
         show.deviceRegistry.isPresent = { _ in false }
         return show
     }

@@ -54,6 +54,8 @@ final class DirectorOnAirMoveExecution {
 
     private weak var show: ShowCoordinator?
     private weak var controller: DirectorController?
+    /// No controller, no capability: the effect paths fail closed.
+    private var capabilities: DirectorCapabilities { controller?.capabilities ?? .shadowOnly }
     private(set) var policy = OnAirMovePolicy()
     /// Nil until an explicit request supplies all study settings.
     private var pending: Pending?
@@ -81,7 +83,7 @@ final class DirectorOnAirMoveExecution {
     func enqueue(_ target: DirectorShot, programStartedAt: TimeInterval,
                  configuration: Configuration) -> OnAirMovePolicy.Plan? {
         validateRunning()
-        guard running == nil, DeveloperFlags.allowDirectorAuto, configuration.isValid,
+        guard running == nil, capabilities.auto, configuration.isValid,
               let show, let controller, let style = controller.effectiveStyle,
               let channel = show.channel(show.programChannel), let subject = channel.manualLockedTargetID,
               let context = snapshot(target: target, programStartedAt: programStartedAt,
@@ -100,7 +102,7 @@ final class DirectorOnAirMoveExecution {
     func commit(_ plan: OnAirMovePolicy.Plan) -> Effect {
         guard let request = pending, request.plan == plan else { return .rejected }
         pending = nil
-        guard DeveloperFlags.allowDirectorAuto, let show, let controller, controller.isAttached,
+        guard capabilities.auto, let show, let controller, controller.isAttached,
               let style = controller.effectiveStyle, let channel = show.channel(plan.program),
               let context = snapshot(target: plan.to, programStartedAt: request.programStartedAt,
                   configuration: request.configuration, now: show.clock()),
@@ -138,7 +140,7 @@ final class DirectorOnAirMoveExecution {
 
     private func isCurrent(_ owner: Running, hasStarted: Bool) -> Bool {
         let request = owner.pending, plan = request.plan
-        guard DeveloperFlags.allowDirectorAuto, let show, let controller, controller.isAttached,
+        guard capabilities.auto, let show, let controller, controller.isAttached,
               running?.pending.plan.id == plan.id || startingID == plan.id,
               show.programChannel == plan.program, show.router.routeGeneration == plan.routeGeneration,
               !show.editLive, controller.authority.epoch == plan.epoch,
@@ -170,7 +172,7 @@ final class DirectorOnAirMoveExecution {
 
     private func snapshot(target: DirectorShot, programStartedAt: TimeInterval,
                           configuration: Configuration, now: TimeInterval) -> OnAirMovePolicy.Context? {
-        guard DeveloperFlags.allowDirectorAuto, configuration.isValid, now.isFinite, now >= 0,
+        guard capabilities.auto, configuration.isValid, now.isFinite, now >= 0,
               let show, let controller, controller.isAttached, !show.editLive,
               let channel = show.channel(show.programChannel), channel.isRunning, !channel.sourceMissing,
               channel.activeMode == .autoTracking, channel.manualLockedTargetID != nil,
