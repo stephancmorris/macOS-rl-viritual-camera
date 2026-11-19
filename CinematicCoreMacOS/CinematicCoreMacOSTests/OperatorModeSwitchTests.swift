@@ -207,7 +207,12 @@ struct OperatorModeSwitchTests {
         // Widest picker: all three segments, each with its note.
         let screen = StoppedScreen(operatorModes: store,
                                    cameras: OperatorModeChoice.Cameras(count: 2, hasBuiltIn: true),
-                                   lastSessionEndedAt: nil, onStart: {})
+                                   lastSessionEndedAt: nil, onStart: {},
+                                   readiness: ReadinessObserver(readInputs: { .init(mode: .singleCam,
+                                       route: .rehearsal, usesLiveCamera: false, cameraAccess: .authorized,
+                                       extensionStatus: .installed, programOutput: .ready) }),
+                                   onReadinessAction: { _ in }, preview: StoppedCameraPreviewController(),
+                                   onPreview: {})
             .background(Color.black)
         let size = try fittingSize(screen, file: "mode-stopped-single-cam.png")
         #expect(size.width <= 1280 && size.height <= 800, "StoppedScreen \(size)")

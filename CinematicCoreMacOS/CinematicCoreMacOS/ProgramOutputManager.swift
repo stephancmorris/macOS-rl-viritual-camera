@@ -245,6 +245,21 @@ final class ProgramOutputManager: ObservableObject {
         }
     }
 
+    /// A route the next start uses instead of `preferredRoute`, without
+    /// changing the saved preference. Webcam sets it to the virtual camera;
+    /// every other Start clears it. The Settings picker and the Multi Cam
+    /// setup keep showing, and saving, `preferredRoute`.
+    var startRouteOverride: Route? {
+        didSet {
+            guard startRouteOverride != oldValue else { return }
+            refreshRoutingDecision()
+        }
+    }
+
+    /// The route a start resolves to: the override when set, else the
+    /// saved preference.
+    var startRoute: Route { startRouteOverride ?? preferredRoute }
+
     @Published private(set) var activeRoute: Route?
     /// Standalone capture owns its format lifetime here. A ShowCoordinator
     /// instead holds it while any attached input runs or starts, including
@@ -884,30 +899,30 @@ final class ProgramOutputManager: ObservableObject {
 
     var routingSummary: String {
         guard isCaptureRunning else {
-            return "\(preferredRoute.title) is selected and will carry the processed feed when capture is running."
+            return "\(startRoute.title) is selected and will carry the processed feed when capture is running."
         }
 
         guard let activeRoute else {
             return "No output route is active."
         }
 
-        if activeRoute == preferredRoute {
+        if activeRoute == startRoute {
             return "\(activeRoute.title) is carrying the processed program feed."
         }
 
-        return "\(preferredRoute.title) is not available yet, so output is falling back to \(activeRoute.title)."
+        return "\(startRoute.title) is not available yet, so output is falling back to \(activeRoute.title)."
     }
 
     var preferredSinkCanReconnect: Bool {
-        sink(for: preferredRoute)?.canReconnect ?? false
+        sink(for: startRoute)?.canReconnect ?? false
     }
 
     var preferredSinkReconnectStatus: String? {
-        sink(for: preferredRoute)?.reconnectStatus
+        sink(for: startRoute)?.reconnectStatus
     }
 
     func reconnectPreferredRoute() {
-        let sink = sink(for: preferredRoute)
+        let sink = sink(for: startRoute)
         logger.notice(
             "Reconnect Output pressed; preferredRoute=\(self.preferredRoute.title, privacy: .public); activeRoute=\(self.activeRoute?.title ?? "none", privacy: .public); sinkAvailable=\((sink?.isAvailable ?? false), privacy: .public); sinkSummary=\(sink?.summary ?? "missing", privacy: .public); sinkDetail=\(sink?.detail ?? "missing", privacy: .public); sinkError=\(sink?.lastErrorDescription ?? "none", privacy: .public)"
         )
@@ -940,8 +955,8 @@ final class ProgramOutputManager: ObservableObject {
         let resolvedRoute: Route?
         if isCaptureRunning, let sessionRoute {
             resolvedRoute = sink(for: sessionRoute)?.isAvailable == true ? sessionRoute : nil
-        } else if let preferredSink = sink(for: preferredRoute), preferredSink.isAvailable {
-            resolvedRoute = preferredRoute
+        } else if let preferredSink = sink(for: startRoute), preferredSink.isAvailable {
+            resolvedRoute = startRoute
         } else if let fallbackSink = sink(for: .virtualCamera), fallbackSink.isAvailable {
             // Only when choosing a destination at start, never mid-show.
             resolvedRoute = .virtualCamera
@@ -953,7 +968,7 @@ final class ProgramOutputManager: ObservableObject {
             resolvedRoute = nil
         }
 
-        for sink in sinks { sink.setSelected(sink.route == preferredRoute) }
+        for sink in sinks { sink.setSelected(sink.route == startRoute) }
 
         activeRoute = isCaptureRunning ? resolvedRoute : nil
         if isCaptureRunning, sessionRoute == nil { sessionRoute = activeRoute }
