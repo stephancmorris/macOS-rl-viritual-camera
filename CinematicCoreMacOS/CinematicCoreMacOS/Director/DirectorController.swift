@@ -84,6 +84,10 @@ final class DirectorController: ObservableObject, DirectorConsoleControlling {
     private var captureSettingsGeneration = UUID()
     private var resolvingCaptureBinding = false
     private(set) var evidenceRevision: UInt64 = 0
+    /// Decision core, stage 2: one frozen picture of the show per tick.
+    private lazy var sceneBuilder = DirectorSceneBuilder(show: show)
+    /// The scene built on the newest tick; nil when it could not be built.
+    private(set) var latestScene: DirectorScene?
     private(set) lazy var assistPreparation = DirectorAssistPreparation(show: show, controller: self)
     private(set) lazy var cutExecution = DirectorCutExecution(show: show, controller: self)
     private(set) lazy var backupExecution = DirectorBackupExecution(show: show, controller: self)
@@ -147,6 +151,8 @@ final class DirectorController: ObservableObject, DirectorConsoleControlling {
     func attach() {
         guard let show else { return }
         lastShadowAbstention = nil
+        latestScene = nil
+        sceneBuilder.begin(at: clock())
         if !isAttached, !authority.paused {
             forward(.pause, pause: .setupChanged, note: "controller attaching")
         }
@@ -340,15 +346,17 @@ final class DirectorController: ObservableObject, DirectorConsoleControlling {
     func tick() {
         guard let show else { return }
         let now = clock()
-        guard now.isFinite, now >= 0 else { return }
+        guard now.isFinite, now >= 0 else { latestScene = nil; return }
         evidenceRevision &+= 1
         let preview = show.previewChannel
         let cutMotionLimit = cutReadinessParameters.map { $0.tightened(by: effectiveStyle).maximumCutMotion }
+        var samples: [ChannelID: ChannelEvidenceSample] = [:]
         for id in ChannelID.allCases {
             guard let channel = show.channel(id) else { continue }
-            let readings = channel.evidenceReadings(now: now)
+            let sample = Self.sample(channel.evidenceReadings(now: now))
+            samples[id] = sample
             guard var current = adapter else { continue }
-            let events = current.ingest(Self.sample(readings), cutMotionLimit: cutMotionLimit)
+            let events = current.ingest(sample, cutMotionLimit: cutMotionLimit)
             adapter = current
             for event in events { evidenceEvent(event, preview: preview) }
         }
@@ -362,6 +370,9 @@ final class DirectorController: ObservableObject, DirectorConsoleControlling {
         }
         onAirMoves.validateRunning()
         cutExecution.evaluate(now: now)
+        // Built after any cut this tick, so it shows the show as it now stands.
+        latestScene = sceneBuilder.build(now: now, evidenceRevision: evidenceRevision, samples: samples,
+            adapter: adapter, segmentType: runSheet?.current?.type ?? .liveEvent, style: effectiveStyle)
         refreshSection()
         let comparisonEpoch = authority.epoch, comparisonEvidence = evidenceRevision
         let comparisonPolicy = policyRevision, comparisonNomination = nominationRevision
