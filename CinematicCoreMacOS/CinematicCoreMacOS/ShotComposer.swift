@@ -138,6 +138,11 @@ final class ShotComposer: ObservableObject {
         )
     }
 
+    /// True when a framing command (preset, headroom or format) has landed and
+    /// no compose has applied it yet. Read-only; the frame path's compose rule
+    /// uses it to compose on the frame a command lands (`ComposeRule`).
+    var framingChangePending: Bool { lastAppliedFramingFingerprint != currentFramingFingerprint }
+
     /// Whether a valid target has been computed at least once.
     /// @Published but written compare-before-write only (transition publish).
     @Published private(set) var hasActiveTarget: Bool = false

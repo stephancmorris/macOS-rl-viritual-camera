@@ -29,7 +29,10 @@ nonisolated struct ChannelRevisions: Equatable, Hashable, Sendable {
 /// The latest program frame a channel rendered, as the router (ROUTER) and a
 /// Take (TAKE) will validate it. Holds a strong reference to the rendered
 /// surface; never a raw capture buffer.
-struct RenderedChannelFrame {
+///
+/// A plain value with no actor: the capture queue makes it and the main thread
+/// reads it. The pixel buffer is not written after the frame is made.
+nonisolated struct RenderedChannelFrame: @unchecked Sendable {
     let channelID: ChannelID
     let revisions: ChannelRevisions
     /// Source presentation time of the capture it was rendered from (seconds).

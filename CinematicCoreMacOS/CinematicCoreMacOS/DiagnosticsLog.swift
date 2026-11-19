@@ -90,6 +90,9 @@ nonisolated struct PipelineCounters: Equatable, Sendable {
     var handoffAccepted = 0
     var handoffRefused = 0
     var repeated = 0
+    /// Finished Program frames a newer one replaced before the main thread
+    /// handed them on. They are in `admitted`; they never reached the route.
+    var handoffSuperseded = 0
 
     /// Frames the capture delegate received: admitted plus gate-skipped.
     var delivered: UInt64 { UInt64(admitted) &+ gateSkipped }
@@ -107,7 +110,8 @@ nonisolated struct PipelineCounters: Equatable, Sendable {
             noRoute: diff(noRoute, earlier.noRoute),
             handoffAccepted: diff(handoffAccepted, earlier.handoffAccepted),
             handoffRefused: diff(handoffRefused, earlier.handoffRefused),
-            repeated: diff(repeated, earlier.repeated))
+            repeated: diff(repeated, earlier.repeated),
+            handoffSuperseded: diff(handoffSuperseded, earlier.handoffSuperseded))
     }
 }
 
@@ -425,7 +429,7 @@ final class DiagnosticsLog {
             c("handoff_fps", .handoff, "fps", row, "frames_window ÷ window_s; host handoff, not presentation"),
             c("window_s", .session, "s", row, "host monotonic length of this window"),
             c("delivered_window", .delivered, "frames", row, "admitted_window + gate_drops_window"),
-            c("admitted_window", .admitted, "frames", row, "frames that entered processFrame"),
+            c("admitted_window", .admitted, "frames", row, "frames the camera's loop finished and offered to Program"),
             c("capture_dropped_window", .captureUpstream, "frames", row, "AVCapture didDrop callbacks (lost before delivery)"),
             c("capture_dropped_total", .captureUpstream, "frames", total, "AVCapture didDrop callbacks (lost before delivery)"),
             c("render_failed_window", .render, "frames", row, "crop renders that failed (HOLD re-sends last good)"),
@@ -434,6 +438,8 @@ final class DiagnosticsLog {
             c("no_route_window", .routed, "frames", row, "program frames produced while no output route was active"),
             c("repeated_window", .repeated, "frames", row, "accepted handoffs that re-sent the last good render"),
             c("repeated_total", .repeated, "frames", total, "accepted handoffs that re-sent the last good render"),
+            c("handoff_superseded_window", .handoff, "frames", row, "rendered Program frames a newer one replaced before the main thread handed them on"),
+            c("handoff_superseded_total", .handoff, "frames", total, "rendered Program frames a newer one replaced before the main thread handed them on"),
             c("presented_fps", .presented, "fps", row, "always 'unknown': display compositor and virtual-camera consumer do not report presentation"),
             c("diag_emit_ms", .instrumentation, "ms", row, "MainActor time to aggregate this row (file write is async, excluded)"),
             c("note", .session, "text", row, "operator / pipeline markers since the previous row"),
@@ -726,6 +732,7 @@ final class DiagnosticsLog {
             String(w.window.renderFailed), String(w.totals.renderFailed),
             String(w.window.routed), String(w.window.noRoute),
             String(w.window.repeated), String(w.totals.repeated),
+            String(w.window.handoffSuperseded), String(w.totals.handoffSuperseded),
             "unknown",
             f(w.emitMS, 3),
             csvEscaped(note),

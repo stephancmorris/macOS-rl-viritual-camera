@@ -29,6 +29,10 @@ protocol ChannelOutputPort: AnyObject {
     /// Route generation to stamp on a frame when its processing starts, so a
     /// frame rendered before a role change is refused when it arrives.
     var routeGeneration: UInt64 { get }
+    /// The same route, readable on the channel's capture queue: the
+    /// generation to stamp, and whether this channel is Program. Only a
+    /// Program frame is handed to the main thread.
+    var frameRoute: @Sendable () -> FrameRoute { get }
     func submitFrame(_ pixelBuffer: CVPixelBuffer, timestamp: Double, isRepeat: Bool, routeGeneration: UInt64)
 
     func start()
@@ -56,6 +60,9 @@ extension ChannelOutputPort {
     /// Ports without routing (the direct output, unrouted channels) have a
     /// single, fixed generation.
     var routeGeneration: UInt64 { 0 }
+
+    /// A port without routing feeds the output directly: always Program.
+    var frameRoute: @Sendable () -> FrameRoute { { FrameRoute(generation: 0, isProgram: true) } }
 
     func submitFrame(_ pixelBuffer: CVPixelBuffer, timestamp: Double, isRepeat: Bool, routeGeneration: UInt64) {
         sendFrame(pixelBuffer, timestamp: timestamp, isRepeat: isRepeat)
@@ -85,6 +92,10 @@ final class UnroutedChannelOutput: ChannelOutputPort {
     /// Non-nil so the channel never tries to open the show's diagnostics
     /// session (which would otherwise be attempted on every frame).
     var diagnosticsFileName: String? { "not recorded: \(channelID.cameraLabel) is not routed" }
+
+    /// Never Program: its frames stay on the channel and never reach the
+    /// main thread per frame.
+    var frameRoute: @Sendable () -> FrameRoute { { FrameRoute(generation: 0, isProgram: false) } }
 
     func start() {}
     func stop() {}

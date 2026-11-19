@@ -111,11 +111,15 @@ import Testing
     }
 
     @Test func thePictureBuffersAreNotPublished() {
-        // A `@Published` property is stored as `_name`; plain storage keeps its name.
-        let labels = Set(Mirror(reflecting: TestHardware.makeCamera()).children.compactMap(\.label))
-        #expect(labels.contains("currentFrameBuffer"))
-        #expect(labels.contains("croppedFrameBuffer"))
+        // A `@Published` property is stored as `_name`. Since D-02 path 2 the
+        // two buffers are not stored on the camera at all: the capture queue
+        // stores them in the frame mailbox and the camera reads them from it.
+        let camera = TestHardware.makeCamera()
+        let labels = Set(Mirror(reflecting: camera).children.compactMap(\.label))
         #expect(!labels.contains("_currentFrameBuffer"))
         #expect(!labels.contains("_croppedFrameBuffer"))
+        #expect(labels.contains("frameMailbox"))
+        #expect(!labels.contains("_frameMailbox"))
+        #expect(camera.currentFrameBuffer == nil && camera.croppedFrameBuffer == nil)
     }
 }
