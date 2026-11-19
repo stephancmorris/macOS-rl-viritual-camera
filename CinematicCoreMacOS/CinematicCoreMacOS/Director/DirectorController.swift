@@ -106,6 +106,14 @@ final class DirectorController: ObservableObject, DirectorConsoleControlling {
     private lazy var sceneBuilder = DirectorSceneBuilder(show: show)
     /// The scene built on the newest tick; nil when it could not be built.
     private(set) var latestScene: DirectorScene?
+    /// Decision core, stage 6: live Assist and Auto from the scene. Debug
+    /// only: nothing in a Release build can set it.
+    private(set) var liveDirecting: LiveDirecting?
+    /// Live Assist's own core, so the shadow judge's tenure is untouched.
+    private var liveCore = DirectorDecisionCore()
+    private struct LiveTenure: Equatable { let preview: ChannelID; let sourceGeneration: UInt64; let routeGeneration: UInt64 }
+    /// The Preview tenure live Assist has already prepared in.
+    private var livePreparedTenure: LiveTenure?
     private(set) lazy var assistPreparation = DirectorAssistPreparation(show: show, controller: self)
     private(set) lazy var cutExecution = DirectorCutExecution(show: show, controller: self)
     private(set) lazy var backupExecution = DirectorBackupExecution(show: show, controller: self)
@@ -185,6 +193,7 @@ final class DirectorController: ObservableObject, DirectorConsoleControlling {
         shadowPosition = .init()
         decisionCore = .init()
         latestScene = nil
+        liveCore = .init(); livePreparedTenure = nil
         sceneBuilder.begin(at: clock())
         if !isAttached, !authority.paused {
             forward(.pause, pause: .setupChanged, note: "controller attaching")
@@ -406,6 +415,7 @@ final class DirectorController: ObservableObject, DirectorConsoleControlling {
         // Built after any cut this tick, so it shows the show as it now stands.
         latestScene = sceneBuilder.build(now: now, evidenceRevision: evidenceRevision, samples: samples,
             adapter: adapter, segmentType: runSheet?.current?.type ?? .liveEvent, style: effectiveStyle)
+        driveLiveAssist(now: now)
         refreshSection()
         let comparisonEpoch = authority.epoch, comparisonEvidence = evidenceRevision
         let comparisonPolicy = policyRevision, comparisonNomination = nominationRevision
@@ -429,7 +439,9 @@ final class DirectorController: ObservableObject, DirectorConsoleControlling {
             } else {
                 emitShadow(DirectorShadowRecorder.judgeComparison, authority: authority, judgeObservation: comparison)
             }
-        } else if !cutExecution.isConfigured {
+        } else if !cutExecution.isConfigured || liveDirecting != nil {
+            // Live directing keeps the shadow judge's records: they are the
+            // evidence the live run is measured by.
             recordShadowJudge(now: now)
         }
     }
@@ -546,6 +558,98 @@ final class DirectorController: ObservableObject, DirectorConsoleControlling {
         let result = assistPreparation.commit(request)
         refreshSection()
         return result
+    }
+
+    // MARK: Live directing (decision core, stage 6)
+
+    /// What live Assist and Auto run with. PROVISIONAL, like the study set it
+    /// names: not measured on a rig.
+    nonisolated struct LiveDirecting: Sendable {
+        let study: DirectorStudyParameters
+        let autoNoticeLength: TimeInterval
+        let maximumLateness: TimeInterval
+        let permitValidity: TimeInterval
+        let maximumRequestAge: TimeInterval
+        var isValid: Bool {
+            [autoNoticeLength, maximumLateness, permitValidity, maximumRequestAge].allSatisfy { $0.isFinite && $0 >= 0 }
+        }
+        /// The cut execution tests' own notice and lateness; a preparation
+        /// request lives as long as the judge's newest sample (0.5 s).
+        static let rehearsalV1 = LiveDirecting(study: .shadowV1, autoNoticeLength: 2, maximumLateness: 1,
+                                               permitValidity: 0, maximumRequestAge: 0.5)
+    }
+
+    #if DEBUG
+    /// Decision core, stage 6, Debug builds only. Assist prepares the core's
+    /// chosen shot through `preparePreview`, once per Preview tenure, and Auto
+    /// cuts through the existing notice and permit with its context read from
+    /// the scene. No level gains a power: authority, qualification, permits and
+    /// the router decide as before. It runs only with the study set this
+    /// Director was built with. nil turns it off.
+    @discardableResult
+    func configureLiveDirecting(_ live: LiveDirecting?,
+                                scheduler: (any DirectorCutDeadlineScheduling)? = nil) -> Bool {
+        liveDirecting = nil; liveCore = .init(); livePreparedTenure = nil
+        guard let live, live.isValid, capabilities.assist, let study = shadowJudgeStudy,
+              study.name == live.study.name else {
+            if cutExecution.usesScene { configureAutomaticCuts(nil) }
+            return false
+        }
+        liveDirecting = live
+        configureAutomaticCuts(.init(autoNoticeLength: live.autoNoticeLength, maximumLateness: live.maximumLateness,
+                permitValidity: live.permitValidity, judgeMaximumAge: study.judgeMaximumAge,
+                minimumProbability: study.minimumProbability, judge: RuleJudge()),
+            context: { [weak self] now in self?.sceneCutContext(now: now) },
+            scheduler: scheduler ?? TaskDirectorCutDeadlineScheduler(clock: clock))
+        cutExecution.usesScene = true
+        return true
+    }
+    #endif
+
+    /// The cut context read from a scene built now: Preview as it stands is
+    /// the prepared shot, and the timing facts are the scene builder's.
+    func sceneCutContext(now: TimeInterval) -> DirectorCutExecution.Context? {
+        guard let show else { return nil }
+        var samples: [ChannelID: ChannelEvidenceSample] = [:]
+        for id in ChannelID.allCases {
+            guard let channel = show.channel(id) else { continue }
+            samples[id] = Self.sample(channel.evidenceReadings(now: now))
+        }
+        guard let scene = sceneBuilder.build(now: now, evidenceRevision: evidenceRevision, samples: samples,
+                adapter: adapter, segmentType: runSheet?.current?.type ?? .liveEvent, style: effectiveStyle)
+        else { return nil }
+        return Self.cutContext(scene, provenance: shadowRecorder?.evidenceClass(of: show))
+    }
+
+    /// Pure: the existing cut context, from one scene.
+    nonisolated static func cutContext(_ scene: DirectorScene,
+                                       provenance: DirectorShadowRecord.EvidenceClass?) -> DirectorCutExecution.Context? {
+        guard let preview = scene.preview, preview != scene.program, let previewInput = scene.input(preview),
+              let programInput = scene.input(scene.program), let programShot = scene.programShot else { return nil }
+        let prepared = DirectorDecisionCore.prepared(previewInput)
+        return .init(timeline: .init(programShot: programShot, programStartedAt: scene.programStartedAt,
+                lastWideAt: scene.lastWideAt, history: scene.history, candidates: [prepared], now: scene.now),
+            prepared: prepared, programIdentity: programInput.state?.identity ?? .unavailable,
+            program: scene.program, programRevisions: programInput.revisions, previewRevisions: previewInput.revisions,
+            routeGeneration: scene.routeGeneration, provenance: provenance.map { [$0] })
+    }
+
+    /// At Assist and above, prepare the core's chosen shot on Preview, once
+    /// per Preview tenure. A refusal is retried on a later tick; a committed
+    /// preparation ends the tenure's work.
+    private func driveLiveAssist(now: TimeInterval) {
+        guard let live = liveDirecting, capabilities.assist, authority.mayPrepare,
+              let scene = latestScene, scene.now == now, let preview = scene.preview,
+              let input = scene.input(preview) else { return }
+        let tenure = LiveTenure(preview: preview, sourceGeneration: input.sourceGeneration,
+                                routeGeneration: scene.routeGeneration)
+        guard livePreparedTenure != tenure else { return }
+        let outcome = liveCore.evaluate(scene, live: currentTakeSnapshot(now: now).live, parameters: live.study,
+                                        judge: RuleJudge())
+        guard case .chosen(let chosen) = outcome.prepare, chosen.candidate.channel == preview else { return }
+        let result = preparePreview(chosen.candidate.shot, configuration: .init(readiness: live.study.readiness,
+            maximumRequestAge: live.maximumRequestAge, onePreparationPerTenure: live.study.onePreparationPerTenure))
+        if case .committed = result { livePreparedTenure = tenure }
     }
 
     func preparationFailed() {
@@ -1045,6 +1149,7 @@ final class DirectorController: ObservableObject, DirectorConsoleControlling {
         if event == .restart {
             shadowStopCapture = nil; shadowShowStopCapture = nil
             shadowPosition = .init(); decisionCore = .init(); shadowJudgeBinding = nil
+            liveCore = .init(); livePreparedTenure = nil
             shadowRecorder?.restart()
         }
         appliedEvents.append(event)

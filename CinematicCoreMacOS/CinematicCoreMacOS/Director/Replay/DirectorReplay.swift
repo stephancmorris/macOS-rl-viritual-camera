@@ -11,6 +11,10 @@ nonisolated struct DirectorReplay {
             case shotChange(channel: ChannelID)
             case manualCommand, operatorTake, refusedOperatorTake, pause, resume, editLive(Bool), stop, fault(ChannelID)
             case directorAttempt(id: String, delay: TimeInterval, succeeds: Bool, acknowledgementDelay: TimeInterval = 0)
+            /// Decision core, stage 6: the Director asks the cut rules about
+            /// Preview as it stands and Takes if they say cut. It needs a cut
+            /// style and the Auto level, as in the app.
+            case directorTake
             case effect(id: String)
             case acknowledgement(id: String)
             case enable(DirectorAuthority.Level), restart, navigation, cosmeticEdit
@@ -58,6 +62,10 @@ nonisolated struct DirectorReplay {
         let programChangesWithoutAuthority: Int
         let wrongSubjectProposals: Int
         let labelledSubjectProposals: Int
+        /// Why each Director Take entry did not cut.
+        var directorTakeAbstentions: [CutPolicy.Abstention: Int] = [:]
+        /// Director cuts the synthetic technical gate refused.
+        var directorTakesRefused = 0
     }
     struct Channel: Sendable {
         var present = false
@@ -78,16 +86,29 @@ nonisolated struct DirectorReplay {
             sinkFactory: { SimulatedDirectorEffectSink(succeeds: $0) })
     }
 
+    /// Stage 6: the same replay with a cut style and qualified levels, so its
+    /// Director Take entries can cut.
+    static func run(_ fixture: Fixture, parameters: DirectorShotPolicy.Parameters,
+                    maximumProposalAge: TimeInterval, maximumEvidenceAge: TimeInterval,
+                    readinessParameters: DirectorReadiness.Parameters, cutStyle: DirectorStyle,
+                    qualifiedLevels: Set<DirectorAuthority.Level>) -> Report {
+        run(fixture, parameters: parameters, maximumProposalAge: maximumProposalAge,
+            maximumEvidenceAge: maximumEvidenceAge, readinessParameters: readinessParameters,
+            sinkFactory: { SimulatedDirectorEffectSink(succeeds: $0) }, cutStyle: cutStyle,
+            qualifiedLevels: qualifiedLevels)
+    }
+
     /// Injectable synthetic boundary for contract tests. The factory is called
     /// at effect time, after the current world has been sampled, never at enqueue.
     static func run(_ fixture: Fixture, parameters: DirectorShotPolicy.Parameters,
                     maximumProposalAge: TimeInterval, maximumEvidenceAge: TimeInterval,
                     readinessParameters: DirectorReadiness.Parameters,
                     sinkFactory: (Bool) -> any DirectorEffectSink,
-                    judge: any DirectorJudge = RuleJudge()) -> Report {
+                    judge: any DirectorJudge = RuleJudge(), cutStyle: DirectorStyle? = nil,
+                    qualifiedLevels: Set<DirectorAuthority.Level> = [.assist]) -> Report {
         // Invalid clocks are counted and skipped rather than crashing a replay.
         var authority = DirectorAuthority()
-        _ = authority.apply(.enable(.assist), prerequisites: .init(nominationsCurrent: true, previewAvailable: true, sourcesHealthy: true, outputHealthy: true, admissionCurrent: true, qualifiedLevels: [.assist]))
+        _ = authority.apply(.enable(.assist), prerequisites: .init(nominationsCurrent: true, previewAvailable: true, sourcesHealthy: true, outputHealthy: true, admissionCurrent: true, qualifiedLevels: qualifiedLevels.union([.assist])))
         var channels: [ChannelID: Channel] = [.a: Channel(), .b: Channel()]
         var program: ChannelID = .a
         var route: UInt64 = 0
@@ -112,7 +133,8 @@ nonisolated struct DirectorReplay {
         var completedAttemptIDs: Set<String> = []
         var effects: [(id: String, due: TimeInterval, proposal: DirectorProposal, proposalID: Int,
                        intended: Bool, succeeds: Bool, sequence: Int, request: DirectorPreparation.Request, acknowledgementDelay: TimeInterval)] = []
-        var attempts = 0, takeAttempts = 0, operatorCuts = 0
+        var attempts = 0, takeAttempts = 0, operatorCuts = 0, directorCuts = 0, directorTakesRefused = 0
+        var directorTakeAbstentions: [CutPolicy.Abstention: Int] = [:]
         var duplicateCallbacks = 0, failedEffects = 0, rejectedAttempts = 0, clockAnomalies = 0
         var wrongAttempts = 0, labelledAttempts = 0
         let validClockConfiguration = fixture.duration.isFinite && fixture.duration > 0 &&
@@ -125,7 +147,7 @@ nonisolated struct DirectorReplay {
             .init(nominationsCurrent: true, previewAvailable: channels[program == .a ? .b : .a] != nil,
                   sourcesHealthy: channels.values.allSatisfy { !$0.missing },
                   outputHealthy: authority.healthy, admissionCurrent: authority.healthy,
-                  qualifiedLevels: [.assist])
+                  qualifiedLevels: qualifiedLevels.union([.assist]))
         }
         func recordStale(_ id: Int, _ reasons: [DirectorProposalValidator.StaleReason]) {
             guard rejectedProposalIDs.insert(id).inserted else { return }
@@ -219,6 +241,7 @@ nonisolated struct DirectorReplay {
             let priorEpoch = authority.epoch
             let priorProgram = program
             var operatorAuthorizedChange = false
+            var directorAuthorizedChange = false
             switch event.action {
             case .manualCommand:
                 if pending != nil || !effects.isEmpty { overrides += 1 }
@@ -241,6 +264,48 @@ nonisolated struct DirectorReplay {
                     programStartedAt = now; cuts += 1; operatorCuts += 1
                     if program == .a { lastWideAt = now }
                 }
+            case .directorTake:
+                let target: ChannelID = program == .a ? .b : .a
+                let channel = channels[target] ?? Channel()
+                let candidate = DirectorShotPolicy.Candidate(channel: target, shot: target == .b ? shotB : shotA,
+                    subjectConfidence: channel.identity == .confirmed ? 1 : 0, movement: channel.movement,
+                    isWide: target == .a)
+                let timeline = DirectorShotPolicy.Timeline(programShot: program == .a ? shotA : shotB,
+                    programStartedAt: programStartedAt, lastWideAt: lastWideAt, history: history,
+                    candidates: [candidate], now: now)
+                let ready = DirectorReadiness.evaluate(.init(take: TakeAvailability(program: program, preview: target,
+                        standard: .p50, reason: channel.missing ? .sourceMissing : nil, takePending: false,
+                        editLive: authority.editLive),
+                    identity: channel.identity,
+                    framingSettledFor: channel.framingReady ? readinessParameters.minimumCutSettledTime : 0,
+                    motion: channel.movement, cropConverged: channel.framingReady),
+                    parameters: readinessParameters, bar: .cut)
+                let decision: CutPolicy.Decision
+                if let cutStyle {
+                    decision = CutPolicy.evaluate(live: .init(world: liveState(for: target, at: now),
+                            prerequisites: currentPrerequisites(), cutReadiness: ready, operatorGestureInProgress: false),
+                        timeline: timeline, prepared: candidate,
+                        programIdentity: channels[program]?.identity ?? .unavailable, style: cutStyle,
+                        evidenceRevision: evidenceRevision, judge: judge, judgeMaximumAge: maximumProposalAge,
+                        minimumProbability: nil)
+                } else { decision = .abstain(.invalidInput) }
+                guard case .cut = decision else {
+                    if case .abstain(let reason) = decision { directorTakeAbstentions[reason, default: 0] += 1 }
+                    break
+                }
+                // The same synthetic technical gate an operator Take meets.
+                guard !channel.missing, let renderAt = channel.lastRenderAt, now - renderAt <= maximumProposalAge else {
+                    directorTakesRefused += 1; break
+                }
+                if now - programStartedAt < parameters.minimumShotDuration { violations += 1 }
+                if previousProgram == target && now - programStartedAt < parameters.repetitionWindow { oscillations += 1 }
+                history.append(.init(shot: program == .a ? shotA : shotB, endedAt: now))
+                previousProgram = program; program = target; route &+= 1
+                directorAuthorizedChange = true
+                programStartedAt = now; cuts += 1; directorCuts += 1
+                if program == .a { lastWideAt = now }
+                // Preview changed: any preparation for the old one ends.
+                pending = nil; pendingID = nil; activeRequest = nil; preparation.retire()
             case .pause: _ = authority.apply(.pause)
             case .resume: _ = authority.apply(.resume, prerequisites: currentPrerequisites())
             case .editLive(let enabled): _ = authority.apply(.editLive(enabled))
@@ -367,8 +432,9 @@ nonisolated struct DirectorReplay {
                 readyEvaluations += 1
             }
             if authority.paused && pending != nil { pausedProposals += 1 }
-            // The A-08 sink has no Take entry point; only an operator can change Program.
-            if program != priorProgram && !operatorAuthorizedChange { unauthorized += 1 }
+            // Only an operator Take, or a Director Take the cut rules and
+            // authority allowed, can change Program.
+            if program != priorProgram && !operatorAuthorizedChange && !directorAuthorizedChange { unauthorized += 1 }
             let nextTime = position + 1 < ordered.count ? ordered[position + 1].element.at : fixture.duration
             if nextTime > now { flushEffects(before: nextTime) }
         }
@@ -380,7 +446,7 @@ nonisolated struct DirectorReplay {
             minimumDurationViolations: violations, oscillations: oscillations,
             staleProposalsRejected: stale, manualOverridesHonoured: overrides,
             manualOverrideLatencies: Array(repeating: nil, count: overrides),
-            proposalCount: labelled, directorAttemptCount: attempts, directorCuts: 0,
+            proposalCount: labelled, directorAttemptCount: attempts, directorCuts: directorCuts,
             operatorTakeAttempts: takeAttempts, operatorCuts: operatorCuts,
             duplicateCallbacks: duplicateCallbacks, failedEffects: failedEffects,
             rejectedAttempts: rejectedAttempts, preparationsCommitted: preparationsCommitted,
@@ -390,7 +456,8 @@ nonisolated struct DirectorReplay {
             wrongSubjectAttempts: wrongAttempts, labelledSubjectAttempts: labelledAttempts,
             proposalsMadeWhilePaused: pausedProposals,
             programChangesWithoutAuthority: unauthorized,
-            wrongSubjectProposals: wrong, labelledSubjectProposals: labelled)
+            wrongSubjectProposals: wrong, labelledSubjectProposals: labelled,
+            directorTakeAbstentions: directorTakeAbstentions, directorTakesRefused: directorTakesRefused)
     }
 
     // MARK: Independent committed-effect audit
