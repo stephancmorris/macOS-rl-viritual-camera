@@ -240,7 +240,11 @@ struct ContentView: View {
                 elapsedSeconds = 0
             }
         }
-        .onChange(of: operatorModes.mode) { _, _ in Task { await stoppedPreview.stop() } }
+        .onChange(of: operatorModes.mode) { _, mode in
+            Task { await stoppedPreview.stop() }
+            // A stopped Webcam session's override must not outlive the mode.
+            if mode != .webcam, !cameraManager.isRunning { cameraManager.programOutput.startRouteOverride = nil }
+        }
         .onChange(of: cameraManager.selectedCamera?.uniqueID) { _, _ in Task { await stoppedPreview.stop() } }
         .onDisappear { Task { await stoppedPreview.stop() } }
         .onChange(of: cameraManager.error != nil) { _, hasError in
@@ -319,9 +323,12 @@ struct ContentView: View {
     }
 
     /// Webcam always sends to Alfie camera, including when a stage session
-    /// saved Direct or Rehearsal. Called only after the stopped Start gate.
+    /// saved Direct or Rehearsal. It overrides the route for this start only:
+    /// the saved preference, which Settings and the Multi Cam setup show and
+    /// write, is left alone. Every other mode clears the override. Called
+    /// only after the stopped Start gate.
     static func applyStartRoute(mode: OperatorMode, output: ProgramOutputManager) {
-        if mode == .webcam { output.preferredRoute = .virtualCamera }
+        output.startRouteOverride = mode == .webcam ? .virtualCamera : nil
     }
 
     private func toggleStoppedPreview() {

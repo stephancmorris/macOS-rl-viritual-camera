@@ -245,6 +245,30 @@ struct ProgramRouterTests {
         output.stop()
     }
 
+    /// Review of #122: a Webcam session must not rewrite the saved route.
+    @Test(arguments: [ProgramOutputManager.Route.display, .rehearsal])
+    func webcamSessionLeavesTheSavedRouteForTheNextStart(saved: ProgramOutputManager.Route) {
+        let display = RouterFakeSink(route: .display)
+        let virtual = RouterFakeSink(route: .virtualCamera)
+        let rehearsal = RouterFakeSink(route: .rehearsal)
+        let output = ProgramOutputManager(sinks: [virtual, display, rehearsal])
+        output.preferredRoute = saved
+
+        ContentView.applyStartRoute(mode: .webcam, output: output)
+        output.start()
+        output.updateCaptureStatus(isRunning: true)
+        #expect(output.activeRoute == .virtualCamera)
+        #expect(output.preferredRoute == saved)
+        output.stop()
+
+        ContentView.applyStartRoute(mode: .singleCam, output: output)
+        output.start()
+        output.updateCaptureStatus(isRunning: true)
+        #expect(output.activeRoute == saved)
+        #expect(output.preferredRoute == saved)
+        output.stop()
+    }
+
     @Test func destinationChangeAppliesToTheNextShow() {
         let display = RouterFakeSink(route: .display)
         let virtual = RouterFakeSink(route: .virtualCamera)

@@ -42,14 +42,16 @@ import Testing
     }
 
     @Test(arguments: [ProgramOutputManager.Route.display, .rehearsal])
-    func webcamStartAppliesTheVirtualRouteToTheActualOutput(saved: ProgramOutputManager.Route) {
+    func webcamStartOverridesTheRouteWithoutChangingTheSavedPreference(saved: ProgramOutputManager.Route) {
         let output = ProgramOutputManager(sinks: [])
         output.preferredRoute = saved
         ContentView.applyStartRoute(mode: .webcam, output: output)
-        #expect(output.preferredRoute == .virtualCamera)
+        #expect(output.startRoute == .virtualCamera)
+        #expect(output.preferredRoute == saved)
         #expect(output.activeRoute == nil)
-        output.preferredRoute = saved
         ContentView.applyStartRoute(mode: .singleCam, output: output)
+        #expect(output.startRouteOverride == nil)
+        #expect(output.startRoute == saved)
         #expect(output.preferredRoute == saved)
     }
 
