@@ -552,7 +552,7 @@ class ShadowReportTests(unittest.TestCase):
             self.assertFalse(data['dwell'])
 
     def test_unknown_schema_keys_malformed_numbers_and_private_payloads_are_rejected(self):
-        changes = [lambda r: r['event'].update(phase=None), lambda r: r.update(schemaVersion=3), lambda r: r.update(frame='PRIVATE_FRAME'),
+        changes = [lambda r: r['event'].update(phase=None), lambda r: r.update(schemaVersion=4), lambda r: r.update(frame='PRIVATE_FRAME'),
                    lambda r: r['context'].update(name='PRIVATE_NAME'),
                    lambda r: r.update(eventTime=float('nan')),
                    lambda r: r['event']['shot'].update(format='webcam'),
@@ -1030,6 +1030,36 @@ class ScorerInputSchemaTests(unittest.TestCase):
         manifest['recordSchemaVersions'] = [1, 2, 3]
         with self.assertRaises(ValueError):
             report.validate_export_manifest(manifest, rows)
+
+
+class SchemaThreeReasonTests(unittest.TestCase):
+    """Decision core, stage 4: schema 3 adds one code per Director cause."""
+    @staticmethod
+    def accepts(row):
+        rows, issues = report.load_records(io.BytesIO((json.dumps(row) + '\n').encode()))
+        return len(rows) == 1 and not issues
+
+    def test_new_codes_are_accepted_in_schema_3_only(self):
+        cut = record(0, 10, dict(prediction(), reason={'domain': 'selection', 'code': 'preferredLength'}))
+        learning = record(0, 10, {'kind': 'abstention', 'decisionID': token('learning'), 'stage': 'prepare',
+                                  'reasons': [{'domain': 'readiness', 'code': 'learningSubject'}]})
+        speech = record(0, 10, {'kind': 'abstention', 'decisionID': token('speech'), 'stage': 'validation',
+                                'reasons': [{'domain': 'speech', 'code': 'noWakePrefix'}]})
+        for row in (cut, learning, speech):
+            for version, accepted in ((1, False), (2, False), (3, True)):
+                candidate = copy.deepcopy(row); candidate['schemaVersion'] = version
+                self.assertEqual(self.accepts(candidate), accepted, (version, row['event']))
+
+    def test_version_2_records_still_read_in_schema_3(self):
+        row = record(0, 10, prediction()); row['schemaVersion'] = 2
+        self.assertTrue(self.accepts(row))
+        row['schemaVersion'] = 3
+        self.assertTrue(self.accepts(row))
+
+    def test_a_code_in_the_wrong_domain_is_refused(self):
+        row = record(0, 10, dict(prediction(), reason={'domain': 'speech', 'code': 'preferredLength'}))
+        row['schemaVersion'] = 3
+        self.assertFalse(self.accepts(row))
 
 
 if __name__ == '__main__':

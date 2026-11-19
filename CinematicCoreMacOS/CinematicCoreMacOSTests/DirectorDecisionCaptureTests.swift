@@ -174,7 +174,7 @@ import Testing
             ?? r.base.appendingPathComponent("bundle")
         let exported = try await r.log.export(selection: .init(sessionIDs: [r.log.sessionID], fromUTC: utc, throughUTC: utc),
             toNewBundle: destination)
-        #expect(exported.manifest.recordCount == records.count && exported.manifest.recordSchemaVersions == [2])
+        #expect(exported.manifest.recordCount == records.count && exported.manifest.recordSchemaVersions == [3])
         r.controller.detach()
     }
 

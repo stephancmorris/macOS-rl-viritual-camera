@@ -4,7 +4,10 @@ import Foundation
 /// Construction must call validated(); encoding and decoding also validate.
 /// B-04 owns bounded storage, 30-day expiry and explicit local export.
 nonisolated struct DirectorShadowRecord: Codable, Equatable, Sendable {
-    static let currentSchemaVersion = 2
+    /// 3 (decision core, stage 4): reason codes for every Director cause,
+    /// including a cut's timing reason, and the speech and world-model domains.
+    static let currentSchemaVersion = 3
+    static let supportedSchemaVersions = [1, 2, 3]
     enum ValidationError: Error, Equatable { case invalidRecord, mixedProvenance, unknownField }
     enum EvidenceClass: String, Codable, CaseIterable, Equatable, Sendable { case synthetic, recorded, live }
     enum ExecutionMode: String, Codable, CaseIterable, Equatable, Sendable { case shadow, observing }
@@ -25,8 +28,8 @@ nonisolated struct DirectorShadowRecord: Codable, Equatable, Sendable {
     enum ActionOutcome: String, Codable, CaseIterable, Equatable, Sendable { case accepted, completed, refused, unobserved }
     enum OperatorAction: String, Codable, CaseIterable, Equatable, Sendable { case take, detect, cancelDetect, selectSubject, unlock, resumeTracking, setMode, selectPreset, beginZoom, endZoom, moveManualCenter, returnToWide, startSession, stopSession, settingsChanged, formatChanged, editLive, setLevel, handToAlfie, takeOver, cancelNextCut, advanceSegment, overrideSubject, otherManualAction }
     enum ReadinessReason: String, Codable, CaseIterable, Equatable, Sendable { case compositionUnavailable, evidenceUnavailable, takeUnavailable, invalidParameters, invalidEvidence, identityUncertain, framingUnsettled, moving, cropMoving }
-    enum ReasonDomain: String, Codable, CaseIterable, Equatable, Sendable { case proposalStale, policy, judge, readiness, selection, observation, authorityRefusal }
-    enum ReasonCode: String, Codable, CaseIterable, Equatable, Sendable { case authorityRevoked, routeChanged, sourceRestarted, shotChangedByOperator, targetBecameProgram, sourceMissing, expired, requestReplaced, policyChanged, nominationChanged, evidenceUnavailable, invalidInput, minimumDuration, noEligibleCandidate, repetition, movement, noPreview, lowConfidence, notRecorded, nothingAllowed, invalidJudgement, compositionUnavailable, takeUnavailable, invalidParameters, invalidEvidence, identityUncertain, framingUnsettled, moving, cropMoving, advisoryWideReminder, advisoryMaximumDwell, subjectEvidence, unclassified, parametersUnavailable, parametersInvalid, judgementStale, cutPolicyUnavailable, notQualified, prerequisites, paused, exhausted }
+    enum ReasonDomain: String, Codable, CaseIterable, Equatable, Sendable { case proposalStale, policy, judge, readiness, selection, observation, authorityRefusal, speech, worldModel }
+    enum ReasonCode: String, Codable, CaseIterable, Equatable, Sendable { case authorityRevoked, routeChanged, sourceRestarted, shotChangedByOperator, targetBecameProgram, sourceMissing, expired, requestReplaced, policyChanged, nominationChanged, evidenceUnavailable, invalidInput, minimumDuration, noEligibleCandidate, repetition, movement, noPreview, lowConfidence, notRecorded, nothingAllowed, invalidJudgement, compositionUnavailable, takeUnavailable, invalidParameters, invalidEvidence, identityUncertain, framingUnsettled, moving, cropMoving, advisoryWideReminder, advisoryMaximumDwell, subjectEvidence, unclassified, parametersUnavailable, parametersInvalid, judgementStale, cutPolicyUnavailable, notQualified, prerequisites, paused, exhausted, previewIsSafeWide, alreadyPrepared, operatorAdjusting, learningSubject, recoveringSubject, takeNotAllowed, previewNotReady, noCutDue, judgeDeclined, preferredLength, programUncertain, wideDue, noWakePrefix, unrecognized, subjectNotLocked, duplicateUtterance, cancelledByManualCommand, targetUnavailable, missingUtteranceStart, invalidToken, muted, stopped, sessionChanged, roleChanged, targetRebound, sourceChanged, cancelledByWide, cancelledByTake, cancelledByMute, notAssigned, notObserved, partialView, stale, ambiguous }
     struct Context: Codable, Equatable, Sendable {
         let inputs: [String]
         let program: String
@@ -236,7 +239,7 @@ nonisolated struct DirectorShadowRecord: Codable, Equatable, Sendable {
             value.map { $0.isReady == $0.reasons.isEmpty } ?? true
         }
         let diagnostic = parameters.status == .invalid && (event.kind == .abstention || event.kind == .operatorAction)
-        try require([1, Self.currentSchemaVersion].contains(schemaVersion) && scalar(eventTime))
+        try require(Self.supportedSchemaVersions.contains(schemaVersion) && scalar(eventTime))
         try require(schemaVersion != 1 || scorerInputs == nil)
         try require(Self.validUTC(recordedAtUTC))
         try require(!context.inputs.isEmpty && Set(context.inputs).count == context.inputs.count &&
@@ -308,16 +311,16 @@ nonisolated struct DirectorShadowRecord: Codable, Equatable, Sendable {
                     let c = item.candidate
                     try require(context.inputs.contains(c.channel) && shot(c.shot) && probability(c.subjectConfidence) && scalar(c.movement) && probability(item.probability))
                     try require(j.judgeKind != .rules || item.probability == nil)
-                    try require(item.reason.isValid)
+                    try require(item.reason.isValid(in: schemaVersion))
                     register("judgements[\(i)].outcome.ranked[\(k)].candidate.subjectConfidence", c.subjectConfidence == nil)
                     register("judgements[\(i)].outcome.ranked[\(k)].candidate.movement", c.movement == nil)
                     register("judgements[\(i)].outcome.ranked[\(k)].probability", item.probability == nil)
                 }
             case .abstain:
-                try require(j.outcome.ranked == nil && j.outcome.reason?.isValid == true)
+                try require(j.outcome.ranked == nil && j.outcome.reason?.isValid(in: schemaVersion) == true)
             }
             try require((j.gateResult == .abstained) == (j.gateReason != nil))
-            try require(j.gateReason.map { $0.isValid } ?? true)
+            try require(j.gateReason.map { $0.isValid(in: schemaVersion) } ?? true)
             if j.gateResult == .accepted {
                 guard let rank = j.acceptedRank, let items = j.outcome.ranked else { throw ValidationError.invalidRecord }
                 try require(items.indices.contains(rank))
@@ -327,8 +330,8 @@ nonisolated struct DirectorShadowRecord: Codable, Equatable, Sendable {
         try require(invalidFields == Array(Set(invalidFields)).sorted() && invalidFields.allSatisfy { optionalNumbers[$0] == true })
         try require(known(event.target) && known(event.programAfter) && known(event.previewAfter))
         try require(event.shot.map(shot) ?? true)
-        try require(event.reason.map { $0.isValid } ?? true)
-        try require(event.reasons.map { $0.allSatisfy(\.isValid) } ?? true)
+        try require(event.reason.map { $0.isValid(in: schemaVersion) } ?? true)
+        try require(event.reasons.map { $0.allSatisfy { $0.isValid(in: schemaVersion) } } ?? true)
         if let index = event.judgementIndex { try require(judgements.indices.contains(index)) }
         try require(scalar(event.proposalCreatedAt))
         // Non-payload optionals must be absent even for programmatic construction.
@@ -693,8 +696,14 @@ nonisolated extension DirectorShadowRecord.Event {
     }
 }
 nonisolated extension DirectorShadowRecord.Reason {
-    var isValid: Bool {
-        let allowed: Set<DirectorShadowRecord.ReasonCode>
+    /// Valid in the newest schema.
+    var isValid: Bool { isValid(in: DirectorShadowRecord.currentSchemaVersion) }
+
+    /// Schema 1 and 2 keep their original vocabulary; schema 3 adds codes
+    /// and the speech and world-model domains.
+    func isValid(in schemaVersion: Int) -> Bool {
+        let original = schemaVersion < 3
+        var allowed: Set<DirectorShadowRecord.ReasonCode>
         switch domain {
         case .proposalStale: allowed = [.authorityRevoked, .routeChanged, .sourceRestarted, .shotChangedByOperator, .targetBecameProgram, .sourceMissing, .expired, .requestReplaced, .policyChanged, .nominationChanged, .evidenceUnavailable]
         case .policy: allowed = [.invalidInput, .minimumDuration, .noEligibleCandidate, .repetition, .movement, .noPreview]
@@ -703,6 +712,24 @@ nonisolated extension DirectorShadowRecord.Reason {
         case .selection: allowed = [.advisoryWideReminder, .advisoryMaximumDwell, .subjectEvidence, .unclassified]
         case .observation: allowed = [.parametersUnavailable, .parametersInvalid, .judgementStale, .cutPolicyUnavailable, .unclassified]
         case .authorityRefusal: allowed = [.notQualified, .prerequisites, .paused, .exhausted]
+        case .speech: allowed = []
+        case .worldModel: allowed = []
+        }
+        if !original {
+            switch domain {
+            case .policy: allowed.formUnion([.previewIsSafeWide, .alreadyPrepared, .noCutDue])
+            case .judge: allowed.formUnion([.judgeDeclined])
+            case .readiness: allowed.formUnion([.operatorAdjusting, .learningSubject, .recoveringSubject, .previewNotReady])
+            case .selection: allowed.formUnion([.preferredLength, .programUncertain, .wideDue])
+            case .authorityRefusal: allowed.formUnion([.takeNotAllowed])
+            case .speech:
+                allowed.formUnion([.noWakePrefix, .unrecognized, .subjectNotLocked, .lowConfidence, .duplicateUtterance,
+                    .cancelledByManualCommand, .targetUnavailable, .missingUtteranceStart, .invalidToken, .muted,
+                    .stopped, .sessionChanged, .roleChanged, .targetRebound, .sourceChanged, .expired,
+                    .cancelledByWide, .cancelledByTake, .cancelledByMute])
+            case .worldModel: allowed.formUnion([.notAssigned, .sourceMissing, .notObserved, .partialView, .stale, .ambiguous])
+            case .proposalStale, .observation: break
+            }
         }
         return allowed.contains(code)
     }
@@ -974,7 +1001,7 @@ nonisolated extension DirectorShadowRecord {
     private func validateScorerInputs() throws {
         guard let scorerInputs else { return }
         func require(_ valid: Bool) throws { if !valid { throw ValidationError.invalidRecord } }
-        try require(schemaVersion == 2 && parameters.status == .available && !scorerInputs.isEmpty)
+        try require(schemaVersion >= 2 && parameters.status == .available && !scorerInputs.isEmpty)
         var previousJudgement = -1, previousRank = -1
         var groups: [Int: [ScorerInput]] = [:]
         for input in scorerInputs {

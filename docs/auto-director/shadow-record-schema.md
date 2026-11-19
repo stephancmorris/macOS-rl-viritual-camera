@@ -227,3 +227,27 @@ Inputs require available parameters and a current rules judgement with a ranked 
 Omission or null means no materialized inputs were supplied; an empty or partial supplied group is invalid. A training loader refuses a ranked comparison without these inputs rather than filling missing history. Other event records need no invented vectors. The recorder extracts inputs from the actual comparison context before its history is discarded; the same bounded writer, loss accounting, expiry and explicit export apply. `withDroppedRecords` preserves supplied inputs. The export manifest lists the original supported record schema versions and does not rewrite records.
 
 Inputs contain no operator label, person identifier, media, path or free text. Capturing a scorer input never enables inference, changes policy or grants authority. Explicit labels, whole-session splits, model fitting and local export are separate offline operations described in the [C-10 pipeline contract](director-scorer-training.md). The [21 October evidence](../../reports/auto-director/evaluation-tools-2026-10-21/implementation.md) is synthetic; no model is bundled or promoted.
+
+## 12. Schema 3: one code per Director cause (16 November 2026, decision core stage 4)
+
+The writer emits schema **3**; readers support **1, 2 and 3**. Schema 3 keeps every schema 2 field, rule and privacy restriction. It adds reason codes only, so that every refusal, abstention and stale result in the Director has one code (`DirectorReason`, `Director/DirectorReason.swift`) and one sentence for the operator.
+
+New codes, valid only in schema 3 records:
+
+| Domain | New codes |
+| --- | --- |
+| `policy` | `previewIsSafeWide`, `alreadyPrepared`, `noCutDue` (the cut rules found no timing reason yet) |
+| `judge` | `judgeDeclined` (the judge did not pick the prepared shot for a cut) |
+| `readiness` | `operatorAdjusting`, `learningSubject`, `recoveringSubject`, `previewNotReady` (a cut's readiness check failed) |
+| `selection` | `preferredLength`, `programUncertain`, `wideDue`: a `wouldCut` record's `reason`, replacing `observation.unclassified` |
+| `authorityRefusal` | `takeNotAllowed` (the level does not allow a cut) |
+| `speech` (new domain) | the 19 `SpeechRejection` cases, by name |
+| `worldModel` (new domain) | `notAssigned`, `sourceMissing`, `notObserved`, `partialView`, `stale`, `ambiguous`; the payload (region, age, track IDs) is never recorded |
+
+Rules:
+
+- A schema 1 or 2 record that uses a new code or domain is invalid. A schema 2 record that uses only the original vocabulary still validates and still reads.
+- `scorerInputs` stay valid in schema 2 and later.
+- The same cause from different sources shares one code (for example a cut's minimum dwell and the policy's minimum duration are both `policy.minimumDuration`). Different causes never share a code.
+- The export manifest lists the original schema versions of the records it exports and does not rewrite them; an export may list both 2 and 3.
+- `director_shadow_report.py` and `director_shadow_schema.json` accept the new codes only in schema 3 records.

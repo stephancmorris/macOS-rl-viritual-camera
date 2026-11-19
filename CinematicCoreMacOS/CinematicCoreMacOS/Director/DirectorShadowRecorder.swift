@@ -385,77 +385,28 @@ final class DirectorShadowRecorder {
             targetScope: nil, outcome: nil, programAfter: nil, previewAfter: nil)
     }
     static func cut(_ decision: CutPolicy.Decision) -> R.Event {
-        if case .cut(let plan) = decision {
-            // Schema 1/2 has no exact vocabulary for preferredLength,
-            // programUncertain or wideDue. Preserve the decision without relabelling its reason.
+        let reason: R.Reason
+        switch decision {
+        case .cut(let plan):
+            // Schema 3: the cut's own timing reason (preferred length, Program uncertain, wide due).
             return .init(kind: .wouldCut, decisionID: .init(UUID()), target: alias(plan.preview),
-                shot: .init(plan.candidate.shot), reason: .init(domain: .observation, code: .unclassified),
+                shot: .init(plan.candidate.shot), reason: DirectorReason(plan.reason).record,
                 proposalID: nil, requestID: nil, proposalCreatedAt: nil, judgementIndex: nil, stage: nil,
                 reasons: nil, actionID: nil, action: nil, phase: nil, targetScope: nil, outcome: nil,
                 programAfter: nil, previewAfter: nil)
-        }
-        let reason: R.Reason
-        switch decision {
-        case .abstain(.invalidInput): reason = .init(domain: .policy, code: .invalidInput)
-        case .abstain(.minimumDwell): reason = .init(domain: .policy, code: .minimumDuration)
-        default: reason = .init(domain: .observation, code: .unclassified)
+        case .abstain(let abstention): reason = DirectorReason(abstention).record
         }
         return .init(kind: .abstention, decisionID: .init(UUID()), target: nil, shot: nil, reason: nil,
             proposalID: nil, requestID: nil, proposalCreatedAt: nil, judgementIndex: nil, stage: .cut,
             reasons: [reason], actionID: nil, action: nil, phase: nil, targetScope: nil, outcome: nil,
             programAfter: nil, previewAfter: nil)
     }
-    /// Decision core, stage 3: why the prepare rules chose nothing, in the
-    /// schema 2 vocabulary. Causes it has no code for are "unclassified";
-    /// stage 4 adds the missing codes.
+    /// Why the prepare rules chose nothing, with one code per cause (stage 4).
     static func preparationAbstention(_ abstention: DirectorShotPolicy.AssistAbstention) -> R.Event {
-        let reasons: [R.Reason]
-        switch abstention {
-        case .invalidInput: reasons = [.init(domain: .policy, code: .invalidInput)]
-        case .noPreview: reasons = [.init(domain: .policy, code: .noPreview)]
-        case .learningSubject, .recoveringSubject: reasons = [.init(domain: .readiness, code: .identityUncertain)]
-        case .evidenceUnavailable: reasons = [.init(domain: .readiness, code: .evidenceUnavailable)]
-        case .notReady(let causes):
-            reasons = causes.isEmpty ? [.init(domain: .observation, code: .unclassified)]
-                : causes.map { .init(domain: .readiness, code: readinessCode($0)) }
-        case .movement: reasons = [.init(domain: .policy, code: .movement)]
-        case .policy(let reason): reasons = [policyReason(reason)]
-        case .judge(.policy(let reason)): reasons = [policyReason(reason)]
-        case .judge(.lowConfidence): reasons = [.init(domain: .judge, code: .lowConfidence)]
-        case .judge(.notRecorded): reasons = [.init(domain: .judge, code: .notRecorded)]
-        case .judge(.nothingAllowed): reasons = [.init(domain: .judge, code: .nothingAllowed)]
-        case .judge(.invalidJudgement): reasons = [.init(domain: .judge, code: .invalidJudgement)]
-        case .judgementStale: reasons = [.init(domain: .observation, code: .judgementStale)]
-        case .previewIsSafeWide, .alreadyPrepared, .operatorAdjusting:
-            reasons = [.init(domain: .observation, code: .unclassified)]
-        }
-        return .init(kind: .abstention, decisionID: .init(UUID()), target: nil, shot: nil, reason: nil,
+        .init(kind: .abstention, decisionID: .init(UUID()), target: nil, shot: nil, reason: nil,
             proposalID: nil, requestID: nil, proposalCreatedAt: nil, judgementIndex: nil, stage: .prepare,
-            reasons: reasons, actionID: nil, action: nil, phase: nil, targetScope: nil, outcome: nil,
-            programAfter: nil, previewAfter: nil)
-    }
-    private static func policyReason(_ reason: DirectorShotPolicy.Abstention) -> R.Reason {
-        switch reason {
-        case .invalidInput: .init(domain: .policy, code: .invalidInput)
-        case .minimumDuration: .init(domain: .policy, code: .minimumDuration)
-        case .noEligibleCandidate: .init(domain: .policy, code: .noEligibleCandidate)
-        case .repetition: .init(domain: .policy, code: .repetition)
-        case .movement: .init(domain: .policy, code: .movement)
-        case .noPreview: .init(domain: .policy, code: .noPreview)
-        }
-    }
-    private static func readinessCode(_ reason: DirectorReadiness.Reason) -> R.ReasonCode {
-        switch reason {
-        case .compositionUnavailable: .compositionUnavailable
-        case .evidenceUnavailable: .evidenceUnavailable
-        case .takeUnavailable: .takeUnavailable
-        case .invalidParameters: .invalidParameters
-        case .invalidEvidence: .invalidEvidence
-        case .identityUncertain: .identityUncertain
-        case .framingUnsettled: .framingUnsettled
-        case .moving: .moving
-        case .cropMoving: .cropMoving
-        }
+            reasons: DirectorReason.reasons(abstention).map(\.record), actionID: nil, action: nil, phase: nil,
+            targetScope: nil, outcome: nil, programAfter: nil, previewAfter: nil)
     }
 
     /// The evidence class every current input shares, or nil when one has no
