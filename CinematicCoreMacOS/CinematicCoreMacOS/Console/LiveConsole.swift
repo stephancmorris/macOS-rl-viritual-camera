@@ -185,6 +185,8 @@ final class LiveConsoleModel: ObservableObject, ConsoleActions {
         let nextDirector = directorStatusEnabled ? readDirectorSection() : nil
         if nextDirector != directorSection { directorSection = nextDirector }
         directorControls.sample(nextDirector)
+        // A pending "which one?" is cancelled once roles or revisions change.
+        if DeveloperFlags.typedCommands { show.typedCommands.refresh() }
     }
 
     /// Badges reflect accepted current preparation; status and level alone
@@ -384,6 +386,9 @@ struct LiveMultiviewConsole: View {
         }
         view.panePicture = { [model] pane in AnyView(LivePanePicture.make(pane: pane, show: model.show, subjectPick: model.directorSection?.subjectPicks[pane.channel ?? .a], controls: model.directorControls)) }
         view.headerTrailing = AnyView(LiveConsoleHeader(model: model))
+        if DeveloperFlags.typedCommands {
+            view.commandField = AnyView(TypedCommandField(controller: model.show.typedCommands))
+        }
         if model.directorSection != nil {
             view.directorControls = AnyView(LiveDirectorControlBar(controller: model.directorControls))
         }

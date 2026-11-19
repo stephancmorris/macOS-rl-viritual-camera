@@ -29,7 +29,7 @@ nonisolated struct DirectorShadowRecord: Codable, Equatable, Sendable {
     enum OperatorAction: String, Codable, CaseIterable, Equatable, Sendable { case take, detect, cancelDetect, selectSubject, unlock, resumeTracking, setMode, selectPreset, beginZoom, endZoom, moveManualCenter, returnToWide, startSession, stopSession, settingsChanged, formatChanged, editLive, setLevel, handToAlfie, takeOver, cancelNextCut, advanceSegment, overrideSubject, otherManualAction }
     enum ReadinessReason: String, Codable, CaseIterable, Equatable, Sendable { case compositionUnavailable, evidenceUnavailable, takeUnavailable, invalidParameters, invalidEvidence, identityUncertain, framingUnsettled, moving, cropMoving }
     enum ReasonDomain: String, Codable, CaseIterable, Equatable, Sendable { case proposalStale, policy, judge, readiness, selection, observation, authorityRefusal, speech, worldModel }
-    enum ReasonCode: String, Codable, CaseIterable, Equatable, Sendable { case authorityRevoked, routeChanged, sourceRestarted, shotChangedByOperator, targetBecameProgram, sourceMissing, expired, requestReplaced, policyChanged, nominationChanged, evidenceUnavailable, invalidInput, minimumDuration, noEligibleCandidate, repetition, movement, noPreview, lowConfidence, notRecorded, nothingAllowed, invalidJudgement, compositionUnavailable, takeUnavailable, invalidParameters, invalidEvidence, identityUncertain, framingUnsettled, moving, cropMoving, advisoryWideReminder, advisoryMaximumDwell, subjectEvidence, unclassified, parametersUnavailable, parametersInvalid, judgementStale, cutPolicyUnavailable, notQualified, prerequisites, paused, exhausted, previewIsSafeWide, alreadyPrepared, operatorAdjusting, learningSubject, recoveringSubject, takeNotAllowed, previewNotReady, noCutDue, judgeDeclined, preferredLength, programUncertain, wideDue, noWakePrefix, unrecognized, subjectNotLocked, duplicateUtterance, cancelledByManualCommand, targetUnavailable, missingUtteranceStart, invalidToken, muted, stopped, sessionChanged, roleChanged, targetRebound, sourceChanged, cancelledByWide, cancelledByTake, cancelledByMute, notAssigned, notObserved, partialView, stale, ambiguous }
+    enum ReasonCode: String, Codable, CaseIterable, Equatable, Sendable { case authorityRevoked, routeChanged, sourceRestarted, shotChangedByOperator, targetBecameProgram, sourceMissing, expired, requestReplaced, policyChanged, nominationChanged, evidenceUnavailable, invalidInput, minimumDuration, noEligibleCandidate, repetition, movement, noPreview, lowConfidence, notRecorded, nothingAllowed, invalidJudgement, compositionUnavailable, takeUnavailable, invalidParameters, invalidEvidence, identityUncertain, framingUnsettled, moving, cropMoving, advisoryWideReminder, advisoryMaximumDwell, subjectEvidence, unclassified, parametersUnavailable, parametersInvalid, judgementStale, cutPolicyUnavailable, notQualified, prerequisites, paused, exhausted, previewIsSafeWide, alreadyPrepared, operatorAdjusting, learningSubject, recoveringSubject, takeNotAllowed, previewNotReady, noCutDue, judgeDeclined, preferredLength, programUncertain, wideDue, noWakePrefix, unrecognized, subjectNotLocked, duplicateUtterance, cancelledByManualCommand, targetUnavailable, missingUtteranceStart, invalidToken, muted, stopped, sessionChanged, roleChanged, targetRebound, sourceChanged, cancelledByWide, cancelledByTake, cancelledByMute, notAssigned, notObserved, partialView, stale, ambiguous, nobody, noLecternZone, presetUnavailable }
     struct Context: Codable, Equatable, Sendable {
         let inputs: [String]
         let program: String
@@ -717,7 +717,7 @@ nonisolated extension DirectorShadowRecord.Reason {
         }
         if !original {
             switch domain {
-            case .policy: allowed.formUnion([.previewIsSafeWide, .alreadyPrepared, .noCutDue])
+            case .policy: allowed.formUnion([.previewIsSafeWide, .alreadyPrepared, .noCutDue, .presetUnavailable])
             case .judge: allowed.formUnion([.judgeDeclined])
             case .readiness: allowed.formUnion([.operatorAdjusting, .learningSubject, .recoveringSubject, .previewNotReady])
             case .selection: allowed.formUnion([.preferredLength, .programUncertain, .wideDue])
@@ -727,7 +727,8 @@ nonisolated extension DirectorShadowRecord.Reason {
                     .cancelledByManualCommand, .targetUnavailable, .missingUtteranceStart, .invalidToken, .muted,
                     .stopped, .sessionChanged, .roleChanged, .targetRebound, .sourceChanged, .expired,
                     .cancelledByWide, .cancelledByTake, .cancelledByMute])
-            case .worldModel: allowed.formUnion([.notAssigned, .sourceMissing, .notObserved, .partialView, .stale, .ambiguous])
+            case .worldModel: allowed.formUnion([.notAssigned, .sourceMissing, .notObserved, .partialView, .stale, .ambiguous,
+                .nobody, .noLecternZone])
             case .proposalStale, .observation: break
             }
         }

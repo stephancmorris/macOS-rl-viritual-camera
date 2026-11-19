@@ -183,4 +183,14 @@ enum DeveloperFlags {
     nonisolated static let allowDirectorAssist = false
     #endif
 
+    /// DEVELOPMENT ONLY — on in Debug builds, always off in Release (decision
+    /// core, stage 5). A text field in the next-shot panel takes typed
+    /// commands for Preview: "camera two, the person on the left, waist up".
+    /// A command is the operator acting; it never reaches Program and never Takes.
+    #if DEBUG
+    nonisolated static let typedCommands = true
+    #else
+    nonisolated static let typedCommands = false
+    #endif
+
 }

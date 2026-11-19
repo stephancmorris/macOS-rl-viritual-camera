@@ -177,7 +177,7 @@ nonisolated extension DirectorReason {
             case .routeChanged: return "Program changed, so this was dropped."
             case .sourceRestarted: return "The camera restarted, so this was dropped."
             case .shotChangedByOperator: return "You changed the shot, so this was dropped."
-            case .targetBecameProgram: return "That camera is on Program now. Use Edit Live."
+            case .targetBecameProgram: return "That camera is on Program now. Alfie only changes Preview."
             case .sourceMissing: return "The camera's source went missing, so this was dropped."
             case .expired: return "This waited too long and expired."
             case .requestReplaced: return "A newer request replaced this one."
@@ -197,6 +197,7 @@ nonisolated extension DirectorReason {
             case .previewIsSafeWide: return "Preview is the wide camera, so there is nothing to prepare."
             case .alreadyPrepared: return "Preview is prepared, so Alfie keeps its shot."
             case .noCutDue: return "No cut is due yet."
+            case .presetUnavailable: return "That camera has no such shot."
             default: break
             }
         case .judge:
@@ -285,6 +286,8 @@ nonisolated extension DirectorReason {
             case .partialView: return "Alfie can only see part of that camera right now."
             case .stale: return "That camera's view of people is out of date."
             case .ambiguous: return "Two people are too close together to tell apart."
+            case .nobody: return "Alfie can't see anyone there on that camera."
+            case .noLecternZone: return "No lectern position is set for that camera."
             default: break
             }
         }

@@ -372,6 +372,10 @@ final class ShowCoordinator: ObservableObject {
         studyParameters: .shadowV1,
         shadowLog: initialDirectorShadowLog, runSheet: initialDirectorRunSheet)
 
+    /// Decision core, stage 5: typed commands for Preview. The console only
+    /// shows the field when `DeveloperFlags.typedCommands` is on.
+    private(set) lazy var typedCommands = TypedCommandController(show: self)
+
     /// Start the Director's shadow when the flag allows it. Every launch is Manual.
     func startDirectorShadow() {
         guard DeveloperFlags.runDirectorShadow else { return }

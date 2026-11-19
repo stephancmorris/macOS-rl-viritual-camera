@@ -11,6 +11,9 @@ import SwiftUI
 
 struct NextShotPanel: View {
     let status: NextShotStatus
+    /// Typed commands (decision core, stage 5): a field and its status line
+    /// at the panel's right. Nil hides them; the bar stays 70 pt either way.
+    var commandField: AnyView? = nil
 
     private var dotColor: Color {
         switch status.readiness {
@@ -32,6 +35,26 @@ struct NextShotPanel: View {
     }
 
     var body: some View {
+        HStack(spacing: 12) {
+            lines
+            if let commandField {
+                commandField.frame(width: 260)
+            }
+        }
+        .padding(.leading, 14)
+        .padding(.trailing, 12)
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
+        .background(
+            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                .fill(ConsoleStyle.neutralFill)
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                .strokeBorder(ConsoleStyle.neutralBorder, lineWidth: 1)
+        )
+    }
+
+    private var lines: some View {
         VStack(alignment: .leading, spacing: status.director == nil ? 6 : 4) {
             HStack(spacing: 10) {
                 Text(NextShotStatus.label)
@@ -61,17 +84,7 @@ struct NextShotPanel: View {
                     .truncationMode(.tail)
             }
         }
-        .padding(.leading, 14)
-        .padding(.trailing, 12)
-        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
-        .background(
-            RoundedRectangle(cornerRadius: 12, style: .continuous)
-                .fill(ConsoleStyle.neutralFill)
-        )
-        .overlay(
-            RoundedRectangle(cornerRadius: 12, style: .continuous)
-                .strokeBorder(ConsoleStyle.neutralBorder, lineWidth: 1)
-        )
+        .frame(maxWidth: .infinity, alignment: .leading)
         .accessibilityElement(children: .ignore)
         .accessibilityLabel(accessibilityLabel)
     }

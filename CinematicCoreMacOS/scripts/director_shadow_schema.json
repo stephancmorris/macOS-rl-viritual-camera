@@ -395,7 +395,10 @@
       "notObserved",
       "partialView",
       "stale",
-      "ambiguous"
+      "ambiguous",
+      "nobody",
+      "noLecternZone",
+      "presetUnavailable"
     ],
     "SegmentType": [
       "presenter",
