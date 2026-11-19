@@ -86,6 +86,8 @@ struct ContentView: View {
                 CropPreviewView(
                     originalFrame: cameraManager.currentFrameBuffer,
                     croppedFrame: cameraManager.croppedFrameBuffer,
+                    originalFrameSource: { [weak cameraManager] in cameraManager?.currentFrameBuffer },
+                    croppedFrameSource: { [weak cameraManager] in cameraManager?.croppedFrameBuffer },
                     detectedPersons: cameraManager.personDetector.displayedPersons,
                     showDetections: true,
                     cropRect: cameraManager.activeMode != .wide ? cameraManager.cropEngine?.displayedCrop : nil,

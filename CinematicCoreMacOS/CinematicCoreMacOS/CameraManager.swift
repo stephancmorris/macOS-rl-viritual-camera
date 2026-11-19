@@ -45,7 +45,11 @@ final class CameraManager: NSObject, ObservableObject {
     /// layer assignment (see `PixelBufferPreviewView`). Retaining this property
     /// retains the buffer's IOSurface, which the capture side owns for its
     /// lifetime; that is what keeps it on screen safely.
-    @Published private(set) var currentFrameBuffer: CVPixelBuffer?
+    /// Plain storage, deliberately not `@Published` (D-01): it is assigned on
+    /// every frame, and publishing it re-evaluated every view that observes
+    /// this object at frame rate. Preview layers sample it instead
+    /// (`SampledPixelBufferView`).
+    private(set) var currentFrameBuffer: CVPixelBuffer?
     
     /// Capture session status
     @Published private(set) var isRunning: Bool = false {
@@ -202,7 +206,10 @@ final class CameraManager: NSObject, ObservableObject {
     /// pool surface so the CropEngine's `CVPixelBufferPool` will not re-vend it
     /// while it is still on screen (this codebase has been bitten by exactly
     /// that surface-recycling bug before).
-    @Published private(set) var croppedFrameBuffer: CVPixelBuffer?
+    ///
+    /// Plain storage, deliberately not `@Published` (D-01); preview layers
+    /// sample it (`SampledPixelBufferView`) and keep the buffer they show.
+    private(set) var croppedFrameBuffer: CVPixelBuffer?
 
 
 
