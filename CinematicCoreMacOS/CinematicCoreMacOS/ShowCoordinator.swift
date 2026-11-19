@@ -369,7 +369,7 @@ final class ShowCoordinator: ObservableObject {
         capabilities: directorCapabilities,
         // DC-6: the evidence adapter and the shadow judge run with
         // provisional study values.
-        studyParameters: .shadowV1,
+        studyParameters: DeveloperFlags.judgeTwo ? .shadowV2 : .shadowV1,
         shadowLog: initialDirectorShadowLog, runSheet: initialDirectorRunSheet)
 
     /// Decision core, stage 5: typed commands for Preview. The console only

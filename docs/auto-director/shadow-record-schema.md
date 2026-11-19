@@ -251,3 +251,30 @@ Rules:
 - The same cause from different sources shares one code (for example a cut's minimum dwell and the policy's minimum duration are both `policy.minimumDuration`). Different causes never share a code.
 - The export manifest lists the original schema versions of the records it exports and does not rewrite them; an export may list both 2 and 3.
 - `director_shadow_report.py` and `director_shadow_schema.json` accept the new codes only in schema 3 records.
+
+## 13. Schema 4 — people counts, a rank and the second rule judge (decision core, stage 7)
+
+Schema 4 adds what decision DC-4 allows: how many people a camera saw and the subject's place among them. It never adds boxes, positions or track IDs.
+
+New optional fields:
+
+| Path | Rule |
+| --- | --- |
+| `evidence[i].peopleCount` | Integer ≥ 0: people in the camera's newest world-model scan. Present with `peopleCoverage` or not at all |
+| `evidence[i].peopleCoverage` | `none`, `region` or `fullFrame`: what that scan looked at. A count under `region` is not a whole-picture count |
+| `evidence[i].subjectRank` | Integer, 0 ≤ rank < `peopleCount`: the lock subject's place counted from the left (0 is leftmost). Absent when the subject is not among the people |
+| `parameters.peopleFitSpan` | > 0: half the width of a tight shot's framed region, in subject widths. Present only when the second rule judge ran |
+| `parameters.peopleMaximumAge` | ≥ 0 seconds: the oldest scan people fit acts on. Present exactly when `peopleFitSpan` is |
+
+New codes, valid only in schema 4 records:
+
+| Domain | New codes |
+| --- | --- |
+| `judge` | `peopleFit` (another person is inside the subject's framed region, so only the wide is offered), `peopleUnknown` (the camera's view is partial, old or unknown, so only the wide is offered) |
+| `policy` | `segmentPrefersWide` (a panel or a performance offers only the wide), `segmentHolds` (a video or a break holds) |
+
+Rules:
+
+- A schema 1, 2 or 3 record that carries any of these fields or codes is invalid. Older records still validate and still read.
+- The fields describe the input the record evaluates (the shadow judge's Preview), not every camera.
+- `director_shadow_report.py` and `director_shadow_schema.json` accept them only in schema 4 records.

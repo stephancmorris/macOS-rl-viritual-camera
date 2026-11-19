@@ -180,4 +180,14 @@ enum DeveloperFlags {
     nonisolated static let typedCommands = false
     #endif
 
+    /// DEVELOPMENT ONLY — off in every build until the owner turns it on in
+    /// Debug for a measured comparison; always off in Release (decision core,
+    /// stage 7). On, the app's Director runs the study set `shadowV2`: the
+    /// second rule judge (people fit, segment fit) in place of the first.
+    #if DEBUG
+    nonisolated static let judgeTwo = false
+    #else
+    nonisolated static let judgeTwo = false
+    #endif
+
 }

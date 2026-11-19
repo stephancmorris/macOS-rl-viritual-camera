@@ -116,7 +116,7 @@ nonisolated struct DirectorReasonTests {
     }
 
     @Test func aVersion2FileStillValidates() {
-        #expect(R.currentSchemaVersion == 3)
+        #expect(R.currentSchemaVersion == 4)
         let original = ["domain": "observation", "code": "unclassified"]
         #expect(valid(record(version: 2, reason: original)))
         #expect(valid(record(version: 1, reason: original)))
@@ -130,6 +130,6 @@ nonisolated struct DirectorReasonTests {
             #expect(valid(record(version: 3, reason: reason)))
         }
         #expect(!valid(record(version: 3, reason: ["domain": "speech", "code": "preferredLength"])))
-        #expect(!valid(record(version: 4, reason: ["domain": "selection", "code": "subjectEvidence"])))
+        #expect(!valid(record(version: 5, reason: ["domain": "selection", "code": "subjectEvidence"])))
     }
 }

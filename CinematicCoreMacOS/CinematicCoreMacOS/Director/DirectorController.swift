@@ -460,7 +460,7 @@ final class DirectorController: ObservableObject, DirectorConsoleControlling {
             return
         }
         let snapshot = currentTakeSnapshot(now: now)
-        let outcome = decisionCore.evaluate(scene, live: snapshot.live, parameters: study, judge: RuleJudge())
+        let outcome = decisionCore.evaluate(scene, live: snapshot.live, parameters: study, judge: study.judge(for: scene))
         let previewInput = scene.preview.flatMap { scene.input($0) }
         let timeline = DirectorShotPolicy.Timeline(programShot: programShot, programStartedAt: scene.programStartedAt,
             lastWideAt: scene.lastWideAt, history: scene.history,
@@ -472,7 +472,8 @@ final class DirectorController: ObservableObject, DirectorConsoleControlling {
             .init(now: now, parameters: parameters, sample: previewInput?.sample, revisions: previewInput?.revisions,
                   adapter: adapter, readinessInputs: cut ? snapshot.readinessInputs : nil,
                   prepareReadiness: prepareReadiness, cutReadiness: cut ? snapshot.measuredReadiness : nil,
-                  timeline: timeline, cutJudgeObservation: cut ? outcome.cutJudgeObservation : nil)
+                  timeline: timeline, cutJudgeObservation: cut ? outcome.cutJudgeObservation : nil,
+                  people: previewInput?.people)
         }
 
         switch outcome.prepare {
@@ -533,7 +534,9 @@ final class DirectorController: ObservableObject, DirectorConsoleControlling {
                   readiness: study.readiness, judgeMaximumAge: study.judgeMaximumAge,
                   minimumProbability: study.minimumProbability) else { return nil }
         shadowJudgeBinding = (key, version)
-        return parameters
+        var named = parameters
+        named.judgeTwo = study.judgeTwo
+        return named
     }
 
     private func evidenceEvent(_ event: DirectorEvidenceAdapter.Event, preview: ChannelID?) {
@@ -645,7 +648,7 @@ final class DirectorController: ObservableObject, DirectorConsoleControlling {
                                 routeGeneration: scene.routeGeneration)
         guard livePreparedTenure != tenure else { return }
         let outcome = liveCore.evaluate(scene, live: currentTakeSnapshot(now: now).live, parameters: live.study,
-                                        judge: RuleJudge())
+                                        judge: live.study.judge(for: scene))
         guard case .chosen(let chosen) = outcome.prepare, chosen.candidate.channel == preview else { return }
         let result = preparePreview(chosen.candidate.shot, configuration: .init(readiness: live.study.readiness,
             maximumRequestAge: live.maximumRequestAge, onePreparationPerTenure: live.study.onePreparationPerTenure))

@@ -1,5 +1,5 @@
 {
-  "version": 3,
+  "version": 4,
   "objects": {
     "Context": {
       "inputs": "[String]",
@@ -38,7 +38,9 @@
       "readiness": "ReadinessParameters?",
       "adapter": "AdapterParameters?",
       "judgeMaximumAge": "Double?",
-      "minimumProbability": "Double?"
+      "minimumProbability": "Double?",
+      "peopleFitSpan": "Double?",
+      "peopleMaximumAge": "Double?"
     },
     "Style": {
       "minimumShotDuration": "Double",
@@ -83,7 +85,10 @@
       "framingSettledFor": "Double?",
       "prepareReadiness": "ReadinessSummary?",
       "cutReadiness": "ReadinessSummary?",
-      "revisions": "Revisions?"
+      "revisions": "Revisions?",
+      "peopleCount": "Int?",
+      "peopleCoverage": "PeopleCoverage?",
+      "subjectRank": "Int?"
     },
     "ReadinessSummary": {
       "isReady": "Bool",
@@ -398,7 +403,11 @@
       "ambiguous",
       "nobody",
       "noLecternZone",
-      "presetUnavailable"
+      "presetUnavailable",
+      "peopleFit",
+      "peopleUnknown",
+      "segmentPrefersWide",
+      "segmentHolds"
     ],
     "SegmentType": [
       "presenter",
@@ -409,11 +418,17 @@
     ],
     "ExportRetention": [
       "explicitExport"
+    ],
+    "PeopleCoverage": [
+      "none",
+      "region",
+      "fullFrame"
     ]
   },
   "supportedVersions": [
     1,
     2,
-    3
+    3,
+    4
   ]
 }

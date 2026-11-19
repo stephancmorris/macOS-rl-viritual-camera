@@ -156,7 +156,7 @@ import Testing
         #expect(cut.event.target == "input-2")
         #expect(cut.event.shot == .init(.init(preset: .stage(.waistUp))))
         #expect(cut.eventTime == 106)
-        #expect(cut.schemaVersion == 3)
+        #expect(cut.schemaVersion == 4)
         #expect(cut.event.reason == .init(domain: .selection, code: .preferredLength))
         #expect(cut.parameters.status == .available)
         #expect(cut.context.programStartedAt == 100 && cut.context.level == .off)
