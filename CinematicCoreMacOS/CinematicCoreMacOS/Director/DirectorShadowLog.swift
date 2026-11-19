@@ -1,5 +1,6 @@
 import Darwin
 import Foundation
+import os
 
 /// B-04: typed metadata only. Mutable file/session state belongs exclusively
 /// to queue; queued-byte and loss counters belong to lock. No frame-path I/O.
@@ -58,6 +59,27 @@ nonisolated final class DirectorShadowLog: @unchecked Sendable {
 
     @MainActor static func besideDiagnostics(limits: Limits) throws -> DirectorShadowLog {
         try .init(directory: DiagnosticsLog.directory, limits: limits)
+    }
+
+    /// The app's storage budget for a show's shadow (C-04). These are
+    /// ceilings, not a measured rate: a record over the first is dropped and
+    /// counted, a session stops at the third, and the oldest sessions are
+    /// pruned past the last. The real rate is read at an attended rehearsal.
+    static let showLimits = Limits(maximumRecordBytes: 16 * 1024, maximumQueuedBytes: 1024 * 1024,
+                                   maximumFileBytes: 64 * 1024 * 1024, maximumStoreBytes: 512 * 1024 * 1024)
+
+    /// The app's shadow log, or nil where the shadow does not run or storage
+    /// is unavailable. A show never waits on it and never fails without it.
+    static func forShow(enabled: Bool = DeveloperFlags.runDirectorShadow, directory: URL,
+                        limits: Limits = showLimits) -> DirectorShadowLog? {
+        guard enabled else { return nil }
+        do {
+            return try DirectorShadowLog(directory: directory, limits: limits)
+        } catch {
+            Logger(subsystem: "com.alfie", category: "Director")
+                .notice("[DIRECTOR] shadow recording is off: storage unavailable (\(String(describing: error), privacy: .public))")
+            return nil
+        }
     }
 
     var metrics: Metrics { lock.withLock { counters } }

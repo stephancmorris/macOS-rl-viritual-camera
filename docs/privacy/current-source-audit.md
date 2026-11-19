@@ -84,3 +84,15 @@ The recorder's shutdown gate was immediate once its async Stop method entered, b
 ### Runtime source ownership — 24 October 2026 repair
 
 Camera owners now have a random ID allocated once per instance. Local admission and Director capture/Stop provenance compare this token rather than an allocator address, which was observed being reused after a camera owner was released. The token stays in these in-memory bindings: it is not a new shadow-record field, saved setting, media identifier or export alias. Export regressions explicitly check that actual owner-token values are absent. This does not change consent, data collection, retention or any qualification decision.
+
+
+### Director shadow storage — 16 November 2026 (C-04 stage 2)
+
+The app now supplies the shadow log itself. Where the Director's shadow runs, `DirectorShadowLog.forShow` creates one log per launch in App Documents/CinematicCore/Diagnostics, as `director_shadow_<session>.jsonl`, and passes it to the show. Today the shadow runs in Debug builds only; a Release build creates no log.
+
+- **Contents:** the existing validated `DirectorShadowRecord` schema. Inputs are written as aliases, not device names. No pixels.
+- **Budget (`DirectorShadowLog.showLimits`):** a record up to 16 KB, a session file up to 64 MB, the whole store up to 512 MB. These are ceilings, not a measured rate.
+- **Retention:** the existing 30 days (`DirectorShadowLog.retention`).
+- **Failure:** if the log cannot be created the show starts without it and one `[DIRECTOR]` notice is logged.
+- **Still pending:** the size of a real service's file, read at an attended rehearsal; a Settings line that says whether recording is on (C-04 stage 3).
+\n

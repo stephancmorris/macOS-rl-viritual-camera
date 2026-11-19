@@ -31,7 +31,8 @@ struct CinematicCoreMacOSApp: App {
     private static func makeShow() -> ShowCoordinator {
         let show = isUnitTestHost
             ? ShowCoordinator(programOutput: ProgramOutputManager(sinks: []), cameraDeviceSource: .isolated)
-            : ShowCoordinator()
+            // C-04: where the shadow runs, it keeps its notes beside the diagnostics.
+            : ShowCoordinator(directorShadowLog: DirectorShadowLog.forShow(directory: DiagnosticsLog.directory))
         show.startDirectorShadow()
         #if DEBUG
         DebugLaunchHooks.startWindowDumps()
