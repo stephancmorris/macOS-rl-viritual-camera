@@ -63,7 +63,7 @@ import Testing
         let log = try #require(lastLog)
         let selection = DirectorShadowExportSelection(sessionIDs: Set(sessions), fromUTC: utc, throughUTC: utc)
         let exported = try await log.export(selection: selection, toNewBundle: destination.appendingPathComponent("bundle"))
-        #expect(exported.manifest.recordSchemaVersions == [3] && exported.manifest.recordCount == 12)
+        #expect(exported.manifest.recordSchemaVersions == [4] && exported.manifest.recordCount == 12)
         let bytes = try Data(contentsOf: destination.appendingPathComponent("bundle/records.jsonl"))
         let records = try bytes.split(separator: 10).map { try JSONDecoder().decode(DirectorShadowRecord.self, from: Data($0)) }
         #expect(records.count == 12 && records.allSatisfy { $0.evidenceClass == .synthetic })
@@ -93,7 +93,7 @@ import Testing
             var inputs = try #require(row["scorerInputs"] as? [[String: Any]])
             var values = try #require(inputs[0]["features"] as? [Double])
             switch change {
-            case "version": row["schemaVersion"] = 4
+            case "version": row["schemaVersion"] = 5
             case "v1Null": row["schemaVersion"] = 1; row["scorerInputs"] = NSNull()
             case "unknown": inputs[0]["personName"] = "PRIVATE-SENTINEL"
             case "featureVersion": inputs[0]["featureSchemaVersion"] = 2

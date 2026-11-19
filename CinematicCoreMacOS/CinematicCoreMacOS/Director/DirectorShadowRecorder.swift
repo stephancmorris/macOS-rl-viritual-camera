@@ -19,6 +19,8 @@ final class DirectorShadowRecorder {
         let adapter: DirectorEvidenceAdapter.Parameters
         let judgeMaximumAge: Double?
         let minimumProbability: Double?
+        /// Stage 7: the second rule judge's values, when it ran.
+        var judgeTwo: DirectorJudgeTwo.Parameters? = nil
     }
     struct Evaluation {
         let now: TimeInterval
@@ -32,6 +34,8 @@ final class DirectorShadowRecorder {
         let cutReadiness: DirectorReadiness?
         let timeline: DirectorShotPolicy.Timeline?
         var cutJudgeObservation: CutPolicy.JudgeObservation? = nil
+        /// Stage 7: the evaluated input's people, as counts and a rank.
+        var people: DirectorScene.People? = nil
     }
     /// In-memory origin of one synchronous Stop attempt. It is never encoded
     /// and cannot be reused as evidence that a retired source is still running.
@@ -257,7 +261,8 @@ final class DirectorShadowRecorder {
             parameters = .init(status: .available, parametersVersion: .init(supplied.binding.parametersVersion),
                 preferencesVersion: validPreferences.version, resolvedStyle: .init(supplied.style),
                 readiness: .init(supplied.readiness), adapter: .init(supplied.adapter),
-                judgeMaximumAge: supplied.judgeMaximumAge, minimumProbability: supplied.minimumProbability)
+                judgeMaximumAge: supplied.judgeMaximumAge, minimumProbability: supplied.minimumProbability,
+                peopleFitSpan: supplied.judgeTwo?.peopleFitSpan, peopleMaximumAge: supplied.judgeTwo?.peopleMaximumAge)
         } else {
             parameters = .init(status: judgeObservation != nil ? .available : (preferences != nil && validPreferences == nil ? .invalid : .unavailable),
                 parametersVersion: judgeObservation.map { .init($0.parametersVersion) }, preferencesVersion: validPreferences?.version,
@@ -284,6 +289,11 @@ final class DirectorShadowRecorder {
                 framingSettledFor: evaluation.readinessInputs?.framingSettledFor,
                 prepareReadiness: evaluation.prepareReadiness, cutReadiness: evaluation.cutReadiness,
                 revisions: evaluation.revisions, measurements: &measurements))
+            if let people = evaluation.people, people.count >= 0 {
+                evidenceSummaries[0].peopleCount = people.count
+                evidenceSummaries[0].peopleCoverage = .init(people.coverage)
+                evidenceSummaries[0].subjectRank = people.subjectRank.flatMap { (0..<people.count).contains($0) ? $0 : nil }
+            }
         }
         var judgements: [R.JudgementSummary] = []
         var scorerInputs: [R.ScorerInput]?
@@ -456,4 +466,14 @@ final class DirectorShadowRecorder {
             targetScope: target == nil ? .session : .channel, outcome: outcome, programAfter: nil, previewAfter: nil)
     }
 
+}
+
+nonisolated extension DirectorShadowRecord.PeopleCoverage {
+    init(_ coverage: WorldModel.Coverage) {
+        switch coverage {
+        case .none: self = .none
+        case .region: self = .region
+        case .fullFrame: self = .fullFrame
+        }
+    }
 }

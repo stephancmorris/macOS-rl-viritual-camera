@@ -34,7 +34,7 @@ echo "Mach service prefix ok"
 
 flags="CinematicCoreMacOS/CinematicCoreMacOS/DeveloperFlags.swift"
 for name in allowRehearsalOutput allowInjectedQualification allowStageBelowShowRate \
-    allowDirectorAuto allowDirectorAssist typedCommands; do
+    allowDirectorAuto allowDirectorAssist typedCommands judgeTwo; do
   if ! awk -v name="$name" '
     $0 ~ "#else" { in_else = 1 }
     $0 ~ "#endif" { in_else = 0 }

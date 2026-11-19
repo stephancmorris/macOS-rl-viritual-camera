@@ -17,16 +17,25 @@ nonisolated struct DirectorScene: Sendable {
         let count: Int
         /// Box centre x, 0...1, sorted left to right.
         let positions: [CGFloat]
+        /// Stage 7: the lock subject's index in `positions` (0 is leftmost),
+        /// and its box width. nil when the subject is not among the people.
+        let subjectRank: Int?
+        let subjectWidth: CGFloat?
 
-        init(coverage: WorldModel.Coverage, observedAt: TimeInterval?, count: Int, positions: [CGFloat]) {
+        init(coverage: WorldModel.Coverage, observedAt: TimeInterval?, count: Int, positions: [CGFloat],
+             subjectRank: Int? = nil, subjectWidth: CGFloat? = nil) {
             self.coverage = coverage; self.observedAt = observedAt; self.count = count; self.positions = positions
+            self.subjectRank = subjectRank; self.subjectWidth = subjectWidth
         }
 
         /// nil when the camera has no row: not "nobody", just not known.
         init?(_ camera: WorldModel.Camera?) {
             guard let camera else { return nil }
+            let people = camera.people.sorted { $0.box.midX < $1.box.midX }
+            let rank = people.firstIndex(where: \.isLockSubject)
             self.init(coverage: camera.coverage, observedAt: camera.observedAt, count: camera.people.count,
-                      positions: camera.people.map(\.box.midX).sorted())
+                      positions: people.map(\.box.midX), subjectRank: rank,
+                      subjectWidth: rank.map { people[$0].box.width })
         }
     }
 

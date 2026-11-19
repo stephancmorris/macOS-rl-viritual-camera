@@ -49,6 +49,8 @@ nonisolated struct DirectorJudgement: Equatable, Sendable {
     enum Abstention: Equatable, Sendable {
         case policy(DirectorShotPolicy.Abstention)
         case lowConfidence, notRecorded, nothingAllowed, invalidJudgement
+        /// Decision core, stage 7 (the second rule judge).
+        case peopleFit, peopleUnknown, segmentPrefersWide, segmentHolds
     }
     enum Outcome: Equatable, Sendable {
         case ranked([Ranked])

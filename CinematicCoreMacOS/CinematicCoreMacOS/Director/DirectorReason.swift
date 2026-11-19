@@ -72,6 +72,10 @@ nonisolated extension DirectorReason {
         case .notRecorded: self.init(.judge, .notRecorded)
         case .nothingAllowed: self.init(.judge, .nothingAllowed)
         case .invalidJudgement: self.init(.judge, .invalidJudgement)
+        case .peopleFit: self.init(.judge, .peopleFit)
+        case .peopleUnknown: self.init(.judge, .peopleUnknown)
+        case .segmentPrefersWide: self.init(.policy, .segmentPrefersWide)
+        case .segmentHolds: self.init(.policy, .segmentHolds)
         }
     }
 
@@ -198,6 +202,8 @@ nonisolated extension DirectorReason {
             case .alreadyPrepared: return "Preview is prepared, so Alfie keeps its shot."
             case .noCutDue: return "No cut is due yet."
             case .presetUnavailable: return "That camera has no such shot."
+            case .segmentPrefersWide: return "Holding the wide for this segment."
+            case .segmentHolds: return "Holding: this segment is a video or a break."
             default: break
             }
         case .judge:
@@ -207,6 +213,8 @@ nonisolated extension DirectorReason {
             case .nothingAllowed: return "The judge found no allowed shot."
             case .invalidJudgement: return "The judge's answer was not usable."
             case .judgeDeclined: return "The judge did not pick the prepared shot."
+            case .peopleFit: return "Holding the wide: someone else would be in the tight shot."
+            case .peopleUnknown: return "Holding the wide: Alfie can't see the whole picture on that camera."
             default: break
             }
         case .readiness:
