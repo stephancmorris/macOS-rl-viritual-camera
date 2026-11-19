@@ -69,6 +69,15 @@ final class DirectorController: ObservableObject, DirectorConsoleControlling {
     private var shadowTakeID: UUID?
     private var shadowStopCapture: DirectorShadowRecorder.StopActionCapture?
     private var shadowShowStopCapture: DirectorShadowRecorder.ShowStopActionCapture?
+    /// What the last abstention written on change said. An abstention is
+    /// written when this changes, not on every tick.
+    private struct ShadowAbstentionKey: Equatable {
+        let stage: DirectorShadowRecord.Stage?
+        let reasons: [DirectorShadowRecord.Reason]?
+        let target: String?
+        init(_ event: DirectorShadowRecord.Event) { stage = event.stage; reasons = event.reasons; target = event.target }
+    }
+    private var lastShadowAbstention: ShadowAbstentionKey?
     private lazy var subjectConsole = DirectorSubjectConsole(show: show)
     private let judgeShadow = DirectorJudgeShadow()
     private var captureBindingProvider: DirectorShadowRecorder.CaptureBindingProvider?
@@ -137,6 +146,7 @@ final class DirectorController: ObservableObject, DirectorConsoleControlling {
     /// Install every ingress hook and start ticking. Idempotent.
     func attach() {
         guard let show else { return }
+        lastShadowAbstention = nil
         if !isAttached, !authority.paused {
             forward(.pause, pause: .setupChanged, note: "controller attaching")
         }
@@ -172,6 +182,7 @@ final class DirectorController: ObservableObject, DirectorConsoleControlling {
     }
 
     func detach() {
+        lastShadowAbstention = nil
         shadowStopCapture = nil
         shadowShowStopCapture = nil
         let wasAttached = isAttached
@@ -375,7 +386,7 @@ final class DirectorController: ObservableObject, DirectorConsoleControlling {
                 emitShadow(DirectorShadowRecorder.judgeComparison, authority: authority, judgeObservation: comparison)
             }
         } else if !cutExecution.isConfigured {
-            emitShadow(DirectorShadowRecorder.noCutPolicy, authority: authority)
+            emitShadowAbstentionOnChange(DirectorShadowRecorder.noCutPolicy, authority: authority)
         }
     }
 
@@ -416,7 +427,11 @@ final class DirectorController: ObservableObject, DirectorConsoleControlling {
                             stopActionCapture: DirectorShadowRecorder.StopActionCapture? = nil,
                             stopActionChannel: ChannelID? = nil,
                             showStopActionCapture: DirectorShadowRecorder.ShowStopActionCapture? = nil) -> Bool {
-        if event.kind == .operatorAction { shadowStopCapture = nil; shadowShowStopCapture = nil }
+        if event.kind == .operatorAction {
+            shadowStopCapture = nil; shadowShowStopCapture = nil
+            // Re-state the judge's position next to every operator action.
+            lastShadowAbstention = nil
+        }
         guard let show else { return false }
         let requiresBinding = hasCaptureBindingProvider
         let parameters = studyParameters ?? (judgeObservation == nil && evaluation == nil ? cutExecution.captureParameters : nil)
@@ -429,6 +444,18 @@ final class DirectorController: ObservableObject, DirectorConsoleControlling {
             studyParameters: parameters,
             evaluation: evaluation, stopActionCapture: stopActionCapture, stopActionChannel: stopActionChannel,
             showStopActionCapture: showStopActionCapture) ?? false
+    }
+
+    /// An abstention is written when its stage, reasons or target change, not
+    /// on every tick. The key is kept only when the record was accepted, so a
+    /// dropped record is tried again on the next tick.
+    @discardableResult private func emitShadowAbstentionOnChange(_ event: DirectorShadowRecord.Event,
+                                                                 authority before: DirectorAuthority) -> Bool {
+        let key = ShadowAbstentionKey(event)
+        guard key != lastShadowAbstention else { return false }
+        guard emitShadow(event, authority: before) else { return false }
+        lastShadowAbstention = key
+        return true
     }
 
     /// Explicit study naming only. A configured provider owns every capture
@@ -880,7 +907,10 @@ final class DirectorController: ObservableObject, DirectorConsoleControlling {
         if transition.cancellations.contains(.prepare) { assistPreparation.retire(); retireSubjectDiscovery() }
         if event == .policyChanged { policyRevision &+= 1 }
         if event == .nominationChanged { nominationRevision &+= 1 }
-        if event == .restart { shadowStopCapture = nil; shadowShowStopCapture = nil; shadowRecorder?.restart() }
+        if event == .restart {
+            shadowStopCapture = nil; shadowShowStopCapture = nil; lastShadowAbstention = nil
+            shadowRecorder?.restart()
+        }
         appliedEvents.append(event)
         if appliedEvents.count > Self.eventHistoryLimit { appliedEvents.removeFirst(appliedEvents.count - Self.eventHistoryLimit) }
         if let refusal = transition.refusal { log("\(note ?? "event") refused: \(refusal)") }
