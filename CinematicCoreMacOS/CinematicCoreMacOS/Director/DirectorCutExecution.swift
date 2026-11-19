@@ -81,6 +81,8 @@ final class DirectorCutExecution {
     private(set) var lastResult: TakeResult?
     var pending: CutNotice.Token? { notice.pending }
     var isConfigured: Bool { configuration != nil }
+    /// Decision core, stage 6: the context comes from the Director's scene.
+    var usesScene = false
     var captureParameters: DirectorShadowRecorder.Parameters? {
         guard let c = configuration else { return nil }
         return captureParameters(c)
@@ -98,6 +100,7 @@ final class DirectorCutExecution {
     func configure(_ configuration: Configuration?, context: ContextProvider?,
                    scheduler: (any DirectorCutDeadlineScheduling)?) {
         retire()
+        usesScene = false
         guard let configuration, configuration.isValid, let context, let scheduler else {
             self.configuration = nil; self.context = nil; self.scheduler = nil
             return
