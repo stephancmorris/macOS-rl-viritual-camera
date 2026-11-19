@@ -487,7 +487,10 @@ final class CropEngine: ObservableObject {
     /// capture gate waits on (20 ms budget at 50 Hz). Serial here keeps frames
     /// rendering in order and one at a time — the capture gate already
     /// guarantees a single frame in flight, so there is no queueing latency.
-    private nonisolated static let renderQueue = DispatchQueue(
+    ///
+    /// One queue per engine, so per camera (D-02 path 1): cameras render side
+    /// by side instead of taking turns on one shared queue.
+    private nonisolated let renderQueue = DispatchQueue(
         label: "com.cinematiccore.cropRender",
         qos: .userInteractive,
         autoreleaseFrequency: .workItem
@@ -497,7 +500,9 @@ final class CropEngine: ObservableObject {
     /// allocation per frame. `CIFilter` is not thread-safe; it is touched only
     /// from `renderQueue` (serial), inside `processCrop`. Nil if Core Image
     /// does not provide the filter, in which case the bilinear path is used.
-    private nonisolated(unsafe) static let lanczosFilter = CIFilter(name: "CILanczosScaleTransform")
+    /// Per engine, like the queue: a shared filter would be mutated from two
+    /// cameras' queues at once.
+    private nonisolated(unsafe) let lanczosFilter = CIFilter(name: "CILanczosScaleTransform")
 
     /// Carries the source buffer onto `renderQueue`. `CVPixelBuffer` is not
     /// `Sendable`; this is safe because the frame path hands the buffer over
@@ -523,7 +528,7 @@ final class CropEngine: ObservableObject {
     ) async throws -> CVPixelBuffer {
         let source = RenderSource(pixelBuffer: pixelBuffer)
         return try await withCheckedThrowingContinuation { continuation in
-            Self.renderQueue.async {
+            renderQueue.async {
                 do {
                     let buffer = try self.processCrop(source.pixelBuffer, crop: crop, outputSize: outputSize, highQuality: highQuality)
                     continuation.resume(returning: buffer)
@@ -586,7 +591,7 @@ final class CropEngine: ObservableObject {
         let scaleY = outputSize.height / cropRect.height
         let scaleX = outputSize.width / cropRect.width
         let scaled: CIImage
-        if highQuality, min(scaleX, scaleY) < lanczosScaleThreshold, let lanczos = Self.lanczosFilter {
+        if highQuality, min(scaleX, scaleY) < lanczosScaleThreshold, let lanczos = lanczosFilter {
             // Strong downscale: Lanczos. `scale` sets the vertical factor;
             // `aspectRatio` adds any extra horizontal stretch when the crop's
             // aspect differs from the output's (possible during interpolation).

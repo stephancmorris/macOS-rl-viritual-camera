@@ -33,7 +33,8 @@ import Testing
 
     @Test func aCancelledTurnSkipsTheRender() async throws {
         let scheduler = FrameWorkScheduler()
-        let held = try #require(await scheduler.acquire(.render, for: .a))
+        // A camera waits only behind its own render.
+        let held = try #require(await scheduler.acquire(.render, for: .b))
         var rendered = false
         let turn = Task { @MainActor in
             _ = try await CameraManager.renderInTurn(scheduler: scheduler, channel: .b) {
@@ -47,6 +48,31 @@ import Testing
         #expect(!rendered)
         scheduler.release(held)
         #expect(scheduler.runningPermit(.render) == nil)
+    }
+
+    @Test func twoCamerasRenderAtTheSameTimeOnTheirOwnQueueAndFilter() async throws {
+        func source() throws -> CVPixelBuffer {
+            var buffer: CVPixelBuffer?
+            CVPixelBufferCreate(kCFAllocatorDefault, 3840, 2160, kCVPixelFormatType_32BGRA,
+                                [kCVPixelBufferIOSurfacePropertiesKey: [:]] as CFDictionary, &buffer)
+            return try #require(buffer)
+        }
+        let engines = [try #require(CropEngine()), try #require(CropEngine())]
+        let sources = [try source(), try source()]
+        let size = CGSize(width: 1920, height: 1080)
+        // The full 4K frame down to 1080p takes the Lanczos path. Both cameras
+        // are in flight together: each render suspends the main actor.
+        let tasks = (0..<2).map { index in
+            Task { @MainActor in
+                var rendered = 0
+                for _ in 0..<12 {
+                    let output = try await engines[index].renderCrop(sources[index], crop: .fullFrame, outputSize: size)
+                    if CVPixelBufferGetWidth(output) == 1920, CVPixelBufferGetHeight(output) == 1080 { rendered += 1 }
+                }
+                return rendered
+            }
+        }
+        for task in tasks { #expect(try await task.value == 12) }
     }
 
     @Test func aSkippedTurnDiscardsTheFrameWithoutHolding() async throws {
