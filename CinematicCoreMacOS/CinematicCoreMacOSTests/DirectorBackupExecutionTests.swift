@@ -49,11 +49,12 @@ import Testing
                             [kCVPixelBufferIOSurfacePropertiesKey: [:]] as CFDictionary, &buffer)
         return try #require(buffer)
     }
-    private func rig(configured: Bool = true) throws -> Rig {
+    private func rig(configured: Bool = true, capabilities: DirectorCapabilities = .full) throws -> Rig {
         let sink = Sink(), clock = Clock(), gates = Gates()
-        let show = ShowCoordinator(programOutput: ProgramOutputManager(sinks: [sink]),
+        let show = TestHardware.makeShow(programOutput: ProgramOutputManager(sinks: [sink]),
             admissionRecords: AdmissionRecordStore(defaults: UserDefaults(suiteName: "b12-\(UUID())")!),
-            qualificationRecords: DirectorQualificationStore(storage: nil, acceptsInjectedRecords: false))
+            qualificationRecords: DirectorQualificationStore(storage: nil, acceptsInjectedRecords: false),
+            directorCapabilities: capabilities)
         show.clock = { clock.now }
         show.router.clock = { clock.now }
         show.addChannel(.b)
@@ -70,7 +71,7 @@ import Testing
                     programPixels: try pixels(), previewPixels: try pixels())
         show.channelA.outputPort.sendFrame(r.programPixels, timestamp: 1)
         refreshPreview(r)
-        #expect(show.director.setLevel(.backup) == .accepted)
+        #expect((show.director.setLevel(.backup) == .accepted) == capabilities.auto)
         if configured { configure(r) }
         return r
     }
@@ -99,6 +100,17 @@ import Testing
         .init(styles: [.liveEvent: .init(minimumShotDuration: 1, preferredShotDuration: 2,
             softMaximumShotDuration: 8, wideCadence: 5, repetitionWindow: 1,
             maximumMovement: 0.2, settleTime: 1, onAirMoveRate: 0.1, cutOnMotionAllowed: false)])
+    }
+
+    /// C-04: the same source loss that falls back below, in a build that may only watch.
+    @Test func aShadowOnlyBuildNeverFallsBackOnSourceLoss() throws {
+        let r = try rig(capabilities: .shadowOnly)
+        #expect(r.show.director.authority.level == .off)
+        r.show.channelA.setSourceMissingForTesting(true)
+        enterHold(r)
+        #expect(r.show.programChannel == .a)
+        #expect(r.sink.sent.last !== r.previewPixels)
+        #expect(r.show.director.issueTakePermit(now: r.clock.now, validity: 10) == nil)
     }
 
     @Test func cameraLossImmediatelyPausesThenOnlyActualHoldCanCommitTheRenderedWide() throws {

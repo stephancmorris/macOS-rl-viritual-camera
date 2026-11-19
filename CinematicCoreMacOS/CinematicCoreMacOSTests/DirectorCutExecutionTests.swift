@@ -61,11 +61,12 @@ import Testing
               judgeMaximumAge: 1, minimumProbability: nil, judge: RuleJudge())
     }
     private func rig(level: NextShotStatus.DirectorSection.Level = .auto,
-                     widePreview: Bool = false) -> Rig {
+                     widePreview: Bool = false, capabilities: DirectorCapabilities = .full) -> Rig {
         let facts = Facts(), sink = Sink(), scheduler = Scheduler()
-        let show = ShowCoordinator(programOutput: ProgramOutputManager(sinks: [sink]),
+        let show = TestHardware.makeShow(programOutput: ProgramOutputManager(sinks: [sink]),
             admissionRecords: AdmissionRecordStore(defaults: UserDefaults(suiteName: "b08-\(UUID())")!),
-            qualificationRecords: DirectorQualificationStore(storage: nil, acceptsInjectedRecords: false))
+            qualificationRecords: DirectorQualificationStore(storage: nil, acceptsInjectedRecords: false),
+            directorCapabilities: capabilities)
         show.clock = { facts.now }; show.router.clock = { facts.now }
         show.addChannel(.b)
         show.channelA.setRunningForTesting(true); show.channel(.b)!.setRunningForTesting(true)
@@ -81,7 +82,7 @@ import Testing
         controller.cutReadinessForTesting = .init(reasons: [])
         controller.attach()
         controller.preferencesChanged(.init(styles: [.liveEvent: style()]))
-        #expect(controller.setLevel(level) == .accepted)
+        #expect((controller.setLevel(level) == .accepted) == capabilities.auto)
         return .init(show: show, facts: facts, sink: sink, scheduler: scheduler)
     }
     private func context(_ r: Rig) -> DirectorCutExecution.ContextProvider {
@@ -121,6 +122,25 @@ import Testing
         r.show.director.configureAutomaticCuts(configuration(), context: context(r))
         r.show.director.evaluateAutomaticCuts()
         #expect(r.scheduler.callbacks.isEmpty && r.show.programChannel == .a && r.sink.sent == 0)
+    }
+
+    /// C-04: the same rig that cuts below, in a build that may only watch.
+    @Test func aShadowOnlyBuildRefusesEveryLevelAndNeverCuts() throws {
+        let r = rig(capabilities: .shadowOnly); configure(r); try prepare(r)
+        let director = r.show.director
+        for level in [NextShotStatus.DirectorSection.Level.assist, .auto, .backup] {
+            #expect(director.setLevel(level) != .accepted)
+        }
+        _ = director.handToAlfie()
+        #expect(director.authority.level == .off && !director.authority.mayIssueTake(at: r.facts.now))
+        #expect(director.directorSection.level == .manual)
+        director.evaluateAutomaticCuts()
+        #expect(director.cutExecution.pending == nil && r.scheduler.callbacks.isEmpty)
+        #expect(director.issueTakePermit(now: r.facts.now, validity: 10) == nil)
+        r.facts.now = 1002; try prepare(r)
+        director.evaluateAutomaticCuts()
+        #expect(r.show.take(origin: .director) == .rejected(.directorNotAuthorized))
+        #expect(r.show.programChannel == .a && r.sink.sent == 0)
     }
 
     @Test func deadlineReevaluatesAndCutsOnceThroughTheExistingTake() throws {

@@ -56,7 +56,7 @@ struct AutoPanMotionSweepTests {
     /// Run 150 s at 50 Hz with travel 0.5. A transit runs from leaving one
     /// end to arriving at the other; a dwell from arriving to leaving.
     private func sweep(_ speed: ShotComposer.Config.AutoPanSpeed, eased: Bool) -> Sweep {
-        let manager = CameraManager()
+        let manager = TestHardware.makeCamera()
         manager.shotComposer.config.autoPanSpeed = speed.rawValue
         manager.autoPanEasing = eased
         let width: CGFloat = 0.5
@@ -124,7 +124,7 @@ struct AutoPanMotionSweepTests {
     }
 
     @Test func phaseIsKeptAcrossAWidthChangeAndZeroTravelHolds() {
-        let manager = CameraManager()
+        let manager = TestHardware.makeCamera()
         manager.autoPanEasing = true
         _ = manager.advanceAutoPan(now: 100, width: 0.5)
         let before = manager.advanceAutoPan(now: 100.02, width: 0.5)

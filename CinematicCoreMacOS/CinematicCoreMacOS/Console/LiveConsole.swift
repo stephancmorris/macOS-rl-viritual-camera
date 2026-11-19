@@ -170,6 +170,7 @@ final class LiveConsoleModel: ObservableObject, ConsoleActions {
     }
 
     func refresh() {
+        show.refreshWorldModel()
         updateRates()
         measurePairIfUnmeasured()
         logConsoleStatsIfDue()
@@ -184,6 +185,8 @@ final class LiveConsoleModel: ObservableObject, ConsoleActions {
         let nextDirector = directorStatusEnabled ? readDirectorSection() : nil
         if nextDirector != directorSection { directorSection = nextDirector }
         directorControls.sample(nextDirector)
+        // A pending "which one?" is cancelled once roles or revisions change.
+        if DeveloperFlags.typedCommands { show.typedCommands.refresh() }
     }
 
     /// Badges reflect accepted current preparation; status and level alone
@@ -383,6 +386,9 @@ struct LiveMultiviewConsole: View {
         }
         view.panePicture = { [model] pane in AnyView(LivePanePicture.make(pane: pane, show: model.show, subjectPick: model.directorSection?.subjectPicks[pane.channel ?? .a], controls: model.directorControls)) }
         view.headerTrailing = AnyView(LiveConsoleHeader(model: model))
+        if DeveloperFlags.typedCommands {
+            view.commandField = AnyView(TypedCommandField(controller: model.show.typedCommands))
+        }
         if model.directorSection != nil {
             view.directorControls = AnyView(LiveDirectorControlBar(controller: model.directorControls))
         }
@@ -443,10 +449,11 @@ struct LivePanePicture: View {
         if pane.paneView == .source {
             CameraPreviewView(
                 pixelBuffer: channel.currentFrameBuffer,
+                pixelBufferSource: { [weak channel] in channel?.currentFrameBuffer },
                 detectedPersons: channel.personDetector.displayedPersons,
                 showDetections: true,
                 activeTargetID: channel.shotComposer.activeTargetID,
-                manualLockedTargetID: channel.manualLockedTargetID,
+                manualLockedTargetID: channel.subjectTrackID,
                 acquiringTargetID: channel.shotComposer.acquiringTargetID,
                 trackedSubjectRect: channel.shotComposer.displayedTrackedBounds,
                 onTapPoint: tapHandler,
@@ -460,7 +467,7 @@ struct LivePanePicture: View {
                 onSubjectOverride: { request in controls?.overrideSubject(request) ?? .refused("Subject selection is unavailable") })
         } else {
             // Rendered output only — never the raw capture buffer.
-            PixelBufferPreviewView(pixelBuffer: channel.croppedFrameBuffer, aspectFill: true)
+            SampledPixelBufferView(source: { [weak channel] in channel?.croppedFrameBuffer }, aspectFill: true)
         }
     }
 

@@ -19,6 +19,8 @@ final class DirectorShadowRecorder {
         let adapter: DirectorEvidenceAdapter.Parameters
         let judgeMaximumAge: Double?
         let minimumProbability: Double?
+        /// Stage 7: the second rule judge's values, when it ran.
+        var judgeTwo: DirectorJudgeTwo.Parameters? = nil
     }
     struct Evaluation {
         let now: TimeInterval
@@ -32,6 +34,8 @@ final class DirectorShadowRecorder {
         let cutReadiness: DirectorReadiness?
         let timeline: DirectorShotPolicy.Timeline?
         var cutJudgeObservation: CutPolicy.JudgeObservation? = nil
+        /// Stage 7: the evaluated input's people, as counts and a rank.
+        var people: DirectorScene.People? = nil
     }
     /// In-memory origin of one synchronous Stop attempt. It is never encoded
     /// and cannot be reused as evidence that a retired source is still running.
@@ -257,7 +261,8 @@ final class DirectorShadowRecorder {
             parameters = .init(status: .available, parametersVersion: .init(supplied.binding.parametersVersion),
                 preferencesVersion: validPreferences.version, resolvedStyle: .init(supplied.style),
                 readiness: .init(supplied.readiness), adapter: .init(supplied.adapter),
-                judgeMaximumAge: supplied.judgeMaximumAge, minimumProbability: supplied.minimumProbability)
+                judgeMaximumAge: supplied.judgeMaximumAge, minimumProbability: supplied.minimumProbability,
+                peopleFitSpan: supplied.judgeTwo?.peopleFitSpan, peopleMaximumAge: supplied.judgeTwo?.peopleMaximumAge)
         } else {
             parameters = .init(status: judgeObservation != nil ? .available : (preferences != nil && validPreferences == nil ? .invalid : .unavailable),
                 parametersVersion: judgeObservation.map { .init($0.parametersVersion) }, preferencesVersion: validPreferences?.version,
@@ -284,6 +289,11 @@ final class DirectorShadowRecorder {
                 framingSettledFor: evaluation.readinessInputs?.framingSettledFor,
                 prepareReadiness: evaluation.prepareReadiness, cutReadiness: evaluation.cutReadiness,
                 revisions: evaluation.revisions, measurements: &measurements))
+            if let people = evaluation.people, people.count >= 0 {
+                evidenceSummaries[0].peopleCount = people.count
+                evidenceSummaries[0].peopleCoverage = .init(people.coverage)
+                evidenceSummaries[0].subjectRank = people.subjectRank.flatMap { (0..<people.count).contains($0) ? $0 : nil }
+            }
         }
         var judgements: [R.JudgementSummary] = []
         var scorerInputs: [R.ScorerInput]?
@@ -369,34 +379,61 @@ final class DirectorShadowRecorder {
             reasons: [.init(domain: .observation, code: .cutPolicyUnavailable)], actionID: nil, action: nil,
             phase: nil, targetScope: nil, outcome: nil, programAfter: nil, previewAfter: nil)
     }
+    /// Decision core, stage 3: there is no Preview to cut to.
+    static var noPreviewCut: R.Event {
+        .init(kind: .abstention, decisionID: .init(UUID()), target: nil, shot: nil, reason: nil,
+            proposalID: nil, requestID: nil, proposalCreatedAt: nil, judgementIndex: nil, stage: .cut,
+            reasons: [.init(domain: .policy, code: .noPreview)], actionID: nil, action: nil,
+            phase: nil, targetScope: nil, outcome: nil, programAfter: nil, previewAfter: nil)
+    }
     static func preparation(_ request: DirectorPreparation.Request) -> R.Event {
+        // The policy's own reason text; "subject evidence" for every existing caller.
         .init(kind: .wouldPrepare, decisionID: .init(UUID()), target: alias(request.intent.target),
-            shot: .init(request.intent.shot), reason: .init(domain: .selection, code: .subjectEvidence),
+            shot: .init(request.intent.shot), reason: .selection(request.intent.reason),
             proposalID: .init(request.intent.id), requestID: .init(request.id), proposalCreatedAt: request.intent.createdAt,
             judgementIndex: nil, stage: nil, reasons: nil, actionID: nil, action: nil, phase: nil,
             targetScope: nil, outcome: nil, programAfter: nil, previewAfter: nil)
     }
     static func cut(_ decision: CutPolicy.Decision) -> R.Event {
-        if case .cut(let plan) = decision {
-            // Schema 1/2 has no exact vocabulary for preferredLength,
-            // programUncertain or wideDue. Preserve the decision without relabelling its reason.
+        let reason: R.Reason
+        switch decision {
+        case .cut(let plan):
+            // Schema 3: the cut's own timing reason (preferred length, Program uncertain, wide due).
             return .init(kind: .wouldCut, decisionID: .init(UUID()), target: alias(plan.preview),
-                shot: .init(plan.candidate.shot), reason: .init(domain: .observation, code: .unclassified),
+                shot: .init(plan.candidate.shot), reason: DirectorReason(plan.reason).record,
                 proposalID: nil, requestID: nil, proposalCreatedAt: nil, judgementIndex: nil, stage: nil,
                 reasons: nil, actionID: nil, action: nil, phase: nil, targetScope: nil, outcome: nil,
                 programAfter: nil, previewAfter: nil)
-        }
-        let reason: R.Reason
-        switch decision {
-        case .abstain(.invalidInput): reason = .init(domain: .policy, code: .invalidInput)
-        case .abstain(.minimumDwell): reason = .init(domain: .policy, code: .minimumDuration)
-        default: reason = .init(domain: .observation, code: .unclassified)
+        case .abstain(let abstention): reason = DirectorReason(abstention).record
         }
         return .init(kind: .abstention, decisionID: .init(UUID()), target: nil, shot: nil, reason: nil,
             proposalID: nil, requestID: nil, proposalCreatedAt: nil, judgementIndex: nil, stage: .cut,
             reasons: [reason], actionID: nil, action: nil, phase: nil, targetScope: nil, outcome: nil,
             programAfter: nil, previewAfter: nil)
     }
+    /// Why the prepare rules chose nothing, with one code per cause (stage 4).
+    static func preparationAbstention(_ abstention: DirectorShotPolicy.AssistAbstention) -> R.Event {
+        .init(kind: .abstention, decisionID: .init(UUID()), target: nil, shot: nil, reason: nil,
+            proposalID: nil, requestID: nil, proposalCreatedAt: nil, judgementIndex: nil, stage: .prepare,
+            reasons: DirectorReason.reasons(abstention).map(\.record), actionID: nil, action: nil, phase: nil,
+            targetScope: nil, outcome: nil, programAfter: nil, previewAfter: nil)
+    }
+
+    /// The evidence class every current input shares, or nil when one has no
+    /// source or they differ. A record is only written when this exists.
+    func evidenceClass(of show: ShowCoordinator) -> R.EvidenceClass? {
+        let channels = ChannelID.allCases.compactMap { show.channel($0) }
+        var kinds = channels.compactMap { Self.sourceKind($0) }
+        #if DEBUG
+        if let override = provenanceForTesting { kinds = override }
+        #endif
+        guard kinds.count == channels.count, let kind = kinds.first, kinds.allSatisfy({ $0 == kind }) else { return nil }
+        return kind
+    }
+
+    /// The newest parameters version written in this session.
+    var latestParametersVersion: UInt64? { latestParameters?.parametersVersion?.value }
+
     private nonisolated static func alias(_ id: ChannelID) -> String {
         "input-\((ChannelID.allCases.firstIndex(of: id) ?? 0) + 1)"
     }
@@ -429,4 +466,14 @@ final class DirectorShadowRecorder {
             targetScope: target == nil ? .session : .channel, outcome: outcome, programAfter: nil, previewAfter: nil)
     }
 
+}
+
+nonisolated extension DirectorShadowRecord.PeopleCoverage {
+    init(_ coverage: WorldModel.Coverage) {
+        switch coverage {
+        case .none: self = .none
+        case .region: self = .region
+        case .fullFrame: self = .fullFrame
+        }
+    }
 }

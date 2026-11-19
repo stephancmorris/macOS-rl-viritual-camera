@@ -5,7 +5,7 @@ import Testing
 /// channel; each one reports what the channel already knows.
 @MainActor struct DirectorEvidenceReadingsTests {
     private func manager() -> CameraManager {
-        CameraManager(channelID: .b, programOutput: ProgramOutputManager(sinks: []), routed: false)
+        TestHardware.makeCamera(channelID: .b, programOutput: ProgramOutputManager(sinks: []), routed: false)
     }
 
     @Test func freshChannelReportsNothingKnown() {

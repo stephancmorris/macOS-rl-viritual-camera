@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""C-05: local metadata-only schema-1/2 JSONL analysis. No authority or I/O to the app."""
+"""C-05: local metadata-only schema-1/2/3 JSONL analysis. No authority or I/O to the app."""
 import argparse
 from collections import Counter, defaultdict, deque
 from datetime import datetime, timedelta
@@ -30,6 +30,33 @@ REASONS = {
     'observation': 'parametersUnavailable parametersInvalid judgementStale cutPolicyUnavailable unclassified',
     'authorityRefusal': 'notQualified prerequisites paused exhausted',
 }
+# Schema 3 (decision core, stage 4): one code per Director cause. Schema 1/2
+# records keep the original vocabulary above and refuse these.
+REASONS_V3 = {
+    'policy': 'previewIsSafeWide alreadyPrepared noCutDue presetUnavailable',
+    'judge': 'judgeDeclined',
+    'readiness': 'operatorAdjusting learningSubject recoveringSubject previewNotReady',
+    'selection': 'preferredLength programUncertain wideDue',
+    'authorityRefusal': 'takeNotAllowed',
+    'speech': 'noWakePrefix unrecognized subjectNotLocked lowConfidence duplicateUtterance cancelledByManualCommand targetUnavailable missingUtteranceStart invalidToken muted stopped sessionChanged roleChanged targetRebound sourceChanged expired cancelledByWide cancelledByTake cancelledByMute',
+    'worldModel': 'notAssigned sourceMissing notObserved partialView stale ambiguous nobody noLecternZone',
+}
+
+
+# Schema 4 (decision core, stage 7): the second rule judge's reasons.
+REASONS_V4 = {
+    'judge': 'peopleFit peopleUnknown',
+    'policy': 'segmentPrefersWide segmentHolds',
+}
+
+
+def reason_codes(domain, version):
+    codes = REASONS.get(domain, '').split()
+    if version >= 3:
+        codes += REASONS_V3.get(domain, '').split()
+    if version >= 4:
+        codes += REASONS_V4.get(domain, '').split()
+    return codes
 PAYLOAD = {
     'wouldPrepare': 'decisionID target shot reason proposalID requestID proposalCreatedAt judgementIndex',
     'wouldCut': 'decisionID target shot reason judgementIndex',
@@ -131,6 +158,17 @@ def semantic(record):
     if p.get('readiness'):
         s = p['readiness']
         require(s['minimumCutSettledTime'] >= s['minimumSettledTime'] and s['maximumCutMotion'] <= s['maximumMotion'])
+    # Schema 4: the second rule judge's values come as a pair; people are
+    # counts, coverage and a rank, never boxes; none of it before schema 4.
+    require((p.get('peopleFitSpan') is None) == (p.get('peopleMaximumAge') is None))
+    require(p.get('peopleFitSpan') is None or p['peopleFitSpan'] > 0)
+    for v in record['evidence']:
+        require((v.get('peopleCount') is None) == (v.get('peopleCoverage') is None))
+        require(v.get('peopleCount') is None or v['peopleCount'] >= 0)
+        require(v.get('subjectRank') is None or (v.get('peopleCount') is not None and 0 <= v['subjectRank'] < v['peopleCount']))
+    if record['schemaVersion'] < 4:
+        require(p.get('peopleFitSpan') is None and p.get('peopleMaximumAge') is None)
+        require(all(v.get(k) is None for v in record['evidence'] for k in ('peopleCount', 'peopleCoverage', 'subjectRank')))
     require(len({v['channel'] for v in record['evidence']}) == len(record['evidence']))
     diagnostic = p['status'] == 'invalid' and e['kind'] in ('abstention', 'operatorAction')
     for i, v in enumerate(record['evidence']):
@@ -172,7 +210,7 @@ def semantic(record):
     def traverse(v):
         if isinstance(v, dict):
             if set(v) == {'domain', 'code'}:
-                require(v['code'] in REASONS[v['domain']].split())
+                require(v['code'] in reason_codes(v['domain'], record['schemaVersion']))
             for child in v.values():
                 traverse(child)
         elif isinstance(v, list):
@@ -233,11 +271,11 @@ DIRECTOR_SHOTS = (('stage', 'wide'), ('stage', 'fullBody'), ('stage', 'waistUp')
 
 
 def validate_scorer_inputs(record):
-    """Schema 2 captures actual vectors; it cannot reconstruct missing history."""
+    """Schema 2 and later capture actual vectors; they cannot reconstruct missing history."""
     captured = record.get('scorerInputs')
     if captured is None:
         return
-    require(record['schemaVersion'] == 2 and bool(captured))
+    require(record['schemaVersion'] >= 2 and bool(captured))
     keys = [(item['judgementIndex'], item['candidateRank']) for item in captured]
     require(keys == sorted(set(keys)))
     groups = defaultdict(list)

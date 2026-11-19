@@ -11,7 +11,7 @@ struct LiveDirectorControlBar<Controller: DirectorConsoleControlling & Observabl
     var body: some View {
         HStack(spacing: 12) {
             Picker("Alfie", selection: Binding(get: { section.level }, set: { show(controller.setLevel($0)) })) {
-                ForEach(NextShotStatus.DirectorSection.Level.allCases, id: \.self) { level in
+                ForEach(NextShotStatus.DirectorSection.Level.selectable(), id: \.self) { level in
                     Text(level.title + (section.canSelect(level) ? "" : " · not qualified"))
                         .tag(level).disabled(!section.canSelect(level))
                 }

@@ -19,6 +19,9 @@ MAX_BYTES = 8 * 1024 * 1024
 MAX_RUNS = 1000
 
 
+SCHEMA_4_PARAMETER_KEYS = {'peopleFitSpan', 'peopleMaximumAge'}
+
+
 def require(condition):
     if not condition:
         raise ValueError('invalid evaluation metadata')
@@ -140,7 +143,10 @@ def validate_evaluation(value):
             require(all(last < start or first > end for start, end in spans))
             spans.append((first, last))
             context = binding['parameterContext']
-            exact(context, shadow.SCHEMA['objects']['ParameterContext'])
+            # Schema 4 added the second rule judge's two optional values; a
+            # sidecar written before it carries every other key.
+            keys = set(shadow.SCHEMA['objects']['ParameterContext'])
+            require(type(context) is dict and keys - SCHEMA_4_PARAMETER_KEYS <= set(context) <= keys)
             shadow.validate(context, 'ParameterContext')
             require(context['parametersVersion'] == binding['parameterVersion'])
             generations = binding['routeGenerations']
@@ -309,7 +315,7 @@ def summarize_shadow_phases(path, window, bindings):
         models = {(j['judgeKind'], j.get('modelVersion')) for r in rows for j in r['judgements']}
         require(models == {(binding['judgeKind'], binding['modelVersion'])} if models else
                 binding['judgeKind'] == 'unobserved' and binding['modelVersion'] is None)
-        require(all(canonical_parameter_context(r['parameters']) == binding['parameterContext'] for r in rows))
+        require(all(canonical_parameter_context(r['parameters']) == canonical_parameter_context(binding['parameterContext']) for r in rows))
         require(sorted({r['context']['routeGeneration'] for r in rows}, key=int) == binding['routeGenerations'])
         for record in rows:
             require(record['recordID'] not in assignments)

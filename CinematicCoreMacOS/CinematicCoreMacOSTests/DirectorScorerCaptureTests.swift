@@ -38,7 +38,7 @@ import Testing
             let clock = Clock(); clock.now = 100 + Double(session * 100)
             let log = try DirectorShadowLog(directory: directory, limits: .init(maximumRecordBytes: 16384,
                 maximumQueuedBytes: 65536, maximumFileBytes: 131072, maximumStoreBytes: 524288), utcClock: { utc })
-            let show = ShowCoordinator(programOutput: ProgramOutputManager(sinks: []),
+            let show = TestHardware.makeShow(programOutput: ProgramOutputManager(sinks: []),
                 qualificationRecords: DirectorQualificationStore(storage: nil, acceptsInjectedRecords: false))
             show.clock = { clock.now }; show.channelA.setRunningForTesting(true); show.addChannel(.b).setRunningForTesting(true)
             let controller = DirectorController(show: show, ticker: Ticker(), clock: { clock.now }, shadowLog: log, log: { _ in })
@@ -63,7 +63,7 @@ import Testing
         let log = try #require(lastLog)
         let selection = DirectorShadowExportSelection(sessionIDs: Set(sessions), fromUTC: utc, throughUTC: utc)
         let exported = try await log.export(selection: selection, toNewBundle: destination.appendingPathComponent("bundle"))
-        #expect(exported.manifest.recordSchemaVersions == [2] && exported.manifest.recordCount == 12)
+        #expect(exported.manifest.recordSchemaVersions == [4] && exported.manifest.recordCount == 12)
         let bytes = try Data(contentsOf: destination.appendingPathComponent("bundle/records.jsonl"))
         let records = try bytes.split(separator: 10).map { try JSONDecoder().decode(DirectorShadowRecord.self, from: Data($0)) }
         #expect(records.count == 12 && records.allSatisfy { $0.evidenceClass == .synthetic })
@@ -93,7 +93,7 @@ import Testing
             var inputs = try #require(row["scorerInputs"] as? [[String: Any]])
             var values = try #require(inputs[0]["features"] as? [Double])
             switch change {
-            case "version": row["schemaVersion"] = 3
+            case "version": row["schemaVersion"] = 5
             case "v1Null": row["schemaVersion"] = 1; row["scorerInputs"] = NSNull()
             case "unknown": inputs[0]["personName"] = "PRIVATE-SENTINEL"
             case "featureVersion": inputs[0]["featureSchemaVersion"] = 2

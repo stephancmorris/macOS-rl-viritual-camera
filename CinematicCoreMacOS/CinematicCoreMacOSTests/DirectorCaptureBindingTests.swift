@@ -36,7 +36,7 @@ import Testing
         let utc = try #require(DirectorShadowExportManifest.utcDate("2026-10-22T00:00:00.000Z"))
         let log = try DirectorShadowLog(directory: directory, limits: .init(maximumRecordBytes: 16384,
             maximumQueuedBytes: 262144, maximumFileBytes: 262144, maximumStoreBytes: 524288), utcClock: { utc })
-        let show = ShowCoordinator(programOutput: ProgramOutputManager(sinks: []),
+        let show = TestHardware.makeShow(programOutput: ProgramOutputManager(sinks: []),
             qualificationRecords: DirectorQualificationStore(storage: nil, acceptsInjectedRecords: false))
         show.clock = { 100 }; show.router.clock = { 100 }
         show.addChannel(.b)

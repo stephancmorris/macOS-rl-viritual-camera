@@ -56,6 +56,20 @@ nonisolated enum CutPolicy {
         return nil
     }
 
+    private static func inputsValid(timeline: DirectorShotPolicy.Timeline, prepared: DirectorShotPolicy.Candidate,
+                                    style: DirectorStyle, judgeMaximumAge: TimeInterval,
+                                    minimumProbability: Double?) -> Bool {
+        let now = timeline.now
+        return (try? style.validated()) != nil && now.isFinite && now >= 0 &&
+            timeline.programStartedAt.isFinite && timeline.programStartedAt >= 0 &&
+            timeline.programStartedAt <= now && timeline.lastWideAt.isFinite && timeline.lastWideAt >= 0 &&
+            timeline.lastWideAt <= now && timeline.history.allSatisfy({ $0.endedAt.isFinite && $0.endedAt >= 0 && $0.endedAt <= now }) &&
+            judgeMaximumAge.isFinite && judgeMaximumAge >= 0 &&
+            (minimumProbability.map({ $0.isFinite && (0...1).contains($0) }) ?? true) &&
+            prepared.isWide == prepared.shot.isWide && prepared.subjectConfidence.isFinite &&
+            (0...1).contains(prepared.subjectConfidence) && prepared.movement.isFinite && prepared.movement >= 0
+    }
+
     /// Only the actual prepared Preview shot is a candidate for this cut.
     static func evaluate(live: DirectorTakeState, timeline: DirectorShotPolicy.Timeline,
                          prepared: DirectorShotPolicy.Candidate, programIdentity: IdentityEvidence,
@@ -63,16 +77,28 @@ nonisolated enum CutPolicy {
                          judgeMaximumAge: TimeInterval, minimumProbability: Double?,
                          observeJudge: ((JudgeObservation) -> Void)? = nil) -> Decision {
         let now = timeline.now
-        guard (try? style.validated()) != nil, now.isFinite, now >= 0,
-              timeline.programStartedAt.isFinite, timeline.programStartedAt >= 0,
-              timeline.programStartedAt <= now, timeline.lastWideAt.isFinite, timeline.lastWideAt >= 0,
-              timeline.lastWideAt <= now, timeline.history.allSatisfy({ $0.endedAt.isFinite && $0.endedAt >= 0 && $0.endedAt <= now }),
-              judgeMaximumAge.isFinite, judgeMaximumAge >= 0,
-              minimumProbability.map({ $0.isFinite && (0...1).contains($0) }) ?? true,
-              prepared.isWide == prepared.shot.isWide, prepared.subjectConfidence.isFinite,
-              (0...1).contains(prepared.subjectConfidence), prepared.movement.isFinite, prepared.movement >= 0 else { return .abstain(.invalidInput) }
+        guard inputsValid(timeline: timeline, prepared: prepared, style: style, judgeMaximumAge: judgeMaximumAge,
+                          minimumProbability: minimumProbability) else { return .abstain(.invalidInput) }
         guard live.world.authority.mayIssueTake(at: now), live.prerequisites.satisfied,
               live.prerequisites.qualifiedLevels.contains(live.world.authority.level) else { return .abstain(.authority) }
+        return editorialDecision(live: live, timeline: timeline, prepared: prepared, programIdentity: programIdentity,
+            style: style, evidenceRevision: evidenceRevision, judge: judge, judgeMaximumAge: judgeMaximumAge,
+            minimumProbability: minimumProbability, observeJudge: observeJudge)
+    }
+
+    /// The cut decision without the authority guard: whether a cut to the
+    /// prepared shot is due now on its own merits. The shadow judge asks this
+    /// in Manual, where authority always refuses. It grants nothing: a Take
+    /// still needs `evaluate`, a fresh permit and the existing notice path.
+    /// It repeats the input checks, so it is safe to call on its own.
+    static func editorialDecision(live: DirectorTakeState, timeline: DirectorShotPolicy.Timeline,
+                                  prepared: DirectorShotPolicy.Candidate, programIdentity: IdentityEvidence,
+                                  style: DirectorStyle, evidenceRevision: UInt64, judge: any DirectorJudge,
+                                  judgeMaximumAge: TimeInterval, minimumProbability: Double?,
+                                  observeJudge: ((JudgeObservation) -> Void)? = nil) -> Decision {
+        let now = timeline.now
+        guard inputsValid(timeline: timeline, prepared: prepared, style: style, judgeMaximumAge: judgeMaximumAge,
+                          minimumProbability: minimumProbability) else { return .abstain(.invalidInput) }
         guard let preview = live.world.preview, preview != live.world.program,
               prepared.channel == preview, let revisions = live.world.revisions,
               !live.world.sourceMissing, live.world.evidenceAvailable,

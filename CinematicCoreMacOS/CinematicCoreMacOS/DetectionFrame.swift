@@ -12,12 +12,19 @@ struct DetectionFrame {
     let persons: [PersonDetector.DetectedPerson]
     let queueWait: TimeInterval
     let detectionDuration: TimeInterval
+    /// How much of the frame this scan covered (world model, C-01).
+    var coverage: WorldModel.Coverage = .none
 }
 
 /// Bounded latest-result mailbox, isolated with its producer/consumer on MainActor.
 @MainActor
 final class DetectionFrameStore {
-    private(set) var generation: UInt64 = 0
+    private(set) var generation: UInt64 = 0 {
+        didSet { generationObserver?(generation) }
+    }
+    /// Told of every generation change, so the frame loop can read it off the
+    /// main thread.
+    var generationObserver: ((UInt64) -> Void)?
     private(set) var latest: DetectionFrame?
     private var sequence: UInt64 = 0
     private var consumedID: UInt64?

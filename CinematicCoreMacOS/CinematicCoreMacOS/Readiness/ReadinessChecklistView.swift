@@ -11,6 +11,7 @@ struct ReadinessChecklistView: View {
     var focusRequest = 0
     var actionError: String?
     var onAction: (ReadinessModel.Action) -> Void
+    var onFocusChange: (Bool) -> Void = { _ in }
     @FocusState private var keyboardRow: String?
     @AccessibilityFocusState private var spokenRow: String?
     private let display = AlfieDisplay()
@@ -41,6 +42,8 @@ struct ReadinessChecklistView: View {
             .frame(maxWidth: 650, alignment: .leading)
             .background(AlfieColor.card, in: RoundedRectangle(cornerRadius: 12))
             .overlay(RoundedRectangle(cornerRadius: 12).strokeBorder(AlfieColor.border, lineWidth: display.outlineWidth))
+            .onChange(of: keyboardRow) { _, _ in reportFocus() }
+            .onChange(of: spokenRow) { _, _ in reportFocus() }
             .onChange(of: focusRequest) { _, _ in focusBlocker() }
             .onChange(of: readiness.rows) { previous, next in
                 guard !readiness.canStart else { return }
@@ -90,6 +93,12 @@ struct ReadinessChecklistView: View {
         guard let row = readiness.blockingRow else { return nil }
         let copy = ReadinessRowPresentation(row: row, inputs: inputs, requestingPermission: requestingPermission)
         return "Not ready to start. \(copy.blockingInstruction)"
+    }
+
+    private func reportFocus() {
+        // Preserve the prior focus until the parent handles the ready
+        // transition; disappearing rows may clear native focus first.
+        if !readiness.canStart { onFocusChange(keyboardRow != nil || spokenRow != nil) }
     }
 
     private func focusBlocker() {

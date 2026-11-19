@@ -127,11 +127,13 @@ struct ContentView: View {
                 CropPreviewView(
                     originalFrame: cameraManager.currentFrameBuffer,
                     croppedFrame: cameraManager.croppedFrameBuffer,
+                    originalFrameSource: { [weak cameraManager] in cameraManager?.currentFrameBuffer },
+                    croppedFrameSource: { [weak cameraManager] in cameraManager?.croppedFrameBuffer },
                     detectedPersons: cameraManager.personDetector.displayedPersons,
                     showDetections: true,
                     cropRect: cameraManager.activeMode != .wide ? cameraManager.cropEngine?.displayedCrop : nil,
                     activeTargetID: cameraManager.shotComposer.activeTargetID,
-                    manualLockedTargetID: cameraManager.manualLockedTargetID,
+                    manualLockedTargetID: cameraManager.subjectTrackID,
                     acquiringTargetID: cameraManager.shotComposer.acquiringTargetID,
                     trackedSubjectRect: cameraManager.shotComposer.displayedTrackedBounds,
                     isRecovering: cameraManager.recoveryState.isRecovering,
@@ -140,7 +142,8 @@ struct ContentView: View {
                     framingTitle: cameraManager.framingTitle,
                     onSelectPerson: nil,
                     onTapPoint: tapPointHandler,
-                    onHoldPoint: holdPointHandler
+                    onHoldPoint: holdPointHandler,
+                    tracking: cameraManager.trackingPresentation
                 )
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
                 // Live video and what floats on it stay dark in every
@@ -150,17 +153,8 @@ struct ContentView: View {
                 // Show setup (SHOW-SETUP) replaces the stopped screen in
                 // Multi Cam. Channel A starts through startCamera() so
                 // extension preflight is unchanged.
-                ScrollView {
-                    VStack(spacing: 18) {
-                        ReadinessChecklistView(readiness: readiness.readiness, inputs: readiness.inputs,
-                            requestingPermission: requestingPermission, showsRefusal: readinessRefused,
-                            focusRequest: readinessFocusRequest, actionError: readinessActionError,
-                            onAction: performReadinessAction)
-                            .padding(.top, 64)
-                        LiveShowSetup(show: show, startChannelA: { await startCamera() })
-                    }
-                }
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                LiveShowSetup(show: show, startChannelA: { await startCamera() })
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
             } else {
                 StoppedScreen(
                     operatorModes: operatorModes,
@@ -212,6 +206,13 @@ struct ContentView: View {
                     ProgramOnAirBadgeAnchor()
                         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
                         .allowsHitTesting(false)
+
+                    // J5: the Alfie camera's use status and the one-time
+                    // meeting-app note, under the identity stack.
+                    WebcamCallOverlay(cameraManager: cameraManager)
+                        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+                        .padding(.leading, 24)
+                        .padding(.top, 124)
 
                     OperatorPill(cameraManager: cameraManager)
                     .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottom)
@@ -267,7 +268,11 @@ struct ContentView: View {
                 elapsedSeconds = 0
             }
         }
-        .onChange(of: operatorModes.mode) { _, _ in Task { await stoppedPreview.stop() } }
+        .onChange(of: operatorModes.mode) { _, mode in
+            Task { await stoppedPreview.stop() }
+            // A stopped Webcam session's override must not outlive the mode.
+            if mode != .webcam, !cameraManager.isRunning { cameraManager.programOutput.startRouteOverride = nil }
+        }
         .onChange(of: cameraManager.selectedCamera?.uniqueID) { _, _ in Task { await stoppedPreview.stop() } }
         .onDisappear { Task { await stoppedPreview.stop() } }
         .onChange(of: cameraManager.error != nil) { _, hasError in
@@ -341,7 +346,17 @@ struct ContentView: View {
         readinessRefused = false
         if prepareNewShow { show?.prepareForNewShow() }
         OperatorAnnouncement.say("Starting session.")
+        Self.applyStartRoute(mode: operatorModes.mode, output: cameraManager.programOutput)
         cameraManager.dispatch(command)
+    }
+
+    /// Webcam always sends to Alfie camera, including when a stage session
+    /// saved Direct or Rehearsal. It overrides the route for this start only:
+    /// the saved preference, which Settings and the Multi Cam setup show and
+    /// write, is left alone. Every other mode clears the override. Called
+    /// only after the stopped Start gate.
+    static func applyStartRoute(mode: OperatorMode, output: ProgramOutputManager) {
+        output.startRouteOverride = mode == .webcam ? .virtualCamera : nil
     }
 
     private func toggleStoppedPreview() {

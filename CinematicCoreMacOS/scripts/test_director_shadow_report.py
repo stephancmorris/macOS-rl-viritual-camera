@@ -552,7 +552,7 @@ class ShadowReportTests(unittest.TestCase):
             self.assertFalse(data['dwell'])
 
     def test_unknown_schema_keys_malformed_numbers_and_private_payloads_are_rejected(self):
-        changes = [lambda r: r['event'].update(phase=None), lambda r: r.update(schemaVersion=3), lambda r: r.update(frame='PRIVATE_FRAME'),
+        changes = [lambda r: r['event'].update(phase=None), lambda r: r.update(schemaVersion=5), lambda r: r.update(frame='PRIVATE_FRAME'),
                    lambda r: r['context'].update(name='PRIVATE_NAME'),
                    lambda r: r.update(eventTime=float('nan')),
                    lambda r: r['event']['shot'].update(format='webcam'),
@@ -1030,6 +1030,65 @@ class ScorerInputSchemaTests(unittest.TestCase):
         manifest['recordSchemaVersions'] = [1, 2, 3]
         with self.assertRaises(ValueError):
             report.validate_export_manifest(manifest, rows)
+
+
+class SchemaThreeReasonTests(unittest.TestCase):
+    """Decision core, stage 4: schema 3 adds one code per Director cause."""
+    @staticmethod
+    def accepts(row):
+        rows, issues = report.load_records(io.BytesIO((json.dumps(row) + '\n').encode()))
+        return len(rows) == 1 and not issues
+
+    def test_new_codes_are_accepted_in_schema_3_only(self):
+        cut = record(0, 10, dict(prediction(), reason={'domain': 'selection', 'code': 'preferredLength'}))
+        learning = record(0, 10, {'kind': 'abstention', 'decisionID': token('learning'), 'stage': 'prepare',
+                                  'reasons': [{'domain': 'readiness', 'code': 'learningSubject'}]})
+        speech = record(0, 10, {'kind': 'abstention', 'decisionID': token('speech'), 'stage': 'validation',
+                                'reasons': [{'domain': 'speech', 'code': 'noWakePrefix'}]})
+        for row in (cut, learning, speech):
+            for version, accepted in ((1, False), (2, False), (3, True)):
+                candidate = copy.deepcopy(row); candidate['schemaVersion'] = version
+                self.assertEqual(self.accepts(candidate), accepted, (version, row['event']))
+
+    def test_version_2_records_still_read_in_schema_3(self):
+        row = record(0, 10, prediction()); row['schemaVersion'] = 2
+        self.assertTrue(self.accepts(row))
+        row['schemaVersion'] = 3
+        self.assertTrue(self.accepts(row))
+
+    def test_a_code_in_the_wrong_domain_is_refused(self):
+        row = record(0, 10, dict(prediction(), reason={'domain': 'speech', 'code': 'preferredLength'}))
+        row['schemaVersion'] = 3
+        self.assertFalse(self.accepts(row))
+
+
+class SchemaFourPeopleTests(unittest.TestCase):
+    """Decision core, stage 7: schema 4 adds people counts, a rank and the
+    second rule judge's reasons and values. None of it is valid before 4."""
+    @staticmethod
+    def accepts(row):
+        rows, issues = report.load_records(io.BytesIO((json.dumps(row) + '\n').encode()))
+        return len(rows) == 1 and not issues
+
+    def test_the_judges_reasons_are_accepted_in_schema_4_only(self):
+        for domain, code in (('judge', 'peopleFit'), ('judge', 'peopleUnknown'),
+                             ('policy', 'segmentPrefersWide'), ('policy', 'segmentHolds')):
+            row = record(0, 10, {'kind': 'abstention', 'decisionID': token(code), 'stage': 'prepare',
+                                 'reasons': [{'domain': domain, 'code': code}]})
+            for version, accepted in ((2, False), (3, False), (4, True)):
+                candidate = copy.deepcopy(row); candidate['schemaVersion'] = version
+                self.assertEqual(self.accepts(candidate), accepted, (version, code))
+
+    def test_judge_values_come_as_a_pair_and_only_in_schema_4(self):
+        row = record(0, 10, prediction()); row['schemaVersion'] = 4
+        row['parameters'].update(peopleFitSpan=1.5, peopleMaximumAge=0.5)
+        self.assertTrue(self.accepts(row))
+        half = copy.deepcopy(row); del half['parameters']['peopleMaximumAge']
+        self.assertFalse(self.accepts(half))
+        bad = copy.deepcopy(row); bad['parameters']['peopleFitSpan'] = 0
+        self.assertFalse(self.accepts(bad))
+        old = copy.deepcopy(row); old['schemaVersion'] = 3
+        self.assertFalse(self.accepts(old))
 
 
 if __name__ == '__main__':

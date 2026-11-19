@@ -40,4 +40,34 @@ import Testing
         let snapshot = inputs(route: .rehearsal, output: .ready)
         #expect(!ContentView.canStart(readiness: ReadinessObserver(readInputs: { snapshot }), requestingPermission: true))
     }
+
+    @Test(arguments: [ProgramOutputManager.Route.display, .rehearsal])
+    func webcamStartOverridesTheRouteWithoutChangingTheSavedPreference(saved: ProgramOutputManager.Route) {
+        let output = ProgramOutputManager(sinks: [])
+        output.preferredRoute = saved
+        ContentView.applyStartRoute(mode: .webcam, output: output)
+        #expect(output.startRoute == .virtualCamera)
+        #expect(output.preferredRoute == saved)
+        #expect(output.activeRoute == nil)
+        ContentView.applyStartRoute(mode: .singleCam, output: output)
+        #expect(output.startRouteOverride == nil)
+        #expect(output.startRoute == saved)
+        #expect(output.preferredRoute == saved)
+    }
+
+    @Test func backgroundReadinessDoesNotStealFocus() {
+        var focus = ReadinessFocusPolicy()
+        let ready1 = focus.becameReady()
+        #expect(!ready1)
+        focus.checklistFocusChanged(true)
+        focus.checklistFocusChanged(false) // operator moved to another control
+        let ready2 = focus.becameReady()
+        #expect(!ready2)
+        focus.checklistFocusChanged(true)
+        let ready3 = focus.becameReady()
+        #expect(ready3)
+        let ready4 = focus.becameReady()
+        #expect(!ready4)
+    }
+
 }

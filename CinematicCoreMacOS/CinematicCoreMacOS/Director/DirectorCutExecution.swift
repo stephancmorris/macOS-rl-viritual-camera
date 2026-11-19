@@ -70,6 +70,8 @@ final class DirectorCutExecution {
 
     private weak var show: ShowCoordinator?
     private weak var controller: DirectorController?
+    /// No controller, no capability: the effect paths fail closed.
+    private var capabilities: DirectorCapabilities { controller?.capabilities ?? .shadowOnly }
     private var configuration: Configuration?
     private var context: ContextProvider?
     private var scheduler: (any DirectorCutDeadlineScheduling)?
@@ -79,6 +81,8 @@ final class DirectorCutExecution {
     private(set) var lastResult: TakeResult?
     var pending: CutNotice.Token? { notice.pending }
     var isConfigured: Bool { configuration != nil }
+    /// Decision core, stage 6: the context comes from the Director's scene.
+    var usesScene = false
     var captureParameters: DirectorShadowRecorder.Parameters? {
         guard let c = configuration else { return nil }
         return captureParameters(c)
@@ -96,6 +100,7 @@ final class DirectorCutExecution {
     func configure(_ configuration: Configuration?, context: ContextProvider?,
                    scheduler: (any DirectorCutDeadlineScheduling)?) {
         retire()
+        usesScene = false
         guard let configuration, configuration.isValid, let context, let scheduler else {
             self.configuration = nil; self.context = nil; self.scheduler = nil
             return
@@ -181,7 +186,7 @@ final class DirectorCutExecution {
         defer {
             if wantsCapture && !captureAccounted { controller?.shadowRecorder?.log.noteDropped() }
         }
-        guard DeveloperFlags.allowDirectorAuto, c.isValid, let controller, controller.isAttached,
+        guard capabilities.auto, c.isValid, let controller, controller.isAttached,
               let show, !show.editLive, now.isFinite, now >= 0,
               let context = context?(now), context.timeline.now == now,
               context.program == show.programChannel,

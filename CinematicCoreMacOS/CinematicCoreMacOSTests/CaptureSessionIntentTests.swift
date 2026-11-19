@@ -86,7 +86,7 @@ private final class CaptureIntentSessionQueue {
 @MainActor
 struct CaptureSessionIntentTests {
     private func manager() -> CameraManager {
-        CameraManager(channelID: .a, programOutput: ProgramOutputManager(sinks: []), routed: false)
+        TestHardware.makeCamera(channelID: .a, programOutput: ProgramOutputManager(sinks: []), routed: false)
     }
 
     private func camera(_ id: String) -> CameraManager.CameraDevice {
@@ -237,7 +237,7 @@ struct CaptureSessionIntentTests {
         let defaults = try #require(UserDefaults(suiteName: "alfie-capture-intent-\(UUID().uuidString)"))
         defaults.set(OperatorMode.multiCam.rawValue, forKey: OperatorModeStore.key)
         let modes = OperatorModeStore(defaults: defaults, multiviewEnabled: true)
-        let show = ShowCoordinator(programOutput: ProgramOutputManager(sinks: []), operatorModes: modes)
+        let show = TestHardware.makeShow(programOutput: ProgramOutputManager(sinks: []), operatorModes: modes)
         show.addChannel(.b)
         let manager = show.channelA, gate = CaptureIntentGate()
         manager.setRunningForTesting(true)

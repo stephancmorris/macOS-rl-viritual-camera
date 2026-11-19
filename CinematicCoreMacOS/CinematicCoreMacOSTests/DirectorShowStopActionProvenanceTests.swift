@@ -24,7 +24,7 @@ import Testing
         let root = FileManager.default.temporaryDirectory.appendingPathComponent("show-stop-provenance-\(UUID())")
         let log = try DirectorShadowLog(directory: root, limits: .init(maximumRecordBytes: 8192,
             maximumQueuedBytes: 262144, maximumFileBytes: 262144, maximumStoreBytes: 524288))
-        let show = ShowCoordinator(programOutput: ProgramOutputManager(sinks: []),
+        let show = TestHardware.makeShow(programOutput: ProgramOutputManager(sinks: []),
             qualificationRecords: DirectorQualificationStore(storage: nil, acceptsInjectedRecords: false))
         show.clock = { 100 }
         if pair { show.addChannel(.b) }
@@ -197,7 +197,7 @@ import Testing
     }
 
     @Test func showStopAvailabilityObservesOnlyAttachedChannelLiveness() {
-        let show = ShowCoordinator(programOutput: ProgramOutputManager(sinks: []))
+        let show = TestHardware.makeShow(programOutput: ProgramOutputManager(sinks: []))
         var changes = 0
         let subscription = show.objectWillChange.sink { changes += 1 }
         defer { subscription.cancel() }

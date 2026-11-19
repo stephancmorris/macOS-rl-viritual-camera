@@ -14,6 +14,8 @@ final class DirectorAssistPreparation {
     }
     private weak var show: ShowCoordinator?
     private weak var controller: DirectorController?
+    /// No controller, no capability: the effect paths fail closed.
+    private var capabilities: DirectorCapabilities { controller?.capabilities ?? .shadowOnly }
     private(set) var preparation = DirectorPreparation()
     private var configuration: Configuration?
     private var tenure: DirectorShotPolicy.PreviewTenure?
@@ -34,7 +36,7 @@ final class DirectorAssistPreparation {
     /// Coordinator ingress only. A delayed completion must use commit and its
     /// captured request; it must never enqueue fresh work on its old behalf.
     func enqueue(_ shot: DirectorShot, configuration c: Configuration) -> DirectorPreparation.Request? {
-        guard DeveloperFlags.allowDirectorAssist, c.readiness.isValid,
+        guard capabilities.assist, c.readiness.isValid,
               c.maximumRequestAge.isFinite, c.maximumRequestAge >= 0,
               let show, let controller, controller.isAttached, let preview = show.previewChannel,
               let channel = show.channel(preview), !show.editLive,
@@ -74,7 +76,7 @@ final class DirectorAssistPreparation {
     /// one MainActor turn. Matching refusal is terminal; no deferred retry.
     func commit(_ request: DirectorPreparation.Request) -> DirectorPreparationEffect {
         guard preparation.request == request, let c = configuration else { return .rejected([.requestReplaced]) }
-        guard DeveloperFlags.allowDirectorAssist, let show, let controller, controller.isAttached else {
+        guard capabilities.assist, let show, let controller, controller.isAttached else {
             preparation.discard(request); return .failed
         }
         let now = show.clock(), current = snapshot(configuration: c, now: now)

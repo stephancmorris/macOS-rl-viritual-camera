@@ -42,7 +42,7 @@ struct SingleCamTests {
     }
 
     private func show(_ mode: OperatorMode, sink: SingleCamFakeSink? = nil) -> ShowCoordinator {
-        ShowCoordinator(
+        TestHardware.makeShow(
             programOutput: ProgramOutputManager(sinks: [sink ?? SingleCamFakeSink()]),
             admissionRecords: AdmissionRecordStore(defaults: UserDefaults(suiteName: "alfie-single-\(UUID().uuidString)")!),
             operatorModes: store(mode))

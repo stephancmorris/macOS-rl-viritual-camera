@@ -33,7 +33,7 @@ import Testing
         admissionCurrent: true, qualifiedLevels: [.assist, .auto, .backup])
 
     private func rig(qualified: Set<DirectorAuthority.Level> = [.assist, .auto, .backup]) -> Rig {
-        let show = ShowCoordinator(
+        let show = TestHardware.makeShow(
             programOutput: ProgramOutputManager(sinks: []),
             admissionRecords: AdmissionRecordStore(defaults: UserDefaults(suiteName: "alfie-director-\(UUID().uuidString)")!),
             qualificationRecords: DirectorQualificationStore(storage: nil, acceptsInjectedRecords: false))
@@ -78,7 +78,7 @@ import Testing
 
     @Test func tickerStopsOnceTheControllerIsGone() {
         let ticker = FakeTicker()
-        let show = ShowCoordinator(programOutput: ProgramOutputManager(sinks: []),
+        let show = TestHardware.makeShow(programOutput: ProgramOutputManager(sinks: []),
             qualificationRecords: DirectorQualificationStore(storage: nil, acceptsInjectedRecords: false))
         var controller: DirectorController? = DirectorController(show: show, ticker: ticker, log: { _ in })
         controller?.attach()
@@ -409,7 +409,7 @@ import Testing
     }
 
     @Test func evidenceWithoutASubjectWaitsForAView() {
-        let show = ShowCoordinator(programOutput: ProgramOutputManager(sinks: []),
+        let show = TestHardware.makeShow(programOutput: ProgramOutputManager(sinks: []),
             qualificationRecords: DirectorQualificationStore(storage: nil, acceptsInjectedRecords: false))
         show.addChannel(.b)
         let ticker = FakeTicker()
@@ -445,7 +445,7 @@ import Testing
     }
 
     @Test func routerReportsTransitionsOnly() throws {
-        let show = ShowCoordinator(programOutput: ProgramOutputManager(sinks: []),
+        let show = TestHardware.makeShow(programOutput: ProgramOutputManager(sinks: []),
             qualificationRecords: DirectorQualificationStore(storage: nil, acceptsInjectedRecords: false))
         var states: [ProgramRouter.State] = []
         show.router.stateObserver = { states.append($0) }

@@ -78,7 +78,7 @@ struct DirectorLaunchStyleTests {
         let saved = DirectorPreferences(styles: [
             .liveEvent: DirectorFeelTable.v1.style(for: DirectorFeel(pace: .lively, wideShots: .rarely, movement: .cutWhileMoving))])
         try DirectorPreferencesStore(fileURL: url).save(saved)
-        let show = ShowCoordinator(programOutput: ProgramOutputManager(sinks: []))
+        let show = TestHardware.makeShow(programOutput: ProgramOutputManager(sinks: []))
         show.loadDirectorStyles(store: DirectorPreferencesStore(fileURL: url))
         #expect(show.director.preferences == saved)
     }
@@ -86,7 +86,7 @@ struct DirectorLaunchStyleTests {
     @Test func showKeepsAnUnreadableFileAndStartsWithoutStyles() throws {
         let url = tempFile()
         try Data("{\"version\":99}".utf8).write(to: url)
-        let show = ShowCoordinator(programOutput: ProgramOutputManager(sinks: []))
+        let show = TestHardware.makeShow(programOutput: ProgramOutputManager(sinks: []))
         show.loadDirectorStyles(store: DirectorPreferencesStore(fileURL: url))
         #expect(show.director.preferences == nil)
         #expect(FileManager.default.fileExists(atPath: url.path))

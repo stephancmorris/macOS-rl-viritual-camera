@@ -52,6 +52,7 @@ jobs:
           -scheme CinematicCoreMacOS
           -destination 'platform=macOS'
           -derivedDataPath "${{ runner.temp }}/AlfieDerivedData"
+          -parallel-testing-enabled NO
           -only-testing:CinematicCoreMacOSTests
           -resultBundlePath "${{ runner.temp }}/unit.xcresult"
           CODE_SIGNING_ALLOWED=NO
@@ -102,6 +103,9 @@ jobs:
           -destination 'platform=macOS'
           -derivedDataPath "${{ runner.temp }}/AlfieReleaseDerivedData"
           CODE_SIGNING_ALLOWED=NO
+
+      - name: Consistency guard regression tests
+        run: python3 -m unittest discover -s scripts/ci -p 'test_*.py'
 
       - name: Consistency
         env:

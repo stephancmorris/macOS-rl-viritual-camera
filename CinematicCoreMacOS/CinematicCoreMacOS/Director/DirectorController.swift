@@ -69,17 +69,60 @@ final class DirectorController: ObservableObject, DirectorConsoleControlling {
     private var shadowTakeID: UUID?
     private var shadowStopCapture: DirectorShadowRecorder.StopActionCapture?
     private var shadowShowStopCapture: DirectorShadowRecorder.ShowStopActionCapture?
+    /// What the last abstention written on change said. An abstention is
+    /// written when this changes, not on every tick.
+    private struct ShadowAbstentionKey: Equatable {
+        let stage: DirectorShadowRecord.Stage?
+        let reasons: [DirectorShadowRecord.Reason]?
+        let target: String?
+        init(_ event: DirectorShadowRecord.Event) { stage = event.stage; reasons = event.reasons; target = event.target }
+    }
+    /// A would-prepare or would-cut, by input and shot.
+    private struct ShadowTargetKey: Equatable {
+        let target: ChannelID
+        let shot: DirectorShot
+    }
+    /// What the shadow last wrote for each side of the judge. Reset to write
+    /// the judge's position again.
+    private struct ShadowPosition {
+        var abstentions: [DirectorShadowRecord.Stage?: ShadowAbstentionKey] = [:]
+        var wouldPrepare: ShadowTargetKey?
+        var wouldCut: ShadowTargetKey?
+    }
+    private var shadowPosition = ShadowPosition()
+    /// Decision core, stage 3: the shadow judge. It returns values only.
+    private var decisionCore = DirectorDecisionCore()
+    /// The parameters group the shadow judge's records name. The version
+    /// rises whenever the style or preferences behind it change.
+    private struct ShadowJudgeKey: Equatable { let preferencesVersion: Int; let style: DirectorStyle }
+    private var shadowJudgeBinding: (key: ShadowJudgeKey, version: UInt64)?
     private lazy var subjectConsole = DirectorSubjectConsole(show: show)
     private let judgeShadow = DirectorJudgeShadow()
     private var captureBindingProvider: DirectorShadowRecorder.CaptureBindingProvider?
     private var captureSettingsGeneration = UUID()
     private var resolvingCaptureBinding = false
     private(set) var evidenceRevision: UInt64 = 0
+    /// Decision core, stage 2: one frozen picture of the show per tick.
+    private lazy var sceneBuilder = DirectorSceneBuilder(show: show)
+    /// The scene built on the newest tick; nil when it could not be built.
+    private(set) var latestScene: DirectorScene?
+    /// Decision core, stage 6: live Assist and Auto from the scene. Debug
+    /// only: nothing in a Release build can set it.
+    private(set) var liveDirecting: LiveDirecting?
+    /// Live Assist's own core, so the shadow judge's tenure is untouched.
+    private var liveCore = DirectorDecisionCore()
+    private struct LiveTenure: Equatable { let preview: ChannelID; let sourceGeneration: UInt64; let routeGeneration: UInt64 }
+    /// The Preview tenure live Assist has already prepared in.
+    private var livePreparedTenure: LiveTenure?
     private(set) lazy var assistPreparation = DirectorAssistPreparation(show: show, controller: self)
     private(set) lazy var cutExecution = DirectorCutExecution(show: show, controller: self)
     private(set) lazy var backupExecution = DirectorBackupExecution(show: show, controller: self)
     private(set) lazy var onAirMoves = DirectorOnAirMoveExecution(show: show, controller: self)
     private let cutReadinessParameters: DirectorReadiness.Parameters?
+    /// The named study set the shadow judge runs with and its records name.
+    /// nil unless this Director was built with that set and actually runs its
+    /// adapter and readiness values; without it the judge does not run.
+    private let shadowJudgeStudy: DirectorStudyParameters?
     private(set) var policyRevision: UInt64 = 0
     private(set) var nominationRevision: UInt64 = 0
     #if DEBUG
@@ -93,6 +136,8 @@ final class DirectorController: ObservableObject, DirectorConsoleControlling {
     private let ticker: DirectorTicker
     private let clock: () -> TimeInterval
     private let qualifiedLevels: () -> Set<DirectorAuthority.Level>
+    /// What this Director may do (C-04). Fixed for its lifetime.
+    let capabilities: DirectorCapabilities
     private let log: (String) -> Void
 
     private var pauseReason: Section.PauseReason?
@@ -108,8 +153,10 @@ final class DirectorController: ObservableObject, DirectorConsoleControlling {
          ticker: DirectorTicker = TaskDirectorTicker(),
          clock: @escaping () -> TimeInterval = { CACurrentMediaTime() },
          qualifiedLevels: @escaping () -> Set<DirectorAuthority.Level> = { [] },
+         capabilities: DirectorCapabilities = .full,
          adapterParameters: DirectorEvidenceAdapter.Parameters? = nil,
          cutReadinessParameters: DirectorReadiness.Parameters? = nil,
+         studyParameters: DirectorStudyParameters? = nil,
          shadowLog: DirectorShadowLog? = nil,
          runSheet: RunSheet? = nil,
          log: ((String) -> Void)? = nil) {
@@ -118,12 +165,23 @@ final class DirectorController: ObservableObject, DirectorConsoleControlling {
         if let shadowLog { self.shadowRecorder = DirectorShadowRecorder(log: shadowLog) }
         self.ticker = ticker
         self.clock = clock
-        self.qualifiedLevels = qualifiedLevels
+        self.capabilities = capabilities
+        // The level ceiling: no record qualifies a level this build cannot run.
+        self.qualifiedLevels = { capabilities.ceiling(qualifiedLevels()) }
+        // A named study set supplies the values not passed explicitly.
+        let adapterParameters = adapterParameters ?? studyParameters?.adapter
+        let cutReadinessParameters = cutReadinessParameters ?? studyParameters?.readiness
         self.cutReadinessParameters = cutReadinessParameters
         self.adapter = adapterParameters.map(DirectorEvidenceAdapter.init(parameters:))
+        self.shadowJudgeStudy = studyParameters.flatMap { study in
+            guard adapterParameters == study.adapter, let readiness = cutReadinessParameters,
+                  DirectorShadowRecord.ReadinessParameters(readiness) == DirectorShadowRecord.ReadinessParameters(study.readiness)
+            else { return nil }
+            return study
+        }
         self.log = log ?? { Self.logger.notice("[DIRECTOR] \($0, privacy: .public)") }
         // Every launch starts Manual (U2); nothing is restored.
-        self.directorSection = .atLaunch(qualified: Self.qualification(qualifiedLevels()))
+        self.directorSection = .atLaunch(qualified: Self.qualification(capabilities.ceiling(qualifiedLevels())))
         refreshSection()
     }
 
@@ -132,6 +190,11 @@ final class DirectorController: ObservableObject, DirectorConsoleControlling {
     /// Install every ingress hook and start ticking. Idempotent.
     func attach() {
         guard let show else { return }
+        shadowPosition = .init()
+        decisionCore = .init()
+        latestScene = nil
+        liveCore = .init(); livePreparedTenure = nil
+        sceneBuilder.begin(at: clock())
         if !isAttached, !authority.paused {
             forward(.pause, pause: .setupChanged, note: "controller attaching")
         }
@@ -167,6 +230,7 @@ final class DirectorController: ObservableObject, DirectorConsoleControlling {
     }
 
     func detach() {
+        shadowPosition = .init()
         shadowStopCapture = nil
         shadowShowStopCapture = nil
         let wasAttached = isAttached
@@ -324,15 +388,17 @@ final class DirectorController: ObservableObject, DirectorConsoleControlling {
     func tick() {
         guard let show else { return }
         let now = clock()
-        guard now.isFinite, now >= 0 else { return }
+        guard now.isFinite, now >= 0 else { latestScene = nil; return }
         evidenceRevision &+= 1
         let preview = show.previewChannel
         let cutMotionLimit = cutReadinessParameters.map { $0.tightened(by: effectiveStyle).maximumCutMotion }
+        var samples: [ChannelID: ChannelEvidenceSample] = [:]
         for id in ChannelID.allCases {
             guard let channel = show.channel(id) else { continue }
-            let readings = channel.evidenceReadings(now: now)
+            let sample = Self.sample(channel.evidenceReadings(now: now))
+            samples[id] = sample
             guard var current = adapter else { continue }
-            let events = current.ingest(Self.sample(readings), cutMotionLimit: cutMotionLimit)
+            let events = current.ingest(sample, cutMotionLimit: cutMotionLimit)
             adapter = current
             for event in events { evidenceEvent(event, preview: preview) }
         }
@@ -346,6 +412,10 @@ final class DirectorController: ObservableObject, DirectorConsoleControlling {
         }
         onAirMoves.validateRunning()
         cutExecution.evaluate(now: now)
+        // Built after any cut this tick, so it shows the show as it now stands.
+        latestScene = sceneBuilder.build(now: now, evidenceRevision: evidenceRevision, samples: samples,
+            adapter: adapter, segmentType: runSheet?.current?.type ?? .liveEvent, style: effectiveStyle)
+        driveLiveAssist(now: now)
         refreshSection()
         let comparisonEpoch = authority.epoch, comparisonEvidence = evidenceRevision
         let comparisonPolicy = policyRevision, comparisonNomination = nominationRevision
@@ -369,9 +439,104 @@ final class DirectorController: ObservableObject, DirectorConsoleControlling {
             } else {
                 emitShadow(DirectorShadowRecorder.judgeComparison, authority: authority, judgeObservation: comparison)
             }
-        } else if !cutExecution.isConfigured {
-            emitShadow(DirectorShadowRecorder.noCutPolicy, authority: authority)
+        } else if !cutExecution.isConfigured || liveDirecting != nil {
+            // Live directing keeps the shadow judge's records: they are the
+            // evidence the live run is measured by.
+            recordShadowJudge(now: now)
         }
+    }
+
+    /// Decision core, stage 3: run the existing rules against this tick's
+    /// scene and record what they would do, on change only. It prepares
+    /// nothing, sends no command and never Takes. Without a named study set, a
+    /// scene, a style or the parameters a record must name, it records that no
+    /// cut policy ran, as before. Studies that supply their own values and
+    /// bindings (tests, Debug rehearsals) therefore see no judge records.
+    private func recordShadowJudge(now: TimeInterval) {
+        guard let study = shadowJudgeStudy, let scene = latestScene, scene.now == now,
+              let programShot = scene.programShot, scene.style != nil,
+              let parameters = shadowJudgeParameters(study) else {
+            emitShadowAbstentionOnChange(DirectorShadowRecorder.noCutPolicy, authority: authority)
+            return
+        }
+        let snapshot = currentTakeSnapshot(now: now)
+        let outcome = decisionCore.evaluate(scene, live: snapshot.live, parameters: study, judge: study.judge(for: scene))
+        let previewInput = scene.preview.flatMap { scene.input($0) }
+        let timeline = DirectorShotPolicy.Timeline(programShot: programShot, programStartedAt: scene.programStartedAt,
+            lastWideAt: scene.lastWideAt, history: scene.history,
+            candidates: previewInput.map { [DirectorDecisionCore.prepared($0)] } ?? [], now: now)
+        let prepareReadiness = previewInput.flatMap {
+            DirectorDecisionCore.prepareReadiness($0, take: scene.previewTake, readiness: study.readiness)
+        }
+        func evaluation(cut: Bool) -> DirectorShadowRecorder.Evaluation {
+            .init(now: now, parameters: parameters, sample: previewInput?.sample, revisions: previewInput?.revisions,
+                  adapter: adapter, readinessInputs: cut ? snapshot.readinessInputs : nil,
+                  prepareReadiness: prepareReadiness, cutReadiness: cut ? snapshot.measuredReadiness : nil,
+                  timeline: timeline, cutJudgeObservation: cut ? outcome.cutJudgeObservation : nil,
+                  people: previewInput?.people)
+        }
+
+        switch outcome.prepare {
+        case .chosen(let chosen):
+            let key = ShadowTargetKey(target: chosen.candidate.channel, shot: chosen.candidate.shot)
+            if shadowPosition.wouldPrepare != key,
+               let request = decisionCore.shadowRequest(for: chosen, scene: scene, authorityEpoch: authority.epoch,
+                   policyRevision: policyRevision, nominationRevision: nominationRevision),
+               emitShadow(DirectorShadowRecorder.preparation(request), authority: authority, evaluation: evaluation(cut: false)) {
+                shadowPosition.wouldPrepare = key
+                shadowPosition.abstentions[.prepare] = nil
+            }
+        case .abstain(let reason):
+            if emitShadowAbstentionOnChange(DirectorShadowRecorder.preparationAbstention(reason), authority: authority,
+                                            evaluation: evaluation(cut: false)) {
+                shadowPosition.wouldPrepare = nil
+            }
+        }
+
+        switch outcome.cut {
+        case .cut(let plan)?:
+            let key = ShadowTargetKey(target: plan.preview, shot: plan.candidate.shot)
+            if shadowPosition.wouldCut != key,
+               emitShadow(DirectorShadowRecorder.cut(.cut(plan)), authority: authority, evaluation: evaluation(cut: true)) {
+                shadowPosition.wouldCut = key
+                shadowPosition.abstentions[.cut] = nil
+            }
+        case .abstain(let reason)?:
+            if emitShadowAbstentionOnChange(DirectorShadowRecorder.cut(.abstain(reason)), authority: authority,
+                                            evaluation: evaluation(cut: true)) {
+                shadowPosition.wouldCut = nil
+            }
+        case nil:
+            if emitShadowAbstentionOnChange(DirectorShadowRecorder.noPreviewCut, authority: authority,
+                                            evaluation: evaluation(cut: true)) {
+                shadowPosition.wouldCut = nil
+            }
+        }
+    }
+
+    /// The study parameters the shadow judge's records name. The record
+    /// has no field for the set's name; its readiness and adapter values are
+    /// shadowV1's. The version rises when the style or preferences change, or
+    /// when another producer wrote a newer one, so no record is refused as a
+    /// changed group under an old version.
+    private func shadowJudgeParameters(_ study: DirectorStudyParameters) -> DirectorShadowRecorder.Parameters? {
+        guard let show, let recorder = shadowRecorder, let kind = recorder.evidenceClass(of: show),
+              let style = effectiveStyle, let preferences else { return nil }
+        let key = ShadowJudgeKey(preferencesVersion: preferences.version, style: style)
+        let latest = recorder.latestParametersVersion ?? 0
+        var version = shadowJudgeBinding?.version ?? 0
+        if shadowJudgeBinding?.key != key || latest > version {
+            let base = max(version, latest)
+            guard base < .max else { return nil }
+            version = base + 1
+        }
+        guard let parameters = captureParameters(.init(parametersVersion: version, provenance: [kind]),
+                  readiness: study.readiness, judgeMaximumAge: study.judgeMaximumAge,
+                  minimumProbability: study.minimumProbability) else { return nil }
+        shadowJudgeBinding = (key, version)
+        var named = parameters
+        named.judgeTwo = study.judgeTwo
+        return named
     }
 
     private func evidenceEvent(_ event: DirectorEvidenceAdapter.Event, preview: ChannelID?) {
@@ -398,6 +563,98 @@ final class DirectorController: ObservableObject, DirectorConsoleControlling {
         return result
     }
 
+    // MARK: Live directing (decision core, stage 6)
+
+    /// What live Assist and Auto run with. PROVISIONAL, like the study set it
+    /// names: not measured on a rig.
+    nonisolated struct LiveDirecting: Sendable {
+        let study: DirectorStudyParameters
+        let autoNoticeLength: TimeInterval
+        let maximumLateness: TimeInterval
+        let permitValidity: TimeInterval
+        let maximumRequestAge: TimeInterval
+        var isValid: Bool {
+            [autoNoticeLength, maximumLateness, permitValidity, maximumRequestAge].allSatisfy { $0.isFinite && $0 >= 0 }
+        }
+        /// The cut execution tests' own notice and lateness; a preparation
+        /// request lives as long as the judge's newest sample (0.5 s).
+        static let rehearsalV1 = LiveDirecting(study: .shadowV1, autoNoticeLength: 2, maximumLateness: 1,
+                                               permitValidity: 0, maximumRequestAge: 0.5)
+    }
+
+    #if DEBUG
+    /// Decision core, stage 6, Debug builds only. Assist prepares the core's
+    /// chosen shot through `preparePreview`, once per Preview tenure, and Auto
+    /// cuts through the existing notice and permit with its context read from
+    /// the scene. No level gains a power: authority, qualification, permits and
+    /// the router decide as before. It runs only with the study set this
+    /// Director was built with. nil turns it off.
+    @discardableResult
+    func configureLiveDirecting(_ live: LiveDirecting?,
+                                scheduler: (any DirectorCutDeadlineScheduling)? = nil) -> Bool {
+        liveDirecting = nil; liveCore = .init(); livePreparedTenure = nil
+        guard let live, live.isValid, capabilities.assist, let study = shadowJudgeStudy,
+              study.name == live.study.name else {
+            if cutExecution.usesScene { configureAutomaticCuts(nil) }
+            return false
+        }
+        liveDirecting = live
+        configureAutomaticCuts(.init(autoNoticeLength: live.autoNoticeLength, maximumLateness: live.maximumLateness,
+                permitValidity: live.permitValidity, judgeMaximumAge: study.judgeMaximumAge,
+                minimumProbability: study.minimumProbability, judge: RuleJudge()),
+            context: { [weak self] now in self?.sceneCutContext(now: now) },
+            scheduler: scheduler ?? TaskDirectorCutDeadlineScheduler(clock: clock))
+        cutExecution.usesScene = true
+        return true
+    }
+    #endif
+
+    /// The cut context read from a scene built now: Preview as it stands is
+    /// the prepared shot, and the timing facts are the scene builder's.
+    func sceneCutContext(now: TimeInterval) -> DirectorCutExecution.Context? {
+        guard let show else { return nil }
+        var samples: [ChannelID: ChannelEvidenceSample] = [:]
+        for id in ChannelID.allCases {
+            guard let channel = show.channel(id) else { continue }
+            samples[id] = Self.sample(channel.evidenceReadings(now: now))
+        }
+        guard let scene = sceneBuilder.build(now: now, evidenceRevision: evidenceRevision, samples: samples,
+                adapter: adapter, segmentType: runSheet?.current?.type ?? .liveEvent, style: effectiveStyle)
+        else { return nil }
+        return Self.cutContext(scene, provenance: shadowRecorder?.evidenceClass(of: show))
+    }
+
+    /// Pure: the existing cut context, from one scene.
+    nonisolated static func cutContext(_ scene: DirectorScene,
+                                       provenance: DirectorShadowRecord.EvidenceClass?) -> DirectorCutExecution.Context? {
+        guard let preview = scene.preview, preview != scene.program, let previewInput = scene.input(preview),
+              let programInput = scene.input(scene.program), let programShot = scene.programShot else { return nil }
+        let prepared = DirectorDecisionCore.prepared(previewInput)
+        return .init(timeline: .init(programShot: programShot, programStartedAt: scene.programStartedAt,
+                lastWideAt: scene.lastWideAt, history: scene.history, candidates: [prepared], now: scene.now),
+            prepared: prepared, programIdentity: programInput.state?.identity ?? .unavailable,
+            program: scene.program, programRevisions: programInput.revisions, previewRevisions: previewInput.revisions,
+            routeGeneration: scene.routeGeneration, provenance: provenance.map { [$0] })
+    }
+
+    /// At Assist and above, prepare the core's chosen shot on Preview, once
+    /// per Preview tenure. A refusal is retried on a later tick; a committed
+    /// preparation ends the tenure's work.
+    private func driveLiveAssist(now: TimeInterval) {
+        guard let live = liveDirecting, capabilities.assist, authority.mayPrepare,
+              let scene = latestScene, scene.now == now, let preview = scene.preview,
+              let input = scene.input(preview) else { return }
+        let tenure = LiveTenure(preview: preview, sourceGeneration: input.sourceGeneration,
+                                routeGeneration: scene.routeGeneration)
+        guard livePreparedTenure != tenure else { return }
+        let outcome = liveCore.evaluate(scene, live: currentTakeSnapshot(now: now).live, parameters: live.study,
+                                        judge: live.study.judge(for: scene))
+        guard case .chosen(let chosen) = outcome.prepare, chosen.candidate.channel == preview else { return }
+        let result = preparePreview(chosen.candidate.shot, configuration: .init(readiness: live.study.readiness,
+            maximumRequestAge: live.maximumRequestAge, onePreparationPerTenure: live.study.onePreparationPerTenure))
+        if case .committed = result { livePreparedTenure = tenure }
+    }
+
     func preparationFailed() {
         log("preparation result or revisions did not match; taking over")
         guard isDirecting else { return }
@@ -411,7 +668,11 @@ final class DirectorController: ObservableObject, DirectorConsoleControlling {
                             stopActionCapture: DirectorShadowRecorder.StopActionCapture? = nil,
                             stopActionChannel: ChannelID? = nil,
                             showStopActionCapture: DirectorShadowRecorder.ShowStopActionCapture? = nil) -> Bool {
-        if event.kind == .operatorAction { shadowStopCapture = nil; shadowShowStopCapture = nil }
+        if event.kind == .operatorAction {
+            shadowStopCapture = nil; shadowShowStopCapture = nil
+            // Re-state the judge's position next to every operator action.
+            shadowPosition = .init()
+        }
         guard let show else { return false }
         let requiresBinding = hasCaptureBindingProvider
         let parameters = studyParameters ?? (judgeObservation == nil && evaluation == nil ? cutExecution.captureParameters : nil)
@@ -424,6 +685,19 @@ final class DirectorController: ObservableObject, DirectorConsoleControlling {
             studyParameters: parameters,
             evaluation: evaluation, stopActionCapture: stopActionCapture, stopActionChannel: stopActionChannel,
             showStopActionCapture: showStopActionCapture) ?? false
+    }
+
+    /// An abstention is written when its stage, reasons or target change, not
+    /// on every tick. The key is kept only when the record was accepted, so a
+    /// dropped record is tried again on the next tick.
+    @discardableResult private func emitShadowAbstentionOnChange(_ event: DirectorShadowRecord.Event,
+                                                                 authority before: DirectorAuthority,
+                                                                 evaluation: DirectorShadowRecorder.Evaluation? = nil) -> Bool {
+        let key = ShadowAbstentionKey(event)
+        guard key != shadowPosition.abstentions[event.stage] else { return false }
+        guard emitShadow(event, authority: before, evaluation: evaluation) else { return false }
+        shadowPosition.abstentions[event.stage] = key
+        return true
     }
 
     /// Explicit study naming only. A configured provider owns every capture
@@ -522,13 +796,13 @@ final class DirectorController: ObservableObject, DirectorConsoleControlling {
     /// Called by B-08 only after a fresh cut decision. No production timing
     /// defaults: the caller supplies the permit lease from approved parameters.
     func issueTakePermit(now: TimeInterval, validity: TimeInterval) -> TakePermit? {
-        guard DeveloperFlags.allowDirectorAuto else { return nil }
+        guard capabilities.auto else { return nil }
         return takePermits.issue(live: currentTakeState(now: now), now: now, validity: validity)
     }
 
     func consumeTakePermit(_ permit: TakePermit, now: TimeInterval) -> Bool {
         // Even a disabled path consumes/discards its own matching attempt.
-        guard DeveloperFlags.allowDirectorAuto else { takePermits.discard(permit); return false }
+        guard capabilities.auto else { takePermits.discard(permit); return false }
         if case .admitted = takePermits.consume(permit, live: currentTakeState(now: now), now: now) { return true }
         return false
     }
@@ -694,7 +968,7 @@ final class DirectorController: ObservableObject, DirectorConsoleControlling {
     func issueNoticePermit(_ token: CutNotice.Token, notice: inout CutNotice,
                            decision: CutPolicy.Decision, now: TimeInterval,
                            validity: TimeInterval) -> TakePermit? {
-        guard DeveloperFlags.allowDirectorAuto else { notice.retire(); return nil }
+        guard capabilities.auto else { notice.retire(); return nil }
         return notice.fire(token, decision: decision, live: currentTakeState(now: now), now: now,
                            permitValidity: validity, issuer: &takePermits)
     }
@@ -792,6 +1066,8 @@ final class DirectorController: ObservableObject, DirectorConsoleControlling {
 
     @discardableResult
     func overrideSubject(_ request: DirectorSubjectOverrideRequest) -> DirectorControlResult {
+        // A shadow-only Director sends no command, not even one the operator starts here.
+        guard capabilities.assist else { return .refused("Subject selection by the Director is not available in this build") }
         guard isAttached, let show, let camera = show.channel(request.channel),
               let pick = subjectConsole.picks(now: clock())[request.channel], request.matches(pick) else {
             return .refused("The camera or subject view changed; select again")
@@ -873,7 +1149,12 @@ final class DirectorController: ObservableObject, DirectorConsoleControlling {
         if transition.cancellations.contains(.prepare) { assistPreparation.retire(); retireSubjectDiscovery() }
         if event == .policyChanged { policyRevision &+= 1 }
         if event == .nominationChanged { nominationRevision &+= 1 }
-        if event == .restart { shadowStopCapture = nil; shadowShowStopCapture = nil; shadowRecorder?.restart() }
+        if event == .restart {
+            shadowStopCapture = nil; shadowShowStopCapture = nil
+            shadowPosition = .init(); decisionCore = .init(); shadowJudgeBinding = nil
+            liveCore = .init(); livePreparedTenure = nil
+            shadowRecorder?.restart()
+        }
         appliedEvents.append(event)
         if appliedEvents.count > Self.eventHistoryLimit { appliedEvents.removeFirst(appliedEvents.count - Self.eventHistoryLimit) }
         if let refusal = transition.refusal { log("\(note ?? "event") refused: \(refusal)") }
@@ -895,6 +1176,13 @@ final class DirectorController: ObservableObject, DirectorConsoleControlling {
     var prerequisitesOverride: (() -> DirectorAuthority.Prerequisites)?
 
     func prerequisites() -> DirectorAuthority.Prerequisites {
+        // The level ceiling holds whatever supplied the prerequisites.
+        var result = uncappedPrerequisites()
+        result.qualifiedLevels = capabilities.ceiling(result.qualifiedLevels)
+        return result
+    }
+
+    private func uncappedPrerequisites() -> DirectorAuthority.Prerequisites {
         if let prerequisitesOverride { return prerequisitesOverride() }
         guard let show else {
             return .init(nominationsCurrent: false, previewAvailable: false, sourcesHealthy: false,

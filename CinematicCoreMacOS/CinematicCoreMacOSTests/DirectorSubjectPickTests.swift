@@ -184,7 +184,7 @@ struct DirectorSubjectPickTests {
 
     #if DEBUG
     @Test func pickAppearsOnTheNextConsoleRefreshWithoutChangingTheCameraSnapshot() {
-        let show = ShowCoordinator(programOutput: ProgramOutputManager(sinks: []),
+        let show = TestHardware.makeShow(programOutput: ProgramOutputManager(sinks: []),
             qualificationRecords: DirectorQualificationStore(storage: nil, acceptsInjectedRecords: false))
         var section = NextShotStatus.DirectorSection.atLaunch(qualified: .none)
         let model = LiveConsoleModel(show: show, directorStatusEnabled: true, directorStatus: { section })

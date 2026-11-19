@@ -11,13 +11,20 @@ final class StoppedCameraPreviewController: ObservableObject {
     @Published private(set) var isPreviewing = false
     @Published private(set) var isChanging = false
     @Published private(set) var error: String?
-    private let worker = StoppedPreviewWorker()
+    private let worker: any StoppedPreviewCapturing
+    private let isAuthorized: () -> Bool
+
+    init(worker: any StoppedPreviewCapturing = StoppedPreviewWorker(),
+         isAuthorized: @escaping () -> Bool = { AVCaptureDevice.authorizationStatus(for: .video) == .authorized }) {
+        self.worker = worker
+        self.isAuthorized = isAuthorized
+    }
     private var generation = 0
     var session: AVCaptureSession { worker.session }
 
     func start(deviceID: String?) async {
         guard !isChanging, !isPreviewing else { return }
-        guard AVCaptureDevice.authorizationStatus(for: .video) == .authorized else { return }
+        guard isAuthorized() else { return }
         guard let deviceID else {
             error = "Choose a camera, then try Preview cameras again."
             return
@@ -47,7 +54,14 @@ final class StoppedCameraPreviewController: ObservableObject {
 /// All mutable session configuration and start/stop calls run on this queue.
 /// The preview layer may retain the session on the main thread, as AVFoundation
 /// requires for display, but never configures it.
-nonisolated private final class StoppedPreviewWorker: @unchecked Sendable {
+@MainActor
+protocol StoppedPreviewCapturing {
+    var session: AVCaptureSession { get }
+    func start(deviceID: String) async -> Bool
+    func stop() async
+}
+
+nonisolated final class StoppedPreviewWorker: StoppedPreviewCapturing, @unchecked Sendable {
     let session = AVCaptureSession()
     private let queue = DispatchQueue(label: "com.alfie.stopped-preview")
 

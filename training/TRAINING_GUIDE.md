@@ -11,17 +11,21 @@ cd training
 python3 -m venv venv
 source venv/bin/activate
 
-# Install dependencies
+# Install dependencies. requirements.txt is the loose set and includes
+# yt-dlp and torch. requirements.lock is pip freeze from a working
+# Python 3.12.8 install on Apple Silicon (arm64).
 pip install -r requirements.txt
+# pip install -r requirements.lock
 
-# Install yt-dlp for YouTube downloads
-pip install yt-dlp
-# or: brew install yt-dlp
-
-# Download MediaPipe pose model (one-time)
+# Download the full pose model (version 1, not latest). PersonDetector
+# checks the SHA-256 when it loads this filename.
 curl -L -o pose_landmarker_full.task \
-  https://storage.googleapis.com/mediapipe-models/pose_landmarker/pose_landmarker_full/float16/latest/pose_landmarker_full.task
+  https://storage.googleapis.com/mediapipe-models/pose_landmarker/pose_landmarker_full/float16/1/pose_landmarker_full.task
+shasum -a 256 pose_landmarker_full.task
+# expect 5134a3aad27a58b93da0088d431f366da362b44e3ccfbe3462b3827a839011b1
 ```
+
+`--model-complexity` 0 and 2 use the lite and heavy version-1 files beside this one. Their SHA-256 values are `59929e1d1ee95287735ddd833b19cf4ac46d29bc7afddbbf6753c459690d574a` and `64437af838a65d18e5ba7a0d39b465540069bc8aae8308de3e318aad31fcbc7b`. A file with one of these three names and any other digest is refused, and the error repeats the curl command above (with that file's name). A path whose name is not one of those three is left to the caller.
 
 ## Step 1: Collect Training Data
 
@@ -264,8 +268,13 @@ python test_training.py     # Training pipeline tests
 - Videos with multiple people may confuse the single-person detector
 
 **yt-dlp errors**
-- Update yt-dlp: `pip install --upgrade yt-dlp`
+- `yt-dlp` is installed with `requirements.txt`. Update it with `pip install --upgrade yt-dlp`
+- `downloader.py` runs the `yt-dlp` executable on `PATH`. A Homebrew binary works as well
 - Some videos may be region-locked or require authentication
+
+**Pose model hash mismatch**
+- Download the version-1 file again. The `latest` URL is not the pinned file
+- `PersonDetector` raises, and the error includes the `curl` command and the expected SHA-256
 
 **BC validation loss not decreasing**
 - Need more training data — process additional video clips

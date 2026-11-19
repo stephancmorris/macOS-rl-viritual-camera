@@ -32,6 +32,7 @@ struct StoppedScreen: View {
     var canPreview = true
     var onPreview: () -> Void
     @State private var initialFocusRequest = 0
+    @State private var readinessFocus = ReadinessFocusPolicy()
     @FocusState private var startFocused: Bool
     @AccessibilityFocusState private var startSpoken: Bool
 
@@ -56,7 +57,8 @@ struct StoppedScreen: View {
 
                 ReadinessChecklistView(readiness: readiness.readiness, inputs: readiness.inputs,
                     requestingPermission: requestingPermission, showsRefusal: showsRefusal, showsRefusalText: false,
-                    focusRequest: focusRequest + initialFocusRequest, actionError: actionError, onAction: onReadinessAction)
+                    focusRequest: focusRequest + initialFocusRequest, actionError: actionError, onAction: onReadinessAction,
+                    onFocusChange: { readinessFocus.checklistFocusChanged($0) })
 
                 if canPreview {
                     Button(action: onPreview) {
@@ -121,7 +123,10 @@ struct StoppedScreen: View {
                 else { initialFocusRequest += 1 }
             }
             .onChange(of: readiness.readiness.canStart) { wasReady, ready in
-                if ready { focusStart(); OperatorAnnouncement.say("Ready to start.") }
+                if ready {
+                    if readinessFocus.becameReady() { focusStart() }
+                    OperatorAnnouncement.say("Ready to start.")
+                }
                 else if wasReady, let row = readiness.readiness.blockingRow {
                     let title = row.id == .virtualCamera ? "Alfie camera" : row.id.title
                     OperatorAnnouncement.say("Setup needs attention. \(title).")

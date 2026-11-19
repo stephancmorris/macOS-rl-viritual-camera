@@ -2,6 +2,7 @@ import CoreGraphics
 import CoreVideo
 import Foundation
 import Testing
+import Vision
 @testable import Alfie
 
 @MainActor struct DirectorSubjectConsoleIntegrationTests {
@@ -10,7 +11,7 @@ import Testing
         func stop() {}
     }
     private func rig() throws -> (ShowCoordinator, DirectorController) {
-        let show = ShowCoordinator(programOutput: ProgramOutputManager(sinks: []),
+        let show = TestHardware.makeShow(programOutput: ProgramOutputManager(sinks: []),
             qualificationRecords: DirectorQualificationStore(storage: nil, acceptsInjectedRecords: false))
         show.clock = { 100 }
         show.channelA.setRunningForTesting(true)
@@ -40,6 +41,46 @@ import Testing
         #expect(controller.appliedEvents.contains(.nominationChanged))
         #expect(controller.directorSection.subjectPicks[.b]?.selectedCandidateID == nil)
         #expect(controller.overrideSubject(request) != .accepted)
+    }
+
+    /// A live identity veto holds the lock while the vetoed person is still a
+    /// candidate. The pick reads like any hold with the subject out of sight.
+    @Test func aVetoHeldTrackIsNotTheSelectedSubject() throws {
+        let (show, controller) = try rig()
+        let channel = try #require(show.channel(.b))
+        channel.personDetector.updateTracking(
+            rectObservations: [VNHumanObservation(boundingBox: CGRect(x: 0.45, y: 0.25, width: 0.07, height: 0.30))],
+            poseObservations: [], faceObservations: [], timestamp: 100)
+        var person = try #require(channel.personDetector.detectedPersons.first)
+        person = PersonDetector.DetectedPerson(id: person.id, boundingBox: person.boundingBox, confidence: 1,
+            timestamp: 100, poseKeypoints: nil,
+            faceBoundingBox: CGRect(x: 0.47, y: 0.48, width: 0.03, height: 0.04), faceLandmarkRatios: nil)
+        let composer = channel.shotComposer
+        var requests: [IdentityEvidenceRequest] = []
+        composer.identityVetoEnabledForTesting = true
+        composer.identityEvidenceSchedulerForTesting = { requests.append($0) }
+        composer.lockTarget(person.id)
+        composer.forceTrackingForTesting(readyGallery: true)
+        controller.tick()
+        let tracking = try #require(controller.directorSection.subjectPicks[.b])
+        #expect(tracking.selectedCandidateID == person.id && tracking.phase == .tracking)
+
+        var observation: UInt64 = 0
+        func tick(ambiguous: Bool) {
+            observation += 1
+            _ = composer.tick(detections: [person], timestamp: 100, pixelBuffer: nil, observationID: observation,
+                              observationTimestamp: 100, lockAmbiguityOpen: ambiguous)
+        }
+        tick(ambiguous: true)
+        for _ in 0..<3 {
+            composer.finishIdentityEvidence(try #require(requests.last), tier: .strongMismatch)
+            tick(ambiguous: false)
+        }
+        #expect(composer.isIdentityVetoHeld)
+        controller.tick()
+        let held = try #require(controller.directorSection.subjectPicks[.b])
+        #expect(held.candidates.map(\.id) == [person.id])
+        #expect(held.selectedCandidateID == nil && held.phase == .recovering)
     }
 
     @Test(arguments: ["source", "selection", "route", "point", "program", "stop", "mode"])

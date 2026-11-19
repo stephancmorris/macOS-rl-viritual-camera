@@ -145,7 +145,7 @@ import Testing
         start(recorder)
         frame(recorder, 1)
         let output = ProgramOutputManager(sinks: [])
-        let camera = CameraManager(channelID: .a, programOutput: output, outputPort: output,
+        let camera = TestHardware.makeCamera(channelID: .a, programOutput: output, outputPort: output,
             trainingDataRecorder: recorder)
         let settings = RecorderSettingsView(recorder: recorder, cameraManager: camera)
         let captureObserver = camera.$isStartingSession.dropFirst().sink { _ in frame(recorder, 3) }
