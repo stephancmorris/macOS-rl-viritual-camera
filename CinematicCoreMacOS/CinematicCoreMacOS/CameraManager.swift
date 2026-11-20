@@ -565,6 +565,8 @@ final class CameraManager: NSObject, ObservableObject {
         // The capture queue reads these to stamp and admit frames.
         commands.epochObserver = { epoch in frameMailbox.update { $0.controlEpoch = epoch } }
         detectionFrames.generationObserver = { generation in frameMailbox.update { $0.detectionGeneration = generation } }
+        // The ladder owns the move; the published direction keeps its private setter.
+        shotMoves.directionDidChange = { [weak self] direction in self?.zoomMoveDirection = direction }
         motionUnit?.setMainHop { [weak self] kind in
             Task(priority: .userInitiated) { @MainActor in await self?.receiveFromLoop(kind) }
         }
@@ -712,7 +714,7 @@ final class CameraManager: NSObject, ObservableObject {
         guard sessionStartRequest == request else { return }
         stopCapture()
     }
-    private var lastGoodProgramCrop: CropEngine.CropRect? { frameMailbox.lastGoodCrop }
+    var lastGoodProgramCrop: CropEngine.CropRect? { frameMailbox.lastGoodCrop }
     /// The composed tracking target and its serial, published to the capture
     /// queue in the motion directive.
     private var trackingTarget: CropEngine.CropRect?
@@ -728,50 +730,13 @@ final class CameraManager: NSObject, ObservableObject {
     private var lastTrackingCrop: CropEngine.CropRect?
     /// Decides the frames the composer runs on in the tracking branch.
     private var composeRule = ComposeRule()
-    private struct ShotMove {
-        var origin: OperatorCommand.Preset
-        var destination: OperatorCommand.Preset
-        var originHeight: CGFloat
-        var destinationHeight: CGFloat
-        var direction: OperatorCommand.ZoomDirection
-        var originIsUncropped = false
-        var destinationIsUncropped = false
-        var commandOrigin: OperatorCommand.Origin = .operatorUI
-    }
-    private var shotMove: ShotMove?
-    private var directorShotMoveID: UUID?
-    private var directorShotMoveIsCurrent: (() -> Bool)?
+    /// The shot move in progress and its Director owner. The zoom and preset
+    /// commands are in CameraManager+ShotMoves.swift.
+    let shotMoves = ShotMoveLadder()
 
-    var isZoomLimited: Bool {
-        activeMode != .wide && (cropEngine?.isZoomLimited == true ||
-            (activeMode == .autoTracking && cropEngine?.hasZoomAdjustment != true && shotComposer.isZoomLimitedByQuality))
-    }
-    var framingTitle: String {
-        shotComposer.config.activeFramingTitle + (cropEngine?.hasZoomAdjustment == true ? " · Adjusted" : "")
-    }
-    private var selectedShot: OperatorCommand.Preset {
-        shotComposer.config.cinematicFormat == .webcam ? .webcam(shotComposer.config.webcamPreset) : .stage(shotComposer.config.shotPreset)
-    }
-    var directorShot: DirectorShot { .init(preset: selectedShot) }
-
-    private var shotLadder: [OperatorCommand.Preset] {
-        shotComposer.config.cinematicFormat == .webcam ? [.webcam(.wide), .webcam(.tight)] :
-            [.stage(.wide), .stage(.fullBody), .stage(.waistUp)]
-    }
-    func canBeginZoom(_ direction: OperatorCommand.ZoomDirection) -> Bool {
-        if let move = shotMove { return direction != move.direction }
-        if activeMode == .wide { return direction == .pushIn }
-        guard let index = shotLadder.firstIndex(of: selectedShot) else { return false }
-        return direction == .pushIn ? index < shotLadder.count - 1 : index > 0
-    }
-    private func fixedHeight(for preset: OperatorCommand.Preset) -> CGFloat {
-        switch preset {
-        case .stage(.wide), .webcam(.wide): return 1
-        case .stage(.fullBody): return 0.8
-        case .stage(.waistUp), .webcam(.tight): return 0.5
-        }
-    }
-    private func choosePreset(_ preset: OperatorCommand.Preset) {
+    /// Select a preset as the camera's own write (an admitted preset or a
+    /// landed zoom move), so it is not reported as a manual Settings change.
+    func choosePreset(_ preset: OperatorCommand.Preset) {
         applyingInternalShotChange = true
         defer { applyingInternalShotChange = false }
         switch preset {
@@ -779,50 +744,6 @@ final class CameraManager: NSObject, ObservableObject {
         case .webcam(let shot): shotComposer.config.webcamPreset = shot
         }
         shotComposer.reapplyFraming()
-    }
-    func selectPreset(_ preset: OperatorCommand.Preset) {
-        cancelOperatorMotion()
-        cropEngine?.clearZoomAdjustment()
-        choosePreset(preset)
-        boostFramingTransition()
-    }
-
-    /// A tap owns exactly one destination, not an unbounded held velocity.
-    func beginZoom(_ direction: OperatorCommand.ZoomDirection) {
-        guard canBeginZoom(direction), let engine = cropEngine else { return }
-        directorShotMoveID = nil
-        directorShotMoveIsCurrent = nil
-        let visible = lastGoodProgramCrop ?? engine.currentCrop
-        let move: ShotMove
-        if let prior = shotMove {
-            move = ShotMove(origin: prior.destination, destination: prior.origin,
-                            originHeight: prior.destinationHeight, destinationHeight: prior.originHeight,
-                            direction: direction, originIsUncropped: prior.destinationIsUncropped,
-                            destinationIsUncropped: prior.originIsUncropped)
-        } else {
-            let origin = selectedShot
-            let ladder = shotLadder
-            let index = ladder.firstIndex(of: origin) ?? 0
-            let next = min(ladder.count - 1, max(0, index + (direction == .pushIn ? 1 : -1)))
-            let destination = ladder[next]
-            let height = activeMode == .autoTracking
-                ? shotComposer.destinationHeight(for: destination) : fixedHeight(for: destination)
-            // No known subject geometry: retain the shot rather than inventing a tracked crop.
-            guard let height else { return }
-            let originHeight = activeMode == .wide ? widestSafeCrop().size.height :
-                (activeMode == .autoTracking ? shotComposer.destinationHeight(for: origin) : fixedHeight(for: origin))
-            move = ShotMove(origin: origin, destination: destination,
-                            originHeight: originHeight ?? visible.size.height, destinationHeight: height,
-                            direction: direction, originIsUncropped: activeMode == .wide)
-        }
-        if activeMode == .wide {
-            setOperationMode(.manualCrop)
-        }
-        if activeMode == .manualCrop { manualCropPoint = visible.center }
-        shotMove = move
-        zoomMoveDirection = direction
-        engine.beginZoom(direction, to: move.destinationHeight, visibleCrop: visible)
-        refreshMotionInputs()
     }
 
     /// B-09: dedicated slow admission. The caller consumes its one-shot policy
@@ -833,7 +754,7 @@ final class CameraManager: NSObject, ObservableObject {
                                isCurrent: @escaping () -> Bool) -> CommandResult {
         guard DeveloperFlags.allowDirectorAuto, isCurrent(), isRunning, !sourceMissing,
               activeMode == .autoTracking, manualLockedTargetID != nil,
-              recoveryState.trackingOwnsControl, !operatorGestureInProgress, shotMove == nil,
+              recoveryState.trackingOwnsControl, !operatorGestureInProgress, shotMoves.current == nil,
               let engine = cropEngine, let from = shotLadder.firstIndex(of: selectedShot),
               let to = shotLadder.firstIndex(of: target.preset), abs(from - to) == 1,
               let height = shotComposer.destinationHeight(for: target.preset),
@@ -847,27 +768,11 @@ final class CameraManager: NSObject, ObservableObject {
         }
         commands.accept(command)
         shotRevision += 1
-        shotMove = ShotMove(origin: selectedShot, destination: target.preset,
-            originHeight: visible.size.height, destinationHeight: height, direction: direction, commandOrigin: .director)
-        directorShotMoveID = id
-        directorShotMoveIsCurrent = isCurrent
-        zoomMoveDirection = direction
+        shotMoves.beginDirector(.init(origin: selectedShot, destination: target.preset,
+            originHeight: visible.size.height, destinationHeight: height, direction: direction, commandOrigin: .director),
+            id: id, isCurrent: isCurrent)
         refreshMotionInputs()
         return .accepted
-    }
-
-    /// Never cancels an operator move that superseded this Director owner.
-    func cancelDirectorShotMove(id: UUID) {
-        guard directorShotMoveID == id, shotMove?.commandOrigin == .director else { return }
-        cropEngine?.endZoom()
-        shotMove = nil
-        zoomMoveDirection = nil
-        directorShotMoveID = nil
-        directorShotMoveIsCurrent = nil
-    }
-
-    func hasDirectorShotMove(id: UUID) -> Bool {
-        directorShotMoveID == id && shotMove?.commandOrigin == .director
     }
 
     /// One whole shot-move step from the main thread: check, step the size,
@@ -887,8 +792,7 @@ final class CameraManager: NSObject, ObservableObject {
 
     /// False when a Director move lost its owner and was cancelled.
     private func prepareShotMove(_ engine: CropEngine) -> Bool {
-        if let id = directorShotMoveID, shotMove?.commandOrigin == .director,
-           directorShotMoveIsCurrent?() != true {
+        if let id = shotMoves.staleDirectorMove() {
             cancelDirectorShotMove(id: id)
             return false
         }
@@ -899,21 +803,17 @@ final class CameraManager: NSObject, ObservableObject {
     /// The ladder: tell the composer the visible size and, when the move has
     /// landed, select its destination preset.
     private func finishShotMoveStep(_ engine: CropEngine) {
-        if let id = directorShotMoveID, shotMove?.commandOrigin == .director,
-           engine.zoomDirection == nil, !engine.zoomHasLanded {
+        if let id = shotMoves.directorOwner, engine.zoomDirection == nil, !engine.zoomHasLanded {
             cancelDirectorShotMove(id: id)
         }
         shotComposer.setVisibleZoomHeight(engine.adjustedHeight)
-        if let move = shotMove, engine.zoomHasLanded {
+        if let move = shotMoves.current, engine.zoomHasLanded {
             choosePreset(move.destination)
             if let anchor = lastTrackingCrop {
                 lastTrackingCrop = .init(center: anchor.center, size: engine.currentCrop.size)
             }
             engine.clearZoomAdjustment()
-            shotMove = nil
-            zoomMoveDirection = nil
-            directorShotMoveID = nil
-            directorShotMoveIsCurrent = nil
+            shotMoves.clear()
             // Reversing a move that began uncropped returns to that view,
             // never silently re-applying a selected crop on the next frame.
             if move.destinationIsUncropped { returnToWide() }
@@ -952,9 +852,9 @@ final class CameraManager: NSObject, ObservableObject {
         // Manual takeover retires Director motion synchronously. Retain only
         // this command's reversal geometry until normal admission completes;
         // other cancellations never become dormant operator gestures.
-        let interrupted: ShotMove?
+        let interrupted: ShotMoveLadder.Move?
         if command.origin != .director, case .beginZoom = command.action,
-           shotMove?.commandOrigin == .director { interrupted = shotMove }
+           shotMoves.isDirectorMove { interrupted = shotMoves.current }
         else { interrupted = nil }
         if command.origin != .director {
             retireSubjectDiscovery()
@@ -970,7 +870,7 @@ final class CameraManager: NSObject, ObservableObject {
         return result
     }
 
-    private func dispatchAdmittedCommand(_ command: OperatorCommand, interruptedDirectorMove: ShotMove? = nil) -> CommandResult {
+    private func dispatchAdmittedCommand(_ command: OperatorCommand, interruptedDirectorMove: ShotMoveLadder.Move? = nil) -> CommandResult {
         if command.origin == .director {
             switch command.action {
             case .beginZoom, .endZoom: return .rejected("Director moves require slow admission")
@@ -982,9 +882,9 @@ final class CameraManager: NSObject, ObservableObject {
         case .startSession, .stopSession: break
         default: guard isRunning else { return .rejected("Session is stopped") }
         }
-        let handoff: ShotMove?
+        let handoff: ShotMoveLadder.Move?
         if case .beginZoom(let direction) = command.action, let interruptedDirectorMove,
-           shotMove == nil, activeMode == .autoTracking,
+           shotMoves.current == nil, activeMode == .autoTracking,
            interruptedDirectorMove.origin == selectedShot, direction != interruptedDirectorMove.direction {
             handoff = interruptedDirectorMove
         } else { handoff = nil }
@@ -1014,11 +914,9 @@ final class CameraManager: NSObject, ObservableObject {
         switch command.action {
         case .beginZoom: break
         default:
-            directorShotMoveID = nil
-            directorShotMoveIsCurrent = nil
+            shotMoves.dropDirectorOwner()
             cropEngine?.endZoom()
-            shotMove = nil
-            zoomMoveDirection = nil
+            shotMoves.endMove()
         }
         controlStatus = nil
         switch command.action {
@@ -1037,7 +935,7 @@ final class CameraManager: NSObject, ObservableObject {
                 boostFramingTransition()
             } else { selectPreset(preset) }
         case .beginZoom(let direction):
-            if var handoff { handoff.commandOrigin = .operatorUI; shotMove = handoff }
+            if let handoff { shotMoves.adoptAsOperatorMove(handoff) }
             beginZoom(direction)
         case .endZoom: break
         case .moveManualCenter(let point):
@@ -1167,12 +1065,10 @@ final class CameraManager: NSObject, ObservableObject {
 
     func cancelOperatorMotion() {
         retireSubjectDiscovery()
-        directorShotMoveID = nil
-        directorShotMoveIsCurrent = nil
+        shotMoves.dropDirectorOwner()
         commands.invalidateMotion()
         cropEngine?.endZoom()
-        shotMove = nil
-        zoomMoveDirection = nil
+        shotMoves.endMove()
     }
 
     func setOperationMode(_ mode: OperationMode) {
@@ -1203,8 +1099,7 @@ final class CameraManager: NSObject, ObservableObject {
     func applyLockOutcome(_ outcome: ShotComposer.TickOutcome) {
         guard commands.admitRecovery(outcome) else { return }
         cropEngine?.endZoom()
-        shotMove = nil
-        zoomMoveDirection = nil
+        shotMoves.endMove()
         switch outcome {
         case .noChange: break
         case .pullBackToWide:
@@ -1222,7 +1117,7 @@ final class CameraManager: NSObject, ObservableObject {
 
     func manualCropSize() -> CGSize {
         let aspect = shotComposer.normalizedAspect
-        let height = min(1, 1 / aspect, cropEngine?.adjustedHeight ?? fixedHeight(for: selectedShot))
+        let height = min(1, 1 / aspect, cropEngine?.adjustedHeight ?? ShotMoveLadder.fixedHeight(for: selectedShot))
         return CGSize(width: height * aspect, height: height)
     }
 
@@ -1458,7 +1353,7 @@ final class CameraManager: NSObject, ObservableObject {
     /// program feed would be worse than a minimal crop. This is what
     /// Return to Wide shows; the Wide *preset* remains a capped crop
     /// (`FramingTuning.maximumCropHeight`) so the two stay distinct.
-    private func widestSafeCrop() -> CropEngine.CropRect {
+    func widestSafeCrop() -> CropEngine.CropRect {
         Self.widestSafeCrop(sourceAspect: lastAppliedSourceAspect,
             outputAspect: shotComposer.config.outputAspectRatio,
             normalizedAspect: shotComposer.normalizedAspect)
@@ -1587,7 +1482,7 @@ final class CameraManager: NSObject, ObservableObject {
     /// Detect armed, a tap waiting for its ROI scan, or a zoom move in flight.
     /// A Director command now would supersede it, so the Director must wait.
     var operatorGestureInProgress: Bool {
-        detectionDiscoveryActive || tapPending || (shotMove != nil && shotMove?.commandOrigin != .director)
+        detectionDiscoveryActive || tapPending || (shotMoves.current != nil && !shotMoves.isDirectorMove)
     }
 
     /// The crop has reached its target: no interpolation and no zoom move.
@@ -2090,7 +1985,7 @@ final class CameraManager: NSObject, ObservableObject {
 
     /// Publish what the capture queue reads: the motion directive, and whether
     /// this camera has per-frame work for the main thread.
-    private func refreshMotionInputs() {
+    func refreshMotionInputs() {
         publishMotionDirective()
         let wanted = controlNeedsFrames
         guard wanted != frameMailbox.admission.controlWanted else { return }
@@ -2105,7 +2000,7 @@ final class CameraManager: NSObject, ObservableObject {
     /// Auto Pan with none of these posts nothing to the main thread per frame.
     private var controlNeedsFrames: Bool {
         guard isRunning, !sourceMissing else { return false }
-        if shotMove != nil || pendingTapPoint != nil || detectionDiscoveryActive { return true }
+        if shotMoves.current != nil || pendingTapPoint != nil || detectionDiscoveryActive { return true }
         switch activeMode {
         case .autoTracking:
             return true
@@ -2125,7 +2020,7 @@ final class CameraManager: NSObject, ObservableObject {
         let boost = MotionDirective.Boost(smoothing: Self.fastFramingSmoothing, until: fastFramingUntil)
         var directive = MotionDirective()
         directive.aspect = shotComposer.normalizedAspect
-        directive.fixedHeight = fixedHeight(for: selectedShot)
+        directive.fixedHeight = ShotMoveLadder.fixedHeight(for: selectedShot)
         directive.zoomUsesTopAnchor = zoomUsesTopAnchor
         directive.trackingTarget = trackingTarget
         directive.trackingSerial = trackingSerial
