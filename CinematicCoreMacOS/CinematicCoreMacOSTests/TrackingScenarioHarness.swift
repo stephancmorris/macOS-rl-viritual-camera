@@ -206,11 +206,20 @@ final class ScenarioLoop {
     /// The bound box's sources each time a shadow veto was recorded.
     private(set) var wouldVetoSources: [Set<Int>] = []
 
+    // A-01 gallery model. With a face chance set, the loop mirrors the
+    // production face scans (acquiring, the 0.4 s refresh while tracking,
+    // full-frame in hold and wide) and fills the real gallery through the
+    // synchronous capture seam. Off, nothing here runs.
+    private let faceChance: ((Double) -> Double)?
+    private var captureQueue: [(due: Double, request: ShotComposer.SignatureCaptureRequest, embedding: IdentityEmbedding?)] = []
+    private(set) var captureRequests = 0
+
     init(preset: ShotComposer.Config.ShotPreset, feel: ShotComposer.Config.TuningPreset, first: CGRect, t: Double,
          faceAvailability: Double = 0, faceSeed: UInt64 = 0, faceRecovery: Bool = false,
-         identityLive: Bool = false) throws {
-        self.faceRecovery = faceRecovery && faceAvailability > 0
+         identityLive: Bool = false, acquire: Bool = false, faceChance: ((Double) -> Double)? = nil) throws {
+        self.faceRecovery = (faceRecovery && faceAvailability > 0) || faceChance != nil
         self.faceAvailability = faceAvailability
+        self.faceChance = faceChance
         faceRng = ProbeRng(faceSeed ^ 0xFACE)
         engine = try #require(CropEngine())
         detector.updateTracking(rectObservations: [VNHumanObservation(boundingBox: first)], poseObservations: [],
@@ -224,7 +233,12 @@ final class ScenarioLoop {
         engine.qualityFloor = floor
         composer.qualityFloorHeightFraction = floor.minCropHeightFraction
         composer.lockTarget(id)
-        composer.forceTrackingForTesting(readyGallery: faceAvailability > 0)
+        if acquire {
+            // A click: acquisition starts now, on the harness clock.
+            composer.setAcquisitionClockForTesting(t)
+        } else {
+            composer.forceTrackingForTesting(readyGallery: faceAvailability > 0)
+        }
         commands.setTrackingOwnership(true)
         if identityLive { composer.identityVetoEnabledForTesting = true }
         if self.faceRecovery {
@@ -232,9 +246,12 @@ final class ScenarioLoop {
                 self.recoveryQueue.append((self.now + Self.identityLatency, request))
             }
         }
-        if faceAvailability > 0 {
+        if faceAvailability > 0 || faceChance != nil {
             composer.identityEvidenceSchedulerForTesting = { [unowned self] request in self.queueEvidence(request) }
             composer.identityWouldVetoForTesting = { [unowned self] in self.wouldVetoSources.append(self.lockedSources) }
+        }
+        if faceChance != nil {
+            composer.signatureCaptureSchedulerForTesting = { [unowned self] request in self.queueCapture(request) }
         }
         roiBox = first
         // Acquisition already observed the subject. Make that observation available immediately.
@@ -267,6 +284,21 @@ final class ScenarioLoop {
         evidenceQueue.append((now + Self.identityLatency, request, tier))
     }
 
+    /// A synthetic face print from box provenance: the subject alone has the
+    /// subject's print, anyone else a print far from it (distance 1.41), a
+    /// union of people no usable print.
+    static func print(of actors: Set<Int>?) -> IdentityEmbedding? {
+        guard let actors, actors.count == 1, let actor = actors.first else { return nil }
+        var vector = [Float](repeating: 0, count: 8)
+        vector[min(actor, 7)] = 1
+        return .vector(vector)
+    }
+
+    private func queueCapture(_ request: ShotComposer.SignatureCaptureRequest) {
+        captureRequests += 1
+        captureQueue.append((now + Self.identityLatency, request, Self.print(of: sources(of: request.targetID))))
+    }
+
     /// Recovery scores graded the same way: the subject alone scores as a
     /// strong match, anyone else as clearly different, a union as unknown.
     private func recoveryScores(for request: ShotComposer.ReacquisitionRequest) -> [ShotComposer.ReacquisitionScore] {
@@ -293,6 +325,10 @@ final class ScenarioLoop {
             evidenceQueue.removeFirst()
             composer.finishIdentityEvidence(next.request, tier: next.tier)
         }
+        while let next = captureQueue.first, next.due <= t {
+            captureQueue.removeFirst()
+            composer.finishSignatureCaptureForTesting(next.request, embedding: next.embedding)
+        }
         while let next = recoveryQueue.first, next.due <= t {
             recoveryQueue.removeFirst()
             composer.finishReacquisitionScoring(generation: next.request.generation,
@@ -303,8 +339,9 @@ final class ScenarioLoop {
         if let p = pending, p.done <= t {
             // PersonDetector.processFrame: updateTracking runs on the main actor when Vision returns,
             // stamped with the detection start time.
+            let chance = faceChance?(p.capturedAt) ?? faceAvailability
             let faces: [VNFaceObservation] = p.faces ? p.boxes.compactMap { observation in
-                faceRng.uniform() < faceAvailability ? VNFaceObservation(boundingBox: Self.faceBox(in: observation.box)) : nil
+                faceRng.uniform() < chance ? VNFaceObservation(boundingBox: Self.faceBox(in: observation.box)) : nil
             } : []
             detector.updateTracking(rectObservations: p.boxes.map { VNHumanObservation(boundingBox: $0.box) },
                                     poseObservations: [], faceObservations: faces, timestamp: p.capturedAt)
@@ -328,7 +365,8 @@ final class ScenarioLoop {
         detector.lockedTargetID = composer.lockBindingTargetID
         if due {
             var roi: CGRect?
-            if case .tracking = composer.lockState {
+            // CameraManager.currentDetectionPlan: tracking and acquiring scan the locked region.
+            if composer.isAcquiring || composer.lockState.isTracking {
                 let motion = detector.trackMotion(for: currentLockID)
                 roi = CameraManager.lockedSearchRegion(box: roiBox ?? composer.currentTrackedBounds,
                                                        velocity: motion?.velocity ?? .zero,
@@ -343,8 +381,17 @@ final class ScenarioLoop {
                 default: return false
                 }
             }()
-            let faces = faceAvailability > 0
-                && ((faceRecovery && recovering) || composer.shouldRunIdentityVerifyScan(now: t))
+            let faces: Bool
+            if faceChance != nil {
+                // CameraManager.currentDetectionPlan: acquiring, hold and wide
+                // always include faces; tracking on verify and refresh scans.
+                faces = composer.isAcquiring || recovering
+                    || (composer.lockState.isTracking && (composer.shouldRunIdentityVerifyScan(now: t)
+                        || composer.shouldRunGalleryRefreshScan(now: t)))
+            } else {
+                faces = faceAvailability > 0
+                    && ((faceRecovery && recovering) || composer.shouldRunIdentityVerifyScan(now: t))
+            }
             pending = (t + visionLatency, t, seq, world(t, roi), faces)
         }
         var persons: [PersonDetector.DetectedPerson] = []
@@ -423,6 +470,10 @@ final class ScenarioLoop {
     }
 }
 
+extension ShotComposer.LockState {
+    var isTracking: Bool { if case .tracking = self { return true }; return false }
+}
+
 @MainActor
 struct TrackingScenarios {
     let t0 = 1000.0
@@ -443,6 +494,11 @@ struct TrackingScenarios {
         var duration: Double
         var overlap: Overlap = .layers
         var make: (ProbeRng) -> [Actor]   // actor 0 is the locked subject
+        /// A-01: start with a click (acquiring) instead of a forced lock.
+        var acquire = false
+        /// A-01: face availability by elapsed time. Set, the loop runs the
+        /// gallery model (real gallery, production face scans); nil, no faces.
+        var faces: ((Double) -> Double)? = nil
     }
     private func box(_ a: Actor, _ e: Double) -> CGRect {
         let s = a.shape(e)
@@ -453,8 +509,30 @@ struct TrackingScenarios {
         return i.isNull ? 0 : Double(i.width) / Double(min(a.width, b.width))
     }
 
+    struct RunResult {
+        var final: String
+        var wrong: Double
+        var hold: Double
+        var holdVisible: Double
+        var inputDigest: String
+        var latchedWrong: Double
+        var longestLatchedWrong: Double
+        var unionTime: Double
+        var legacyFinal: String
+        var ambiguityShare: Double
+        var identityRequests: Int
+        var wouldVetoOnSubject: Int
+        var wouldVetoOnOther: Int
+        /// Seconds from the start until the lock first reached tracking; nil if never.
+        var timeToLock: Double?
+        /// Real gallery entries at the end (A-01 gallery model; 0 without it).
+        var gallerySize: Int
+        /// The gallery held at least `readyThreshold` real entries at the end.
+        var identityConfirmed: Bool
+    }
+
     func run(_ sc: Scenario, seed: UInt64, faceAvailability: Double = 0, faceRecovery: Bool = false,
-             identityLive: Bool = false) throws -> (final: String, wrong: Double, hold: Double, holdVisible: Double, inputDigest: String, latchedWrong: Double, longestLatchedWrong: Double, unionTime: Double, legacyFinal: String, ambiguityShare: Double, identityRequests: Int, wouldVetoOnSubject: Int, wouldVetoOnOther: Int) {
+             identityLive: Bool = false) throws -> RunResult {
         let rng = ProbeRng(seed)
         let actors = sc.make(rng)
         func hidden(_ i: Int, _ e: Double) -> Bool {
@@ -468,9 +546,12 @@ struct TrackingScenarios {
         func subjectVisible(_ e: Double) -> Bool {
             actors[0].present(e) && !hidden(0, e) && !actors[0].visionMiss(e)
         }
+        let base = t0
         let loop = try ScenarioLoop(preset: .waistUp, feel: .steadyFollow, first: box(actors[0], 0), t: t0,
                                     faceAvailability: faceAvailability, faceSeed: seed,
-                                    faceRecovery: faceRecovery, identityLive: identityLive)
+                                    faceRecovery: faceRecovery, identityLive: identityLive,
+                                    acquire: sc.acquire, faceChance: sc.faces.map { f in { f($0 - base) } })
+        var timeToLock: Double? = sc.acquire ? nil : 0
         loop.traceEnabled = TrackingScenarioOptions.trace && !TrackingScenarioOptions.wide
         var inputBytes = Data()
         func recordInputs(_ boxes: [CGRect], time: Double) {
@@ -525,6 +606,7 @@ struct TrackingScenarios {
                 return out
             }
             if frame == 1, !TrackingScenarioOptions.wide { #expect(!loop.isHold) }
+            if timeToLock == nil, loop.isTracking { timeToLock = el }
             if loop.trace.count > traceIndex {
                 let scan = loop.trace[traceIndex]
                 let actor = scan.lockedBox.flatMap { lb in
@@ -569,14 +651,22 @@ struct TrackingScenarios {
             }
         }
         let legacyFinal = loop.isHold ? "hold" : (loop.isTracking ? (on == 0 ? "subject" : "WRONG") : "wide")
-        let final = loop.isHold ? "hold" : (loop.isTracking ? (loop.lockedSources.contains(0) ? "subject" : "WRONG") : "wide")
+        // Inactive and acquiring occur only in runs that start with a click.
+        let final = loop.isHold ? "hold" : (loop.isTracking ? (loop.lockedSources.contains(0) ? "subject" : "WRONG")
+            : (loop.composer.isAcquiring ? "acquiring" : (loop.composer.isManualLockActive ? "wide" : "inactive")))
         let digest = SHA256.hash(data: inputBytes).map { String(format: "%02x", $0) }.joined()
         if seed == 40000 { print("TRACKING-INPUT-BASELINE|\(sc.name)|seed=\(seed)|digest=\(digest)|legacyWrong=\(wrong)|final=\(final)") }
-        return (final, wrong, hold, holdVisible, digest, Double(wrongFrames) / fps,
-                Double(longestWrongStretch) / fps, Double(unionFrames) / fps, legacyFinal,
-                trackingFrames > 0 ? Double(ambiguousFrames) / Double(trackingFrames) : 0,
-                loop.identityRequests, loop.wouldVetoSources.filter { $0 == [0] }.count,
-                loop.wouldVetoSources.filter { !$0.contains(0) }.count)
+        let realGallery = sc.faces == nil ? 0 : (loop.composer.galleryForTesting?.size ?? 0)
+        return RunResult(final: final, wrong: wrong, hold: hold, holdVisible: holdVisible, inputDigest: digest,
+                latchedWrong: Double(wrongFrames) / fps,
+                longestLatchedWrong: Double(longestWrongStretch) / fps, unionTime: Double(unionFrames) / fps,
+                legacyFinal: legacyFinal,
+                ambiguityShare: trackingFrames > 0 ? Double(ambiguousFrames) / Double(trackingFrames) : 0,
+                identityRequests: loop.identityRequests,
+                wouldVetoOnSubject: loop.wouldVetoSources.filter { $0 == [0] }.count,
+                wouldVetoOnOther: loop.wouldVetoSources.filter { !$0.contains(0) }.count,
+                timeToLock: timeToLock, gallerySize: realGallery,
+                identityConfirmed: realGallery >= ShotComposer.FaceSignatureGallery.readyThreshold)
     }
 
     @Test func pullbackActuallyWidensThePicture() throws {
@@ -672,6 +762,78 @@ struct TrackingScenarios {
                     visionMiss: { $0 >= 2 && $0 < 2.4 })]
             })
         }
+        return list
+    }
+
+    /// A-01 (lock and recover without a face), design section 6. Kept apart
+    /// from `scenarios()` so the existing tables, identity sweeps and golden
+    /// digests do not change. Actor 0 is the subject; widths are 0.07.
+    func a01Scenarios() -> [Scenario] {
+        var list: [Scenario] = []
+        func still(_ x: Double) -> (Double) -> Double { { _ in x } }
+        let width = 0.07
+        // The subject is unseen from 2 s for `gap` seconds, then returns in place.
+        for gap in [0.6, 0.9, 1.2, 2.0, 2.8, 4.0] {
+            list.append(Scenario(name: "occludedInPlace_gap\(r2(gap, 1))", duration: 14) { _ in
+                [Actor(x: still(0.5), visionMiss: { $0 >= 2 && $0 < 2 + gap })]
+            })
+        }
+        // The subject leaves at 2 s. A newcomer standing 1.4 widths away
+        // (outside the locked region, so never seen while tracked) walks onto
+        // the spot in 0.4 s and arrives `arrive` seconds after the subject vanished.
+        for arrive in [0.4, 0.7, 1.5, 2.5] {
+            list.append(Scenario(name: "newcomerOnSpot_arrive\(r2(arrive, 1))", duration: 14) { _ in
+                let start = 0.5 + 1.4 * width, walk = 0.4, leaves = 2 + arrive - walk
+                return [Actor(x: still(0.5), present: { $0 < 2 }),
+                        Actor(x: { e in start + (0.5 - start) * max(0, min(1, (e - leaves) / walk)) })]
+            })
+        }
+        // A bystander 0.25 frame away, outside the locked region, is first
+        // seen by the hold's full-frame scan. The subject returns in place.
+        for gap in [0.6, 2.0] {
+            list.append(Scenario(name: "farBystanderRevealedAtHold_gap\(r2(gap, 1))", duration: 14) { _ in
+                [Actor(x: still(0.5), visionMiss: { $0 >= 2 && $0 < 2 + gap }), Actor(x: still(0.75))]
+            })
+        }
+        // A neighbour 1.4 widths away stays put; the subject returns in place.
+        for gap in [0.6, 2.0] {
+            list.append(Scenario(name: "subjectReturnsBesideBystander_gap\(r2(gap, 1))", duration: 14) { _ in
+                [Actor(x: still(0.5), visionMiss: { $0 >= 2 && $0 < 2 + gap }), Actor(x: still(0.5 + 1.4 * width))]
+            })
+        }
+        // The subject leaves at 2 s; someone else appears exactly on the spot at 3.5 s.
+        for (label, height) in [("", 1.0), ("_height0.75", 0.75)] {
+            list.append(Scenario(name: "otherEmergesOnSpot_after1.5\(label)", duration: 14) { _ in
+                [Actor(x: still(0.5), present: { $0 < 2 }),
+                 Actor(x: still(0.5), h: 0.30 * height, present: { $0 >= 3.5 })]
+            })
+        }
+        // Clicks. No face is ever visible.
+        list.append(Scenario(name: "acquireNoFace_still", duration: 10, make: { _ in [Actor(x: still(0.5))] },
+                             acquire: true, faces: { _ in 0 }))
+        list.append(Scenario(name: "acquireNoFace_walking0.10", duration: 10, make: { _ in
+            // 0.10 frame/s from 0.2 to 0.8, then back.
+            [Actor(x: { e in e <= 6 ? 0.2 + 0.10 * e : 0.8 - 0.10 * (e - 6) })]
+        }, acquire: true, faces: { _ in 0 }))
+        list.append(Scenario(name: "acquireNoFace_neighbour1.0bw_gestures", duration: 10, make: { rng in
+            func gestures() -> (Double) -> (Double, Double, Double) {
+                var plan: [(Double, Double, Int)] = []
+                var t = 0.3 + rng.uniform() * 2
+                while t < 10 { plan.append((t, t + 0.6 + rng.uniform() * 0.8, Int(rng.next() % 3))); t += 1.5 + rng.uniform() * 3 }
+                return { e in
+                    guard let gst = plan.first(where: { e >= $0.0 && e < $0.1 }) else { return (1, 1, 0) }
+                    switch gst.2 { case 0: return (1, 1.2, 0); case 1: return (1.6, 1, 0); default: return (1.6, 1, -0.6) }
+                }
+            }
+            return [Actor(x: still(0.5)), Actor(x: still(0.5 - width), shape: gestures())]
+        }, acquire: true, faces: { _ in 0 }))
+        // A click with the face visible on 70% of face scans.
+        list.append(Scenario(name: "acquireFace0.7", duration: 10, make: { _ in [Actor(x: still(0.5))] },
+                             acquire: true, faces: { _ in 0.7 }))
+        // A click with no face, a 2 s gap in place from 3 s, then the face is visible from 5 s.
+        list.append(Scenario(name: "weakLockLongGapThenFace", duration: 10, make: { _ in
+            [Actor(x: still(0.5), visionMiss: { $0 >= 3 && $0 < 5 })]
+        }, acquire: true, faces: { $0 >= 5 ? 0.7 : 0 }))
         return list
     }
 

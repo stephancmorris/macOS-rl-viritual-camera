@@ -438,6 +438,10 @@ final class ShotComposer: ObservableObject {
     #if DEBUG
     /// Replaces only the Vision extraction; admission and gallery rules stay real.
     var signatureCaptureForTesting: (@Sendable (CGRect) async -> IdentityEmbedding?)?
+    /// When set, gallery captures go here instead of to a detached Vision
+    /// task; the caller later answers each through
+    /// `finishSignatureCaptureForTesting`. Lets a synchronous harness fill the gallery.
+    var signatureCaptureSchedulerForTesting: ((SignatureCaptureRequest) -> Void)?
     private(set) var signatureCaptureTaskForTesting: Task<Void, Never>?
     var galleryForTesting: FaceSignatureGallery? {
         switch lockState {
@@ -469,9 +473,8 @@ final class ShotComposer: ObservableObject {
     /// dropping the face model every frame was a real latency/load win and
     /// stays the default. Cost when healthy: one extra ~1 ms face-landmarks
     /// inference every ≥0.4 s, scoped to the locked ROI.
-    func shouldRunGalleryRefreshScan() -> Bool {
+    func shouldRunGalleryRefreshScan(now: TimeInterval = CACurrentMediaTime()) -> Bool {
         guard case .tracking = lockState else { return false }
-        let now = CACurrentMediaTime()
         guard now - lastGalleryRefreshAttemptAt >= FaceSignatureGallery.captureSpacing else { return false }
         guard !signatureCaptureInFlight else { return false }
         lastGalleryRefreshAttemptAt = now
@@ -1129,17 +1132,9 @@ final class ShotComposer: ObservableObject {
         gallery: FaceSignatureGallery,
         timestamp: TimeInterval
     ) {
-        guard let pixelBuffer else { return }
         guard let faceBox = person.faceBoundingBox else { return }
         guard !signatureCaptureInFlight else { return }
         guard gallery.shouldCapture(at: timestamp) else { return }
-
-        signatureCaptureInFlight = true
-        let bufferBox = SendablePixelBuffer(value: pixelBuffer)
-        let captureTimestamp = timestamp
-        let extractor = signatureExtractor
-        let landmarkVector = person.faceLandmarkRatios
-        let generation = lockGeneration
         let scope = GalleryAdmission.scope(entryCount: gallery.size, unverified: galleryUnverifiedSince != nil)
         let references = AdmissionReferences(embeddings: {
             switch scope {
@@ -1148,6 +1143,23 @@ final class ShotComposer: ObservableObject {
             case nil: return []
             }
         }())
+        #if DEBUG
+        if let scheduler = signatureCaptureSchedulerForTesting {
+            signatureCaptureInFlight = true
+            scheduler(SignatureCaptureRequest(generation: lockGeneration, targetID: targetID, faceBox: faceBox,
+                                              capturedAt: timestamp, scope: scope, references: references,
+                                              landmarkVector: person.faceLandmarkRatios))
+            return
+        }
+        #endif
+        guard let pixelBuffer else { return }
+
+        signatureCaptureInFlight = true
+        let bufferBox = SendablePixelBuffer(value: pixelBuffer)
+        let captureTimestamp = timestamp
+        let extractor = signatureExtractor
+        let landmarkVector = person.faceLandmarkRatios
+        let generation = lockGeneration
         #if DEBUG
         let injectedCapture = signatureCaptureForTesting
         #endif
@@ -1200,6 +1212,40 @@ final class ShotComposer: ObservableObject {
         let candidates: [(id: UUID, isExcluded: Bool)]
     }
 
+    #if DEBUG
+    /// One gallery capture handed to the synchronous test scheduler. The
+    /// caller answers it through `finishSignatureCaptureForTesting`.
+    struct SignatureCaptureRequest {
+        let generation: UInt64
+        let targetID: UUID
+        let faceBox: CGRect
+        let capturedAt: TimeInterval
+        fileprivate let scope: GalleryAdmission.Scope?
+        fileprivate let references: AdmissionReferences
+        let landmarkVector: LandmarkRatios?
+    }
+
+    /// Delivers a scheduled capture exactly as the detached capture task
+    /// does: the in-flight slot is released, a retired generation is refused,
+    /// and the real admission rules and gallery apply.
+    func finishSignatureCaptureForTesting(_ request: SignatureCaptureRequest, embedding: IdentityEmbedding?) {
+        signatureCaptureInFlight = false
+        guard lockGeneration == request.generation else { return }
+        let result = SignatureCaptureResult(embedding: embedding, elapsedMs: 0,
+            bestDistance: embedding.flatMap { IdentityEmbedding.bestDistance(from: $0, to: request.references.embeddings) })
+        applySignatureCaptureResult(result, scope: request.scope, landmarkVector: request.landmarkVector,
+                                    targetID: request.targetID, capturedAt: request.capturedAt)
+    }
+
+    /// Restarts the acquisition clocks on the caller's clock, for harnesses
+    /// whose time base is not `CACurrentMediaTime()`.
+    func setAcquisitionClockForTesting(_ time: TimeInterval) {
+        guard case .acquiring(let id, let gallery, _) = lockState else { return }
+        acquisitionLastSeenAt = time
+        lockState = .acquiring(targetID: id, gallery: gallery, sinceTime: time)
+    }
+    #endif
+
     private nonisolated struct SignatureCaptureResult: Sendable {
         let embedding: IdentityEmbedding?
         let elapsedMs: Double
@@ -1207,7 +1253,7 @@ final class ShotComposer: ObservableObject {
     }
 
     /// Gallery signatures a new capture is checked against; immutable.
-    private nonisolated struct AdmissionReferences: Sendable {
+    fileprivate nonisolated struct AdmissionReferences: Sendable {
         let embeddings: [IdentityEmbedding]
     }
 
