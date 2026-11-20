@@ -6,7 +6,7 @@
 
 | Data / owner | Persistence and content | Cleanup / consent boundary |
 | --- | --- | --- |
-| CameraManager capture, crop buffers, ProgramRouter/output | In-process source/rendered frames; local IOSurface/XPC handoff to the extension; selected Program sent to a display or receiving camera client. No video-file writer was found in these frame paths. | Stop/source invalidation retire work; receiving clients and physical receivers have their own behavior. This does not prove immediate freeing or zeroization of every buffer. |
+| CameraManager capture, crop buffers, ProgramRouter/output | In-process source/rendered frames; local IOSurface/XPC handoff to the extension (since F-03 the surface object itself crosses XPC, not a global ID; see the F-03 section); selected Program sent to a display or receiving camera client. No video-file writer was found in these frame paths. | Stop/source invalidation retire work; receiving clients and physical receivers have their own behavior. This does not prove immediate freeing or zeroization of every buffer. |
 | ShotComposer identity acquisition / FaceSignatureGallery | Vision face feature-print observations and identity evidence in process, including reacquisition galleries. No gallery serialization path was found. | `reset(clearManualLock: true)` invalidates identity work and clears the lock; ordinary reset can deliberately preserve lock/gallery state. No memory-zeroization or downstream deletion guarantee. |
 | TrainingDataRecorder | App Documents/CinematicCore/TrainingData/session_*/frames.jsonl and metadata.json; person bounding boxes/confidence, derived depth proxy, pose coordinates, crop labels, timing and camera/configuration metadata. These are observations rather than raw images or face prints. | Explicit persisted consent before Start. Revocation closes observation admission before publishing shutdown, then shares Stop's ordered writer drain/close; existing files remain. Existing bounded-write/drop accounting still applies. Renewed consent cannot bypass unfinished shutdown. Retention defaults to 30 days, configurable 1–365 in the UI; modification-date cleanup runs at recording Start or explicit deletion, not continuously. |
 | DiagnosticsLog | App Documents/CinematicCore/Diagnostics: soak CSV, memory CSV and session JSON. Automatic metrics, build/machine/OS and camera/mode/route context, wall clocks and free-text notes/errors. No separate diagnostics-consent control was found. | At session begin, modification-date pruning covers CSV and `alfie_session_*.json` files older than 30 days. Stop flushes/closes without deleting. Cleanup is not continuous or capture-time expiry. Raw files retain identifying context. |
@@ -85,6 +85,16 @@ The recorder's shutdown gate was immediate once its async Stop method entered, b
 
 Camera owners now have a random ID allocated once per instance. Local admission and Director capture/Stop provenance compare this token rather than an allocator address, which was observed being reused after a camera owner was released. The token stays in these in-memory bindings: it is not a new shadow-record field, saved setting, media identifier or export alias. Export regressions explicitly check that actual owner-token values are absent. This does not change consent, data collection, retention or any qualification decision.
 
+
+### Program frames to the extension — 20 November 2026 (F-03)
+
+Before F-03 the app sent each Program frame to the virtual-camera extension as a global IOSurface ID, and the extension looked it up with `IOSurfaceLookup`. Whether another local process could also look such an ID up was never verified.
+
+- **Now:** the IOSurface object itself crosses XPC by secure coding (`sendVideoFrame(surface:…)`). The extension receives its own reference. No surface ID is sent, and the extension no longer calls `IOSurfaceLookup`.
+- **Mismatched pair:** before any frame, the app asks the extension to agree the transport (`negotiateFrameTransport`). An extension older than F-03 does not know the message, so the app gets no answer, sends no frames and reports that the extension needs re-activating. An app older than F-03 still sends IDs; a new extension refuses them, logs once and keeps sending black. Neither side crashes.
+- **Lifetime:** the extension marks each received surface in use until the frame is dropped or replaced on air. The app still keeps the last 10 sends. They cover XPC transit and receiving apps that hold a frame after the extension has released it. A smaller depth waits for an attended long session with a receiving app.
+- **Not changed:** what the frames contain, who receives them, and the entitlements.
+- **Still pending:** whether a separate process can resolve a Program surface's ID while a show runs. The app no longer depends on that, but the pool's surfaces are still ordinary IOSurfaces. This needs an attended check.
 
 ### Director shadow storage — 16 November 2026 (C-04 stage 2)
 

@@ -169,8 +169,8 @@ final class XPCConnectionManager {
         newConnection.remoteObjectInterface = NSXPCInterface(with: CinematicCoreXPCProtocol.self)
 
         // Only talk to a listener signed as our extension by our team. A
-        // mismatched peer invalidates the connection before a surface id is
-        // sent. Without a team signature there is nothing to verify against,
+        // mismatched peer invalidates the connection before a frame surface
+        // is sent. Without a team signature there is nothing to verify against,
         // so refuse rather than connect unchecked.
         guard let requirement = XPCPeerRequirement.forExtension() else {
             let message = "This build has no team signature, so the virtual camera extension cannot be verified."

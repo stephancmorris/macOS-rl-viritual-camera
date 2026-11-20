@@ -116,11 +116,11 @@ Camera / UVC capture card
 │  CommandDispatcher                       │
 │  ProgramOutputManager                    │
 └───────────────┬──────────────────────────┘
-                │ XPC (IOSurface ID, zero-copy)
+                │ XPC (IOSurface object, zero-copy)
                 ▼
 ┌──────────────────────────────────────────┐
 │ CMIO system extension                    │
-│  FrameQueue (max 5, drain newest)        │
+│  HostFrameQueue (max 5, drain newest)    │
 │  Advertises “Alfie” camera               │
 └──────────────────────────────────────────┘
                 │

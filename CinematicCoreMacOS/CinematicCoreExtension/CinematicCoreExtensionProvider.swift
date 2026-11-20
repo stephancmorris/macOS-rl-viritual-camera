@@ -28,28 +28,8 @@ let extensionDefaultFrameRate: Double = 50.0
 
 private enum ExtensionSecurityPolicy {
 	static let expectedHostBundleIdentifier = "Morris.CinematicCoreMacOS"
-	static let minFrameDimension: Int32 = 16
-	static let maxFrameDimension: Int32 = 4096
-	static let maxFrameArea: Int64 = 4096 * 4096
-
-	static func validateFrameMetadata(
-		surfaceID: UInt32,
-		timestamp: Double,
-		width: Int32,
-		height: Int32
-	) -> Bool {
-		guard surfaceID != 0,
-			  timestamp.isFinite,
-			  timestamp >= 0,
-			  width >= minFrameDimension,
-			  height >= minFrameDimension,
-			  width <= maxFrameDimension,
-			  height <= maxFrameDimension else {
-			return false
-		}
-
-		return Int64(width) * Int64(height) <= maxFrameArea
-	}
+	// Frame metadata and surface checks live in Shared/HostFrameQueue.swift
+	// (`HostFrameValidation`), where the app's tests can reach them.
 
 	/// The code-signing requirement the host must satisfy: an Apple-issued
 	/// certificate, the host bundle identifier, and this extension's own team.
@@ -101,61 +81,6 @@ private enum ExtensionSecurityPolicy {
 	}
 }
 
-// MARK: - Shared Frame Queue
-
-/// Thread-safe queue for incoming frames from XPC.
-///
-/// A lock-guarded class rather than an actor on purpose: the playout timer
-/// drains it synchronously on its own serial queue. The previous actor version
-/// forced every drain through `Task { await … }`, adding a scheduling hop (and
-/// occasional missed tick) between the timer firing and the frame going out.
-/// Both enqueue and drain are O(1) work; a lock is the honest primitive here.
-final class FrameQueue {
-    private var frames: [(surfaceID: UInt32, timestamp: Double, width: Int32, height: Int32)] = []
-    private let maxQueueSize = 5
-    private let lock = NSLock()
-
-    func enqueue(surfaceID: UInt32, timestamp: Double, width: Int32, height: Int32) {
-        lock.lock()
-        defer { lock.unlock() }
-        frames.append((surfaceID, timestamp, width, height))
-
-        // Limit queue size to prevent memory buildup
-        if frames.count > maxQueueSize {
-            frames.removeFirst()
-            os_log(.debug, "Frame queue full, dropping oldest frame")
-        }
-    }
-
-    /// Returns the newest frame and discards everything older. The host can
-    /// produce faster than the playout timer consumes (e.g. during a rate
-    /// change); draining one frame per tick would let the queue sit at its
-    /// cap, which is standing latency of queue depth × tick. Showing the
-    /// newest frame bounds that backlog to at most one frame.
-    func drainToLatest() -> (surfaceID: UInt32, timestamp: Double, width: Int32, height: Int32)? {
-        lock.lock()
-        defer { lock.unlock() }
-        guard let latest = frames.last else { return nil }
-        if frames.count > 1 {
-            os_log(.debug, "Frame queue drained %d stale frames", frames.count - 1)
-        }
-        frames.removeAll()
-        return latest
-    }
-
-    func clear() {
-        lock.lock()
-        defer { lock.unlock() }
-        frames.removeAll()
-    }
-
-    var count: Int {
-        lock.lock()
-        defer { lock.unlock() }
-        return frames.count
-    }
-}
-
 // MARK: -
 
 /// Startup and stream failures the extension reports instead of aborting.
@@ -190,8 +115,10 @@ class CinematicCoreExtensionDeviceSource: NSObject, CMIOExtensionDeviceSource {
 	private var _videoDescription: CMFormatDescription!
 	private var currentFrameDimensions = CMVideoDimensions(width: 1920, height: 1080)
 	
-	// Frame queue for incoming frames from host app
-	private let frameQueue = FrameQueue()
+	// Frame queue for incoming frames from host app. It holds each received
+	// surface, marked in use, until the frame is dropped or replaced on air.
+	private let frameQueue = HostFrameQueue()
+	private var hasLoggedRefusedSurfaceID = false
 	
 	/// The playout (drain) rate. Starts at `extensionDefaultFrameRate` and is
 	/// corrected by the host over XPC (`updatePlayoutFrameRate`) to the show
@@ -315,36 +242,46 @@ class CinematicCoreExtensionDeviceSource: NSObject, CMIOExtensionDeviceSource {
 		return true
 	}
 	
-	/// Receive video frame from host app via XPC
-	func enqueueFrame(surfaceID: UInt32, timestamp: Double, width: Int32, height: Int32, connection: UInt64) {
+	/// Receive a video frame from the host app via XPC. The surface arrived
+	/// as an object, so this process already holds its own reference.
+	func enqueueFrame(_ frame: HostFrame, connection: UInt64) {
 		stateLock.lock(); defer { stateLock.unlock() }
-		guard ExtensionSecurityPolicy.validateFrameMetadata(
-			surfaceID: surfaceID,
-			timestamp: timestamp,
-			width: width,
-			height: height
-		) else {
+		guard HostFrameValidation.accepts(frame) else {
 			os_log(
 				.error,
-				"Rejected invalid frame metadata surface=%{public}u timestamp=%{public}.3f size=%{public}dx%{public}d",
-				surfaceID,
-				timestamp,
-				width,
-				height
+				"Rejected invalid frame timestamp=%{public}.3f size=%{public}dx%{public}d surface=%{public}ldx%{public}ld format=%{public}u",
+				frame.timestamp,
+				frame.width,
+				frame.height,
+				IOSurfaceGetWidth(frame.surface),
+				IOSurfaceGetHeight(frame.surface),
+				IOSurfaceGetPixelFormat(frame.surface)
 			)
 			return
 		}
 
 		guard activateHostConnection(connection) else { return }
-		// Synchronous enqueue: the lock-guarded FrameQueue makes this O(1) on
-		// the XPC delivery queue with no Task hop.
-		frameQueue.enqueue(surfaceID: surfaceID, timestamp: timestamp, width: width, height: height)
+		// Synchronous enqueue: the lock-guarded HostFrameQueue makes this O(1)
+		// on the XPC delivery queue with no Task hop.
+		if frameQueue.enqueue(frame) > 0 {
+			os_log(.debug, "Frame queue full, dropping oldest frame")
+		}
 		isReceivingFrames = true
 		lastFrameArrival = ProcessInfo.processInfo.systemUptime
 		if !hasLoggedFirstEnqueuedFrame {
 			hasLoggedFirstEnqueuedFrame = true
-			os_log(.info, "First frame enqueued from host via XPC at %{public}.3f", timestamp)
+			os_log(.info, "First frame enqueued from host via XPC at %{public}.3f", frame.timestamp)
 		}
+	}
+
+	/// A pre-F-03 host sent a global surface ID. This extension no longer
+	/// looks surfaces up by ID, so the frame is refused; the stream keeps
+	/// sending black. Logged once per extension run.
+	func refuseSurfaceIDFrame() {
+		stateLock.lock(); defer { stateLock.unlock() }
+		guard !hasLoggedRefusedSurfaceID else { return }
+		hasLoggedRefusedSurfaceID = true
+		os_log(.error, "Refused a frame sent by surface ID: the Alfie app is older than this camera extension. Update the app.")
 	}
 	
 	/// Reservation has no playout effect: signing is enforced by XPC when
@@ -449,13 +386,18 @@ class CinematicCoreExtensionDeviceSource: NSObject, CMIOExtensionDeviceSource {
 			// by definition (the timer is the playout clock) and only add
 			// latency. Drained synchronously on this serial queue — the old
 			// actor + Task hop between tick and send is gone.
-			if let frame = self.frameQueue.drainToLatest() {
+			// The drained frame stays held, and marked in use, until the next
+			// drain replaces it or the queue is cleared.
+			if let (frame, discarded) = self.frameQueue.drainToLatest() {
+				if discarded > 0 {
+					os_log(.debug, "Frame queue drained %d stale frames", discarded)
+				}
 				if !self.hasLoggedFirstDequeuedFrame {
 					self.hasLoggedFirstDequeuedFrame = true
 					os_log(.info, "First frame dequeued for CMIO stream at %{public}.3f", frame.timestamp)
 				}
 				// We have a real frame from the host app - forward it
-				self.sendFrameFromIOSurface(surfaceID: frame.surfaceID, timestamp: frame.timestamp, width: frame.width, height: frame.height)
+				self.sendFrameFromIOSurface(frame)
 			} else if self.isReceivingFrames {
 				// Queue is empty but we're receiving frames - just skip this timer tick
 				// This prevents synthetic frames from appearing while transitioning
@@ -474,18 +416,17 @@ class CinematicCoreExtensionDeviceSource: NSObject, CMIOExtensionDeviceSource {
 	
 	// MARK: - Frame Sending
 	
-	private func sendFrameFromIOSurface(surfaceID: UInt32, timestamp: Double, width: Int32, height: Int32) {
-		// Lookup IOSurface by ID
-		guard let ioSurface = IOSurfaceLookup(surfaceID) else {
-			os_log(.error, "Failed to lookup IOSurface with ID: \(surfaceID)")
-			return
-		}
-		
-		// Create CVPixelBuffer from IOSurface (zero-copy)
+	private func sendFrameFromIOSurface(_ frame: HostFrame) {
+		let timestamp = frame.timestamp
+		let width = frame.width
+		let height = frame.height
+
+		// Wrap the received surface in a CVPixelBuffer (zero-copy). No global
+		// ID lookup: the surface came over XPC as an object (F-03).
 		var unmanagedPixelBuffer: Unmanaged<CVPixelBuffer>?
 		let status = CVPixelBufferCreateWithIOSurface(
 			kCFAllocatorDefault,
-			ioSurface,
+			frame.surface,
 			nil,  // attributes
 			&unmanagedPixelBuffer
 		)
@@ -899,8 +840,25 @@ private class XPCServiceImplementation: NSObject, CinematicCoreXPCProtocol {
 		super.init()
 	}
 	
+	func negotiateFrameTransport(_ hostVersion: Int, reply: @escaping (Int) -> Void) {
+		deviceSource?.verifyHostConnection(connection)
+		let accepted = FrameTransport.accept(hostVersion: hostVersion)
+		if accepted == FrameTransport.refused {
+			os_log(.error, "Refused frame transport version %{public}d from host", hostVersion)
+		}
+		reply(accepted)
+	}
+
+	func sendVideoFrame(surface: IOSurface, timestamp: Double, width: Int32, height: Int32) {
+		deviceSource?.enqueueFrame(
+			HostFrame(surface: surface, timestamp: timestamp, width: width, height: height),
+			connection: connection)
+	}
+
+	/// The pre-F-03 ID path. Refused: this extension never looks up a
+	/// surface by global ID.
 	func sendVideoFrame(surfaceID: UInt32, timestamp: Double, width: Int32, height: Int32) {
-		deviceSource?.enqueueFrame(surfaceID: surfaceID, timestamp: timestamp, width: width, height: height, connection: connection)
+		deviceSource?.refuseSurfaceIDFrame()
 	}
 	
 	func updateCaptureStatus(isRunning: Bool) {
