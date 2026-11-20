@@ -44,7 +44,7 @@ extension CameraManager {
     /// Vision or invalidates ordinary tracking observations.
     func retireSubjectDiscovery() {
         if subjectDiscovery.retire() {
-            // detectionInFlight excludes a normal scheduled tracking waiter
+            // The detection slot excludes a normal scheduled tracking waiter
             // while this token is current. Cancel only our perception lane;
             // render and the operator-tap path are left alone.
             workScheduler?.cancelWaiting(.perception, for: channelID)
@@ -70,18 +70,18 @@ extension CameraManager {
         guard let binding = subjectDiscoveryBinding(), let configuration = subjectDiscovery.installedConfiguration else {
             retireSubjectDiscovery(); return
         }
-        guard !detectionInFlight else { return }
         let requestedAt = CACurrentMediaTime()
-        guard let token = subjectDiscovery.request(binding: binding, configuration: configuration,
+        guard !detectionCadence.inFlight,
+              let token = subjectDiscovery.request(binding: binding, configuration: configuration,
                                                    now: requestedAt, holdsSlot: true) else { return }
-        detectionInFlight = true
+        _ = detectionCadence.claim()
         let box = SendablePixelBufferBox(pixelBuffer)
         Task { [weak self] in
             guard let self else { return }
             var permitAt: TimeInterval?
             defer {
                 self.subjectDiscovery.completed(token, requestedAt: requestedAt, permitAt: permitAt)
-                self.detectionInFlight = false
+                self.detectionCadence.release()
             }
             guard self.subjectDiscoveryBinding() == binding, let scheduler = self.workScheduler else {
                 self.subjectDiscovery.recordRetirement(of: token); return

@@ -331,25 +331,18 @@ final class CameraManager: NSObject, ObservableObject {
 
     // MARK: - Off-critical-path detection
     //
-    // Detection used to be awaited inline, so every frame waited for Vision
-    // before the crop could run. Measured 26 July: Vision 16.4 ms + ~17 ms of
-    // crop/compose/output against a 20 ms budget at 50 Hz — the capture gate
-    // then rejected 4 frames in 10 and the program feed ran at 30 fps.
-    //
-    // Detection now runs alongside the picture. Each frame composes from the
-    // most recent completed detection (20–40 ms old at interval 2) and never
-    // waits, so the frame path costs only the ~17 ms it always did.
+    // The slot and its clocks are owned by `DetectionCadence`; scheduling is
+    // in CameraManager+DetectionScheduling.swift.
 
     /// Most recent completed detection set. Read every frame; written only when
-    /// a detection finishes.
-    private let detectionFrames = DetectionFrameStore()
+    /// a detection finishes. Internal for the scheduling extension.
+    let detectionFrames = DetectionFrameStore()
     /// TEST-ONLY: allows lifecycle tests to prove pre-Pan observations are retired.
     var detectionGenerationForTesting: UInt64 { detectionFrames.generation }
 
-    /// One detection at a time. Without this, a pipeline that falls behind would
-    /// queue detections faster than they complete and spawn unbounded work.
-    /// Internal for the discovery scan in CameraManager+SubjectDiscovery.swift.
-    var detectionInFlight = false
+    /// The one detection slot, shared by scheduled tracking detection and
+    /// Director discovery, with the cadence count and cache-flush clock.
+    let detectionCadence = DetectionCadence()
 
     /// Bumped when a capture source starts, stops, or rebinds. In-flight frames
     /// from an older value are retired.
@@ -358,113 +351,16 @@ final class CameraManager: NSObject, ObservableObject {
         set { frameMailbox.update { $0.sourceGeneration = newValue } }
     }
 
-    /// Frame counter driving `DeveloperFlags.detectionFrameInterval`.
-    private var detectionFrameCounter: UInt64 = 0
-
-    /// Wall-clock of the last Core Image cache flush.
-    private var lastImageCacheFlush: TimeInterval = 0
-
-    /// Diagnostic A/B hook: drop both Core Image contexts' caches on a fixed
-    /// schedule. NOT the memory fix — the autorelease drains and
-    /// `cacheIntermediates: false` contexts are the fix (July 2026); this hook
-    /// only exists so a soak can A/B the flush back in via
-    /// `DeveloperFlags.imageCacheFlushInterval`. One cheap comparison per
-    /// frame; the flush itself runs at most every `interval` seconds.
-    private func flushImageCachesIfDue(now: TimeInterval) {
-        let interval = DeveloperFlags.imageCacheFlushInterval
-        guard interval > 0 else { return }
-        guard lastImageCacheFlush > 0 else {
-            lastImageCacheFlush = now
-            return
-        }
-        guard now - lastImageCacheFlush >= interval else { return }
-        lastImageCacheFlush = now
-        cropEngine?.flushImageCaches()
-        personDetector.flushImageCaches()
-        // Marked in the diagnostics CSV so a flush can be lined up against the
-        // heap and frame-rate columns when reviewing a session.
-        outputPort.noteDiagnostics("image cache flush")
-    }
-
-    /// Start a detection if none is running and `due` says this frame holds a
-    /// cadence slot. Slot accounting happens once per frame in `processFrame`
-    /// (so the detection plan knows whether Vision will run); this function
-    /// only re-checks and arms the work. Returns immediately either way — the
-    /// caller never awaits.
     private func invalidateDetection(clearTracks: Bool = true) {
         retireSubjectDiscovery()
         if clearTracks { subjectDiscovery.clearOrigin() }
         detectionFrames.invalidate()
         personDetector.invalidatePendingWork(clearTracks: clearTracks)
-        detectionFrameCounter = 0
+        detectionCadence.resetCount()
         if clearTracks { lastSubjectROIBox = nil }
-        // Leave detectionInFlight armed until the old job actually completes.
+        // Leave the detection slot claimed until the old job actually completes.
     }
 
-    private func scheduleDetectionIfDue(
-        pixelBuffer: CVPixelBuffer,
-        sourceTimestamp: Double,
-        plan: PersonDetector.DetectionRequestPlan,
-        due: Bool
-    ) {
-        guard due, !detectionInFlight else { return }
-        detectionInFlight = true
-        let generation = detectionFrames.generation
-        let id = detectionFrames.nextObservationID()
-        let capturedAt = CACurrentMediaTime()
-        let box = SendablePixelBufferBox(pixelBuffer)
-        Task { [weak self] in
-            guard let self else { return }
-            // Whatever happens to this detection, a control turn follows it:
-            // a result reaches the picture without waiting for the next
-            // frame's turn, and a detector left idle is cleared.
-            defer {
-                self.detectionInFlight = false
-                self.requestControlWake()
-            }
-            // The task may sit behind other MainActor work after it was
-            // scheduled. Do not let it begin Vision under a newer
-            // session/target generation and mutate the detector before the
-            // frame store gets its post-work rejection chance.
-            guard self.detectionFrames.generation == generation else { return }
-            // Vision is admitted fairly across tracking channels. A superseded
-            // or cancelled request skips this detection slot (latest-only).
-            let scheduler = self.workScheduler
-            var permit: FrameWorkScheduler.Permit?
-            if let scheduler {
-                guard let granted = await scheduler.acquire(.perception, for: self.channelID) else { return }
-                permit = granted
-            }
-            defer { if let permit { scheduler?.release(permit) } }
-            guard self.detectionFrames.generation == generation else { return }
-            let persons = await self.personDetector.processFrame(box.pixelBuffer, plan: plan)
-            let frame = DetectionFrame(observationID: id, capturedAt: capturedAt,
-                sourceTimestamp: sourceTimestamp, pixelBuffer: box.pixelBuffer, persons: persons,
-                queueWait: self.personDetector.stats.lastQueueWait,
-                detectionDuration: self.personDetector.stats.lastDetectionTime,
-                coverage: .scanned(mode: plan.mode, roi: plan.roi))
-            guard self.detectionFrames.publish(frame, generation: generation) else { return }
-            self.outputPort.recordDetectionTiming(queueWait: frame.queueWait, visionWall: frame.detectionDuration)
-            self.outputPort.recordLatency(stage: .detection, duration: frame.detectionDuration)
-        }
-    }
-
-    /// Pure cadence rule: does the Nth eligible frame (every captured frame
-    /// where no detection is in flight — counting starts at 1) carry a
-    /// detection slot?
-    ///
-    /// REGRESSION NOTE (Aug 2026): an intermediate version of this gate tested
-    /// `(counter + 1) % interval == 0` but only advanced the counter on frames
-    /// that were already due. From counter 0 with interval 2 that predicate is
-    /// false forever, scheduled detection dead-locked, and tracking froze on
-    /// the single tap-time detection — the "tracking box doesn't move" bug.
-    /// The rule below is the original, correct accounting: EVERY eligible
-    /// frame advances the count; slots land on multiples of the interval. Unit
-    /// tested in `DetectionCadenceTests`.
-    nonisolated static func detectionSlotIsDue(eligibleFrameCount: UInt64, interval: Int) -> Bool {
-        let interval = UInt64(max(1, interval))
-        return eligibleFrameCount % interval == 0
-    }
 
     // State for Auto Pan
     /// PAN-EASE-MODEL: shape the sweep with `AutoPanMotion.eased`. Follows the
@@ -2160,7 +2056,7 @@ final class CameraManager: NSObject, ObservableObject {
 
     /// A detection finished: run a control turn now, without a new frame, so
     /// its result reaches the picture on the next frame the camera delivers.
-    private func requestControlWake() {
+    func requestControlWake() {
         guard let motionUnit, motionUnit.requestControlWake() else { return }
         Task { @MainActor [weak self] in await self?.runControlPump() }
     }
@@ -2410,12 +2306,8 @@ final class CameraManager: NSObject, ObservableObject {
         // before building the plan lets one-shot plan decisions (the throttled
         // gallery refresh scan) fire only on frames where Vision actually runs.
         var detectionDue = false
-        if tick != nil, !detectionInFlight {
-            detectionFrameCounter &+= 1
-            detectionDue = Self.detectionSlotIsDue(
-                eligibleFrameCount: detectionFrameCounter,
-                interval: DeveloperFlags.detectionFrameInterval
-            )
+        if tick != nil {
+            detectionDue = detectionCadence.advance(interval: DeveloperFlags.detectionFrameInterval)
         }
         var detectionPlan = currentDetectionPlan(detectionRunsThisFrame: detectionDue)
         if shotComposer.manualLockedTargetID != nil {
@@ -2445,7 +2337,7 @@ final class CameraManager: NSObject, ObservableObject {
                 detectionFrames.invalidate()
                 personDetector.clearForInactiveMode()
                 lastWorldObservation = nil
-                detectionIdleCleaned = !detectionInFlight
+                detectionIdleCleaned = !detectionCadence.inFlight
             }
         } else {
             detectionIdleCleaned = false
