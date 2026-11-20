@@ -231,6 +231,34 @@ nonisolated struct DiagnosticsManifest: Codable, Equatable, Sendable {
     var closing: Closing?
 }
 
+// MARK: - Diagnostics files setting
+
+/// The saved "Keep diagnostics files" switch (F-05). It controls the soak CSV,
+/// the memory CSV and the session manifest in
+/// Documents/CinematicCore/Diagnostics. It does not control the `[SOAK]`
+/// console line, the text log in Library/Logs/Alfie or the Director shadow.
+///
+/// Default ON, to keep the behaviour rig checks rely on: an absent key reads
+/// as on. The setting is read when a diagnostics session begins, so a change
+/// takes effect at the next capture start.
+///
+/// Lives in this file because DiagnosticsLog.swift and ProgramOutputManager.swift
+/// also compile into the CMIO extension target.
+nonisolated enum DiagnosticsFilesSetting {
+    static let key = "diagnosticsFilesEnabled"
+    static let title = "Keep diagnostics files"
+    static let detail = "Alfie writes a timing CSV, a memory CSV and a session summary for each capture, "
+        + "including camera names and this Mac's model. Files older than 30 days are deleted. "
+        + "Takes effect at the next capture start."
+    /// Shown where the current file name would be when the switch is off.
+    static let offStatus = "Off: diagnostics files are turned off in Settings"
+
+    /// The saved value, defaulting to on when it was never set.
+    static func isEnabled(in defaults: UserDefaults) -> Bool {
+        defaults.object(forKey: key) as? Bool ?? true
+    }
+}
+
 // MARK: - Off-main file appender
 
 /// Serial, off-MainActor file appender.
@@ -486,18 +514,27 @@ final class DiagnosticsLog {
     private let cleanupClock: @Sendable () -> Date
     private let wallClock: @Sendable () -> Date
     private let sessionID: @Sendable () -> UUID
+    private let filesEnabled: () -> Bool
     private var storageDirectory: URL { directoryOverride ?? Self.directory }
 
     /// Default paths and the off-main cleanup clock are unchanged in production.
     /// Isolated audits can supply a temporary directory and a fixed wall clock.
+    /// `filesEnabled` is asked once per `beginSession`; the production owner
+    /// (`ProgramOutputManager`) passes the saved `DiagnosticsFilesSetting`.
     init(directory: URL? = nil, cleanupClock: @escaping @Sendable () -> Date = { Date() },
          wallClock: @escaping @Sendable () -> Date = { Date() },
-         sessionID: @escaping @Sendable () -> UUID = { UUID() }) {
+         sessionID: @escaping @Sendable () -> UUID = { UUID() },
+         filesEnabled: @escaping () -> Bool = { true }) {
         directoryOverride = directory
         self.cleanupClock = cleanupClock
         self.wallClock = wallClock
         self.sessionID = sessionID
+        self.filesEnabled = filesEnabled
     }
+
+    /// True when the last `beginSession` found the files switch off and so
+    /// opened nothing. Reset by every `beginSession`.
+    private(set) var filesOffForLastSession = false
 
     /// An audit/read barrier, not a frame-path flush or a new cleanup trigger.
     func waitForPendingFileOperations() async {
@@ -550,6 +587,16 @@ final class DiagnosticsLog {
 
     func beginSession(note: String, identity: DiagnosticsSessionIdentity? = nil) {
         guard !isOpen else { return }
+        guard filesEnabled() else {
+            // No file is created. Expired files from earlier sessions are
+            // still removed at session start, as they are when the switch is on.
+            filesOffForLastSession = true
+            currentFileName = nil
+            writer.prune(directory: storageDirectory, olderThan: 30, clock: cleanupClock)
+            Self.logger.notice("Diagnostics files are off; this session writes none")
+            return
+        }
+        filesOffForLastSession = false
         let now = wallClock()
         let stamp = Self.fileStampFormatter.string(from: now) + "_" + sessionID().uuidString
         let name = "alfie_soak_\(stamp).csv"

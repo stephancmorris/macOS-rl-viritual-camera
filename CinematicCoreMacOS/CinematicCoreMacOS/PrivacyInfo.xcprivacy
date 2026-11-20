@@ -1,0 +1,56 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  Alfie app privacy manifest (F-05). Ships in Alfie.app/Contents/Resources.
+
+  No tracking, no tracking domains and no collected data types: the app has no
+  network code and no network entitlement, so nothing it records leaves the Mac.
+
+  Required-reason APIs, from a source search on 20 November 2026:
+  - UserDefaults (CA92.1): the app's own saved settings.
+  - File timestamps (C617.1): modification dates, sizes and other metadata of
+    the app's own diagnostics, training-data and Director files inside its
+    container, read for 30-day pruning, log rotation and size limits.
+  - System boot time (35F9.1): ProcessInfo.systemUptime, used only to measure
+    elapsed time between events inside the app.
+
+  Update this file when any of these change. The call sites are listed in
+  docs/privacy/current-source-audit.md.
+-->
+<plist version="1.0">
+<dict>
+	<key>NSPrivacyTracking</key>
+	<false/>
+	<key>NSPrivacyTrackingDomains</key>
+	<array/>
+	<key>NSPrivacyCollectedDataTypes</key>
+	<array/>
+	<key>NSPrivacyAccessedAPITypes</key>
+	<array>
+		<dict>
+			<key>NSPrivacyAccessedAPIType</key>
+			<string>NSPrivacyAccessedAPICategoryUserDefaults</string>
+			<key>NSPrivacyAccessedAPITypeReasons</key>
+			<array>
+				<string>CA92.1</string>
+			</array>
+		</dict>
+		<dict>
+			<key>NSPrivacyAccessedAPIType</key>
+			<string>NSPrivacyAccessedAPICategoryFileTimestamp</string>
+			<key>NSPrivacyAccessedAPITypeReasons</key>
+			<array>
+				<string>C617.1</string>
+			</array>
+		</dict>
+		<dict>
+			<key>NSPrivacyAccessedAPIType</key>
+			<string>NSPrivacyAccessedAPICategorySystemBootTime</string>
+			<key>NSPrivacyAccessedAPITypeReasons</key>
+			<array>
+				<string>35F9.1</string>
+			</array>
+		</dict>
+	</array>
+</dict>
+</plist>
