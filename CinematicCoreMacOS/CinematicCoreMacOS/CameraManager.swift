@@ -211,11 +211,8 @@ final class CameraManager: NSObject, ObservableObject {
             frameMailbox.update { $0.sourceMissing = missing }
         }
     }
-    private var disconnectObserver: NSObjectProtocol?
-
-    /// Per-channel serial executor for blocking session calls, so starting or
-    /// stopping one camera never blocks the MainActor or the other channel.
-    private let sessionQueue: DispatchQueue
+    /// The session executor, the disconnect watch and the configured format.
+    private let deviceController: CaptureDeviceController
 
     var revisions: ChannelRevisions {
         ChannelRevisions(sourceGeneration: captureGeneration,
@@ -544,7 +541,7 @@ final class CameraManager: NSObject, ObservableObject {
         self.outputPort = outputPort
         self.trainingDataRecorder = trainingDataRecorder ?? TrainingDataRecorder()
         self.commands = CommandDispatcher(channelID: channelID)
-        self.sessionQueue = DispatchQueue(label: "com.alfie.capture-session.\(channelID.letter)", qos: .userInitiated)
+        self.deviceController = CaptureDeviceController(channelLetter: channelID.letter)
         let engine = CropEngine()
         self.cropEngine = engine
         let frameMailbox = ChannelFrameMailbox()
@@ -1311,9 +1308,7 @@ final class CameraManager: NSObject, ObservableObject {
         stopObservingDisconnect()
         releaseDevice()
         sourceMissing = false
-        configuredCaptureDevice = nil
-        configuredCaptureFormat = nil
-        configuredCaptureSize = nil
+        deviceController.clearConfiguredDevice()
         outputPort.stop()
         isRunning = false
         activeInputSource = preferredInputSource
@@ -2109,11 +2104,11 @@ final class CameraManager: NSObject, ObservableObject {
             sourceIdentity?.deliveredWidth = sourceWidth
             sourceIdentity?.deliveredHeight = sourceHeight
             outputPort.recordDeliveredDimensions(width: sourceWidth, height: sourceHeight)
-            if activeInputSource == .liveCamera, let expected = configuredCaptureSize {
+            if activeInputSource == .liveCamera, let expected = deviceController.configuredSize {
                 let requested = "\(expected.width)×\(expected.height)"
                 let actual = "\(sourceWidth)×\(sourceHeight)"
                 if sourceWidth == expected.width && sourceHeight == expected.height {
-                    captureProfileStatus = "Delivered \(actual) at \(configuredCaptureRateLabel). \(configuredCaptureReason?.description ?? "")"
+                    captureProfileStatus = "Delivered \(actual) at \(deviceController.configuredRateLabel). \(deviceController.configuredReason?.description ?? "")"
                 } else {
                     captureProfileStatus = "Driver delivered \(actual) after \(requested) was requested; crop quality follows delivered pixels."
                     Self.logger.warning("Capture delivery mismatch: requested \(requested, privacy: .public), delivered \(actual, privacy: .public)")
@@ -2646,38 +2641,22 @@ final class CameraManager: NSObject, ObservableObject {
         #if DEBUG
         if let sessionStopRunningForTesting { sessionStopRunningForTesting(); return }
         #endif
-        let session = CaptureSessionBox(captureSession)
-        sessionQueue.async { @Sendable in
-            if session.value.isRunning { session.value.stopRunning() }
-        }
+        deviceController.stopSession(captureSession)
     }
 
     private func startSessionAsync() async {
         #if DEBUG
         if let sessionStartRunningForTesting { await sessionStartRunningForTesting(); return }
         #endif
-        let session = CaptureSessionBox(captureSession)
-        await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in
-            sessionQueue.async { @Sendable in
-                session.value.startRunning()
-                continuation.resume()
-            }
-        }
+        await deviceController.startSession(captureSession)
     }
 
     private func observeDisconnect() {
-        stopObservingDisconnect()
-        guard let device = configuredCaptureDevice else { return }
-        disconnectObserver = NotificationCenter.default.addObserver(
-            forName: AVCaptureDevice.wasDisconnectedNotification, object: device, queue: .main
-        ) { [weak self] _ in
-            MainActor.assumeIsolated { self?.handleSourceLost() }
-        }
+        deviceController.watchDisconnect { [weak self] in self?.handleSourceLost() }
     }
 
     private func stopObservingDisconnect() {
-        if let disconnectObserver { NotificationCenter.default.removeObserver(disconnectObserver) }
-        disconnectObserver = nil
+        deviceController.stopWatchingDisconnect()
     }
 
     /// The claimed device vanished (hot unplug). Retire the generation, stop
@@ -2753,17 +2732,6 @@ final class CameraManager: NSObject, ObservableObject {
         }
     }
     
-    /// Format explicitly chosen in configureCameraDevice(), re-asserted after
-    /// startRunning() because the macOS .high session preset clobbers it
-    /// (see reassertConfiguredFormatIfNeeded).
-    private var configuredCaptureDevice: AVCaptureDevice?
-    private var configuredCaptureFormat: AVCaptureDevice.Format?
-    private var configuredCaptureSize: (width: Int, height: Int)?
-    private var configuredCaptureReason: CaptureProfilePolicy.Reason?
-    /// "1080p50", or "30 fps (show standard 1080p50)" for a Webcam fallback.
-    private var configuredCaptureRateLabel = ShowStandard.activeOrCurrent.title
-    private var configuredMinFrameDuration: CMTime?
-    private var configuredMaxFrameDuration: CMTime?
 
     private func configureCameraDevice(_ device: AVCaptureDevice) throws {
         Self.logger.notice("Configuring device: \(device.localizedName, privacy: .public)")
@@ -2798,16 +2766,14 @@ final class CameraManager: NSObject, ObservableObject {
         // Remember the choice so startCapture() can re-assert it after
         // startRunning() — the .high session preset overwrites activeFormat
         // when the session starts (see reassertConfiguredFormatIfNeeded).
-        configuredCaptureDevice = device
-        configuredCaptureFormat = format
-        configuredCaptureSize = (Int(dims.width), Int(dims.height))
-        configuredCaptureReason = selection.reason
         configuredCaptureFPS = selection.frameRate
         // Webcam mode may run below the show rate (see CaptureProfilePolicy);
         // say the real capture rate rather than implying the show standard.
-        configuredCaptureRateLabel = selection.rateLabel(
+        let rateLabel = selection.rateLabel(
             showRate: Config.targetFrameRate, showStandardTitle: ShowStandard.activeOrCurrent.title)
-        captureProfileStatus = "Requested \(dims.width)×\(dims.height) at \(configuredCaptureRateLabel): \(selection.reason.description). Waiting for delivered frame."
+        deviceController.recordConfiguration(device: device, format: format,
+            size: (Int(dims.width), Int(dims.height)), reason: selection.reason, rateLabel: rateLabel)
+        captureProfileStatus = "Requested \(dims.width)×\(dims.height) at \(rateLabel): \(selection.reason.description). Waiting for delivered frame."
         recordSourceIdentity(DiagnosticsSessionIdentity.Source(
             inputKind: "Live camera",
             deviceName: device.localizedName,
@@ -2856,35 +2822,12 @@ final class CameraManager: NSObject, ObservableObject {
         device.activeVideoMinFrameDuration = duration
         device.activeVideoMaxFrameDuration = duration
 
-        configuredMinFrameDuration = device.activeVideoMinFrameDuration
-        configuredMaxFrameDuration = device.activeVideoMaxFrameDuration
+        deviceController.recordFrameDurations(min: device.activeVideoMinFrameDuration,
+                                              max: device.activeVideoMaxFrameDuration)
     }
 
-    /// The .high session preset (macOS default; .inputPriority is iOS-only)
-    /// re-configures the capture device's activeFormat during startRunning(),
-    /// silently replacing the 4K format chosen in configureCameraDevice with
-    /// 1080p. Verified empirically with the Elgato 4K X: activeFormat reads
-    /// 3840×2160 after commitConfiguration and 1920×1080 immediately after
-    /// startRunning. Re-asserting the stored format after start sticks — the
-    /// session only performs its preset-driven reconfiguration at start time.
     private func reassertConfiguredFormatIfNeeded() {
-        guard let device = configuredCaptureDevice,
-              let format = configuredCaptureFormat,
-              device.activeFormat != format else { return }
-        let clobbered = CMVideoFormatDescriptionGetDimensions(device.activeFormat.formatDescription)
-        let wanted = CMVideoFormatDescriptionGetDimensions(format.formatDescription)
-        Self.logger.warning(
-            "Session preset clobbered activeFormat to \(clobbered.width)x\(clobbered.height); re-asserting \(wanted.width)x\(wanted.height)"
-        )
-        do {
-            try device.lockForConfiguration()
-            device.activeFormat = format
-            if let min = configuredMinFrameDuration { device.activeVideoMinFrameDuration = min }
-            if let max = configuredMaxFrameDuration { device.activeVideoMaxFrameDuration = max }
-            device.unlockForConfiguration()
-        } catch {
-            Self.logger.error("Failed to re-assert capture format: \(error.localizedDescription, privacy: .public)")
-        }
+        deviceController.reassertConfiguredFormatIfNeeded()
     }
     
 }
