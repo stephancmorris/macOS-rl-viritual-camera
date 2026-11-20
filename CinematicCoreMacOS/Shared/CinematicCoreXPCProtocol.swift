@@ -6,20 +6,35 @@
 //
 
 import Foundation
+import IOSurface
 import Security
 
 /// XPC Protocol for communication between host app and system extension
 /// Enables zero-copy IOSurface sharing for 4K video frames
 @objc protocol CinematicCoreXPCProtocol {
-    
-    /// Send a video frame's IOSurface ID to the virtual camera extension
+
+    /// Agree the frame transport before any frame is sent (F-03). The host
+    /// sends `FrameTransport.surfaceObject`; the extension replies with the
+    /// version it accepted, or `FrameTransport.refused`. An extension built
+    /// before F-03 does not know this message and never replies, so the host
+    /// sends it no frames.
+    func negotiateFrameTransport(_ hostVersion: Int, reply: @escaping (Int) -> Void)
+
+    /// Send a Program frame to the virtual camera extension. The IOSurface
+    /// object crosses XPC by secure coding, so the extension receives its own
+    /// reference to the surface rather than a global ID to look up.
     /// - Parameters:
-    ///   - surfaceID: The IOSurface identifier from CVPixelBuffer
+    ///   - surface: The frame's IOSurface, from its CVPixelBuffer
     ///   - timestamp: Presentation timestamp in seconds (CMTime converted to Double)
     ///   - width: Frame width in pixels
     ///   - height: Frame height in pixels
+    func sendVideoFrame(surface: IOSurface, timestamp: Double, width: Int32, height: Int32)
+
+    /// The pre-F-03 message, which carried a global IOSurface ID. Kept only
+    /// so a new extension can recognise an old host and refuse its frames
+    /// with one clear log line. The host never sends it.
     func sendVideoFrame(surfaceID: UInt32, timestamp: Double, width: Int32, height: Int32)
-    
+
     /// Notify extension of capture session status changes
     /// - Parameter isRunning: Whether the capture session is active
     func updateCaptureStatus(isRunning: Bool)
