@@ -36,7 +36,7 @@ enum DebugLaunchHooks {
         didAutostart = true
         try? await Task.sleep(for: .seconds(1.5))
         let available = cameras()
-        logger.notice("[DEBUG] autostart \(mode, privacy: .public) with \(available.map(\.name), privacy: .public)")
+        logger.notice("[DEBUG] autostart \(mode, privacy: .public) with \(available.map(\.name), privacy: .private)")
         if mode == "pair", available.count >= 2 {
             model.select(available[0].uniqueID, for: .a)
             model.select(available[1].uniqueID, for: .b)

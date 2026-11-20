@@ -16,6 +16,8 @@ struct GeneralSettingsPage: View {
     @ObservedObject var systemExtensionManager: SystemExtensionActivationManager
     @AppStorage(AppAppearance.userDefaultsKey) private var appearanceRaw = AppAppearance.system.rawValue
     @AppStorage(DeveloperFlags.directorShadowSettingKey) private var directorShadowEnabled = false
+    /// Default on, matching `DiagnosticsFilesSetting.isEnabled` for an unset key.
+    @AppStorage(DiagnosticsFilesSetting.key) private var diagnosticsFilesEnabled = true
 
     private var appearance: AppAppearance {
         AppAppearance(rawValue: appearanceRaw) ?? .system
@@ -46,6 +48,15 @@ struct GeneralSettingsPage: View {
                 SettingsRow(title: "Build") { SettingsValueText(buildString) }
                 SettingsRow(title: "Camera extension") { SettingsValueText(extensionStatus) }
                 SettingsRow(title: "GPU") { SettingsValueText(gpuName) }
+            }
+
+            SettingsSectionLabel("Diagnostics")
+            SettingsCard {
+                SettingsRow(title: DiagnosticsFilesSetting.title, detail: DiagnosticsFilesSetting.detail) {
+                    Toggle(DiagnosticsFilesSetting.title, isOn: $diagnosticsFilesEnabled)
+                        .toggleStyle(.switch)
+                        .labelsHidden()
+                }
             }
 
             SettingsSectionLabel("Director shadow")

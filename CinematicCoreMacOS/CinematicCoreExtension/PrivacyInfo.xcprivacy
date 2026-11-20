@@ -1,0 +1,59 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  Alfie virtual-camera system extension privacy manifest (F-05). Ships in the
+  .systemextension bundle's Contents/Resources, separate from the app's.
+
+  No tracking, no tracking domains and no collected data types: the extension
+  has no network code. It receives Program frames from the Alfie app over XPC
+  and hands them to the receiving camera client on this Mac.
+
+  Required-reason APIs, from a source search on 20 November 2026:
+  - System boot time (35F9.1): ProcessInfo.systemUptime in the provider, used
+    only to measure time since the last frame arrived.
+  - UserDefaults (CA92.1) and file timestamps (C617.1): these calls are not in
+    the provider itself. They come from shared files that also compile into
+    this target (ShowStandard.swift, ProgramOutputManager.swift,
+    DiagnosticsLog.swift, ProgramOutputDiagnostics.swift), so they are in the
+    extension binary. Each reads only this bundle's own settings or files in
+    its own container.
+
+  Update this file when the extension's sources or its shared files change.
+-->
+<plist version="1.0">
+<dict>
+	<key>NSPrivacyTracking</key>
+	<false/>
+	<key>NSPrivacyTrackingDomains</key>
+	<array/>
+	<key>NSPrivacyCollectedDataTypes</key>
+	<array/>
+	<key>NSPrivacyAccessedAPITypes</key>
+	<array>
+		<dict>
+			<key>NSPrivacyAccessedAPIType</key>
+			<string>NSPrivacyAccessedAPICategorySystemBootTime</string>
+			<key>NSPrivacyAccessedAPITypeReasons</key>
+			<array>
+				<string>35F9.1</string>
+			</array>
+		</dict>
+		<dict>
+			<key>NSPrivacyAccessedAPIType</key>
+			<string>NSPrivacyAccessedAPICategoryUserDefaults</string>
+			<key>NSPrivacyAccessedAPITypeReasons</key>
+			<array>
+				<string>CA92.1</string>
+			</array>
+		</dict>
+		<dict>
+			<key>NSPrivacyAccessedAPIType</key>
+			<string>NSPrivacyAccessedAPICategoryFileTimestamp</string>
+			<key>NSPrivacyAccessedAPITypeReasons</key>
+			<array>
+				<string>C617.1</string>
+			</array>
+		</dict>
+	</array>
+</dict>
+</plist>

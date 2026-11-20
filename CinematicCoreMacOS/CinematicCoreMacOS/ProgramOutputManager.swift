@@ -385,8 +385,9 @@ final class ProgramOutputManager: ObservableObject {
 
     /// Per-session CSV of the same numbers as the `[SOAK]` line, for after-the-
     /// fact analysis in a spreadsheet. Written off-MainActor, one row per soak
-    /// window — never per frame.
-    let diagnosticsLog = DiagnosticsLog()
+    /// window — never per frame. Files are written only while the saved
+    /// `DiagnosticsFilesSetting` is on (default on), read at each session start.
+    let diagnosticsLog: DiagnosticsLog
 
     /// Filename of the diagnostics CSV in progress, surfaced in Settings. Set
     /// once per session start/stop, so publishing it is not a frame-path cost.
@@ -602,7 +603,10 @@ final class ProgramOutputManager: ObservableObject {
                     ?? "no active route: nothing is handed off or presented"))
     }
 
-    init(sinks: [any ProgramOutputSink] = []) {
+    init(sinks: [any ProgramOutputSink] = [], diagnosticsLog: DiagnosticsLog? = nil) {
+        self.diagnosticsLog = diagnosticsLog ?? DiagnosticsLog(filesEnabled: {
+            DiagnosticsFilesSetting.isEnabled(in: .standard)
+        })
         self.sinks = sinks
         self.sinks.forEach { sink in
             sink.onStateChange = { [weak self] in
@@ -668,6 +672,9 @@ final class ProgramOutputManager: ObservableObject {
     /// Idempotent — `DiagnosticsLog.beginSession` ignores repeat calls, so this
     /// is safe to call per frame. Once open it stays open for the rest of the
     /// capture session, including any stretch where detection is switched off.
+    /// With diagnostics files off, `diagnosticsFileName` becomes the off
+    /// status, which is non-nil, so the frame path stops asking until the
+    /// next capture start.
     func beginDiagnosticsSessionIfNeeded(note: String) {
         guard diagnosticsFileName == nil else { return }
         lastSoakTime = CACurrentMediaTime()
@@ -679,6 +686,7 @@ final class ProgramOutputManager: ObservableObject {
             identity: currentSessionIdentity()
         )
         diagnosticsFileName = diagnosticsLog.currentFileName
+            ?? (diagnosticsLog.filesOffForLastSession ? DiagnosticsFilesSetting.offStatus : nil)
     }
 
     private var detectionStartNoted = false
@@ -924,11 +932,13 @@ final class ProgramOutputManager: ObservableObject {
     func reconnectPreferredRoute() {
         let sink = sink(for: startRoute)
         logger.notice(
-            "Reconnect Output pressed; preferredRoute=\(self.preferredRoute.title, privacy: .public); activeRoute=\(self.activeRoute?.title ?? "none", privacy: .public); sinkAvailable=\((sink?.isAvailable ?? false), privacy: .public); sinkSummary=\(sink?.summary ?? "missing", privacy: .public); sinkDetail=\(sink?.detail ?? "missing", privacy: .public); sinkError=\(sink?.lastErrorDescription ?? "none", privacy: .public)"
+            "Reconnect Output pressed; preferredRoute=\(self.preferredRoute.title, privacy: .public); activeRoute=\(self.activeRoute?.title ?? "none", privacy: .public); sinkAvailable=\((sink?.isAvailable ?? false), privacy: .public); sinkSummary=\(sink?.summary ?? "missing", privacy: .private); sinkDetail=\(sink?.detail ?? "missing", privacy: .private); sinkError=\(sink?.lastErrorDescription ?? "none", privacy: .public)"
         )
         AlfieDiagnosticsLog.append(
             "ProgramOutput",
-            "Reconnect Output pressed preferredRoute=\(preferredRoute.title) activeRoute=\(activeRoute?.title ?? "none") sinkAvailable=\(sink?.isAvailable ?? false) sinkSummary=\(sink?.summary ?? "missing") sinkDetail=\(sink?.detail ?? "missing") sinkError=\(sink?.lastErrorDescription ?? "none")"
+            // Summary and detail stay out of the text log: a display sink
+            // names the screen, and a screen name can carry a person's name.
+            "Reconnect Output pressed preferredRoute=\(preferredRoute.title) activeRoute=\(activeRoute?.title ?? "none") sinkAvailable=\(sink?.isAvailable ?? false) sinkError=\(sink?.lastErrorDescription ?? "none")"
         )
         sink?.reconnect()
         refreshStatuses()

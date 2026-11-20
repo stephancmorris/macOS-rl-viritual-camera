@@ -602,7 +602,7 @@ final class CameraManager: NSObject, ObservableObject {
         if selectedCamera == nil, channelID == .a {
             selectedCamera = cameraDevices.first { $0.supports4K } ?? cameraDevices.first
             if let selected = selectedCamera {
-                Self.logger.notice("Selected camera: \(selected.name, privacy: .public)")
+                Self.logger.notice("Selected camera: \(selected.name, privacy: .private)")
             }
         }
     }
@@ -649,7 +649,7 @@ final class CameraManager: NSObject, ObservableObject {
             }
             let maxResString = maxRes.map { "\($0.width)x\($0.height)" } ?? "Unknown"
             
-            Self.logger.debug("Camera discovered: \(device.localizedName, privacy: .public) \(maxResString, privacy: .public)\(supports4K ? " (4K)" : "")")
+            Self.logger.debug("Camera discovered: \(device.localizedName, privacy: .private) \(maxResString, privacy: .public)\(supports4K ? " (4K)" : "")")
             
             let cameraDevice = CameraDevice(
                 id: device.uniqueID,
@@ -1727,7 +1727,7 @@ final class CameraManager: NSObject, ObservableObject {
     /// Restart capture with a different camera
     func restartWithCamera(_ cameraDevice: CameraDevice) async throws {
         try Task.checkCancellation()
-        Self.logger.notice("Switching to camera: \(cameraDevice.name, privacy: .public)")
+        Self.logger.notice("Switching to camera: \(cameraDevice.name, privacy: .private)")
         let needsRestart = (isRunning && activeInputSource == .liveCamera)
             || (isStartingSession && preferredInputSource == .liveCamera)
         guard needsRestart else {
@@ -2710,7 +2710,7 @@ final class CameraManager: NSObject, ObservableObject {
     
 
     private func configureCameraDevice(_ device: AVCaptureDevice) throws {
-        Self.logger.notice("Configuring device: \(device.localizedName, privacy: .public)")
+        Self.logger.notice("Configuring device: \(device.localizedName, privacy: .private)")
         
         try device.lockForConfiguration()
         defer { device.unlockForConfiguration() }
