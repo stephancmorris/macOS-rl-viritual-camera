@@ -92,7 +92,7 @@ Before F-03 the app sent each Program frame to the virtual-camera extension as a
 
 - **Now:** the IOSurface object itself crosses XPC by secure coding (`sendVideoFrame(surface:…)`). The extension receives its own reference. No surface ID is sent, and the extension no longer calls `IOSurfaceLookup`.
 - **Mismatched pair:** before any frame, the app asks the extension to agree the transport (`negotiateFrameTransport`). An extension older than F-03 does not know the message, so the app gets no answer, sends no frames and reports that the extension needs re-activating. An app older than F-03 still sends IDs; a new extension refuses them, logs once and keeps sending black. Neither side crashes.
-- **Lifetime:** the extension marks each received surface in use until the frame is dropped or replaced on air. The app keeps the last 3 sends (was 10) to cover XPC transit only.
+- **Lifetime:** the extension marks each received surface in use until the frame is dropped or replaced on air. The app still keeps the last 10 sends. They cover XPC transit and receiving apps that hold a frame after the extension has released it. A smaller depth waits for an attended long session with a receiving app.
 - **Not changed:** what the frames contain, who receives them, and the entitlements.
 - **Still pending:** whether a separate process can resolve a Program surface's ID while a show runs. The app no longer depends on that, but the pool's surfaces are still ordinary IOSurfaces. This needs an attended check.
 

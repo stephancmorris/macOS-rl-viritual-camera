@@ -172,13 +172,20 @@ nonisolated struct FrameTransportHandshake: Equatable {
     private(set) var generation: UInt64 = 0
     private(set) var state: State = .idle
 
-    /// True when the caller should send the negotiation message now.
-    mutating func begin(generation: UInt64, now: TimeInterval) -> Bool {
+    /// Sends the negotiation through `send` when one is due on this
+    /// connection, and starts the reply timeout only once it was sent.
+    /// `send` returns false when it could not send (no remote proxy); the
+    /// state then stays idle, so the next call tries again and nothing can
+    /// expire into a false `noReply`. Returns true when it sent.
+    ///
+    /// The reply arrives later on the MainActor, after this returns, so the
+    /// pending state is in place before `complete` can run.
+    mutating func negotiateIfDue(generation: UInt64, now: TimeInterval, send: () -> Bool) -> Bool {
         if self.generation != generation {
             self.generation = generation
             state = .idle
         }
-        guard state == .idle else { return false }
+        guard state == .idle, send() else { return false }
         state = .pending(since: now)
         return true
     }

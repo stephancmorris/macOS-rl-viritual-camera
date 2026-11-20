@@ -29,16 +29,19 @@ final class VirtualCameraOutputSink: ProgramOutputSink {
     /// surface the extension may still read.
     ///
     /// That covers the extension's queue and the frame it has just sent. It
-    /// does not cover transit: between this send and the extension decoding
-    /// the message, nothing but this sink keeps the pool from recycling the
-    /// buffer. So the sink still retains the most recent sends, now only for
-    /// transit (3 frames ≈ 60 ms at 50 fps, where XPC delivery is normally
-    /// well under one frame). Before F-03 this was 10 frames, because it also
-    /// had to cover the extension's whole queue.
+    /// does not cover two other windows, so this sink still retains the most
+    /// recent sends (10 frames ≈ 200 ms at 50 fps):
+    /// - transit: between this send and the extension decoding the message,
+    ///   nothing else keeps the pool from recycling the buffer;
+    /// - downstream clients: after the extension hands a frame to the CMIO
+    ///   stream, a receiving app (Zoom, OBS, QuickTime) can keep that buffer
+    ///   longer than one playout interval, while the extension releases its
+    ///   use count at the next drain (~20 ms). Nothing shows that the stream's
+    ///   wrap or the client's copy holds a use count of its own.
     ///
-    /// If an attended long session shows tearing, put this back to 10: that
-    /// would mean the pool does not honour the extension's use count.
-    static let retainedFrameDepth = 3
+    /// Keep 10 until an attended long session with a receiving app shows that
+    /// a smaller depth holds without tearing.
+    static let retainedFrameDepth = 10
     private var recentlySentBuffers: [CVPixelBuffer] = []
     /// Connection-scoped agreement on the frame transport. No frame is sent
     /// until the extension answers with the surface-object version.
@@ -183,7 +186,12 @@ final class VirtualCameraOutputSink: ProgramOutputSink {
         guard case .connected = xpcManager.connectionState else { return false }
         let generation = xpcManager.connectionGeneration
         if transportHandshake.isReady(generation: generation) { return true }
-        if transportHandshake.begin(generation: generation, now: now()) {
+        // The proxy is fetched before the handshake starts its timeout: with
+        // no proxy nothing is sent, the handshake stays idle and the next
+        // call tries again, so a missing proxy can never read as an old
+        // extension that did not answer.
+        let xpcManager = self.xpcManager
+        let sent = transportHandshake.negotiateIfDue(generation: generation, now: now()) {
             guard let proxy = xpcManager.remoteProxy() else { return false }
             proxy.negotiateFrameTransport(FrameTransport.surfaceObject) { [weak self] accepted in
                 Task { @MainActor in
@@ -195,7 +203,9 @@ final class VirtualCameraOutputSink: ProgramOutputSink {
                     }
                 }
             }
-        } else if transportHandshake.expireIfDue(now: now()) {
+            return true
+        }
+        if !sent, transportHandshake.expireIfDue(now: now()) {
             Self.logger.error("Virtual camera extension did not answer the frame transport check; it is likely older than this app")
             onStateChange?()
         }

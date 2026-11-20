@@ -41,8 +41,8 @@ struct FrameTransportAgreementTests {
 
     @Test func framesWaitForTheExtensionsAnswer() {
         var handshake = FrameTransportHandshake()
-        let first = handshake.begin(generation: 1, now: 10)
-        let second = handshake.begin(generation: 1, now: 10.1)
+        let first = handshake.negotiateIfDue(generation: 1, now: 10) { true }
+        let second = handshake.negotiateIfDue(generation: 1, now: 10.1) { true }
         #expect(first)
         #expect(!second)   // one request per connection
         #expect(!handshake.isReady(generation: 1))
@@ -53,18 +53,18 @@ struct FrameTransportAgreementTests {
 
     @Test func aRefusalStopsFramesForThatConnection() {
         var handshake = FrameTransportHandshake()
-        _ = handshake.begin(generation: 1, now: 0)
+        _ = handshake.negotiateIfDue(generation: 1, now: 0) { true }
         handshake.complete(generation: 1, acceptedVersion: FrameTransport.refused)
         #expect(!handshake.isReady(generation: 1))
         #expect(handshake.isMismatched(generation: 1))
-        let retried = handshake.begin(generation: 1, now: 100)
+        let retried = handshake.negotiateIfDue(generation: 1, now: 100) { true }
         #expect(!retried)   // no retry on the same connection
     }
 
     /// An extension older than F-03 drops the unknown message and never answers.
     @Test func noAnswerBecomesAMismatchAfterTheTimeout() {
         var handshake = FrameTransportHandshake()
-        _ = handshake.begin(generation: 1, now: 0)
+        _ = handshake.negotiateIfDue(generation: 1, now: 0) { true }
         let early = handshake.expireIfDue(now: FrameTransportHandshake.replyTimeout - 0.01)
         #expect(!early)
         #expect(!handshake.isMismatched(generation: 1))
@@ -80,8 +80,8 @@ struct FrameTransportAgreementTests {
 
     @Test func aRetiredConnectionsAnswerCannotAuthorizeANewOne() {
         var handshake = FrameTransportHandshake()
-        _ = handshake.begin(generation: 1, now: 0)
-        let reconnected = handshake.begin(generation: 2, now: 1)
+        _ = handshake.negotiateIfDue(generation: 1, now: 0) { true }
+        let reconnected = handshake.negotiateIfDue(generation: 2, now: 1) { true }
         #expect(reconnected)   // reconnect starts afresh
         handshake.complete(generation: 1, acceptedVersion: FrameTransport.surfaceObject)
         #expect(!handshake.isReady(generation: 2))
@@ -90,8 +90,39 @@ struct FrameTransportAgreementTests {
         #expect(!handshake.isMismatched(generation: 3))
     }
 
-    @Test func theHostRetainsOnlyForTransitNow() {
-        #expect(VirtualCameraOutputSink.retainedFrameDepth == 3)
+    /// With no remote proxy nothing is sent, so the reply timeout must not
+    /// start: a missing proxy is not an old extension that did not answer.
+    @Test func noProxyMeansNoSendAndNoFalseMismatch() {
+        var handshake = FrameTransportHandshake()
+        var sends = 0
+        let unsent = handshake.negotiateIfDue(generation: 1, now: 0) { false }
+        #expect(!unsent)
+        #expect(handshake.state == .idle)
+        let expired = handshake.expireIfDue(now: FrameTransportHandshake.replyTimeout + 10)
+        #expect(!expired)
+        #expect(!handshake.isMismatched(generation: 1))
+
+        // The next call, once a proxy exists, sends and starts the timeout then.
+        let sent = handshake.negotiateIfDue(generation: 1, now: 20) { sends += 1; return true }
+        #expect(sent && sends == 1)
+        let early = handshake.expireIfDue(now: 20 + FrameTransportHandshake.replyTimeout - 0.01)
+        #expect(!early)
+        handshake.complete(generation: 1, acceptedVersion: FrameTransport.surfaceObject)
+        #expect(handshake.isReady(generation: 1))
+    }
+
+    @Test func aSendIsAttemptedOnlyWhileIdle() {
+        var handshake = FrameTransportHandshake()
+        var sends = 0
+        _ = handshake.negotiateIfDue(generation: 1, now: 0) { sends += 1; return true }
+        _ = handshake.negotiateIfDue(generation: 1, now: 1) { sends += 1; return true }
+        #expect(sends == 1)   // pending: no second request on this connection
+    }
+
+    /// Kept at 10 to cover transit and downstream CMIO clients until an
+    /// attended long session with a receiving app shows a smaller depth holds.
+    @Test func theHostKeepsTheTenFrameRetention() {
+        #expect(VirtualCameraOutputSink.retainedFrameDepth == 10)
     }
 }
 
