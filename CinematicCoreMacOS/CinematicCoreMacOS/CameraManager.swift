@@ -549,6 +549,7 @@ final class CameraManager: NSObject, ObservableObject {
         let autoPan = AutoPanState()
         self.frameMailbox = frameMailbox
         self.motionTargets = motionTargets
+        self.directivePublisher = MotionDirectivePublisher(targets: motionTargets)
         self.autoPan = autoPan
         let route = outputPort.frameRoute
         self.motionUnit = engine.map { engine in
@@ -715,14 +716,10 @@ final class CameraManager: NSObject, ObservableObject {
     var lastGoodProgramCrop: CropEngine.CropRect? { frameMailbox.lastGoodCrop }
     /// The composed tracking target and its serial, published to the capture
     /// queue in the motion directive.
-    private var trackingTarget: CropEngine.CropRect?
-    private var trackingSerial: UInt64 = 0
-    private var lastPublishedDirective: MotionDirective?
-    private var motionRefreshScheduled = false
-    private var motionTransactionDepth = 0
-    private var stagedDirective: MotionDirective?
-    private var controlPumpActive = false
-    private var loopMessageWaiters: [CheckedContinuation<Void, Never>] = []
+    /// The tracking target, the last directive and the motion transaction.
+    private let directivePublisher: MotionDirectivePublisher
+    /// One control pump at a time, and the test seam's waiters.
+    private let controlPump = ControlPumpGate()
     /// True once the detector was cleared for a mode that runs no detection.
     private var detectionIdleCleaned = false
     private var lastTrackingCrop: CropEngine.CropRect?
@@ -1915,12 +1912,8 @@ final class CameraManager: NSObject, ObservableObject {
     /// keeps later frames in the one-slot mailbox, where the newest replaces
     /// the rest.
     private func runControlPump() async {
-        guard !controlPumpActive, let motionUnit else { return }
-        controlPumpActive = true
-        defer {
-            controlPumpActive = false
-            resumeLoopMessageWaiters()
-        }
+        guard let motionUnit, controlPump.enter() else { return }
+        defer { controlPump.leave() }
         while true {
             let work = motionUnit.takeControl()
             guard work.hasWork else { return }
@@ -1938,26 +1931,22 @@ final class CameraManager: NSObject, ObservableObject {
     /// Test seam: wait until every message the capture queue has posted (a
     /// control turn, a hand-off, events) has been taken by the main thread.
     private func loopMessagesSettled() async {
-        while controlPumpActive || motionUnit?.hasPendingMainWork == true {
-            await withCheckedContinuation { loopMessageWaiters.append($0) }
+        while controlPump.isActive || motionUnit?.hasPendingMainWork == true {
+            await controlPump.waitForNextSettle()
         }
     }
 
     private func resumeLoopMessageWaiters() {
-        guard !loopMessageWaiters.isEmpty else { return }
-        let waiters = loopMessageWaiters
-        loopMessageWaiters.removeAll()
-        for waiter in waiters { waiter.resume() }
+        controlPump.resumeWaiters()
     }
 
     /// Republish on the next main turn. Coalesced; cheap when nothing changed.
     func setNeedsMotionRefresh() {
         // A transaction republishes when it ends; no extra task for it.
-        guard !motionRefreshScheduled, motionTransactionDepth == 0 else { return }
-        motionRefreshScheduled = true
+        guard directivePublisher.claimRefresh() else { return }
         Task { @MainActor [weak self] in
             guard let self else { return }
-            self.motionRefreshScheduled = false
+            self.directivePublisher.refreshStarted()
             self.refreshMotionInputs()
         }
     }
@@ -2001,8 +1990,8 @@ final class CameraManager: NSObject, ObservableObject {
         directive.aspect = shotComposer.normalizedAspect
         directive.fixedHeight = ShotMoveLadder.fixedHeight(for: selectedShot)
         directive.zoomUsesTopAnchor = zoomUsesTopAnchor
-        directive.trackingTarget = trackingTarget
-        directive.trackingSerial = trackingSerial
+        directive.trackingTarget = directivePublisher.trackingTarget
+        directive.trackingSerial = directivePublisher.trackingSerial
         switch activeMode {
         case .wide:
             // Return to Wide snaps there via jumpToTarget(); entering .wide
@@ -2029,10 +2018,8 @@ final class CameraManager: NSObject, ObservableObject {
         if directive.smoothing != nil, cropEngine.config.transitionSmoothing != operatorSmoothing {
             cropEngine.config.transitionSmoothing = operatorSmoothing
         }
-        guard directive != lastPublishedDirective else { return }
-        lastPublishedDirective = directive
         // Inside a transaction the directive is published with the commit.
-        if motionTransactionDepth > 0 { stagedDirective = directive } else { motionTargets.write(directive) }
+        directivePublisher.publish(directive)
     }
 
     /// The target the picture aims at after this control turn, for the
@@ -2042,7 +2029,7 @@ final class CameraManager: NSObject, ObservableObject {
     /// quality floor) instead of being read back one observation late.
     private func targetAfterControlTurn() -> CropEngine.CropRect? {
         guard let cropEngine else { return nil }
-        if activeMode == .autoTracking, let trackingTarget {
+        if activeMode == .autoTracking, let trackingTarget = directivePublisher.trackingTarget {
             return cropEngine.motion.targetAfterApplying(trackingTarget)
         }
         return cropEngine.targetCrop
@@ -2051,36 +2038,25 @@ final class CameraManager: NSObject, ObservableObject {
     /// Stage this camera's writes to the motion core. The capture queue sees
     /// none of them, nor the directive, until `endMotionTransaction`.
     private func beginMotionTransaction() {
-        motionTransactionDepth += 1
-        cropEngine?.motion.beginTransaction()
+        directivePublisher.beginTransaction(core: cropEngine?.motion)
     }
 
     /// Republish, then commit: the staged core state and the directive reach
     /// the capture queue in one locked step.
     private func endMotionTransaction() {
         refreshMotionInputs()
-        motionTransactionDepth -= 1
-        guard let core = cropEngine?.motion else { return }
-        if motionTransactionDepth == 0, let directive = stagedDirective {
-            stagedDirective = nil
-            let targets = motionTargets
-            core.endTransaction { targets.write(directive) }
-        } else {
-            core.endTransaction()
-        }
+        directivePublisher.endTransaction(core: cropEngine?.motion)
     }
 
     private func setTrackingTarget(_ crop: CropEngine.CropRect) {
-        trackingTarget = crop
-        trackingSerial &+= 1
+        directivePublisher.setTrackingTarget(crop)
     }
 
     /// A command set the target itself (Return to Wide, Track, a new
     /// subject, a session boundary). A composed target the capture queue has
     /// not applied yet is older than that command and must not follow it.
     private func retireTrackingTarget() {
-        trackingTarget = nil
-        trackingSerial &+= 1
+        directivePublisher.retireTrackingTarget()
     }
 
     /// The source's delivered size changed (or a session began).
