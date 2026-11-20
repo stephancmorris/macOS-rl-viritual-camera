@@ -802,23 +802,23 @@ struct FramingRegressionTests {
 
     @Test func validationPlaybackUsesAbsolutePresentationTime() {
         let start = 100.0
-        #expect(CameraManager.playbackDelay(
+        #expect(ValidationClipPlayer.playbackDelay(
             sourceTimestamp: 42.0, firstTimestamp: 42.0, playbackStart: start, now: start
         ) == 0)
 
         // 400 ms of source time must be scheduled from the original playback
         // epoch. Accounting for 100 ms spent processing prior frames leaves
         // exactly 300 ms, rather than a new 400 ms delay from "now".
-        #expect(abs(CameraManager.playbackDelay(
+        #expect(abs(ValidationClipPlayer.playbackDelay(
             sourceTimestamp: 42.4, firstTimestamp: 42.0, playbackStart: start, now: 100.1
         ) - 0.3) < 0.000_001)
 
         // Slow processing never adds a compensating sleep, and malformed
         // non-monotonic timestamps cannot schedule a frame before playback.
-        #expect(CameraManager.playbackDelay(
+        #expect(ValidationClipPlayer.playbackDelay(
             sourceTimestamp: 42.4, firstTimestamp: 42.0, playbackStart: start, now: 100.8
         ) == 0)
-        #expect(CameraManager.playbackDelay(
+        #expect(ValidationClipPlayer.playbackDelay(
             sourceTimestamp: 41.9, firstTimestamp: 42.0, playbackStart: start, now: start
         ) == 0)
     }

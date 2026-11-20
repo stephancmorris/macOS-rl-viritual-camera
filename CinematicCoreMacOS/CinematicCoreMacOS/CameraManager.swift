@@ -459,7 +459,8 @@ final class CameraManager: NSObject, ObservableObject {
         autoreleaseFrequency: .workItem
     )
     private var cancellables = Set<AnyCancellable>()
-    private var clipPlaybackTask: Task<Void, Never>?
+    /// Validation-clip playback (Gate 5); owns the playback task.
+    private let clipPlayer = ValidationClipPlayer()
     private nonisolated let frameProcessingGate = CaptureFrameProcessingGate()
     private nonisolated let dropCoalescer = CaptureDropCoalescer()
 
@@ -1302,8 +1303,7 @@ final class CameraManager: NSObject, ObservableObject {
         retireTrackingTarget()
         invalidateDetection()
         cancelDetection()
-        clipPlaybackTask?.cancel()
-        clipPlaybackTask = nil
+        clipPlayer.stop()
         frameProcessingGate.reset()
         outputPort.updateCaptureStatus(isRunning: false)
         workScheduler?.cancelWaiting(for: channelID)
@@ -1877,38 +1877,22 @@ final class CameraManager: NSObject, ObservableObject {
         validationClipStatus = "Preparing \(validationClipURL.lastPathComponent)…"
         outputPort.updateCaptureStatus(isRunning: true)
 
-        clipPlaybackTask?.cancel()
         let playbackGeneration = captureGeneration
-        clipPlaybackTask = Task.detached(priority: .userInitiated) { [weak self] in
-            guard let self else { return }
-
-            do {
-                repeat {
-                    try await Self.playValidationClip(from: validationClipURL) { pixelBufferBox, timestampSeconds in
-                        await self.processValidationFrame(
-                            pixelBufferBox,
-                            timestampSeconds: timestampSeconds,
-                            generation: playbackGeneration
-                        )
-                    }
-
-                    let shouldLoop = await self.loopValidationClip
-                    if !shouldLoop || Task.isCancelled {
-                        break
-                    }
-
-                    await self.updateValidationClipStatus(
-                        "Looping \(validationClipURL.lastPathComponent)…"
-                    )
-                } while !Task.isCancelled
-
-                await self.finishValidationClipPlayback(cancelled: Task.isCancelled, generation: playbackGeneration)
-            } catch is CancellationError {
-                await self.finishValidationClipPlayback(cancelled: true, generation: playbackGeneration)
-            } catch {
-                await self.handleValidationClipFailure(error, generation: playbackGeneration)
-            }
-        }
+        // The callbacks hold the camera while playback runs, as before.
+        clipPlayer.start(validationClipURL,
+            onFrame: { pixelBufferBox, timestampSeconds in
+                await self.processValidationFrame(pixelBufferBox, timestampSeconds: timestampSeconds,
+                                                  generation: playbackGeneration)
+            },
+            shouldLoop: { self.loopValidationClip },
+            onLoop: { self.updateValidationClipStatus("Looping \(validationClipURL.lastPathComponent)…") },
+            ended: { ending in
+                switch ending {
+                case .finished: self.finishValidationClipPlayback(cancelled: false, generation: playbackGeneration)
+                case .cancelled: self.finishValidationClipPlayback(cancelled: true, generation: playbackGeneration)
+                case .failed(let error): self.handleValidationClipFailure(error, generation: playbackGeneration)
+                }
+            })
     }
 
     // MARK: - Frame path, main-thread side (D-02 path 2)
@@ -2527,7 +2511,7 @@ final class CameraManager: NSObject, ObservableObject {
         cancelOperatorMotion()
         commands.setTrackingOwnership(false)
         cropEngine?.clearZoomAdjustment()
-        clipPlaybackTask = nil
+        clipPlayer.playbackEnded()
         outputPort.updateCaptureStatus(isRunning: false)
         outputPort.stop()
         isRunning = false
@@ -2547,70 +2531,6 @@ final class CameraManager: NSObject, ObservableObject {
         }
     }
 
-    nonisolated static func playbackDelay(sourceTimestamp: Double, firstTimestamp: Double,
-        playbackStart: Double, now: Double) -> Double {
-        max(0, playbackStart + max(0, sourceTimestamp - firstTimestamp) - now)
-    }
-
-    private nonisolated static func playValidationClip(
-        from url: URL,
-        onFrame: @escaping @Sendable (SendablePixelBufferBox, Double) async -> Void
-    ) async throws {
-        let asset = AVURLAsset(url: url)
-        let videoTracks = try await asset.loadTracks(withMediaType: .video)
-        guard let videoTrack = videoTracks.first else {
-            throw CameraError.invalidValidationClip
-        }
-
-        let reader = try AVAssetReader(asset: asset)
-        let output = AVAssetReaderTrackOutput(
-            track: videoTrack,
-            outputSettings: [
-                kCVPixelBufferPixelFormatTypeKey as String: Int(kCVPixelFormatType_32BGRA),
-                kCVPixelBufferIOSurfacePropertiesKey as String: [:] as CFDictionary,
-                kCVPixelBufferMetalCompatibilityKey as String: true
-            ]
-        )
-        output.alwaysCopiesSampleData = false
-
-        guard reader.canAdd(output) else {
-            throw CameraError.validationClipPlaybackFailed("AVAssetReader could not attach the video output")
-        }
-        reader.add(output)
-
-        guard reader.startReading() else {
-            throw CameraError.validationClipPlaybackFailed(
-                reader.error?.localizedDescription ?? "AVAssetReader failed to start"
-            )
-        }
-
-        var firstTimestamp: Double?
-        let playbackStart = CACurrentMediaTime()
-        while !Task.isCancelled, let sampleBuffer = output.copyNextSampleBuffer() {
-            guard let pixelBuffer = CMSampleBufferGetImageBuffer(sampleBuffer) else {
-                continue
-            }
-
-            let timestampSeconds = CMSampleBufferGetPresentationTimeStamp(sampleBuffer).seconds
-            if firstTimestamp == nil { firstTimestamp = timestampSeconds }
-            let delay = Self.playbackDelay(sourceTimestamp: timestampSeconds,
-                firstTimestamp: firstTimestamp!, playbackStart: playbackStart, now: CACurrentMediaTime())
-            if delay > 0 { try await Task.sleep(nanoseconds: UInt64(delay * 1_000_000_000)) }
-
-            let pixelBufferBox = SendablePixelBufferBox(pixelBuffer)
-            await onFrame(pixelBufferBox, timestampSeconds)
-        }
-
-        if Task.isCancelled {
-            throw CancellationError()
-        }
-
-        if reader.status == .failed {
-            throw CameraError.validationClipPlaybackFailed(
-                reader.error?.localizedDescription ?? "AVAssetReader failed while reading"
-            )
-        }
-    }
     
     private func configureSession() async throws {
         #if DEBUG
